@@ -48,7 +48,7 @@ using namespace llvm;
 
 static cl::opt<bool>
 FinalizerOpt("no-finalizer", cl::init(false), cl::Hidden, 
-    cl::ZeroOrMore, cl::desc("antihack pass"));
+    cl::ZeroOrMore, cl::desc("no finalizer option"));
 
 static cl::opt<std::string>
 AntiHackOpt("antihack", cl::init(""), cl::Hidden,
