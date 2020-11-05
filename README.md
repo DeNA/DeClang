@@ -40,7 +40,10 @@ $ bash build_tools.sh
 $ bash android_release.sh v1.0.0
 ...
 ```
-Then you have a Release-v1.0.0 folder in the root directory of DeClang.
+Then you have a Release-v1.0.0 folder in the root directory of DeClang. 
+
+If you are building DeClang on Windows, you have to install MYSYS2 and run
+the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build.
 
 ## Installation & Setup
 
