@@ -80,7 +80,8 @@ The Directory Structure
 ::
 
   clang-tidy/                       # Clang-tidy core.
-  |-- ClangTidy.h                   # Interfaces for users and checks.
+  |-- ClangTidy.h                   # Interfaces for users.
+  |-- ClangTidyCheck.h              # Interfaces for checks.
   |-- ClangTidyModule.h             # Interface for clang-tidy modules.
   |-- ClangTidyModuleRegistry.h     # Interface for registering of modules.
      ...
@@ -127,7 +128,7 @@ style used in the project. For code reviews we mostly use `LLVM Phabricator`_.
 
 Next, you need to decide which module the check belongs to. Modules
 are located in subdirectories of `clang-tidy/
-<https://reviews.llvm.org/diffusion/L/browse/clang-tools-extra/trunk/clang-tidy/>`_
+<https://github.com/llvm/llvm-project/tree/master/clang-tools-extra/clang-tidy/>`_
 and contain checks targeting a certain aspect of code quality (performance,
 readability, etc.), certain coding style or standard (Google, LLVM, CERT, etc.)
 or a widely used API (e.g. MPI). Their names are same as user-facing check
@@ -157,7 +158,7 @@ Let's see in more detail at the check class definition:
 
   ...
 
-  #include "../ClangTidy.h"
+  #include "../ClangTidyCheck.h"
 
   namespace clang {
   namespace tidy {
@@ -210,7 +211,7 @@ can further inspect them and report diagnostics.
 
 (If you want to see an example of a useful check, look at
 `clang-tidy/google/ExplicitConstructorCheck.h
-<https://reviews.llvm.org/diffusion/L/browse/clang-tools-extra/trunk/clang-tidy/google/ExplicitConstructorCheck.h>`_
+<https://github.com/llvm/llvm-project/blob/master/clang-tools-extra/clang-tidy/google/ExplicitConstructorCheck.h>`_
 and `clang-tidy/google/ExplicitConstructorCheck.cpp
 <https://reviews.llvm.org/diffusion/L/browse/clang-tools-extra/trunk/clang-tidy/google/ExplicitConstructorCheck.cpp>`_).
 

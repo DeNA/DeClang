@@ -1,8 +1,18 @@
+//===--- ExpectedTypes.cpp ---------------------------------------*- C++-*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #include "ExpectedTypes.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Type.h"
 #include "clang/Index/USRGeneration.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
+#include "llvm/ADT/None.h"
 #include "llvm/ADT/STLExtras.h"
 
 namespace clang {
@@ -33,7 +43,13 @@ static const Type *toEquivClass(ASTContext &Ctx, QualType T) {
 
 static llvm::Optional<QualType>
 typeOfCompletion(const CodeCompletionResult &R) {
-  auto *VD = dyn_cast_or_null<ValueDecl>(R.Declaration);
+  const NamedDecl *D = R.Declaration;
+  if (!D)
+    return llvm::None;
+  // Templates do not have a type on their own, look at the templated decl.
+  if (auto *Template = dyn_cast<TemplateDecl>(D))
+    D = Template->getTemplatedDecl();
+  auto *VD = dyn_cast<ValueDecl>(D);
   if (!VD)
     return llvm::None; // We handle only variables and functions below.
   auto T = VD->getType();

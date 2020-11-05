@@ -35,6 +35,13 @@ parser.add_argument('--compiler',
                     required=True,
                     help='Path to a compiler executable, or one of the values [any, msvc, clang-cl, gcc, clang]')
 
+parser.add_argument('--libs-dir',
+                    metavar='directory',
+                    dest='libs_dir',
+                    required=False,
+                    action='append',
+                    help='If specified, a path to linked libraries to be passed via -L')
+
 parser.add_argument('--tools-dir',
                     metavar='directory',
                     dest='tools_dir',
@@ -200,16 +207,16 @@ def find_toolchain(compiler, tools_dir):
     file = os.path.basename(compiler)
     name, ext = os.path.splitext(file)
     if file.lower() == 'cl.exe':
-        return 'msvc'
+        return ('msvc', compiler)
     if name == 'clang-cl':
-        return 'clang-cl'
+        return ('clang-cl', compiler)
     if name.startswith('clang'):
-        return 'clang'
+        return ('clang', compiler)
     if name.startswith('gcc') or name.startswith('g++'):
-        return 'gcc'
+        return ('gcc', compiler)
     if name == 'cc' or name == 'c++':
-        return 'generic'
-    return 'unknown'
+        return ('generic', compiler)
+    return ('unknown', compiler)
 
 class Builder(object):
     def __init__(self, toolchain_type, args, obj_ext):
@@ -225,6 +232,7 @@ class Builder(object):
         self.nodefaultlib = args.nodefaultlib
         self.verbose = args.verbose
         self.obj_ext = obj_ext
+        self.lib_paths = args.libs_dir
 
     def _exe_file_name(self):
         assert self.mode != 'compile'
@@ -564,9 +572,12 @@ class MsvcBuilder(Builder):
         if self.toolchain_type == 'clang-cl':
             args.append('-Xclang')
             args.append('-fkeep-static-consts')
+            args.append('-fms-compatibility-version=19')
         args.append('/c')
 
         args.append('/Fo' + obj)
+        if self.toolchain_type == 'clang-cl':
+            args.append('--')
         args.append(source)
 
         return ('compiling', [source], obj,
@@ -647,6 +658,9 @@ class GccBuilder(Builder):
             if sys.platform == 'darwin':
                 main_symbol = '_main'
             args.append('-Wl,-e,' + main_symbol)
+        if sys.platform.startswith('netbsd'):
+            for x in self.lib_paths:
+                args += ['-L' + x, '-Wl,-rpath,' + x]
         args.extend(['-o', self._exe_file_name()])
         args.extend(self._obj_file_names())
 

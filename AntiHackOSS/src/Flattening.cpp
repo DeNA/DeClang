@@ -153,7 +153,7 @@ bool Flattening::flatten(Function *f, std::string seed) {
 
     BasicBlock *bb = &*i;
     if (!isa<BranchInst>(bb->getTerminator()) && !isa<ReturnInst>(bb->getTerminator())) {
-      (*logFile) << f->getName() << "[Frontend]: (Warning) Terminator Error. Not Flattening.\n";
+      (*logFile) << "[Frontend]: (Warning) " << f->getName() << " Terminator Error. Not Flattening.\n";
       //(*logFile) << "terminator: ";
       //bb->getTerminator()->print(*logFile);
       return false;

@@ -71,20 +71,20 @@ test:
 
 # .branch_lt[0]
 # THUNK-LABEL: __long_branch_callee:
-# THUNK-NEXT: 10010028:        addis 12, 2, -1
-# THUNK-NEXT:                  ld 12, -32768(12)
-# THUNK-NEXT:                  mtctr 12
-# THUNK-NEXT:                  bctr
+# THUNK-NEXT: 10010028:       addis 12, 2, 1
+# THUNK-NEXT:                 ld 12, -32768(12)
+# THUNK-NEXT:                 mtctr 12
+# THUNK-NEXT:                 bctr
 
 # .branch_lt[1]
 # THUNK-LABEL: __long_branch_tail_callee:
-# THUNK-NEXT: 10010038:        addis 12, 2, -1
-# THUNK-NEXT:                  ld 12, -32760(12)
-# THUNK-NEXT:                  mtctr 12
-# THUNK-NEXT:                  bctr
+# THUNK-NEXT: 10010038:       addis 12, 2, 1
+# THUNK-NEXT:                 ld 12, -32760(12)
+# THUNK-NEXT:                 mtctr 12
+# THUNK-NEXT:                 bctr
 
 # The offset from the TOC to the .branch_lt section  is (-1 << 16) - 32768.
 #                Name             Type            Address          Off    Size
-# BRANCHLT:     .branch_lt        PROGBITS        0000000010020000 020000 000010
-# BRANCHLT:     .got              PROGBITS        0000000010030000 030000 000008
+# BRANCHLT:     .got              PROGBITS        0000000010020000 020000 000008
+# BRANCHLT:     .branch_lt        PROGBITS        0000000010030000 030000 000010
 # BRANCHLT-NOT: .plt

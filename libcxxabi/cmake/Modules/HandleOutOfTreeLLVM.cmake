@@ -94,7 +94,6 @@ macro(configure_out_of_tree_llvm)
   endif()
   if (LLVM_FOUND)
     include(AddLLVM OPTIONAL)
-    include(HandleLLVMOptions OPTIONAL)
   endif()
 
   # LLVM Options --------------------------------------------------------------

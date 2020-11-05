@@ -1,9 +1,8 @@
 //===----------------------------------------------------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -73,16 +72,16 @@
 
 #elif TEST_STD_VER > 17
 
-# if !defined(_LIBCPP_VERSION)
+# if TEST_STD_VER > 17 && defined(__cpp_impl_destroying_delete) && __cpp_impl_destroying_delete >= 201806L
 #   ifndef __cpp_lib_destroying_delete
 #     error "__cpp_lib_destroying_delete should be defined in c++2a"
 #   endif
 #   if __cpp_lib_destroying_delete != 201806L
 #     error "__cpp_lib_destroying_delete should have the value 201806L in c++2a"
 #   endif
-# else // _LIBCPP_VERSION
+# else
 #   ifdef __cpp_lib_destroying_delete
-#     error "__cpp_lib_destroying_delete should not be defined because it is unimplemented in libc++!"
+#     error "__cpp_lib_destroying_delete should not be defined when TEST_STD_VER > 17 && defined(__cpp_impl_destroying_delete) && __cpp_impl_destroying_delete >= 201806L is not defined!"
 #   endif
 # endif
 
@@ -102,4 +101,4 @@
 
 #endif // TEST_STD_VER > 17
 
-int main() {}
+int main(int, char**) { return 0; }

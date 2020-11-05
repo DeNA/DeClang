@@ -39,10 +39,10 @@ entry:
 ; CHECK: store
 ; CHECK-ORIGINS: icmp
 ; CHECK-ORIGINS: br i1
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK-ORIGINS: store
 ; CHECK-ORIGINS: br label
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK: store
 ; CHECK: ret void
 
@@ -63,10 +63,10 @@ entry:
 ; CHECK: store {{.*}} align 32
 ; CHECK-ORIGINS: icmp
 ; CHECK-ORIGINS: br i1
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK-ORIGINS: store {{.*}} align 32
 ; CHECK-ORIGINS: br label
-; CHECK-ORIGINS: <label>
+; CHECK-ORIGINS: {{^[0-9]+}}:
 ; CHECK: store {{.*}} align 32
 ; CHECK: ret void
 
@@ -436,6 +436,22 @@ entry:
 ; CHECK: %[[SC:.*]] = or i32 %[[SB]], %[[SA]]
 ; CHECK: = fdiv float
 ; CHECK: store i32 %[[SC]], i32* {{.*}}@__msan_retval_tls
+; CHECK: ret float
+
+; Check that fneg simply propagates shadow.
+
+define float @FNeg(float %a) nounwind uwtable readnone sanitize_memory {
+entry:
+  %c = fneg float %a
+  ret float %c
+}
+
+; CHECK-LABEL: @FNeg
+; CHECK: %[[SA:.*]] = load i32,{{.*}}@__msan_param_tls
+; CHECK-ORIGINS: %[[SB:.*]] = load i32,{{.*}}@__msan_param_origin_tls
+; CHECK: = fneg float
+; CHECK: store i32 %[[SA]], i32* {{.*}}@__msan_retval_tls
+; CHECK-ORIGINS: store i32{{.*}}@__msan_retval_origin_tls
 ; CHECK: ret float
 
 ; Check that we propagate shadow for x<0, x>=0, etc (i.e. sign bit tests)

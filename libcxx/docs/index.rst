@@ -93,7 +93,7 @@ and GCC.
 ============ ==================== ============ ========================
 OS           Arch                 Compilers    ABI Library
 ============ ==================== ============ ========================
-Mac OS X     i386, x86_64         Clang, GCC   libc++abi
+macOS        i386, x86_64         Clang, GCC   libc++abi
 FreeBSD 10+  i386, x86_64, ARM    Clang, GCC   libcxxrt, libc++abi
 Linux        i386, x86_64         Clang, GCC   libc++abi
 ============ ==================== ============ ========================
@@ -101,9 +101,9 @@ Linux        i386, x86_64         Clang, GCC   libc++abi
 The following minimum compiler versions are strongly recommended.
 
 * Clang 3.5 and above
-* GCC 4.7 and above.
+* GCC 5.0 and above.
 
-Anything older *may* work.
+The C++03 dialect is only supported for Clang compilers.
 
 C++ Dialect Support
 ---------------------
@@ -121,8 +121,6 @@ This list contains known issues with libc++
 
 * Building libc++ with ``-fno-rtti`` is not supported. However
   linking against it with ``-fno-rtti`` is supported.
-* On OS X v10.8 and older the CMake option ``-DLIBCXX_LIBCPPABI_VERSION=""``
-  must be used during configuration.
 
 
 A full list of currently open libc++ bugs can be `found here`__.
@@ -139,10 +137,12 @@ Design Documents
    DesignDocs/DebugMode
    DesignDocs/CapturingConfigInfo
    DesignDocs/ABIVersioning
+   DesignDocs/ExperimentalFeatures
    DesignDocs/VisibilityMacros
    DesignDocs/ThreadingSupportAPI
    DesignDocs/FileTimeType
    DesignDocs/FeatureTestMacros
+   DesignDocs/ExtendedCXX03Support
 
 * `<atomic> design <http://libcxx.llvm.org/atomic_design.html>`_
 * `<type_traits> design <http://libcxx.llvm.org/type_traits_design.html>`_
@@ -190,5 +190,4 @@ Quick Links
 * `LLVM Bugzilla <https://bugs.llvm.org/>`_
 * `libcxx-commits Mailing List`_
 * `libcxx-dev Mailing List`_
-* `Browse libc++ -- SVN <http://llvm.org/svn/llvm-project/libcxx/trunk/>`_
-* `Browse libc++ -- ViewVC <http://llvm.org/viewvc/llvm-project/libcxx/trunk/>`_
+* `Browse libc++ Sources <https://github.com/llvm/llvm-project/tree/master/libcxx/>`_

@@ -8,9 +8,9 @@ function(add_python_test_target name test_script args comment)
   add_custom_target(${name}
     COMMAND ${PYTHON_TEST_COMMAND} ${ARG_DEFAULT_ARGS}
     COMMENT "${comment}"
-    DEPENDS ${LLDB_TEST_DEPS}
     USES_TERMINAL
     )
+  add_dependencies(${name} ${LLDB_TEST_DEPS})
 endfunction()
 
 # The default architecture with which to compile test executables is the default LLVM target
@@ -74,15 +74,6 @@ if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
   endif()
 endif()
 
-if(LLDB_CODESIGN_IDENTITY_USED)
-  list(APPEND LLDB_TEST_COMMON_ARGS --codesign-identity "${LLDB_CODESIGN_IDENTITY_USED}")
-endif()
-
-if(LLDB_BUILD_FRAMEWORK)
-  get_target_property(framework_target_dir liblldb LIBRARY_OUTPUT_DIRECTORY)
-  list(APPEND LLDB_TEST_COMMON_ARGS --framework ${framework_target_dir}/LLDB.framework)
-endif()
-
 if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Windows|Darwin")
   list(APPEND LLDB_TEST_COMMON_ARGS
     --env ARCHIVER=${CMAKE_AR} --env OBJCOPY=${CMAKE_OBJCOPY})
@@ -94,12 +85,28 @@ if (NOT "${LLDB_LIT_TOOLS_DIR}" STREQUAL "")
   endif()
 endif()
 
-if(CMAKE_HOST_APPLE AND DEBUGSERVER_PATH)
-  list(APPEND LLDB_TEST_COMMON_ARGS --server ${DEBUGSERVER_PATH})
-endif()
+if(CMAKE_HOST_APPLE)
+  if(LLDB_BUILD_FRAMEWORK)
+    get_target_property(framework_build_dir liblldb LIBRARY_OUTPUT_DIRECTORY)
+    list(APPEND LLDB_TEST_COMMON_ARGS --framework ${framework_build_dir}/LLDB.framework)
+  endif()
 
-if(SKIP_TEST_DEBUGSERVER)
-  list(APPEND LLDB_TEST_COMMON_ARGS --out-of-tree-debugserver)
+  # Use the same identity for testing
+  get_property(code_sign_identity_used GLOBAL PROPERTY LLDB_DEBUGSERVER_CODESIGN_IDENTITY)
+  if(code_sign_identity_used)
+    list(APPEND LLDB_TEST_COMMON_ARGS --codesign-identity "${code_sign_identity_used}")
+  endif()
+
+  if(LLDB_USE_SYSTEM_DEBUGSERVER)
+    lldb_find_system_debugserver(system_debugserver_path)
+    message(STATUS "LLDB tests use out-of-tree debugserver: ${system_debugserver_path}")
+    list(APPEND LLDB_TEST_COMMON_ARGS --out-of-tree-debugserver)
+  else()
+    set(debugserver_path ${LLVM_RUNTIME_OUTPUT_INTDIR}/debugserver)
+    message(STATUS "LLDB Tests use just-built debugserver: ${debugserver_path}")
+    list(APPEND LLDB_TEST_COMMON_ARGS --server ${debugserver_path})
+    add_dependencies(lldb-test-deps debugserver)
+  endif()
 endif()
 
 set(LLDB_DOTEST_ARGS ${LLDB_TEST_COMMON_ARGS};${LLDB_TEST_USER_ARGS})
@@ -110,10 +117,13 @@ add_python_test_target(check-lldb-single
   "--no-multiprocess;${LLDB_DOTEST_ARGS}"
   "Testing LLDB with args: ${LLDB_DOTEST_ARGS}"
   )
+set_target_properties(check-lldb-single PROPERTIES FOLDER "lldb misc")
 
 # If tests crash cause LLDB to crash, or things are otherwise unstable, or if machine-parsable
 # output is desired (i.e. in continuous integration contexts) check-lldb-single is a better target.
 add_custom_target(check-lldb)
+add_dependencies(check-lldb lldb-test-deps)
+set_target_properties(check-lldb PROPERTIES FOLDER "lldb misc")
 
 # If we're building with an in-tree clang, then list clang as a dependency
 # to run tests.
@@ -133,7 +143,6 @@ endif ()
 # Run the lit-style tests and the unittests as part of the check-lldb target.
 add_dependencies(check-lldb check-lldb-lit)
 
-add_custom_target(lldb-test-depends DEPENDS ${LLDB_TEST_DEPENDS})
 # This will add LLDB's test dependencies to the dependencies for check-all and
 # include them in the test-depends target.
 set_property(GLOBAL APPEND PROPERTY LLVM_LIT_DEPENDS ${ARG_DEPENDS})

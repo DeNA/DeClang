@@ -1,3 +1,4 @@
+# UNSUPPORTED: linux, windows
 # RUN: not llvm-mc %s -triple=riscv32 -riscv-no-aliases 2>&1 | FileCheck %s
 # RUN: not llvm-mc %s -triple=riscv32 2>&1 | FileCheck %s
 
@@ -18,6 +19,8 @@ sra x2, x3, 32  # CHECK: :[[@LINE]]:13: error: immediate must be an integer in t
 sll x2, x3, -1  # CHECK: :[[@LINE]]:13: error: immediate must be an integer in the range [0, 31]
 srl x2, x3, -2  # CHECK: :[[@LINE]]:13: error: immediate must be an integer in the range [0, 31]
 sra x2, x3, -3  # CHECK: :[[@LINE]]:13: error: immediate must be an integer in the range [0, 31]
+
+addi x1, .      # CHECK: :[[@LINE]]:10: error: invalid operand for instruction
 
 foo:
   .space 4

@@ -10,7 +10,7 @@ static_assert(is_same_v<int, int>, "should get partial spec");
 // parameter names from the primary template. The partial specialization might
 // not have enough parameters.
 
-// CHECK: distinct !DIGlobalVariable(name: "is_same_v", linkageName: "_ZL9is_same_vIiiE", {{.*}} templateParams: ![[PARAMS:[0-9]+]])
+// CHECK: distinct !DIGlobalVariable(name: "is_same_v", linkageName: "_Z9is_same_vIiiE", {{.*}} templateParams: ![[PARAMS:[0-9]+]])
 // CHECK: ![[PARAMS]] = !{![[LHS:[0-9]+]], ![[RHS:[0-9]+]]}
 // CHECK: ![[LHS]] = !DITemplateTypeParameter(name: "LHS", type: ![[INT:[0-9]+]])
 // CHECK: ![[INT]] = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)

@@ -14,6 +14,7 @@ endif()
 add_lldb_library(lldbPluginScriptInterpreterPython PLUGIN
   PythonDataObjects.cpp
   PythonExceptionState.cpp
+  PythonReadline.cpp
   ScriptInterpreterPython.cpp
 
   LINK_LIBS
@@ -23,6 +24,8 @@ add_lldb_library(lldbPluginScriptInterpreterPython PLUGIN
     lldbHost
     lldbInterpreter
     lldbTarget
+    ${PYTHON_LIBRARY}
+
   LINK_COMPONENTS
     Support
   )

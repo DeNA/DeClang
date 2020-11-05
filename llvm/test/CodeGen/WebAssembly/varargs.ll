@@ -105,7 +105,7 @@ declare void @callee(...)
 
 ; CHECK-LABEL: caller_none:
 ; CHECK:      i32.const $push0=, 0
-; CHECK-NEXT: call callee@FUNCTION, $pop0
+; CHECK-NEXT: call callee, $pop0
 ; CHECK-NEXT: return{{$}}
 define void @caller_none() {
   call void (...) @callee()
@@ -149,7 +149,7 @@ declare void @callee_with_nonlegal_fixed(fp128, ...) nounwind
 ; CHECK: i64.const       $push[[L0:[0-9]+]]=, 0
 ; CHECK: i64.const       $push[[L1:[0-9]+]]=, 0
 ; CHECK: i32.const       $push[[L2:[0-9]+]]=, 0
-; CHECK: call            callee_with_nonlegal_fixed@FUNCTION, $pop[[L0]], $pop[[L1]], $pop[[L2]]{{$}}
+; CHECK: call            callee_with_nonlegal_fixed, $pop[[L0]], $pop[[L1]], $pop[[L2]]{{$}}
 define void @call_nonlegal_fixed() nounwind {
   call void (fp128, ...) @callee_with_nonlegal_fixed(fp128 0xL00000000000000000000000000000000)
   ret void
@@ -171,7 +171,7 @@ define void @nonlegal_fixed(fp128 %x, ...) nounwind {
 ; CHECK-NEXT: i32.const       $push8=, 32
 ; CHECK-NEXT: i32.sub         $push12=, $pop7, $pop8
 ; CHECK-NEXT: local.tee       $push11=, $1=, $pop12
-; CHECK-NEXT: global.set      __stack_pointer@GLOBAL, $pop11
+; CHECK-NEXT: global.set      __stack_pointer, $pop11
 ; CHECK-NEXT: i32.const       $push0=, 24
 ; CHECK-NEXT: i32.add         $push1=, $1, $pop0
 ; CHECK-NEXT: i64.const       $push2=, -9223372036854775808
@@ -182,7 +182,7 @@ define void @nonlegal_fixed(fp128 %x, ...) nounwind {
 ; CHECK-NEXT: i64.store       0($pop4), $pop5
 ; CHECK-NEXT: i32.const       $push6=, 7
 ; CHECK-NEXT: i32.store       0($1), $pop6
-; CHECK-NEXT: call            callee@FUNCTION, $1
+; CHECK-NEXT: call            callee, $1
 define void @call_fp128_alignment(i8* %p) {
 entry:
   call void (...) @callee(i8 7, fp128 0xL00000000000000018000000000000000)

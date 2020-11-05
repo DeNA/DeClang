@@ -1,5 +1,5 @@
 // clang-format off
-// REQUIRES: lld, python
+// REQUIRES: lld
 
 // Test that we can display tag types.
 // RUN: %build --compiler=clang-cl --nodefaultlib -o %t.exe -- %s 
@@ -870,8 +870,7 @@ const wchar_t &CRWCP = WCP;
 // CHECK-NEXT: |-VarDecl {{.*}} CRC16_24 'const char16_t &'
 // CHECK-NEXT: |-VarDecl {{.*}} CRC32_42 'const char32_t &'
 // CHECK-NEXT: |-VarDecl {{.*}} CRWC1 'const wchar_t &'
-// CHECK-NEXT: |-VarDecl {{.*}} CRWCP 'const wchar_t &'
-// CHECK-NEXT: `-<undeserialized declarations>
+// CHECK-NEXT: `-VarDecl {{.*}} CRWCP 'const wchar_t &'
 
 // CHECK: (lldb) quit
 

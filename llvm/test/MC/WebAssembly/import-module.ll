@@ -14,7 +14,7 @@ declare void @plain()
 attributes #0 = { "wasm-import-module"="bar" "wasm-import-name"="qux" }
 
 ; CHECK:        - Type:            IMPORT
-; CHECK-NEXT:     Imports:         
+; CHECK-NEXT:     Imports:
 ; CHECK:            - Module:          bar
 ; CHECK-NEXT:         Field:           qux
 ; CHECK-NEXT:         Kind:            FUNCTION
@@ -25,7 +25,7 @@ attributes #0 = { "wasm-import-module"="bar" "wasm-import-name"="qux" }
 
 ; CHECK:        - Type:            CUSTOM
 ; CHECK:              Name:            foo
-; CHECK-NEXT:         Flags:           [ UNDEFINED ]
+; CHECK-NEXT:         Flags:           [ UNDEFINED, EXPLICIT_NAME ]
 
 ; CHECK:              Name:            plain
 ; CHECK-NEXT:         Flags:           [ UNDEFINED ]

@@ -310,10 +310,10 @@
 // AARCH64:#define __FLT16_HAS_QUIET_NAN__ 1
 // AARCH64:#define __FLT16_MANT_DIG__ 11
 // AARCH64:#define __FLT16_MAX_10_EXP__ 4
-// AARCH64:#define __FLT16_MAX_EXP__ 15
+// AARCH64:#define __FLT16_MAX_EXP__ 16
 // AARCH64:#define __FLT16_MAX__ 6.5504e+4F16
-// AARCH64:#define __FLT16_MIN_10_EXP__ (-13)
-// AARCH64:#define __FLT16_MIN_EXP__ (-14)
+// AARCH64:#define __FLT16_MIN_10_EXP__ (-4)
+// AARCH64:#define __FLT16_MIN_EXP__ (-13)
 // AARCH64:#define __FLT16_MIN__ 6.103515625e-5F16
 // AARCH64:#define __FLT_DENORM_MIN__ 1.40129846e-45F
 // AARCH64:#define __FLT_DIG__ 6
@@ -2845,8 +2845,9 @@
 // I386:#define __i386__ 1
 // I386:#define i386 1
 //
-// RUN: %clang_cc1 -E -dM -ffreestanding -triple=i386-pc-linux-gnu -target-cpu pentium4 < /dev/null | FileCheck -match-full-lines -check-prefix I386-LINUX %s
-// RUN: %clang_cc1 -x c++ -E -dM -ffreestanding -triple=i386-pc-linux-gnu -target-cpu pentium4 < /dev/null | FileCheck -match-full-lines -check-prefix I386-LINUX -check-prefix I386-LINUX-CXX %s
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=i386-pc-linux-gnu -target-cpu pentium4 < /dev/null | FileCheck -match-full-lines -check-prefix I386-LINUX -check-prefix I386-LINUX-ALIGN32 %s
+// RUN: %clang_cc1 -x c++ -E -dM -ffreestanding -triple=i386-pc-linux-gnu -target-cpu pentium4 < /dev/null | FileCheck -match-full-lines -check-prefix I386-LINUX -check-prefix I386-LINUX-CXX -check-prefix I386-LINUX-ALIGN32 %s
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=i386-pc-linux-gnu -target-cpu pentium4 -malign-double < /dev/null | FileCheck -match-full-lines -check-prefix I386-LINUX -check-prefix I386-LINUX-ALIGN64 %s
 //
 // I386-LINUX-NOT:#define _LP64
 // I386-LINUX:#define __BIGGEST_ALIGNMENT__ 16
@@ -2883,6 +2884,18 @@
 // I386-LINUX:#define __FLT_MIN_EXP__ (-125)
 // I386-LINUX:#define __FLT_MIN__ 1.17549435e-38F
 // I386-LINUX:#define __FLT_RADIX__ 2
+// I386-LINUX:#define __GCC_ATOMIC_BOOL_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_CHAR16_T_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_CHAR32_T_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_CHAR_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_INT_LOCK_FREE 2
+// I386-LINUX-ALIGN32:#define __GCC_ATOMIC_LLONG_LOCK_FREE 1
+// I386-LINUX-ALIGN64:#define __GCC_ATOMIC_LLONG_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_LONG_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_POINTER_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_SHORT_LOCK_FREE 2
+// I386-LINUX:#define __GCC_ATOMIC_TEST_AND_SET_TRUEVAL 1
+// I386-LINUX:#define __GCC_ATOMIC_WCHAR_T_LOCK_FREE 2
 // I386-LINUX:#define __INT16_C_SUFFIX__
 // I386-LINUX:#define __INT16_FMTd__ "hd"
 // I386-LINUX:#define __INT16_FMTi__ "hi"
@@ -3034,8 +3047,10 @@
 // I386-LINUX:#define __i386__ 1
 // I386-LINUX:#define i386 1
 //
-// RUN: %clang_cc1 -E -dM -ffreestanding -triple=i386-netbsd < /dev/null | FileCheck -match-full-lines -check-prefix I386-NETBSD %s
-// RUN: %clang_cc1 -x c++ -E -dM -ffreestanding -triple=i386-netbsd < /dev/null | FileCheck -match-full-lines -check-prefix I386-NETBSD -check-prefix I386-NETBSD-CXX %s
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=i386-netbsd -target-cpu i486 < /dev/null | FileCheck -match-full-lines -check-prefix I386-NETBSD %s
+// RUN: %clang_cc1 -x c++ -E -dM -ffreestanding -triple=i386-netbsd -target-cpu i486 < /dev/null | FileCheck -match-full-lines -check-prefix I386-NETBSD -check-prefix I386-NETBSD-CXX %s
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=i386-netbsd -target-cpu i486 -malign-double < /dev/null | FileCheck -match-full-lines -check-prefix I386-NETBSD %s
+//
 //
 // I386-NETBSD-NOT:#define _LP64
 // I386-NETBSD:#define __BIGGEST_ALIGNMENT__ 16
@@ -3072,6 +3087,17 @@
 // I386-NETBSD:#define __FLT_MIN_EXP__ (-125)
 // I386-NETBSD:#define __FLT_MIN__ 1.17549435e-38F
 // I386-NETBSD:#define __FLT_RADIX__ 2
+// I386-NETBSD:#define __GCC_ATOMIC_BOOL_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_CHAR16_T_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_CHAR32_T_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_CHAR_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_INT_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_LLONG_LOCK_FREE 1
+// I386-NETBSD:#define __GCC_ATOMIC_LONG_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_POINTER_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_SHORT_LOCK_FREE 2
+// I386-NETBSD:#define __GCC_ATOMIC_TEST_AND_SET_TRUEVAL 1
+// I386-NETBSD:#define __GCC_ATOMIC_WCHAR_T_LOCK_FREE 2
 // I386-NETBSD:#define __INT16_C_SUFFIX__
 // I386-NETBSD:#define __INT16_FMTd__ "hd"
 // I386-NETBSD:#define __INT16_FMTi__ "hi"
@@ -5158,7 +5184,7 @@
 // MSP430:#define __SIZE_MAX__ 65535U
 // MSP430:#define __SIZE_TYPE__ unsigned int
 // MSP430:#define __SIZE_WIDTH__ 16
-// MSP430-CXX:#define __STDCPP_DEFAULT_NEW_ALIGNMENT__ 8U
+// MSP430-CXX:#define __STDCPP_DEFAULT_NEW_ALIGNMENT__ 2U
 // MSP430:#define __UINT16_C_SUFFIX__ U
 // MSP430:#define __UINT16_MAX__ 65535U
 // MSP430:#define __UINT16_TYPE__ unsigned short
@@ -5991,7 +6017,7 @@
 // PPC64LE:#define _ARCH_PWR5 1
 // PPC64LE:#define _ARCH_PWR5X 1
 // PPC64LE:#define _ARCH_PWR6 1
-// PPC64LE:#define _ARCH_PWR6X 1
+// PPC64LE-NOT:#define _ARCH_PWR6X 1
 // PPC64LE:#define _ARCH_PWR7 1
 // PPC64LE:#define _CALL_ELF 2
 // PPC64LE:#define _LITTLE_ENDIAN 1
@@ -6331,7 +6357,7 @@
 // PPCPWR7:#define _ARCH_PWR5 1
 // PPCPWR7:#define _ARCH_PWR5X 1
 // PPCPWR7:#define _ARCH_PWR6 1
-// PPCPWR7:#define _ARCH_PWR6X 1
+// PPCPWR7-NOT:#define _ARCH_PWR6X 1
 // PPCPWR7:#define _ARCH_PWR7 1
 //
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc64-none-none -target-cpu power7 -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPCPOWER7 %s
@@ -6344,7 +6370,7 @@
 // PPCPOWER7:#define _ARCH_PWR5 1
 // PPCPOWER7:#define _ARCH_PWR5X 1
 // PPCPOWER7:#define _ARCH_PWR6 1
-// PPCPOWER7:#define _ARCH_PWR6X 1
+// PPCPOWER7-NOT:#define _ARCH_PWR6X 1
 // PPCPOWER7:#define _ARCH_PWR7 1
 //
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc64-none-none -target-cpu pwr8 -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPCPWR8 %s
@@ -6357,7 +6383,7 @@
 // PPCPWR8:#define _ARCH_PWR5 1
 // PPCPWR8:#define _ARCH_PWR5X 1
 // PPCPWR8:#define _ARCH_PWR6 1
-// PPCPWR8:#define _ARCH_PWR6X 1
+// PPCPWR8-NOT:#define _ARCH_PWR6X 1
 // PPCPWR8:#define _ARCH_PWR7 1
 // PPCPWR8:#define _ARCH_PWR8 1
 //
@@ -6374,7 +6400,7 @@
 // PPCPOWER8:#define _ARCH_PWR5 1
 // PPCPOWER8:#define _ARCH_PWR5X 1
 // PPCPOWER8:#define _ARCH_PWR6 1
-// PPCPOWER8:#define _ARCH_PWR6X 1
+// PPCPOWER8-NOT:#define _ARCH_PWR6X 1
 // PPCPOWER8:#define _ARCH_PWR7 1
 // PPCPOWER8:#define _ARCH_PWR8 1
 //
@@ -6388,7 +6414,7 @@
 // PPCPWR9:#define _ARCH_PWR5 1
 // PPCPWR9:#define _ARCH_PWR5X 1
 // PPCPWR9:#define _ARCH_PWR6 1
-// PPCPWR9:#define _ARCH_PWR6X 1
+// PPCPWR9-NOT:#define _ARCH_PWR6X 1
 // PPCPWR9:#define _ARCH_PWR7 1
 // PPCPWR9:#define _ARCH_PWR9 1
 //
@@ -6402,12 +6428,215 @@
 // PPCPOWER9:#define _ARCH_PWR5 1
 // PPCPOWER9:#define _ARCH_PWR5X 1
 // PPCPOWER9:#define _ARCH_PWR6 1
-// PPCPOWER9:#define _ARCH_PWR6X 1
+// PPCPOWER9-NOT:#define _ARCH_PWR6X 1
 // PPCPOWER9:#define _ARCH_PWR7 1
 // PPCPOWER9:#define _ARCH_PWR9 1
 //
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc64-none-none -target-feature +float128 -target-cpu power9 -fno-signed-char < /dev/null | FileCheck -check-prefix PPC-FLOAT128 %s
 // PPC-FLOAT128:#define __FLOAT128__ 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc64-ibm-aix7.1.0.0 -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPC64-AIX %s
+//
+// PPC64-AIX:#define _AIX 1
+// PPC64-AIX:#define _ARCH_PPC 1
+// PPC64-AIX:#define _ARCH_PPC64 1
+// PPC64-AIX:#define _BIG_ENDIAN 1
+// PPC64-AIX:#define _IBMR2 1
+// PPC64-AIX-NOT:#define _ILP32 1
+// PPC64-AIX:#define _LONG_LONG 1
+// PPC64-AIX:#define _LP64 1
+// PPC64-AIX:#define _POWER 1
+// PPC64-AIX:#define __64BIT__ 1
+// PPC64-AIX:#define __BIGGEST_ALIGNMENT__ 8
+// PPC64-AIX:#define __BIG_ENDIAN__ 1
+// PPC64-AIX:#define __BYTE_ORDER__ __ORDER_BIG_ENDIAN__
+// PPC64-AIX:#define __CHAR16_TYPE__ unsigned short
+// PPC64-AIX:#define __CHAR32_TYPE__ unsigned int
+// PPC64-AIX:#define __CHAR_BIT__ 8
+// PPC64-AIX:#define __CHAR_UNSIGNED__ 1
+// PPC64-AIX:#define __DBL_DENORM_MIN__ 4.9406564584124654e-324
+// PPC64-AIX:#define __DBL_DIG__ 15
+// PPC64-AIX:#define __DBL_EPSILON__ 2.2204460492503131e-16
+// PPC64-AIX:#define __DBL_HAS_DENORM__ 1
+// PPC64-AIX:#define __DBL_HAS_INFINITY__ 1
+// PPC64-AIX:#define __DBL_HAS_QUIET_NAN__ 1
+// PPC64-AIX:#define __DBL_MANT_DIG__ 53
+// PPC64-AIX:#define __DBL_MAX_10_EXP__ 308
+// PPC64-AIX:#define __DBL_MAX_EXP__ 1024
+// PPC64-AIX:#define __DBL_MAX__ 1.7976931348623157e+308
+// PPC64-AIX:#define __DBL_MIN_10_EXP__ (-307)
+// PPC64-AIX:#define __DBL_MIN_EXP__ (-1021)
+// PPC64-AIX:#define __DBL_MIN__ 2.2250738585072014e-308
+// PPC64-AIX:#define __DECIMAL_DIG__ __LDBL_DECIMAL_DIG__
+// PPC64-AIX:#define __FLT_DENORM_MIN__ 1.40129846e-45F
+// PPC64-AIX:#define __FLT_DIG__ 6
+// PPC64-AIX:#define __FLT_EPSILON__ 1.19209290e-7F
+// PPC64-AIX:#define __FLT_EVAL_METHOD__ 1
+// PPC64-AIX:#define __FLT_HAS_DENORM__ 1
+// PPC64-AIX:#define __FLT_HAS_INFINITY__ 1
+// PPC64-AIX:#define __FLT_HAS_QUIET_NAN__ 1
+// PPC64-AIX:#define __FLT_MANT_DIG__ 24
+// PPC64-AIX:#define __FLT_MAX_10_EXP__ 38
+// PPC64-AIX:#define __FLT_MAX_EXP__ 128
+// PPC64-AIX:#define __FLT_MAX__ 3.40282347e+38F
+// PPC64-AIX:#define __FLT_MIN_10_EXP__ (-37)
+// PPC64-AIX:#define __FLT_MIN_EXP__ (-125)
+// PPC64-AIX:#define __FLT_MIN__ 1.17549435e-38F
+// PPC64-AIX:#define __FLT_RADIX__ 2
+// PPC64-AIX-NOT:#define __ILP32__ 1
+// PPC64-AIX:#define __INT16_C_SUFFIX__
+// PPC64-AIX:#define __INT16_FMTd__ "hd"
+// PPC64-AIX:#define __INT16_FMTi__ "hi"
+// PPC64-AIX:#define __INT16_MAX__ 32767
+// PPC64-AIX:#define __INT16_TYPE__ short
+// PPC64-AIX:#define __INT32_C_SUFFIX__
+// PPC64-AIX:#define __INT32_FMTd__ "d"
+// PPC64-AIX:#define __INT32_FMTi__ "i"
+// PPC64-AIX:#define __INT32_MAX__ 2147483647
+// PPC64-AIX:#define __INT32_TYPE__ int
+// PPC64-AIX:#define __INT64_C_SUFFIX__ L
+// PPC64-AIX:#define __INT64_FMTd__ "ld"
+// PPC64-AIX:#define __INT64_FMTi__ "li"
+// PPC64-AIX:#define __INT64_MAX__ 9223372036854775807L
+// PPC64-AIX:#define __INT64_TYPE__ long int
+// PPC64-AIX:#define __INT8_C_SUFFIX__
+// PPC64-AIX:#define __INT8_FMTd__ "hhd"
+// PPC64-AIX:#define __INT8_FMTi__ "hhi"
+// PPC64-AIX:#define __INT8_MAX__ 127
+// PPC64-AIX:#define __INT8_TYPE__ signed char
+// PPC64-AIX:#define __INTMAX_C_SUFFIX__ L
+// PPC64-AIX:#define __INTMAX_FMTd__ "ld"
+// PPC64-AIX:#define __INTMAX_FMTi__ "li"
+// PPC64-AIX:#define __INTMAX_MAX__ 9223372036854775807L
+// PPC64-AIX:#define __INTMAX_TYPE__ long int
+// PPC64-AIX:#define __INTMAX_WIDTH__ 64
+// PPC64-AIX:#define __INTPTR_FMTd__ "ld"
+// PPC64-AIX:#define __INTPTR_FMTi__ "li"
+// PPC64-AIX:#define __INTPTR_MAX__ 9223372036854775807L
+// PPC64-AIX:#define __INTPTR_TYPE__ long int
+// PPC64-AIX:#define __INTPTR_WIDTH__ 64
+// PPC64-AIX:#define __INT_FAST16_FMTd__ "hd"
+// PPC64-AIX:#define __INT_FAST16_FMTi__ "hi"
+// PPC64-AIX:#define __INT_FAST16_MAX__ 32767
+// PPC64-AIX:#define __INT_FAST16_TYPE__ short
+// PPC64-AIX:#define __INT_FAST32_FMTd__ "d"
+// PPC64-AIX:#define __INT_FAST32_FMTi__ "i"
+// PPC64-AIX:#define __INT_FAST32_MAX__ 2147483647
+// PPC64-AIX:#define __INT_FAST32_TYPE__ int
+// PPC64-AIX:#define __INT_FAST64_FMTd__ "ld"
+// PPC64-AIX:#define __INT_FAST64_FMTi__ "li"
+// PPC64-AIX:#define __INT_FAST64_MAX__ 9223372036854775807L
+// PPC64-AIX:#define __INT_FAST64_TYPE__ long int
+// PPC64-AIX:#define __INT_FAST8_FMTd__ "hhd"
+// PPC64-AIX:#define __INT_FAST8_FMTi__ "hhi"
+// PPC64-AIX:#define __INT_FAST8_MAX__ 127
+// PPC64-AIX:#define __INT_FAST8_TYPE__ signed char
+// PPC64-AIX:#define __INT_LEAST16_FMTd__ "hd"
+// PPC64-AIX:#define __INT_LEAST16_FMTi__ "hi"
+// PPC64-AIX:#define __INT_LEAST16_MAX__ 32767
+// PPC64-AIX:#define __INT_LEAST16_TYPE__ short
+// PPC64-AIX:#define __INT_LEAST32_FMTd__ "d"
+// PPC64-AIX:#define __INT_LEAST32_FMTi__ "i"
+// PPC64-AIX:#define __INT_LEAST32_MAX__ 2147483647
+// PPC64-AIX:#define __INT_LEAST32_TYPE__ int
+// PPC64-AIX:#define __INT_LEAST64_FMTd__ "ld"
+// PPC64-AIX:#define __INT_LEAST64_FMTi__ "li"
+// PPC64-AIX:#define __INT_LEAST64_MAX__ 9223372036854775807L
+// PPC64-AIX:#define __INT_LEAST64_TYPE__ long int
+// PPC64-AIX:#define __INT_LEAST8_FMTd__ "hhd"
+// PPC64-AIX:#define __INT_LEAST8_FMTi__ "hhi"
+// PPC64-AIX:#define __INT_LEAST8_MAX__ 127
+// PPC64-AIX:#define __INT_LEAST8_TYPE__ signed char
+// PPC64-AIX:#define __INT_MAX__ 2147483647
+// PPC64-AIX:#define __LDBL_DECIMAL_DIG__ 17
+// PPC64-AIX:#define __LDBL_DENORM_MIN__ 4.9406564584124654e-324L
+// PPC64-AIX:#define __LDBL_DIG__ 15
+// PPC64-AIX:#define __LDBL_EPSILON__ 2.2204460492503131e-16L
+// PPC64-AIX:#define __LDBL_HAS_DENORM__ 1
+// PPC64-AIX:#define __LDBL_HAS_INFINITY__ 1
+// PPC64-AIX:#define __LDBL_HAS_QUIET_NAN__ 1
+// PPC64-AIX:#define __LDBL_MANT_DIG__ 53
+// PPC64-AIX:#define __LDBL_MAX_10_EXP__ 308
+// PPC64-AIX:#define __LDBL_MAX_EXP__ 1024
+// PPC64-AIX:#define __LDBL_MAX__ 1.7976931348623157e+308L
+// PPC64-AIX:#define __LDBL_MIN_10_EXP__ (-307)
+// PPC64-AIX:#define __LDBL_MIN_EXP__ (-1021)
+// PPC64-AIX:#define __LDBL_MIN__ 2.2250738585072014e-308L
+// PPC64-AIX:#define __LONG_LONG_MAX__ 9223372036854775807LL
+// PPC64-AIX:#define __LONG_MAX__ 9223372036854775807L
+// PPC64-AIX:#define __LP64__ 1
+// PPC64-AIX-NOT:#define __NATURAL_ALIGNMENT__ 1
+// PPC64-AIX:#define __POINTER_WIDTH__ 64
+// PPC64-AIX:#define __POWERPC__ 1
+// PPC64-AIX:#define __PPC64__ 1
+// PPC64-AIX:#define __PPC__ 1
+// PPC64-AIX:#define __PTRDIFF_TYPE__ long int
+// PPC64-AIX:#define __PTRDIFF_WIDTH__ 64
+// PPC64-AIX:#define __REGISTER_PREFIX__
+// PPC64-AIX:#define __SCHAR_MAX__ 127
+// PPC64-AIX:#define __SHRT_MAX__ 32767
+// PPC64-AIX:#define __SIG_ATOMIC_MAX__ 2147483647
+// PPC64-AIX:#define __SIG_ATOMIC_WIDTH__ 32
+// PPC64-AIX:#define __SIZEOF_DOUBLE__ 8
+// PPC64-AIX:#define __SIZEOF_FLOAT__ 4
+// PPC64-AIX:#define __SIZEOF_INT__ 4
+// PPC64-AIX:#define __SIZEOF_LONG_DOUBLE__ 8
+// PPC64-AIX:#define __SIZEOF_LONG_LONG__ 8
+// PPC64-AIX:#define __SIZEOF_LONG__ 8
+// PPC64-AIX:#define __SIZEOF_POINTER__ 8
+// PPC64-AIX:#define __SIZEOF_PTRDIFF_T__ 8
+// PPC64-AIX:#define __SIZEOF_SHORT__ 2
+// PPC64-AIX:#define __SIZEOF_SIZE_T__ 8
+// PPC64-AIX:#define __SIZEOF_WCHAR_T__ 4
+// PPC64-AIX:#define __SIZEOF_WINT_T__ 4
+// PPC64-AIX:#define __SIZE_MAX__ 18446744073709551615UL
+// PPC64-AIX:#define __SIZE_TYPE__ long unsigned int
+// PPC64-AIX:#define __SIZE_WIDTH__ 64
+// PPC64-AIX:#define __UINT16_C_SUFFIX__
+// PPC64-AIX:#define __UINT16_MAX__ 65535
+// PPC64-AIX:#define __UINT16_TYPE__ unsigned short
+// PPC64-AIX:#define __UINT32_C_SUFFIX__ U
+// PPC64-AIX:#define __UINT32_MAX__ 4294967295U
+// PPC64-AIX:#define __UINT32_TYPE__ unsigned int
+// PPC64-AIX:#define __UINT64_C_SUFFIX__ UL
+// PPC64-AIX:#define __UINT64_MAX__ 18446744073709551615UL
+// PPC64-AIX:#define __UINT64_TYPE__ long unsigned int
+// PPC64-AIX:#define __UINT8_C_SUFFIX__
+// PPC64-AIX:#define __UINT8_MAX__ 255
+// PPC64-AIX:#define __UINT8_TYPE__ unsigned char
+// PPC64-AIX:#define __UINTMAX_C_SUFFIX__ UL
+// PPC64-AIX:#define __UINTMAX_MAX__ 18446744073709551615UL
+// PPC64-AIX:#define __UINTMAX_TYPE__ long unsigned int
+// PPC64-AIX:#define __UINTMAX_WIDTH__ 64
+// PPC64-AIX:#define __UINTPTR_MAX__ 18446744073709551615UL
+// PPC64-AIX:#define __UINTPTR_TYPE__ long unsigned int
+// PPC64-AIX:#define __UINTPTR_WIDTH__ 64
+// PPC64-AIX:#define __UINT_FAST16_MAX__ 65535
+// PPC64-AIX:#define __UINT_FAST16_TYPE__ unsigned short
+// PPC64-AIX:#define __UINT_FAST32_MAX__ 4294967295U
+// PPC64-AIX:#define __UINT_FAST32_TYPE__ unsigned int
+// PPC64-AIX:#define __UINT_FAST64_MAX__ 18446744073709551615UL
+// PPC64-AIX:#define __UINT_FAST64_TYPE__ long unsigned int
+// PPC64-AIX:#define __UINT_FAST8_MAX__ 255
+// PPC64-AIX:#define __UINT_FAST8_TYPE__ unsigned char
+// PPC64-AIX:#define __UINT_LEAST16_MAX__ 65535
+// PPC64-AIX:#define __UINT_LEAST16_TYPE__ unsigned short
+// PPC64-AIX:#define __UINT_LEAST32_MAX__ 4294967295U
+// PPC64-AIX:#define __UINT_LEAST32_TYPE__ unsigned int
+// PPC64-AIX:#define __UINT_LEAST64_MAX__ 18446744073709551615UL
+// PPC64-AIX:#define __UINT_LEAST64_TYPE__ long unsigned int
+// PPC64-AIX:#define __UINT_LEAST8_MAX__ 255
+// PPC64-AIX:#define __UINT_LEAST8_TYPE__ unsigned char
+// PPC64-AIX:#define __USER_LABEL_PREFIX__
+// PPC64-AIX:#define __WCHAR_MAX__ 4294967295U
+// PPC64-AIX:#define __WCHAR_TYPE__ unsigned int
+// PPC64-AIX:#define __WCHAR_WIDTH__ 32
+// PPC64-AIX:#define __WINT_TYPE__ int
+// PPC64-AIX:#define __WINT_WIDTH__ 32
+// PPC64-AIX:#define __powerpc64__ 1
+// PPC64-AIX:#define __powerpc__ 1
+// PPC64-AIX:#define __ppc64__ 1
+// PPC64-AIX:#define __ppc__ 1
 //
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc64-unknown-linux-gnu -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPC64-LINUX %s
 //
@@ -6816,6 +7045,341 @@
 // PPC:#define __WINT_TYPE__ int
 // PPC:#define __WINT_WIDTH__ 32
 // PPC:#define __ppc__ 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX %s
+//
+// PPC-AIX-NOT:#define __64BIT__ 1
+// PPC-AIX:#define _AIX 1
+// PPC-AIX:#define _ARCH_PPC 1
+// PPC-AIX:#define _BIG_ENDIAN 1
+// PPC-AIX:#define _IBMR2 1
+// PPC-AIX:#define _LONG_LONG 1
+// PPC-AIX-NOT:#define _LP64 1
+// PPC-AIX:#define _POWER 1
+// PPC-AIX:#define __BIGGEST_ALIGNMENT__ 8
+// PPC-AIX:#define __BIG_ENDIAN__ 1
+// PPC-AIX:#define __BYTE_ORDER__ __ORDER_BIG_ENDIAN__
+// PPC-AIX:#define __CHAR16_TYPE__ unsigned short
+// PPC-AIX:#define __CHAR32_TYPE__ unsigned int
+// PPC-AIX:#define __CHAR_BIT__ 8
+// PPC-AIX:#define __CHAR_UNSIGNED__ 1
+// PPC-AIX:#define __DBL_DENORM_MIN__ 4.9406564584124654e-324
+// PPC-AIX:#define __DBL_DIG__ 15
+// PPC-AIX:#define __DBL_EPSILON__ 2.2204460492503131e-16
+// PPC-AIX:#define __DBL_HAS_DENORM__ 1
+// PPC-AIX:#define __DBL_HAS_INFINITY__ 1
+// PPC-AIX:#define __DBL_HAS_QUIET_NAN__ 1
+// PPC-AIX:#define __DBL_MANT_DIG__ 53
+// PPC-AIX:#define __DBL_MAX_10_EXP__ 308
+// PPC-AIX:#define __DBL_MAX_EXP__ 1024
+// PPC-AIX:#define __DBL_MAX__ 1.7976931348623157e+308
+// PPC-AIX:#define __DBL_MIN_10_EXP__ (-307)
+// PPC-AIX:#define __DBL_MIN_EXP__ (-1021)
+// PPC-AIX:#define __DBL_MIN__ 2.2250738585072014e-308
+// PPC-AIX:#define __DECIMAL_DIG__ __LDBL_DECIMAL_DIG__
+// PPC-AIX:#define __FLT_DENORM_MIN__ 1.40129846e-45F
+// PPC-AIX:#define __FLT_DIG__ 6
+// PPC-AIX:#define __FLT_EPSILON__ 1.19209290e-7F
+// PPC-AIX:#define __FLT_EVAL_METHOD__ 1
+// PPC-AIX:#define __FLT_HAS_DENORM__ 1
+// PPC-AIX:#define __FLT_HAS_INFINITY__ 1
+// PPC-AIX:#define __FLT_HAS_QUIET_NAN__ 1
+// PPC-AIX:#define __FLT_MANT_DIG__ 24
+// PPC-AIX:#define __FLT_MAX_10_EXP__ 38
+// PPC-AIX:#define __FLT_MAX_EXP__ 128
+// PPC-AIX:#define __FLT_MAX__ 3.40282347e+38F
+// PPC-AIX:#define __FLT_MIN_10_EXP__ (-37)
+// PPC-AIX:#define __FLT_MIN_EXP__ (-125)
+// PPC-AIX:#define __FLT_MIN__ 1.17549435e-38F
+// PPC-AIX:#define __FLT_RADIX__ 2
+// PPC-AIX:#define __INT16_C_SUFFIX__
+// PPC-AIX:#define __INT16_FMTd__ "hd"
+// PPC-AIX:#define __INT16_FMTi__ "hi"
+// PPC-AIX:#define __INT16_MAX__ 32767
+// PPC-AIX:#define __INT16_TYPE__ short
+// PPC-AIX:#define __INT32_C_SUFFIX__
+// PPC-AIX:#define __INT32_FMTd__ "d"
+// PPC-AIX:#define __INT32_FMTi__ "i"
+// PPC-AIX:#define __INT32_MAX__ 2147483647
+// PPC-AIX:#define __INT32_TYPE__ int
+// PPC-AIX:#define __INT64_C_SUFFIX__ LL
+// PPC-AIX:#define __INT64_FMTd__ "lld"
+// PPC-AIX:#define __INT64_FMTi__ "lli"
+// PPC-AIX:#define __INT64_MAX__ 9223372036854775807LL
+// PPC-AIX:#define __INT64_TYPE__ long long int
+// PPC-AIX:#define __INT8_C_SUFFIX__
+// PPC-AIX:#define __INT8_FMTd__ "hhd"
+// PPC-AIX:#define __INT8_FMTi__ "hhi"
+// PPC-AIX:#define __INT8_MAX__ 127
+// PPC-AIX:#define __INT8_TYPE__ signed char
+// PPC-AIX:#define __INTMAX_C_SUFFIX__ LL
+// PPC-AIX:#define __INTMAX_FMTd__ "lld"
+// PPC-AIX:#define __INTMAX_FMTi__ "lli"
+// PPC-AIX:#define __INTMAX_MAX__ 9223372036854775807LL
+// PPC-AIX:#define __INTMAX_TYPE__ long long int
+// PPC-AIX:#define __INTMAX_WIDTH__ 64
+// PPC-AIX:#define __INTPTR_FMTd__ "ld"
+// PPC-AIX:#define __INTPTR_FMTi__ "li"
+// PPC-AIX:#define __INTPTR_MAX__ 2147483647L
+// PPC-AIX:#define __INTPTR_TYPE__ long int
+// PPC-AIX:#define __INTPTR_WIDTH__ 32
+// PPC-AIX:#define __INT_FAST16_FMTd__ "hd"
+// PPC-AIX:#define __INT_FAST16_FMTi__ "hi"
+// PPC-AIX:#define __INT_FAST16_MAX__ 32767
+// PPC-AIX:#define __INT_FAST16_TYPE__ short
+// PPC-AIX:#define __INT_FAST32_FMTd__ "d"
+// PPC-AIX:#define __INT_FAST32_FMTi__ "i"
+// PPC-AIX:#define __INT_FAST32_MAX__ 2147483647
+// PPC-AIX:#define __INT_FAST32_TYPE__ int
+// PPC-AIX:#define __INT_FAST64_FMTd__ "lld"
+// PPC-AIX:#define __INT_FAST64_FMTi__ "lli"
+// PPC-AIX:#define __INT_FAST64_MAX__ 9223372036854775807LL
+// PPC-AIX:#define __INT_FAST64_TYPE__ long long int
+// PPC-AIX:#define __INT_FAST8_FMTd__ "hhd"
+// PPC-AIX:#define __INT_FAST8_FMTi__ "hhi"
+// PPC-AIX:#define __INT_FAST8_MAX__ 127
+// PPC-AIX:#define __INT_FAST8_TYPE__ signed char
+// PPC-AIX:#define __INT_LEAST16_FMTd__ "hd"
+// PPC-AIX:#define __INT_LEAST16_FMTi__ "hi"
+// PPC-AIX:#define __INT_LEAST16_MAX__ 32767
+// PPC-AIX:#define __INT_LEAST16_TYPE__ short
+// PPC-AIX:#define __INT_LEAST32_FMTd__ "d"
+// PPC-AIX:#define __INT_LEAST32_FMTi__ "i"
+// PPC-AIX:#define __INT_LEAST32_MAX__ 2147483647
+// PPC-AIX:#define __INT_LEAST32_TYPE__ int
+// PPC-AIX:#define __INT_LEAST64_FMTd__ "lld"
+// PPC-AIX:#define __INT_LEAST64_FMTi__ "lli"
+// PPC-AIX:#define __INT_LEAST64_MAX__ 9223372036854775807LL
+// PPC-AIX:#define __INT_LEAST64_TYPE__ long long int
+// PPC-AIX:#define __INT_LEAST8_FMTd__ "hhd"
+// PPC-AIX:#define __INT_LEAST8_FMTi__ "hhi"
+// PPC-AIX:#define __INT_LEAST8_MAX__ 127
+// PPC-AIX:#define __INT_LEAST8_TYPE__ signed char
+// PPC-AIX:#define __INT_MAX__ 2147483647
+// PPC-AIX:#define __LDBL_DECIMAL_DIG__ 17
+// PPC-AIX:#define __LDBL_DENORM_MIN__ 4.9406564584124654e-324L
+// PPC-AIX:#define __LDBL_DIG__ 15
+// PPC-AIX:#define __LDBL_EPSILON__ 2.2204460492503131e-16L
+// PPC-AIX:#define __LDBL_HAS_DENORM__ 1
+// PPC-AIX:#define __LDBL_HAS_INFINITY__ 1
+// PPC-AIX:#define __LDBL_HAS_QUIET_NAN__ 1
+// PPC-AIX:#define __LDBL_MANT_DIG__ 53
+// PPC-AIX:#define __LDBL_MAX_10_EXP__ 308
+// PPC-AIX:#define __LDBL_MAX_EXP__ 1024
+// PPC-AIX:#define __LDBL_MAX__ 1.7976931348623157e+308L
+// PPC-AIX:#define __LDBL_MIN_10_EXP__ (-307)
+// PPC-AIX:#define __LDBL_MIN_EXP__ (-1021)
+// PPC-AIX:#define __LDBL_MIN__ 2.2250738585072014e-308L
+// PPC-AIX:#define __LONG_LONG_MAX__ 9223372036854775807LL
+// PPC-AIX:#define __LONG_MAX__ 2147483647L
+// PPC-AIX-NOT:#define __LP64__ 1
+// PPC-AIX-NOT:#define __NATURAL_ALIGNMENT__ 1
+// PPC-AIX:#define __POINTER_WIDTH__ 32
+// PPC-AIX:#define __POWERPC__ 1
+// PPC-AIX:#define __PPC__ 1
+// PPC-AIX:#define __PTRDIFF_TYPE__ long int
+// PPC-AIX:#define __PTRDIFF_WIDTH__ 32
+// PPC-AIX:#define __REGISTER_PREFIX__
+// PPC-AIX:#define __SCHAR_MAX__ 127
+// PPC-AIX:#define __SHRT_MAX__ 32767
+// PPC-AIX:#define __SIG_ATOMIC_MAX__ 2147483647
+// PPC-AIX:#define __SIG_ATOMIC_WIDTH__ 32
+// PPC-AIX:#define __SIZEOF_DOUBLE__ 8
+// PPC-AIX:#define __SIZEOF_FLOAT__ 4
+// PPC-AIX:#define __SIZEOF_INT__ 4
+// PPC-AIX:#define __SIZEOF_LONG_DOUBLE__ 8
+// PPC-AIX:#define __SIZEOF_LONG_LONG__ 8
+// PPC-AIX:#define __SIZEOF_LONG__ 4
+// PPC-AIX:#define __SIZEOF_POINTER__ 4
+// PPC-AIX:#define __SIZEOF_PTRDIFF_T__ 4
+// PPC-AIX:#define __SIZEOF_SHORT__ 2
+// PPC-AIX:#define __SIZEOF_SIZE_T__ 4
+// PPC-AIX:#define __SIZEOF_WCHAR_T__ 2
+// PPC-AIX:#define __SIZEOF_WINT_T__ 4
+// PPC-AIX:#define __SIZE_MAX__ 4294967295UL
+// PPC-AIX:#define __SIZE_TYPE__ long unsigned int
+// PPC-AIX:#define __SIZE_WIDTH__ 32
+// PPC-AIX:#define __UINT16_C_SUFFIX__
+// PPC-AIX:#define __UINT16_MAX__ 65535
+// PPC-AIX:#define __UINT16_TYPE__ unsigned short
+// PPC-AIX:#define __UINT32_C_SUFFIX__ U
+// PPC-AIX:#define __UINT32_MAX__ 4294967295U
+// PPC-AIX:#define __UINT32_TYPE__ unsigned int
+// PPC-AIX:#define __UINT64_C_SUFFIX__ ULL
+// PPC-AIX:#define __UINT64_MAX__ 18446744073709551615ULL
+// PPC-AIX:#define __UINT64_TYPE__ long long unsigned int
+// PPC-AIX:#define __UINT8_C_SUFFIX__
+// PPC-AIX:#define __UINT8_MAX__ 255
+// PPC-AIX:#define __UINT8_TYPE__ unsigned char
+// PPC-AIX:#define __UINTMAX_C_SUFFIX__ ULL
+// PPC-AIX:#define __UINTMAX_MAX__ 18446744073709551615ULL
+// PPC-AIX:#define __UINTMAX_TYPE__ long long unsigned int
+// PPC-AIX:#define __UINTMAX_WIDTH__ 64
+// PPC-AIX:#define __UINTPTR_MAX__ 4294967295UL
+// PPC-AIX:#define __UINTPTR_TYPE__ long unsigned int
+// PPC-AIX:#define __UINTPTR_WIDTH__ 32
+// PPC-AIX:#define __UINT_FAST16_MAX__ 65535
+// PPC-AIX:#define __UINT_FAST16_TYPE__ unsigned short
+// PPC-AIX:#define __UINT_FAST32_MAX__ 4294967295U
+// PPC-AIX:#define __UINT_FAST32_TYPE__ unsigned int
+// PPC-AIX:#define __UINT_FAST64_MAX__ 18446744073709551615ULL
+// PPC-AIX:#define __UINT_FAST64_TYPE__ long long unsigned int
+// PPC-AIX:#define __UINT_FAST8_MAX__ 255
+// PPC-AIX:#define __UINT_FAST8_TYPE__ unsigned char
+// PPC-AIX:#define __UINT_LEAST16_MAX__ 65535
+// PPC-AIX:#define __UINT_LEAST16_TYPE__ unsigned short
+// PPC-AIX:#define __UINT_LEAST32_MAX__ 4294967295U
+// PPC-AIX:#define __UINT_LEAST32_TYPE__ unsigned int
+// PPC-AIX:#define __UINT_LEAST64_MAX__ 18446744073709551615ULL
+// PPC-AIX:#define __UINT_LEAST64_TYPE__ long long unsigned int
+// PPC-AIX:#define __UINT_LEAST8_MAX__ 255
+// PPC-AIX:#define __UINT_LEAST8_TYPE__ unsigned char
+// PPC-AIX:#define __USER_LABEL_PREFIX__
+// PPC-AIX:#define __WCHAR_MAX__ 65535
+// PPC-AIX:#define __WCHAR_TYPE__ unsigned short
+// PPC-AIX:#define __WCHAR_WIDTH__ 16
+// PPC-AIX:#define __WINT_TYPE__ int
+// PPC-AIX:#define __WINT_WIDTH__ 32
+// PPC-AIX:#define __powerpc__ 1
+// PPC-AIX:#define __ppc__ 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix7.2.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX72 %s
+//
+// PPC-AIX72:#define _AIX32 1
+// PPC-AIX72:#define _AIX41 1
+// PPC-AIX72:#define _AIX43 1
+// PPC-AIX72:#define _AIX50 1
+// PPC-AIX72:#define _AIX51 1
+// PPC-AIX72:#define _AIX52 1
+// PPC-AIX72:#define _AIX53 1
+// PPC-AIX72:#define _AIX61 1
+// PPC-AIX72:#define _AIX71 1
+// PPC-AIX72:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX71 %s
+//
+// PPC-AIX71:#define _AIX32 1
+// PPC-AIX71:#define _AIX41 1
+// PPC-AIX71:#define _AIX43 1
+// PPC-AIX71:#define _AIX50 1
+// PPC-AIX71:#define _AIX51 1
+// PPC-AIX71:#define _AIX52 1
+// PPC-AIX71:#define _AIX53 1
+// PPC-AIX71:#define _AIX61 1
+// PPC-AIX71:#define _AIX71 1
+// PPC-AIX71-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix6.1.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX61 %s
+//
+// PPC-AIX61:#define _AIX32 1
+// PPC-AIX61:#define _AIX41 1
+// PPC-AIX61:#define _AIX43 1
+// PPC-AIX61:#define _AIX50 1
+// PPC-AIX61:#define _AIX51 1
+// PPC-AIX61:#define _AIX52 1
+// PPC-AIX61:#define _AIX53 1
+// PPC-AIX61:#define _AIX61 1
+// PPC-AIX61-NOT:#define _AIX71 1
+// PPC-AIX61-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix5.3.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX53 %s
+// PPC-AIX53:#define _AIX32 1
+// PPC-AIX53:#define _AIX41 1
+// PPC-AIX53:#define _AIX43 1
+// PPC-AIX53:#define _AIX50 1
+// PPC-AIX53:#define _AIX51 1
+// PPC-AIX53:#define _AIX52 1
+// PPC-AIX53:#define _AIX53 1
+// PPC-AIX53-NOT:#define _AIX61 1
+// PPC-AIX53-NOT:#define _AIX71 1
+// PPC-AIX53-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix5.2.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX52 %s
+// PPC-AIX52:#define _AIX32 1
+// PPC-AIX52:#define _AIX41 1
+// PPC-AIX52:#define _AIX43 1
+// PPC-AIX52:#define _AIX50 1
+// PPC-AIX52:#define _AIX51 1
+// PPC-AIX52:#define _AIX52 1
+// PPC-AIX52-NOT:#define _AIX53 1
+// PPC-AIX52-NOT:#define _AIX61 1
+// PPC-AIX52-NOT:#define _AIX71 1
+// PPC-AIX52-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix5.1.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX51 %s
+// PPC-AIX51:#define _AIX32 1
+// PPC-AIX51:#define _AIX41 1
+// PPC-AIX51:#define _AIX43 1
+// PPC-AIX51:#define _AIX50 1
+// PPC-AIX51:#define _AIX51 1
+// PPC-AIX51-NOT:#define _AIX52 1
+// PPC-AIX51-NOT:#define _AIX53 1
+// PPC-AIX51-NOT:#define _AIX61 1
+// PPC-AIX51-NOT:#define _AIX71 1
+// PPC-AIX51-NOT:#define _AIX72 1
+//
+//RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix5.0.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX50 %s
+// PPC-AIX50:#define _AIX32 1
+// PPC-AIX50:#define _AIX41 1
+// PPC-AIX50:#define _AIX43 1
+// PPC-AIX50:#define _AIX50 1
+// PPC-AIX50-NOT:#define _AIX51 1
+// PPC-AIX50-NOT:#define _AIX52 1
+// PPC-AIX50-NOT:#define _AIX53 1
+// PPC-AIX50-NOT:#define _AIX61 1
+// PPC-AIX50-NOT:#define _AIX71 1
+// PPC-AIX50-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix4.3.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX43 %s
+// PPC-AIX43:#define _AIX32 1
+// PPC-AIX43:#define _AIX41 1
+// PPC-AIX43:#define _AIX43 1
+// PPC-AIX43-NOT:#define _AIX50 1
+// PPC-AIX43-NOT:#define _AIX51 1
+// PPC-AIX43-NOT:#define _AIX52 1
+// PPC-AIX43-NOT:#define _AIX53 1
+// PPC-AIX43-NOT:#define _AIX61 1
+// PPC-AIX43-NOT:#define _AIX71 1
+// PPC-AIX43-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix4.1.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX41 %s
+// PPC-AIX41:#define _AIX32 1
+// PPC-AIX41:#define _AIX41 1
+// PPC-AIX41-NOT:#define _AIX43 1
+// PPC-AIX41-NOT:#define _AIX50 1
+// PPC-AIX41-NOT:#define _AIX51 1
+// PPC-AIX41-NOT:#define _AIX52 1
+// PPC-AIX41-NOT:#define _AIX53 1
+// PPC-AIX41-NOT:#define _AIX61 1
+// PPC-AIX41-NOT:#define _AIX71 1
+// PPC-AIX41-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix3.2.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX32 %s
+// PPC-AIX32:#define _AIX32 1
+// PPC-AIX32-NOT:#define _AIX41 1
+// PPC-AIX32-NOT:#define _AIX43 1
+// PPC-AIX32-NOT:#define _AIX50 1
+// PPC-AIX32-NOT:#define _AIX51 1
+// PPC-AIX32-NOT:#define _AIX52 1
+// PPC-AIX32-NOT:#define _AIX53 1
+// PPC-AIX32-NOT:#define _AIX61 1
+// PPC-AIX32-NOT:#define _AIX71 1
+// PPC-AIX32-NOT:#define _AIX72 1
+//
+// RUN: %clang_cc1 -x c++ -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX-CXX %s
+//
+// PPC-AIX-CXX:#define _WCHAR_T 1
+//
+// RUN: %clang_cc1 -x c++ -fno-wchar -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX-NOWCHAR %s
+// RUN: %clang_cc1 -x c -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX-NOWCHAR %s
+//
+// PPC-AIX-NOWCHAR-NOT:#define _WCHAR_T 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 -fno-signed-char -pthread < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX-THREADSAFE %s
+// PPC-AIX-THREADSAFE:#define _THREAD_SAFE 1
+//
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX-NOTHREADSAFE %s
+// PPC-AIX-NOTHREADSAFE-NOT:#define _THREAD_SAFE 1
 //
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-unknown-linux-gnu -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPC-LINUX %s
 //
@@ -7605,7 +8169,7 @@
 // SPARC:#define __UINT_LEAST8_MAX__ 255
 // SPARC:#define __UINT_LEAST8_TYPE__ unsigned char
 // SPARC:#define __USER_LABEL_PREFIX__
-// SPARC:#define __VERSION__ "4.2.1 Compatible{{.*}}
+// SPARC:#define __VERSION__ "{{.*}}Clang{{.*}}
 // SPARC:#define __WCHAR_MAX__ 2147483647
 // SPARC:#define __WCHAR_TYPE__ int
 // SPARC:#define __WCHAR_WIDTH__ 32
@@ -8477,7 +9041,7 @@
 // X86_64-CLOUDABI:#define __UINT_LEAST8_MAX__ 255
 // X86_64-CLOUDABI:#define __UINT_LEAST8_TYPE__ unsigned char
 // X86_64-CLOUDABI:#define __USER_LABEL_PREFIX__
-// X86_64-CLOUDABI:#define __VERSION__ "4.2.1 Compatible{{.*}}
+// X86_64-CLOUDABI:#define __VERSION__ "{{.*}}Clang{{.*}}
 // X86_64-CLOUDABI:#define __WCHAR_MAX__ 2147483647
 // X86_64-CLOUDABI:#define __WCHAR_TYPE__ int
 // X86_64-CLOUDABI:#define __WCHAR_WIDTH__ 32
@@ -8532,6 +9096,17 @@
 // X86_64-LINUX:#define __FLT_MIN_EXP__ (-125)
 // X86_64-LINUX:#define __FLT_MIN__ 1.17549435e-38F
 // X86_64-LINUX:#define __FLT_RADIX__ 2
+// X86_64-LINUX:#define __GCC_ATOMIC_BOOL_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_CHAR16_T_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_CHAR32_T_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_CHAR_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_INT_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_LLONG_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_LONG_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_POINTER_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_SHORT_LOCK_FREE 2
+// X86_64-LINUX:#define __GCC_ATOMIC_TEST_AND_SET_TRUEVAL 1
+// X86_64-LINUX:#define __GCC_ATOMIC_WCHAR_T_LOCK_FREE 2
 // X86_64-LINUX:#define __INT16_C_SUFFIX__
 // X86_64-LINUX:#define __INT16_FMTd__ "hd"
 // X86_64-LINUX:#define __INT16_FMTi__ "hi"
@@ -8734,6 +9309,17 @@
 // X86_64-NETBSD:#define __FLT_MIN_EXP__ (-125)
 // X86_64-NETBSD:#define __FLT_MIN__ 1.17549435e-38F
 // X86_64-NETBSD:#define __FLT_RADIX__ 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_BOOL_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_CHAR16_T_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_CHAR32_T_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_CHAR_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_INT_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_LLONG_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_LONG_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_POINTER_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_SHORT_LOCK_FREE 2
+// X86_64-NETBSD:#define __GCC_ATOMIC_TEST_AND_SET_TRUEVAL 1
+// X86_64-NETBSD:#define __GCC_ATOMIC_WCHAR_T_LOCK_FREE 2
 // X86_64-NETBSD:#define __INT16_C_SUFFIX__
 // X86_64-NETBSD:#define __INT16_FMTd__ "hd"
 // X86_64-NETBSD:#define __INT16_FMTi__ "hi"
@@ -9114,10 +9700,10 @@
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=wasm64-unknown-unknown \
 // RUN:   < /dev/null \
 // RUN:   | FileCheck -match-full-lines -check-prefixes=WEBASSEMBLY,WEBASSEMBLY64 %s
-// RUN: %clang_cc1 -E -dM -ffreestanding -triple=wasm32-unknown-wasi \
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=wasm32-wasi \
 // RUN:   < /dev/null \
 // RUN:   | FileCheck -match-full-lines -check-prefixes=WEBASSEMBLY,WEBASSEMBLY32,WEBASSEMBLY-WASI %s
-// RUN: %clang_cc1 -E -dM -ffreestanding -triple=wasm64-unknown-wasi \
+// RUN: %clang_cc1 -E -dM -ffreestanding -triple=wasm64-wasi \
 // RUN:   < /dev/null \
 // RUN:   | FileCheck -match-full-lines -check-prefixes=WEBASSEMBLY,WEBASSEMBLY64,WEBASSEMBLY-WASI %s
 //
@@ -9165,20 +9751,21 @@
 // WEBASSEMBLY-NEXT:#define __DECIMAL_DIG__ __LDBL_DECIMAL_DIG__
 // WEBASSEMBLY-NOT:#define __ELF__
 // WEBASSEMBLY-NEXT:#define __FINITE_MATH_ONLY__ 0
-// WEBASSEMBLY-NEXT:#define __FLT16_DECIMAL_DIG__ 5
-// WEBASSEMBLY-NEXT:#define __FLT16_DENORM_MIN__ 5.9604644775390625e-8F16
-// WEBASSEMBLY-NEXT:#define __FLT16_DIG__ 3
-// WEBASSEMBLY-NEXT:#define __FLT16_EPSILON__ 9.765625e-4F16
-// WEBASSEMBLY-NEXT:#define __FLT16_HAS_DENORM__ 1
-// WEBASSEMBLY-NEXT:#define __FLT16_HAS_INFINITY__ 1
-// WEBASSEMBLY-NEXT:#define __FLT16_HAS_QUIET_NAN__ 1
-// WEBASSEMBLY-NEXT:#define __FLT16_MANT_DIG__ 11
-// WEBASSEMBLY-NEXT:#define __FLT16_MAX_10_EXP__ 4
-// WEBASSEMBLY-NEXT:#define __FLT16_MAX_EXP__ 15
-// WEBASSEMBLY-NEXT:#define __FLT16_MAX__ 6.5504e+4F16
-// WEBASSEMBLY-NEXT:#define __FLT16_MIN_10_EXP__ (-13)
-// WEBASSEMBLY-NEXT:#define __FLT16_MIN_EXP__ (-14)
-// WEBASSEMBLY-NEXT:#define __FLT16_MIN__ 6.103515625e-5F16
+// WEBASSEMBLY-NEXT:#define __FLOAT128__ 1
+// WEBASSEMBLY-NOT:#define __FLT16_DECIMAL_DIG__
+// WEBASSEMBLY-NOT:#define __FLT16_DENORM_MIN__
+// WEBASSEMBLY-NOT:#define __FLT16_DIG__
+// WEBASSEMBLY-NOT:#define __FLT16_EPSILON__
+// WEBASSEMBLY-NOT:#define __FLT16_HAS_DENORM__
+// WEBASSEMBLY-NOT:#define __FLT16_HAS_INFINITY__
+// WEBASSEMBLY-NOT:#define __FLT16_HAS_QUIET_NAN__
+// WEBASSEMBLY-NOT:#define __FLT16_MANT_DIG__
+// WEBASSEMBLY-NOT:#define __FLT16_MAX_10_EXP__
+// WEBASSEMBLY-NOT:#define __FLT16_MAX_EXP__
+// WEBASSEMBLY-NOT:#define __FLT16_MAX__
+// WEBASSEMBLY-NOT:#define __FLT16_MIN_10_EXP__
+// WEBASSEMBLY-NOT:#define __FLT16_MIN_EXP__
+// WEBASSEMBLY-NOT:#define __FLT16_MIN__
 // WEBASSEMBLY-NEXT:#define __FLT_DECIMAL_DIG__ 9
 // WEBASSEMBLY-NEXT:#define __FLT_DENORM_MIN__ 1.40129846e-45F
 // WEBASSEMBLY-NEXT:#define __FLT_DIG__ 6

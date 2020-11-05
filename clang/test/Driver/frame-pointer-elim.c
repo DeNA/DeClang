@@ -69,5 +69,11 @@
 // RUN: %clang -### -target x86_64-scei-ps4 -S -O2 %s 2>&1 | \
 // RUN:   FileCheck --check-prefix=OMIT_LEAF %s
 
+// RUN: %clang -### -target powerpc64 -S %s 2>&1 | \
+// RUN:   FileCheck --check-prefix=KEEP_ALL %s
+// KEEP_ALL: "-mdisable-fp-elim"
+// RUN: %clang -### -target powerpc64 -S -O1 %s 2>&1 | \
+// RUN:   FileCheck --check-prefix=OMIT_ALL %s
+
 void f0() {}
 void f1() { f0(); }

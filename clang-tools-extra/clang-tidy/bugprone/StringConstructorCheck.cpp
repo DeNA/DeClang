@@ -1,9 +1,8 @@
 //===--- StringConstructorCheck.cpp - clang-tidy---------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -135,11 +134,12 @@ void StringConstructorCheck::check(const MatchFinder::MatchResult &Result) {
     const auto *Str = Result.Nodes.getNodeAs<StringLiteral>("str");
     const auto *Lit = Result.Nodes.getNodeAs<IntegerLiteral>("int");
     if (Lit->getValue().ugt(Str->getLength())) {
-      diag(Loc, "length is bigger then string literal size");
+      diag(Loc, "length is bigger than string literal size");
     }
   } else if (const auto *Ptr = Result.Nodes.getNodeAs<Expr>("from-ptr")) {
     Expr::EvalResult ConstPtr;
-    if (Ptr->EvaluateAsRValue(ConstPtr, Ctx) &&
+    if (!Ptr->isInstantiationDependent() &&
+        Ptr->EvaluateAsRValue(ConstPtr, Ctx) &&
         ((ConstPtr.Val.isInt() && ConstPtr.Val.getInt().isNullValue()) ||
          (ConstPtr.Val.isLValue() && ConstPtr.Val.isNullPointer()))) {
       diag(Loc, "constructing string from nullptr is undefined behaviour");

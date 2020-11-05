@@ -2,10 +2,9 @@
 
 #===-- generate_netbsd_ioctls.awk ------------------------------------------===#
 #
-#                     The LLVM Compiler Infrastructure
-#
-# This file is distributed under the University of Illinois Open Source
-# License. See LICENSE.TXT for details.
+# Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 #
 #===------------------------------------------------------------------------===#
 #
@@ -255,10 +254,9 @@ END {
 
   pcmd("//===-- sanitizer_interceptors_ioctl_netbsd.inc -----------------*- C++ -*-===//")
   pcmd("//")
-  pcmd("//                     The LLVM Compiler Infrastructure")
-  pcmd("//")
-  pcmd("// This file is distributed under the University of Illinois Open Source")
-  pcmd("// License. See LICENSE.TXT for details.")
+  pcmd("// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.")
+  pcmd("// See https://llvm.org/LICENSE.txt for license information.")
+  pcmd("// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception")
   pcmd("//")
   pcmd("//===----------------------------------------------------------------------===//")
   pcmd("//")
@@ -484,6 +482,8 @@ function get_type(string)
     return "sizeof(u16)"
   } else if (string == "u_int32_t" || string == "uint32_t") {
     return "sizeof(u32)"
+  } else if (string == "u_int64_t" || string == "uint64_t") {
+    return "sizeof(u64)"
   } else if (string ~ /\*$/) {
     return "sizeof(uptr)"
   } else if (string == "off_t") {
@@ -625,6 +625,10 @@ function get_type(string)
     return "struct_RF_ProgressInfo_sz"
   } else if (string == "nvlist_ref_t") {
     return "struct_nvlist_ref_sz"
+  } else if (string == "spi_ioctl_transfer_t") {
+    return "struct_spi_ioctl_transfer_sz"
+  } else if (string == "spi_ioctl_configure_t") {
+    return "struct_spi_ioctl_configure_sz"
   } else {
     print "Unrecognized entry: " string
     print "Aborting"

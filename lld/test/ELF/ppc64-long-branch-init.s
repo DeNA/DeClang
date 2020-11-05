@@ -11,6 +11,7 @@
 ## is not foolproof but good enough to not break in practice.
 
 # CHECK: Disassembly of section .init:
+# CHECK-EMPTY:
 # CHECK-LABEL: _init:
 # CHECK:         blr
 # CHECK-EMPTY:

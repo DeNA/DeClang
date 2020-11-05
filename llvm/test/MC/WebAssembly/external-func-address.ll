@@ -21,11 +21,11 @@ define void @call(i32) {
 }
 
 ; CHECK:      --- !WASM
-; CHECK-NEXT: FileHeader:      
+; CHECK-NEXT: FileHeader:
 ; CHECK-NEXT:   Version:         0x00000001
-; CHECK-NEXT: Sections:        
+; CHECK-NEXT: Sections:
 ; CHECK-NEXT:   - Type:            TYPE
-; CHECK-NEXT:     Signatures:      
+; CHECK-NEXT:     Signatures:
 ; CHECK-NEXT:       - Index:           0
 ; CHECK-NEXT:         ReturnType:      NORESULT
 ; CHECK-NEXT:         ParamTypes:
@@ -58,8 +58,8 @@ define void @call(i32) {
 ; CHECK-NEXT:           Opcode:          I32_CONST
 ; CHECK-NEXT:           Value:           1
 ; CHECK-NEXT:         Functions:       [ 1, 2 ]
-; CHECK:        - Type:            DATA
+; CHECK:        - Type:            DATA{{$}}
 ; CHECK-NEXT:     Relocations:
-; CHECK-NEXT:       - Type:            R_WEBASSEMBLY_TABLE_INDEX_I32
+; CHECK-NEXT:       - Type:            R_WASM_TABLE_INDEX_I32
 ; CHECK-NEXT:         Index:           3
 ; CHECK-NEXT:         Offset:          0x00000006

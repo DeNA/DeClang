@@ -1,10 +1,9 @@
 // RUN: %clang_builtins %s %librt -o %t && %run %t
 //===-- compiler_rt_logb_test.c - Test __compiler_rt_logb -----------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is dual licensed under the MIT and the University of Illinois Open
-// Source Licenses. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -36,11 +35,15 @@ double cases[] = {
     -0.0,  0.0,    1,   -2,   2,        -0.5,      0.5,
 };
 
+#ifndef __GLIBC_PREREQ
+#define __GLIBC_PREREQ(x, y) 0
+#endif
+
 int main() {
   // Do not the run the compiler-rt logb test case if using GLIBC version
   // < 2.23. Older versions might not compute to the same value as the
   // compiler-rt value.
-#if !defined(__GLIBC__) || (defined(__GLIBC_PREREQ) && __GLIBC_PREREQ(2, 23))
+#if __GLIBC_PREREQ(2, 23)
   const unsigned N = sizeof(cases) / sizeof(cases[0]);
   unsigned i;
   for (i = 0; i < N; ++i) {

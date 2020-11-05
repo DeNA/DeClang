@@ -20,18 +20,17 @@ Sections:
     Type: SHT_PROGBITS
     Flags: [ SHF_ALLOC, SHF_EXECINSTR ]
 Symbols:
-  Local:
-    - Name:    default
-      Section: .text
-    - Name:    internal
-      Visibility: STV_INTERNAL
-      Section: .text
-    - Name:    hidden
-      Visibility: STV_HIDDEN
-      Section: .text
-    - Name:    protected
-      Visibility: STV_PROTECTED
-      Section: .text
-    - Name:    mips_pic
-      Other:   [ STO_MIPS_PIC ]
-      Section: .text
+  - Name:    default
+    Section: .text
+  - Name:    internal
+    Visibility: STV_INTERNAL
+    Section: .text
+  - Name:    hidden
+    Visibility: STV_HIDDEN
+    Section: .text
+  - Name:    protected
+    Visibility: STV_PROTECTED
+    Section: .text
+  - Name:    mips_pic
+    Other:   [ STO_MIPS_PIC ]
+    Section: .text
