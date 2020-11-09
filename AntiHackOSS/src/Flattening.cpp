@@ -152,10 +152,11 @@ bool Flattening::flatten(Function *f, std::string seed) {
     origBB.push_back(tmp);
 
     BasicBlock *bb = &*i;
-    if (!isa<BranchInst>(bb->getTerminator()) && !isa<ReturnInst>(bb->getTerminator())) {
+    if (!isa<BranchInst>(bb->getTerminator()) && !isa<ReturnInst>(bb->getTerminator()) &&
+         !isa<UnreachableInst>(bb->getTerminator()) ) {
       (*logFile) << "[Frontend]: (Warning) " << f->getName() << " Terminator Error. Not Flattening.\n";
-      //(*logFile) << "terminator: ";
-      //bb->getTerminator()->print(*logFile);
+      (*logFile) << "terminator: ";
+      bb->getTerminator()->print(*logFile);
       return false;
     }
   }

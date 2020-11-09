@@ -25,7 +25,7 @@ fi
 
 popd > /dev/null
 
-# copy checksum, helper tools etc.
+# copy helper tools etc.
 pushd $(dirname $0) > /dev/null
 cd ../
 
@@ -36,6 +36,13 @@ cp -v tools/config/gen_config.sh ./Release/
 mkdir -p ./Release/script/
 cp -v script/*setup.sh ./Release/script/
 cp -v script/*unset.sh ./Release/script/
+popd > /dev/null
+
+# copy license
+pushd $(dirname $0) > /dev/null
+cd ..
+cp ./AntiHackOSS/LICENSE-DeClang ./Release/
+cp ./AntiHackOSS/LICENSE-ollvm ./Release/
 popd > /dev/null
 
 pushd $(dirname $0) > /dev/null

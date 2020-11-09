@@ -41,6 +41,12 @@ cp -v script/*setup.sh ./Release/script/
 cp -v script/*unset.sh ./Release/script/
 popd > /dev/null
 
+# copy license
+pushd $(dirname $0) > /dev/null
+cp ../LICENSE-DeClang ./Release/
+cp ../LICENSE-ollvm ./Release/
+popd > /dev/null
+
 pushd $(dirname $0) > /dev/null
 cd ../
 
