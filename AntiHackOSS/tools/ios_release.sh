@@ -45,6 +45,7 @@ popd > /dev/null
 pushd $(dirname $0) > /dev/null
 cp ../LICENSE-DeClang ./Release/
 cp ../LICENSE-ollvm ./Release/
+cp ./LICENSE ./Release/
 popd > /dev/null
 
 pushd $(dirname $0) > /dev/null
