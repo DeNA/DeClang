@@ -64,8 +64,8 @@ else
   HOMEDIR=$DECLANG_HOME
 fi
 
-DECLANG=$HOMEDIR/.DeClang/compiler/ios/bin/clang
-DECLANGXX=$HOMEDIR/.DeClang/compiler/ios/bin/clang++
+DECLANG=$HOMEDIR/.DeClang/compiler/bin/clang
+DECLANGXX=$HOMEDIR/.DeClang/compiler/bin/clang++
 sed -i '' $"s~buildSettings = {~buildSettings = {\\
 CC = \"${DECLANG}\";\\
 CPLUSPLUS = \"${DECLANGXX}\";\\

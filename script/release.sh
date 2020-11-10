@@ -3,6 +3,6 @@ set -e
 pushd $(dirname $0) > /dev/null
 
 cd ../tools/
-exec bash android_release.sh $1
+exec bash release.sh $1
 
 popd > /dev/null

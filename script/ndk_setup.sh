@@ -15,7 +15,7 @@ if [[ -z "$DECLANG_HOME" ]]; then
 else
   HOMEDIR=$DECLANG_HOME
 fi
-compiler_path="$HOMEDIR"/.DeClang/compiler/android/
+compiler_path="$HOMEDIR"/.DeClang/compiler/
 
 if [ "_$OS" = "_Windows_NT" ]; then
   ndk_clang_path=`find "$ndk_path" -type f -name "clang++.exe"`
