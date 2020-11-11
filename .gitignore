@@ -8,3 +8,4 @@
 /llvm/include/llvm/Transforms/AntiHack
 /AntiHackOSS/tools/config/gen_config_*
 /tools
+.DS_Store
