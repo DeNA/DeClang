@@ -9,3 +9,4 @@
 /AntiHackOSS/tools/config/gen_config_*
 /tools
 .DS_Store
+/Release*
