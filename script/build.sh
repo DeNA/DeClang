@@ -25,7 +25,7 @@ mkdir -p build/
 cd build/
 if [[ ! -e Makefile ]]; then
   use_ccache="false"
-  if [ $(which ccache) ]; then
+  if [[ $(which ccache) ]]; then
     use_ccache="true"
   fi
 
