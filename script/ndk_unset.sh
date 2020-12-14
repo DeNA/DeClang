@@ -10,7 +10,7 @@ dir=`dirname "$ndk_path"`
 
 pushd "$dir" > /dev/null
 
-if [ "_$OS" = "_Windows_NT" ]; then
+if [[ "_$OS" = "_Windows_NT" ]]; then
   ndk_clang_path=`find "$ndk_path" -type f -name "clang++.exe"`
 else
   ndk_clang_path=`find "$ndk_path" -type f -name "clang++"`

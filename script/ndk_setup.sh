@@ -17,7 +17,7 @@ else
 fi
 compiler_path="$HOMEDIR"/.DeClang/compiler/
 
-if [ "_$OS" = "_Windows_NT" ]; then
+if [[ "_$OS" = "_Windows_NT" ]]; then
   ndk_clang_path=`find "$ndk_path" -type f -name "clang++.exe"`
 else
   ndk_clang_path=`find "$ndk_path" -type f -name "clang++"`
