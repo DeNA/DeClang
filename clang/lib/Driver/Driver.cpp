@@ -948,6 +948,18 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
     }
   }
 
+  //DECLANG CODES BEGIN
+  //add -DDECLANG
+  std::vector<const char*> modArgs = ArgList.vec();
+  modArgs.push_back("-DDECLANG");
+
+  //add -Wl,-static-libstdc++
+  modArgs.push_back("-static-libstdc++");
+
+  ArgList = ArrayRef<const char*>(modArgs);
+
+  //DECLANG CODES END
+
   // We look for the driver mode option early, because the mode can affect
   // how other options are parsed.
   ParseDriverMode(ClangExecutable, ArgList.slice(1));
