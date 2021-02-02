@@ -86,7 +86,6 @@ public:
   bool GetDetachKeepsStopped() const;
   void SetDetachKeepsStopped(bool keep_stopped);
   bool GetWarningsOptimization() const;
-  bool GetWarningsUnsupportedLanguage() const;
   bool GetStopOnExec() const;
   std::chrono::seconds GetUtilityExpressionTimeout() const;
   bool GetOSPluginReportsAllThreads() const;
@@ -394,7 +393,6 @@ public:
   /// Process warning types.
   enum Warnings {
     eWarningsOptimization = 1,
-    eWarningsUnsupportedLanguage = 2,
     eWarningsSwiftImport
   };
 
@@ -1342,12 +1340,6 @@ public:
   ///     The affected Module.
   void PrintWarningCantLoadSwiftModule(const Module &module,
                                        std::string details);
-
-  /// Print a user-visible warning about a function written in a
-  /// language that this version of LLDB doesn't support.
-  ///
-  /// \see PrintWarningOptimization
-  void PrintWarningUnsupportedLanguage(const SymbolContext &sc);
 
   virtual bool GetProcessInfo(ProcessInstanceInfo &info);
 

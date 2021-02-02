@@ -326,13 +326,10 @@ void Thread::FrameSelectedCallback(StackFrame *frame) {
   if (!frame)
     return;
 
-  if (frame->HasDebugInformation() &&
-      (GetProcess()->GetWarningsOptimization() ||
-       GetProcess()->GetWarningsUnsupportedLanguage())) {
+  if (frame->HasDebugInformation() && GetProcess()->GetWarningsOptimization()) {
     SymbolContext sc =
         frame->GetSymbolContext(eSymbolContextFunction | eSymbolContextModule);
     GetProcess()->PrintWarningOptimization(sc);
-    GetProcess()->PrintWarningUnsupportedLanguage(sc);
   }
   SymbolContext msc = frame->GetSymbolContext(eSymbolContextModule);
   if (msc.module_sp)
