@@ -517,8 +517,8 @@ def system(commands, **kwargs):
                 "command": shellCommand
             }
             raise cpe
-        output = output + this_output.decode("utf-8")
-        error = error + this_error.decode("utf-8")
+        output = output + this_output.decode("utf-8", "ignore")
+        error = error + this_error.decode("utf-8", "ignore")
     return (output, error)
 
 
