@@ -1949,13 +1949,11 @@ SwiftLanguageRuntimeImpl::BindGenericTypeParameters(StackFrame &stack_frame,
                                                     TypeSystemSwiftTypeRef &ts,
                                                     ConstString mangled_name) {
   Status error;
-  auto &target = m_process.GetTarget();
-  auto scratch_ctx = target.GetScratchSwiftASTContext(error, stack_frame);
   auto *reflection_ctx = GetReflectionContext();
-  if (!scratch_ctx || !reflection_ctx) {
+  if (!reflection_ctx) {
     LLDB_LOG(
         GetLogIfAnyCategoriesSet(LIBLLDB_LOG_EXPRESSIONS | LIBLLDB_LOG_TYPES),
-        "No scratch/reflection context available.");
+        "No reflection context available.");
     return ts.GetTypeFromMangledTypename(mangled_name);
   }
 
@@ -2027,6 +2025,14 @@ SwiftLanguageRuntimeImpl::BindGenericTypeParameters(StackFrame &stack_frame,
   // function, we don't want to do this earlier, because the
   // canonicalization in GetCanonicalDemangleTree() must be performed in
   // the original context as to resolve type aliases correctly.
+  auto &target = m_process.GetTarget();
+  auto scratch_ctx = target.GetScratchSwiftASTContext(error, stack_frame);
+  if (!scratch_ctx) {
+    LLDB_LOG(
+        GetLogIfAnyCategoriesSet(LIBLLDB_LOG_EXPRESSIONS | LIBLLDB_LOG_TYPES),
+        "No scratch context available.");
+    return ts.GetTypeFromMangledTypename(mangled_name);
+  }
   bound_type = scratch_ctx->get()->ImportType(bound_type, error);
   
   LLDB_LOG(
