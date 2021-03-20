@@ -75,6 +75,8 @@ add_clang_library(clangDriver
   ToolChains/InterfaceStubs.cpp
   Types.cpp
   XRayArgs.cpp
+  DeClangExtraProcess.cpp
+
 
   DEPENDS
   ClangDriverOptions

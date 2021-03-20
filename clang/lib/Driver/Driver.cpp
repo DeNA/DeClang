@@ -93,6 +93,8 @@ using namespace clang::driver;
 using namespace clang;
 using namespace llvm::opt;
 
+extern void DeClangExtraProcess(const Compilation &C, const std::string& homeDir, llvm::raw_fd_ostream *logFile);
+
 // static
 std::string Driver::GetResourcesPath(StringRef BinaryPath,
                                      StringRef CustomResourceDir) {
@@ -989,6 +991,15 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
     }
   }
 
+  //DECLANG CODES BEGIN
+  //add -DDECLANG
+  std::vector<const char*> modArgs = ArgList.vec();
+  modArgs.push_back("-DDECLANG");
+
+  ArgList = ArrayRef<const char*>(modArgs);
+
+  //DECLANG CODES END
+
   // We look for the driver mode option early, because the mode can affect
   // how other options are parsed.
   ParseDriverMode(ClangExecutable, ArgList.slice(1));
@@ -1567,6 +1578,37 @@ int Driver::ExecuteCompilation(
   // Set up response file names for each command, if necessary
   for (auto &Job : C.getJobs())
     setUpResponseFiles(C, Job);
+
+  //DECLANG CODES BEGIN
+  char* home_dir = getenv("DECLANG_HOME");
+  if (home_dir == nullptr) {
+    home_dir = getenv("HOME");
+  }
+  if (home_dir == nullptr) {
+    home_dir = getenv("USERPROFILE");
+  }
+  if (home_dir == nullptr) {
+    llvm::errs() << "[Linker]: (Warning) Cannot find $DECLANG_HOME, $HOME or %USERPROFILE%\n";
+    llvm::errs().flush();
+    std::exit(EXIT_FAILURE);
+  }
+  std::string homeDir(home_dir);
+  homeDir = llvm::sys::path::convert_to_slash(homeDir);
+
+  //log path
+  std::string logPath = homeDir + "/.DeClang/log.txt";
+  llvm::raw_fd_ostream *logFile;
+  std::error_code EC;
+  logFile = new llvm::raw_fd_ostream(logPath, EC, llvm::sys::fs::F_Append);
+  if (EC) {
+    llvm::errs() << "[Linker]: Open logFile Failed. Check DECLANG_HOME maybe?: " << EC.message() << " "  << logPath << "\n";
+    llvm::errs().flush();
+  }
+
+  for (Command& cmd : C.getJobs() ) {
+    cmd.Print(*logFile, "\n", /*Quote=*/true);
+  }
+  //DECLANG CODES END
 
   C.ExecuteJobs(C.getJobs(), FailingCommands);
 

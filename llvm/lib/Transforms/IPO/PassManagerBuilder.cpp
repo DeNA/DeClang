@@ -48,8 +48,20 @@
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 #include "llvm/Transforms/Vectorize/VectorCombine.h"
+#include "llvm/Transforms/AntiHack/AntiHack.h"
+
 
 using namespace llvm;
+
+//DECLANG CODES BEGIN
+static cl::opt<bool>
+FinalizerOpt("no-finalizer", cl::init(false), cl::Hidden,
+    cl::ZeroOrMore, cl::desc("no finalizer option"));
+
+static cl::opt<std::string>
+AntiHackOpt("antihack", cl::init(""), cl::Hidden,
+    cl::ZeroOrMore, cl::desc("antihack pass"));
+//DECLANG CODES END
 
 static cl::opt<bool>
     RunPartialInlining("enable-partial-inlining", cl::init(false), cl::Hidden,
@@ -885,6 +897,10 @@ void PassManagerBuilder::populateModulePassManager(
   }
 
   MPM.add(createAnnotationRemarksLegacyPass());
+
+  //DECLANG CODES BEGIN
+  MPM.add(createAntiHack(AntiHackOpt));
+  //DECLANG CODES END
 }
 
 void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
