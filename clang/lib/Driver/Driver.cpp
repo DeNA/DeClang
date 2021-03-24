@@ -953,8 +953,10 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   std::vector<const char*> modArgs = ArgList.vec();
   modArgs.push_back("-DDECLANG");
 
+#if !defined(_WIN32)
   //add -Wl,-static-libstdc++
   modArgs.push_back("-static-libstdc++");
+#endif
 
   ArgList = ArrayRef<const char*>(modArgs);
 
