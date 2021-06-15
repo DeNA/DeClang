@@ -1613,7 +1613,11 @@ int Driver::ExecuteCompilation(
   C.ExecuteJobs(C.getJobs(), FailingCommands);
 
   // If the command succeeded, we are done.
-  if (FailingCommands.empty())
+  if (FailingCommands.empty()) {
+  //DECLANG CODES BEGIN 
+    DeClangExtraProcess(C, homeDir, logFile);
+  //DECLANG CODES END
+  }
     return 0;
 
   // Otherwise, remove result files and print extra information about abnormal
