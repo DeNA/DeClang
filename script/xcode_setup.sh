@@ -75,6 +75,6 @@ COMPILER_INDEX_STORE_ENABLE = NO;\\
 ~g" "$pbxproj"
 sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = YES;~COMPILER_INDEX_STORE_ENABLE = NO;~g' "$pbxproj"
 sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = DEFAULT;~COMPILER_INDEX_STORE_ENABLE = NO;~g' "$pbxproj"
-sed -i '' $'s~CLANG_ENABLE_MODULES = YES;~CLANG_ENABLE_MODULES = NO;~g' "$pbxproj"
+# sed -i '' $'s~CLANG_ENABLE_MODULES = YES;~CLANG_ENABLE_MODULES = NO;~g' "$pbxproj"
 
 # popd >/dev/null
