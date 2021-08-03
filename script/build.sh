@@ -5,9 +5,9 @@ pushd $(dirname $0) > /dev/null
 cd ../
 
 rm -f clang/lib/Driver/DeClangExtraProcess.cpp
-rm -f llvm/lib/Transforms/AntiHack
-rm -f llvm/include/llvm/Transforms/AntiHack
-rm -f tools
+rm -rf llvm/lib/Transforms/AntiHack
+rm -rf llvm/include/llvm/Transforms/AntiHack
+rm -rf tools
 
 if [[ -e AntiHackDeNA ]]; then
   ln -s ../../../AntiHackDeNA/clang/DeClangExtraProcess.cpp clang/lib/Driver/DeClangExtraProcess.cpp
