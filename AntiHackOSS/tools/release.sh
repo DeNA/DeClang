@@ -46,7 +46,7 @@ pushd $(dirname $0) > /dev/null
 cd ..
 cp ./AntiHackOSS/LICENSE-DeClang ./Release/
 cp ./AntiHackOSS/LICENSE-ollvm ./Release/
-cp ./LICENSE ./Release/
+cp ./LICENSE.txt ./Release/
 popd > /dev/null
 
 pushd $(dirname $0) > /dev/null
