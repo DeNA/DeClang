@@ -13,9 +13,16 @@ rm -rf ./Release/
 mkdir -p ./Release/compiler/bin/
 mkdir -p ./Release/compiler/lib/
 
-cp -v build/bin/clang++ ./Release/compiler/bin/
-cp -v build/bin/clang ./Release/compiler/bin/
-cp -r build/lib/clang/ ./Release/compiler/lib/clang/
+if [[ "_$OS" = "_Windows_NT" ]]; then
+  cp -v build/Release/bin/clang++ ./Release/compiler/bin/
+  cp -v build/Release/bin/clang ./Release/compiler/bin/
+  cp -v build/Release/bin/clang-cl ./Release/compiler/bin/
+  cp -r build/Release/lib/clang/ ./Release/compiler/lib/clang/
+else
+  cp -v build/bin/clang++ ./Release/compiler/bin/
+  cp -v build/bin/clang ./Release/compiler/bin/
+  cp -r build/lib/clang/ ./Release/compiler/lib/clang/
+fi
 popd > /dev/null
 
 
@@ -46,7 +53,7 @@ pushd $(dirname $0) > /dev/null
 cd ..
 cp ./AntiHackOSS/LICENSE-DeClang ./Release/
 cp ./AntiHackOSS/LICENSE-ollvm ./Release/
-cp ./LICENSE ./Release/
+cp ./LICENSE.txt ./Release/
 popd > /dev/null
 
 pushd $(dirname $0) > /dev/null
