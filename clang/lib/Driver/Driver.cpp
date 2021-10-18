@@ -996,6 +996,14 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   std::vector<const char*> modArgs = ArgList.vec();
   modArgs.push_back("-DDECLANG");
 
+  //std::string noautolink = "-fno-autolink";
+  //for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end(); ++it) {
+  //  if (noautolink == *it) {
+  //    modArgs.erase(it);
+  //    llvm::errs() << "removed no-autolink\n";
+  //  }
+  //}
+
   ArgList = ArrayRef<const char*>(modArgs);
 
   //DECLANG CODES END
@@ -1617,8 +1625,8 @@ int Driver::ExecuteCompilation(
   //DECLANG CODES BEGIN 
     DeClangExtraProcess(C, homeDir, logFile);
   //DECLANG CODES END
-  }
     return 0;
+  }
 
   // Otherwise, remove result files and print extra information about abnormal
   // failures.
