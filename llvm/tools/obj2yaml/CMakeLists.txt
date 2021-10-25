@@ -8,6 +8,7 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_llvm_utility(obj2yaml
+  archive2yaml.cpp
   obj2yaml.cpp
   coff2yaml.cpp
   dwarf2yaml.cpp
@@ -16,5 +17,4 @@ add_llvm_utility(obj2yaml
   minidump2yaml.cpp
   xcoff2yaml.cpp
   wasm2yaml.cpp
-  Error.cpp
   )

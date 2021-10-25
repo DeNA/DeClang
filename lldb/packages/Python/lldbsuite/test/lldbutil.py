@@ -22,6 +22,7 @@ from lldbsuite.support import seven
 # LLDB modules
 import lldb
 from . import lldbtest_config
+from . import configuration
 
 # How often failed simulator process launches are retried.
 SIMULATOR_RETRY = 3
@@ -63,6 +64,11 @@ def mkdir_p(path):
 # ============================
 
 def get_xcode_sdk(os, env):
+    # Respect --apple-sdk <path> if it's specified. If the SDK is simply
+    # mounted from some disk image, and not actually installed, this is the
+    # only way to use it.
+    if configuration.apple_sdk:
+        return configuration.apple_sdk
     if os == "ios":
         if env == "simulator":
             return "iphonesimulator"
@@ -561,7 +567,7 @@ def run_break_set_by_file_colon_line(
         file_name = path,
         line_number = line_number,
         column_number = column_number)
-    
+
     return get_bpno_from_match(break_results)
 
 def run_break_set_command(test, command):
@@ -872,6 +878,18 @@ def run_to_breakpoint_do_run(test, target, bkpt, launch_info = None,
                     (target.GetExecutable().GetFilename(), error.GetCString()))
     test.assertFalse(error.Fail(),
                      "Process launch failed: %s" % (error.GetCString()))
+
+    if process.GetState() == lldb.eStateRunning:
+        # If we get here with eStateRunning, it means we missed the
+        # initial breakpoint. Figure out where the process is
+        # so we can report that:
+        error = lldb.SBError()
+        error = process.Stop()
+        if not error.Success():
+            test.fail("Failed to stop: %s"%(error.GetCString()))
+
+        error_string = "Failed to hit initial breakpoint:\n%s\n"%(print_stacktraces(process, True))
+        test.fail(error_string)
 
     test.assertEqual(process.GetState(), lldb.eStateStopped)
 
@@ -1613,7 +1631,8 @@ def packetlog_get_process_info(log):
     return process_info
 
 def packetlog_get_dylib_info(log):
-    """parse a gdb-remote packet log file and extract the *last* response to jGetLoadedDynamicLibrariesInfos"""
+    """parse a gdb-remote packet log file and extract the *last* complete
+    (=> fetch_all_solibs=true) response to jGetLoadedDynamicLibrariesInfos"""
     import json
     dylib_info = None
     with open(log, "r") as logfile:
@@ -1627,7 +1646,7 @@ def packetlog_get_dylib_info(log):
                 # Unescape '}'.
                 dylib_info = json.loads(line.replace('}]','}')[:-4])
                 expect_dylib_info_response = False
-            if 'send packet: $jGetLoadedDynamicLibrariesInfos:{' in line:
+            if 'send packet: $jGetLoadedDynamicLibrariesInfos:{"fetch_all_solibs":true}' in line:
                 expect_dylib_info_response = True
 
     return dylib_info

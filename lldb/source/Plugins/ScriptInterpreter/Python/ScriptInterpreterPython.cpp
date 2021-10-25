@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Host/Config.h"
+#include "lldb/lldb-enumerations.h"
 
 #if LLDB_ENABLE_PYTHON
 
@@ -214,6 +215,12 @@ extern "C" bool LLDBSWIGPythonRunScriptKeywordValue(
 extern "C" void *
 LLDBSWIGPython_GetDynamicSetting(void *module, const char *setting,
                                  const lldb::TargetSP &target_sp);
+
+static ScriptInterpreterPythonImpl *GetPythonInterpreter(Debugger &debugger) {
+  ScriptInterpreter *script_interpreter =
+      debugger.GetScriptInterpreter(true, lldb::eScriptLanguagePython);
+  return static_cast<ScriptInterpreterPythonImpl *>(script_interpreter);
+}
 
 static bool g_initialized = false;
 
@@ -1826,11 +1833,10 @@ StructuredData::ObjectSP ScriptInterpreterPythonImpl::CreateScriptedThreadPlan(
     return {};
 
   Debugger &debugger = thread_plan_sp->GetTarget().GetDebugger();
-  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
-      static_cast<ScriptInterpreterPythonImpl *>(script_interpreter);
+      GetPythonInterpreter(debugger);
 
-  if (!script_interpreter)
+  if (!python_interpreter)
     return {};
 
   void *ret_val;
@@ -1930,11 +1936,10 @@ ScriptInterpreterPythonImpl::CreateScriptedBreakpointResolver(
     return StructuredData::GenericSP();
 
   Debugger &debugger = bkpt_sp->GetTarget().GetDebugger();
-  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
-      static_cast<ScriptInterpreterPythonImpl *>(script_interpreter);
+      GetPythonInterpreter(debugger);
 
-  if (!script_interpreter)
+  if (!python_interpreter)
     return StructuredData::GenericSP();
 
   void *ret_val;
@@ -2004,11 +2009,10 @@ StructuredData::GenericSP ScriptInterpreterPythonImpl::CreateScriptedStopHook(
     return StructuredData::GenericSP();
   }
 
-  ScriptInterpreter *script_interpreter = m_debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
-      static_cast<ScriptInterpreterPythonImpl *>(script_interpreter);
+      GetPythonInterpreter(m_debugger);
 
-  if (!script_interpreter) {
+  if (!python_interpreter) {
     error.SetErrorString("No script interpreter for scripted stop-hook.");
     return StructuredData::GenericSP();
   }
@@ -2104,11 +2108,10 @@ ScriptInterpreterPythonImpl::CreateSyntheticScriptedProvider(
     return StructuredData::ObjectSP();
 
   Debugger &debugger = target->GetDebugger();
-  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
-      (ScriptInterpreterPythonImpl *)script_interpreter;
+      GetPythonInterpreter(debugger);
 
-  if (!script_interpreter)
+  if (!python_interpreter)
     return StructuredData::ObjectSP();
 
   void *ret_val = nullptr;
@@ -2274,11 +2277,10 @@ bool ScriptInterpreterPythonImpl::BreakpointCallbackFunction(
     return true;
 
   Debugger &debugger = target->GetDebugger();
-  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
-      (ScriptInterpreterPythonImpl *)script_interpreter;
+      GetPythonInterpreter(debugger);
 
-  if (!script_interpreter)
+  if (!python_interpreter)
     return true;
 
   if (python_function_name && python_function_name[0]) {
@@ -2340,11 +2342,10 @@ bool ScriptInterpreterPythonImpl::WatchpointCallbackFunction(
     return true;
 
   Debugger &debugger = target->GetDebugger();
-  ScriptInterpreter *script_interpreter = debugger.GetScriptInterpreter();
   ScriptInterpreterPythonImpl *python_interpreter =
-      (ScriptInterpreterPythonImpl *)script_interpreter;
+      GetPythonInterpreter(debugger);
 
-  if (!script_interpreter)
+  if (!python_interpreter)
     return true;
 
   if (python_function_name && python_function_name[0]) {
@@ -2780,6 +2781,7 @@ bool ScriptInterpreterPythonImpl::LoadScriptingModule(
   };
 
   std::string module_name(pathname);
+  bool possible_package = false;
 
   if (extra_search_dir) {
     if (llvm::Error e = ExtendSysPath(extra_search_dir.GetPath())) {
@@ -2804,6 +2806,7 @@ bool ScriptInterpreterPythonImpl::LoadScriptingModule(
         return false;
       }
       // Not a filename, probably a package of some sort, let it go through.
+      possible_package = true;
     } else if (is_directory(st) || is_regular_file(st)) {
       if (module_file.GetDirectory().IsEmpty()) {
         error.SetErrorString("invalid directory name");
@@ -2828,6 +2831,18 @@ bool ScriptInterpreterPythonImpl::LoadScriptingModule(
       module_name.resize(module_name.length() - 3);
     else if (extension == ".pyc")
       module_name.resize(module_name.length() - 4);
+  }
+
+  if (!possible_package && module_name.find('.') != llvm::StringRef::npos) {
+    error.SetErrorStringWithFormat(
+        "Python does not allow dots in module names: %s", module_name.c_str());
+    return false;
+  }
+
+  if (module_name.find('-') != llvm::StringRef::npos) {
+    error.SetErrorStringWithFormat(
+        "Python discourages dashes in module names: %s", module_name.c_str());
+    return false;
   }
 
   // check if the module is already import-ed

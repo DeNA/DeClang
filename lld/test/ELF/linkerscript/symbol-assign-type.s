@@ -8,14 +8,9 @@
 
 ## NOTE: GNU ld retains st_type for many operations.
 
-# RUN: echo 'retain1 = _start; \
-# RUN:   retain2 = 1 ? _start : 0; \
-# RUN:   drop1 = _start + 0; \
-# RUN:   drop2 = 0 ? _start : 1; \
-# RUN:   drop3 = -_start; \
-# RUN: ' > %t.lds
-# RUN: llvm-mc -filetype=obj -triple=x86_64 %s -o %t.o
-# RUN: ld.lld -T %t.lds %t.o -o %t1
+# RUN: split-file %s %t
+# RUN: llvm-mc -filetype=obj -triple=x86_64 %t/main.s -o %t.o
+# RUN: ld.lld -T %t/a.lds %t.o -o %t1
 # RUN: llvm-readelf -s %t1 | FileCheck %s
 
 # CHECK:      Size Type   Bind   Vis     Ndx Name
@@ -32,6 +27,17 @@
 # DEFSYM:        0 FUNC   GLOBAL DEFAULT   1 retain
 # DEFSYM-NEXT:   0 NOTYPE GLOBAL DEFAULT   1 drop
 
+#--- a.lds
+retain1 = _start;
+retain2 = 1 ? _start : 0;
+
+## Reset to STT_NOTYPE if any operation is performed,
+## even if the operation is an identity function.
+drop1 = _start + 0;
+drop2 = 0 ? _start : 1;
+drop3 = -_start;
+
+#--- main.s
 .globl _start
 .type _start, @function
 _start:

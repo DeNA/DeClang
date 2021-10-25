@@ -40,9 +40,7 @@ class ThreadAPITestCase(TestBase):
     @skipIfAsan # The output looks different under ASAN.
     @add_test_categories(['pyapi'])
     @expectedFailureAll(oslist=["linux"], archs=['arm'], bugnumber="llvm.org/pr45892")
-    @expectedFailureAll(oslist=['freebsd'], bugnumber='llvm.org/pr20476')
     @expectedFailureAll(oslist=["windows"])
-    @expectedFailureNetBSD
     def test_step_out_of_malloc_into_function_b(self):
         """Test Python SBThread.StepOut() API to step out of a malloc call where the call site is at function b()."""
         # We build a different executable than the default build() does.
@@ -101,8 +99,7 @@ class ThreadAPITestCase(TestBase):
 
         proc_of_thread = thread.GetProcess()
         self.trace("proc_of_thread:", proc_of_thread)
-        self.assertTrue(proc_of_thread.GetProcessID()
-                        == process.GetProcessID())
+        self.assertEqual(proc_of_thread.GetProcessID(), process.GetProcessID())
 
     def get_stop_description(self):
         """Test Python SBThread.GetStopDescription() API."""
@@ -182,8 +179,8 @@ class ThreadAPITestCase(TestBase):
 
         thread.StepOut()
         self.runCmd("thread backtrace")
-        self.assertTrue(
-            thread.GetFrameAtIndex(0).GetLineEntry().GetLine() == self.step_out_of_malloc,
+        self.assertEqual(
+            thread.GetFrameAtIndex(0).GetLineEntry().GetLine(), self.step_out_of_malloc,
             "step out of malloc into function b is successful")
 
     def step_over_3_times(self, exe_name):
@@ -205,7 +202,7 @@ class ThreadAPITestCase(TestBase):
         self.assertTrue(process, PROCESS_IS_VALID)
 
         # Frame #0 should be on self.step_out_of_malloc.
-        self.assertTrue(process.GetState() == lldb.eStateStopped)
+        self.assertEqual(process.GetState(), lldb.eStateStopped)
         thread = get_stopped_thread(process, lldb.eStopReasonBreakpoint)
         self.assertTrue(
             thread.IsValid(),
@@ -213,7 +210,7 @@ class ThreadAPITestCase(TestBase):
         self.runCmd("thread backtrace")
         frame0 = thread.GetFrameAtIndex(0)
         lineEntry = frame0.GetLineEntry()
-        self.assertTrue(lineEntry.GetLine() == self.step_out_of_malloc)
+        self.assertEqual(lineEntry.GetLine(), self.step_out_of_malloc)
 
         thread.StepOver()
         thread.StepOver()
@@ -224,13 +221,13 @@ class ThreadAPITestCase(TestBase):
         # main2.cpp.
         frame0 = thread.GetFrameAtIndex(0)
         lineEntry = frame0.GetLineEntry()
-        self.assertTrue(thread.GetStopReason() == lldb.eStopReasonPlanComplete)
+        self.assertEqual(thread.GetStopReason(), lldb.eStopReasonPlanComplete)
         # Expected failure with clang as the compiler.
         # rdar://problem/9223880
         #
         # Which has been fixed on the lldb by compensating for inaccurate line
         # table information with r140416.
-        self.assertTrue(lineEntry.GetLine() == self.after_3_step_overs)
+        self.assertEqual(lineEntry.GetLine(), self.after_3_step_overs)
 
     def run_to_address(self, exe_name):
         """Test Python SBThread.RunToAddress() API."""
@@ -251,7 +248,7 @@ class ThreadAPITestCase(TestBase):
         self.assertTrue(process, PROCESS_IS_VALID)
 
         # Frame #0 should be on self.step_out_of_malloc.
-        self.assertTrue(process.GetState() == lldb.eStateStopped)
+        self.assertEqual(process.GetState(), lldb.eStateStopped)
         thread = get_stopped_thread(process, lldb.eStopReasonBreakpoint)
         self.assertTrue(
             thread.IsValid(),
@@ -259,7 +256,7 @@ class ThreadAPITestCase(TestBase):
         self.runCmd("thread backtrace")
         frame0 = thread.GetFrameAtIndex(0)
         lineEntry = frame0.GetLineEntry()
-        self.assertTrue(lineEntry.GetLine() == self.step_out_of_malloc)
+        self.assertEqual(lineEntry.GetLine(), self.step_out_of_malloc)
 
         # Get the start/end addresses for this line entry.
         start_addr = lineEntry.GetStartAddress().GetLoadAddress(target)

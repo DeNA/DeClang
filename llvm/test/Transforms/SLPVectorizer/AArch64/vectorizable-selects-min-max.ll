@@ -608,7 +608,6 @@ entry:
 
   ret void
 }
-
 define void @select_umax_8xi16(i16* %ptr, i16 %x) {
 ; CHECK-LABEL: @select_umax_8xi16(
 ; CHECK-NEXT:  entry:

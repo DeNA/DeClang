@@ -369,10 +369,7 @@ static void initSlots2Values(const Function &F,
 const Value* PerFunctionMIParsingState::getIRValue(unsigned Slot) {
   if (Slots2Values.empty())
     initSlots2Values(MF.getFunction(), Slots2Values);
-  auto ValueInfo = Slots2Values.find(Slot);
-  if (ValueInfo == Slots2Values.end())
-    return nullptr;
-  return ValueInfo->second;
+  return Slots2Values.lookup(Slot);
 }
 
 namespace {
@@ -984,6 +981,7 @@ bool MIParser::parse(MachineInstr *&MI) {
          Token.isNot(MIToken::kw_post_instr_symbol) &&
          Token.isNot(MIToken::kw_heap_alloc_marker) &&
          Token.isNot(MIToken::kw_debug_location) &&
+         Token.isNot(MIToken::kw_debug_instr_number) &&
          Token.isNot(MIToken::coloncolon) && Token.isNot(MIToken::lbrace)) {
     auto Loc = Token.location();
     Optional<unsigned> TiedDefIdx;
@@ -1013,6 +1011,19 @@ bool MIParser::parse(MachineInstr *&MI) {
   if (Token.is(MIToken::kw_heap_alloc_marker))
     if (parseHeapAllocMarker(HeapAllocMarker))
       return true;
+
+  unsigned InstrNum = 0;
+  if (Token.is(MIToken::kw_debug_instr_number)) {
+    lex();
+    if (Token.isNot(MIToken::IntegerLiteral))
+      return error("expected an integer literal after 'debug-instr-number'");
+    if (getUnsigned(InstrNum))
+      return true;
+    lex();
+    // Lex past trailing comma if present.
+    if (Token.is(MIToken::comma))
+      lex();
+  }
 
   DebugLoc DebugLocation;
   if (Token.is(MIToken::kw_debug_location)) {
@@ -1070,6 +1081,8 @@ bool MIParser::parse(MachineInstr *&MI) {
     MI->setHeapAllocMarker(MF, HeapAllocMarker);
   if (!MemOperands.empty())
     MI->setMemRefs(MF, MemOperands);
+  if (InstrNum)
+    MI->setDebugInstrNum(InstrNum);
   return false;
 }
 
@@ -3153,10 +3166,7 @@ static void initSlots2BasicBlocks(
 static const BasicBlock *getIRBlockFromSlot(
     unsigned Slot,
     const DenseMap<unsigned, const BasicBlock *> &Slots2BasicBlocks) {
-  auto BlockInfo = Slots2BasicBlocks.find(Slot);
-  if (BlockInfo == Slots2BasicBlocks.end())
-    return nullptr;
-  return BlockInfo->second;
+  return Slots2BasicBlocks.lookup(Slot);
 }
 
 const BasicBlock *MIParser::getIRBlock(unsigned Slot) {

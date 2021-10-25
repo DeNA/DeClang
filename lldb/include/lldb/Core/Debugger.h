@@ -250,6 +250,8 @@ public:
 
   const FormatEntity::Entry *GetFrameFormatUnique() const;
 
+  uint32_t GetStopDisassemblyMaxSize() const;
+
   const FormatEntity::Entry *GetThreadFormat() const;
 
   const FormatEntity::Entry *GetThreadStopFormat() const;
@@ -276,6 +278,8 @@ public:
   bool GetUseColor() const;
 
   bool SetUseColor(bool use_color);
+
+  bool GetUseAutosuggestion() const;
 
   bool GetUseSourceCache() const;
 
@@ -340,8 +344,8 @@ public:
   // This is for use in the command interpreter, when you either want the
   // selected target, or if no target is present you want to prime the dummy
   // target with entities that will be copied over to new targets.
-  Target *GetSelectedOrDummyTarget(bool prefer_dummy = false);
-  Target *GetDummyTarget() { return m_dummy_target_sp.get(); }
+  Target &GetSelectedOrDummyTarget(bool prefer_dummy = false);
+  Target &GetDummyTarget() { return *m_dummy_target_sp; }
 
   lldb::BroadcasterManagerSP GetBroadcasterManager() {
     return m_broadcaster_manager_sp;

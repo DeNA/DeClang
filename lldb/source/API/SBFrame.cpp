@@ -18,6 +18,7 @@
 #include "Utils.h"
 #include "lldb/Core/Address.h"
 #include "lldb/Core/StreamFile.h"
+#include "lldb/Core/StructuredDataImpl.h"
 #include "lldb/Core/ValueObjectRegister.h"
 #include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/Expression/ExpressionVariable.h"
@@ -44,6 +45,7 @@
 #include "lldb/API/SBDebugger.h"
 #include "lldb/API/SBExpressionOptions.h"
 #include "lldb/API/SBStream.h"
+#include "lldb/API/SBStructuredData.h"
 #include "lldb/API/SBSymbolContext.h"
 #include "lldb/API/SBThread.h"
 #include "lldb/API/SBValue.h"
@@ -52,7 +54,7 @@
 #include "llvm/Support/PrettyStackTrace.h"
 
 // BEGIN SWIFT
-#include "lldb/Target/LanguageRuntime.h"
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 // END SWIFT
 
 using namespace lldb;
@@ -435,7 +437,7 @@ SBAddress SBFrame::GetPCAddress() const {
     if (stop_locker.TryLock(&process->GetRunLock())) {
       frame = exe_ctx.GetFramePtr();
       if (frame)
-        sb_addr.SetAddress(&frame->GetFrameCodeAddress());
+        sb_addr.SetAddress(frame->GetFrameCodeAddress());
     }
   }
   return LLDB_RECORD_RESULT(sb_addr);
@@ -1205,6 +1207,19 @@ lldb::LanguageType SBFrame::GuessLanguage() const {
     }
   }
   return eLanguageTypeUnknown;
+}
+
+lldb::SBStructuredData SBFrame::GetLanguageSpecificData() const {
+  std::unique_lock<std::recursive_mutex> lock;
+  ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
+  auto *process = exe_ctx.GetProcessPtr();
+  auto *frame = exe_ctx.GetFramePtr();
+  if (process && frame)
+    if (auto *runtime = process->GetLanguageRuntime(frame->GuessLanguage()))
+      if (auto *data = runtime->GetLanguageSpecificData(*frame))
+        return {data};
+
+  return {};
 }
 
 // BEGIN SWIFT

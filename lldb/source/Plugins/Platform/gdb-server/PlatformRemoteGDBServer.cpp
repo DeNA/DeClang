@@ -495,12 +495,10 @@ lldb::ProcessSP PlatformRemoteGDBServer::DebugProcess(
           error.Clear();
 
         if (target && error.Success()) {
-          debugger.GetTargetList().SetSelectedTarget(target);
-
           // The darwin always currently uses the GDB remote debugger plug-in
           // so even when debugging locally we are debugging remotely!
           process_sp = target->CreateProcess(launch_info.GetListener(),
-                                             "gdb-remote", nullptr);
+                                             "gdb-remote", nullptr, true);
 
           if (process_sp) {
             error = process_sp->ConnectRemote(connect_url.c_str());
@@ -581,13 +579,11 @@ lldb::ProcessSP PlatformRemoteGDBServer::Attach(
           error.Clear();
 
         if (target && error.Success()) {
-          debugger.GetTargetList().SetSelectedTarget(target);
-
           // The darwin always currently uses the GDB remote debugger plug-in
           // so even when debugging locally we are debugging remotely!
           process_sp =
               target->CreateProcess(attach_info.GetListenerForProcess(debugger),
-                                    "gdb-remote", nullptr);
+                                    "gdb-remote", nullptr, true);
           if (process_sp) {
             error = process_sp->ConnectRemote(connect_url.c_str());
             if (error.Success()) {
@@ -659,6 +655,11 @@ bool PlatformRemoteGDBServer::CloseFile(lldb::user_id_t fd, Status &error) {
 lldb::user_id_t
 PlatformRemoteGDBServer::GetFileSize(const FileSpec &file_spec) {
   return m_gdb_client.GetFileSize(file_spec);
+}
+
+void PlatformRemoteGDBServer::AutoCompleteDiskFileOrDirectory(
+    CompletionRequest &request, bool only_dir) {
+  m_gdb_client.AutoCompleteDiskFileOrDirectory(request, only_dir);
 }
 
 uint64_t PlatformRemoteGDBServer::ReadFile(lldb::user_id_t fd, uint64_t offset,
@@ -735,8 +736,8 @@ const UnixSignalsSP &PlatformRemoteGDBServer::GetRemoteUnixSignals() {
   m_remote_signals_sp = UnixSignals::Create(GetRemoteSystemArchitecture());
 
   StringExtractorGDBRemote response;
-  auto result = m_gdb_client.SendPacketAndWaitForResponse("jSignalsInfo",
-                                                          response, false);
+  auto result =
+      m_gdb_client.SendPacketAndWaitForResponse("jSignalsInfo", response);
 
   if (result != decltype(result)::Success ||
       response.GetResponseType() != response.eResponse)

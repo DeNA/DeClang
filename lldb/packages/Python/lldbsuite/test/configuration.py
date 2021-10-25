@@ -81,20 +81,6 @@ regexp = None
 skip_tests = None
 xfail_tests = None
 
-# By default, recorded session info for errored/failed test are dumped into its
-# own file under a session directory named after the timestamp of the test suite
-# run.  Use '-s session-dir-name' to specify a specific dir name.
-sdir_name = None
-
-# Valid options:
-# f - test file name (without extension)
-# n - test class name
-# m - test method name
-# a - architecture
-# c - compiler path
-# The default is to write all fields.
-session_file_format = 'fnmac'
-
 # Set this flag if there is any session info dumped during the test run.
 sdir_has_content = False
 # svn_info stores the output from 'svn info lldb.base.dir'.
@@ -139,9 +125,6 @@ test_result = None
 # Reproducers
 capture_path = None
 replay_path = None
-
-# Test rerun configuration vars
-rerun_all_issues = False
 
 # The names of all tests. Used to assert we don't have two tests with the
 # same base name.

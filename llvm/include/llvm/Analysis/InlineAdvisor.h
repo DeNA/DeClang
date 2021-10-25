@@ -9,12 +9,11 @@
 #ifndef LLVM_INLINEADVISOR_H_
 #define LLVM_INLINEADVISOR_H_
 
+#include "llvm/Analysis/InlineCost.h"
+#include "llvm/Config/llvm-config.h"
+#include "llvm/IR/PassManager.h"
 #include <memory>
 #include <unordered_set>
-#include <vector>
-
-#include "llvm/Analysis/InlineCost.h"
-#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 class BasicBlock;
@@ -23,8 +22,10 @@ class Function;
 class Module;
 class OptimizationRemarkEmitter;
 
-/// There are 3 scenarios we can use the InlineAdvisor:
+/// There are 4 scenarios we can use the InlineAdvisor:
 /// - Default - use manual heuristics.
+///
+/// - MandatoryOnly - only mandatory inlinings (i.e. AlwaysInline).
 ///
 /// - Release mode, the expected mode for production, day to day deployments.
 /// In this mode, when building the compiler, we also compile a pre-trained ML
@@ -36,7 +37,12 @@ class OptimizationRemarkEmitter;
 /// requires the full C Tensorflow API library, and evaluates models
 /// dynamically. This mode also permits generating training logs, for offline
 /// training.
-enum class InliningAdvisorMode : int { Default, Release, Development };
+enum class InliningAdvisorMode : int {
+  Default,
+  MandatoryOnly,
+  Release,
+  Development
+};
 
 class InlineAdvisor;
 /// Capture state between an inlining decision having had been made, and
@@ -177,6 +183,20 @@ private:
   InlineParams Params;
 };
 
+/// Advisor recommending only mandatory (AlwaysInline) cases.
+class MandatoryInlineAdvisor final : public InlineAdvisor {
+  std::unique_ptr<InlineAdvice> getAdvice(CallBase &CB) override;
+
+public:
+  MandatoryInlineAdvisor(FunctionAnalysisManager &FAM) : InlineAdvisor(FAM) {}
+
+  enum class MandatoryInliningKind { NotMandatory, Always, Never };
+
+  static MandatoryInliningKind getMandatoryKind(CallBase &CB,
+                                                FunctionAnalysisManager &FAM,
+                                                OptimizationRemarkEmitter &ORE);
+};
+
 /// The InlineAdvisorAnalysis is a module pass because the InlineAdvisor
 /// needs to capture state right before inlining commences over a module.
 class InlineAdvisorAnalysis : public AnalysisInfoMixin<InlineAdvisorAnalysis> {
@@ -208,6 +228,12 @@ std::unique_ptr<InlineAdvisor>
 getReleaseModeAdvisor(Module &M, ModuleAnalysisManager &MAM);
 #endif
 
+#ifdef LLVM_HAVE_TF_API
+std::unique_ptr<InlineAdvisor>
+getDevelopmentModeAdvisor(Module &M, ModuleAnalysisManager &MAM,
+                          std::function<bool(CallBase &)> GetDefaultAdvice);
+#endif
+
 // Default (manual policy) decision making helper APIs. Shared with the legacy
 // pass manager inliner.
 
@@ -225,6 +251,9 @@ void emitInlinedInto(OptimizationRemarkEmitter &ORE, DebugLoc DLoc,
                      const Function &Caller, const InlineCost &IC,
                      bool ForProfileContext = false,
                      const char *PassName = nullptr);
+
+/// get call site location as string
+std::string getCallSiteLocation(DebugLoc DLoc);
 
 /// Add location info to ORE message.
 void addLocationToRemarks(OptimizationRemark &Remark, DebugLoc DLoc);

@@ -28,7 +28,6 @@
 #include "llvm/Support/SMLoc.h"
 
 namespace llvm {
-class CodeInit;
 class DefInit;
 class Record;
 class StringInit;
@@ -150,6 +149,17 @@ public:
 
   // Returns the total number of arguments.
   int getNumArgs() const { return arguments.size(); }
+
+  // Returns true of the operation has a single variadic arg.
+  bool hasSingleVariadicArg() const;
+
+  // Returns true if the operation has a single variadic result.
+  bool hasSingleVariadicResult() const {
+    return getNumResults() == 1 && getResult(0).isVariadic();
+  }
+
+  // Returns true of the operation has no variadic regions.
+  bool hasNoVariadicRegions() const { return getNumVariadicRegions() == 0; }
 
   using arg_iterator = const Argument *;
   using arg_range = llvm::iterator_range<arg_iterator>;

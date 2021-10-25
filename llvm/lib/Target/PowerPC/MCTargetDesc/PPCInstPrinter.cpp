@@ -49,18 +49,6 @@ FullRegNamesWithPercent("ppc-reg-with-percent-prefix", cl::Hidden,
 
 void PPCInstPrinter::printRegName(raw_ostream &OS, unsigned RegNo) const {
   const char *RegName = getRegisterName(RegNo);
-  if (RegName[0] == 'q' /* QPX */) {
-    // The system toolchain on the BG/Q does not understand QPX register names
-    // in .cfi_* directives, so print the name of the floating-point
-    // subregister instead.
-    std::string RN(RegName);
-
-    RN[0] = 'f';
-    OS << RN;
-
-    return;
-  }
-
   OS << RegName;
 }
 
@@ -90,6 +78,36 @@ void PPCInstPrinter::printInst(const MCInst *MI, uint64_t Address,
     printOperand(MI, 1, O);
     O << ")";
     return;
+  }
+
+  // Check if the last operand is an expression with the variant kind
+  // VK_PPC_PCREL_OPT. If this is the case then this is a linker optimization
+  // relocation and the .reloc directive needs to be added.
+  unsigned LastOp = MI->getNumOperands() - 1;
+  if (MI->getNumOperands() > 1) {
+    const MCOperand &Operand = MI->getOperand(LastOp);
+    if (Operand.isExpr()) {
+      const MCExpr *Expr = Operand.getExpr();
+      const MCSymbolRefExpr *SymExpr =
+          static_cast<const MCSymbolRefExpr *>(Expr);
+
+      if (SymExpr && SymExpr->getKind() == MCSymbolRefExpr::VK_PPC_PCREL_OPT) {
+        const MCSymbol &Symbol = SymExpr->getSymbol();
+        if (MI->getOpcode() == PPC::PLDpc) {
+          printInstruction(MI, Address, O);
+          O << "\n";
+          Symbol.print(O, &MAI);
+          O << ":";
+          return;
+        } else {
+          O << "\t.reloc ";
+          Symbol.print(O, &MAI);
+          O << "-8,R_PPC64_PCREL_OPT,.-(";
+          Symbol.print(O, &MAI);
+          O << "-8)\n";
+        }
+      }
+    }
   }
 
   // Check for slwi/srwi mnemonics.
@@ -166,12 +184,18 @@ void PPCInstPrinter::printInst(const MCInst *MI, uint64_t Address,
 
   if (MI->getOpcode() == PPC::DCBF) {
     unsigned char L = MI->getOperand(0).getImm();
-    if (!L || L == 1 || L == 3) {
-      O << "\tdcbf";
-      if (L == 1 || L == 3)
+    if (!L || L == 1 || L == 3 || L == 4 || L == 6) {
+      O << "\tdcb";
+      if (L != 6)
+        O << "f";
+      if (L == 1)
         O << "l";
       if (L == 3)
-        O << "p";
+        O << "lp";
+      if (L == 4)
+        O << "ps";
+      if (L == 6)
+        O << "stps";
       O << " ";
 
       printOperand(MI, 1, O);
@@ -513,10 +537,17 @@ void PPCInstPrinter::printTLSCall(const MCInst *MI, unsigned OpNo,
     RefExp = cast<MCSymbolRefExpr>(Op.getExpr());
 
   O << RefExp->getSymbol().getName();
+  // The variant kind VK_PPC_NOTOC needs to be handled as a special case
+  // because we do not want the assembly to print out the @notoc at the
+  // end like __tls_get_addr(x@tlsgd)@notoc. Instead we want it to look
+  // like __tls_get_addr@notoc(x@tlsgd).
+  if (RefExp->getKind() == MCSymbolRefExpr::VK_PPC_NOTOC)
+    O << '@' << MCSymbolRefExpr::getVariantKindName(RefExp->getKind());
   O << '(';
   printOperand(MI, OpNo+1, O);
   O << ')';
-  if (RefExp->getKind() != MCSymbolRefExpr::VK_None)
+  if (RefExp->getKind() != MCSymbolRefExpr::VK_None &&
+      RefExp->getKind() != MCSymbolRefExpr::VK_PPC_NOTOC)
     O << '@' << MCSymbolRefExpr::getVariantKindName(RefExp->getKind());
   if (ConstExp != nullptr)
     O << '+' << ConstExp->getValue();
@@ -525,7 +556,7 @@ void PPCInstPrinter::printTLSCall(const MCInst *MI, unsigned OpNo,
 /// showRegistersWithPercentPrefix - Check if this register name should be
 /// printed with a percentage symbol as prefix.
 bool PPCInstPrinter::showRegistersWithPercentPrefix(const char *RegName) const {
-  if (!FullRegNamesWithPercent || TT.isOSDarwin() || TT.getOS() == Triple::AIX)
+  if (!FullRegNamesWithPercent || TT.getOS() == Triple::AIX)
     return false;
 
   switch (RegName[0]) {
@@ -545,7 +576,7 @@ bool PPCInstPrinter::showRegistersWithPercentPrefix(const char *RegName) const {
 const char *PPCInstPrinter::getVerboseConditionRegName(unsigned RegNum,
                                                        unsigned RegEncoding)
                                                        const {
-  if (!TT.isOSDarwin() && !FullRegNames)
+  if (!FullRegNames)
     return nullptr;
   if (RegNum < PPC::CR0EQ || RegNum > PPC::CR7UN)
     return nullptr;
@@ -567,7 +598,7 @@ const char *PPCInstPrinter::getVerboseConditionRegName(unsigned RegNum,
 bool PPCInstPrinter::showRegistersWithPrefix() const {
   if (TT.getOS() == Triple::AIX)
     return false;
-  return TT.isOSDarwin() || FullRegNamesWithPercent || FullRegNames;
+  return FullRegNamesWithPercent || FullRegNames;
 }
 
 void PPCInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,

@@ -216,7 +216,7 @@ R803 entity-decl ->
        function-name [* char-length]
 R804 object-name -> name
 R805 initialization -> = constant-expr | => null-init | => initial-data-target
-R806 null-init -> function-reference
+R806 null-init -> function-reference     {constrained to be NULL()}
 R807 access-spec -> PUBLIC | PRIVATE
 R808 language-binding-spec ->
        BIND ( C [, NAME = scalar-default-char-constant-expr] )
@@ -574,7 +574,8 @@ R1205 connect-spec ->
         POSITION = scalar-default-char-expr | RECL = scalar-int-expr |
         ROUND = scalar-default-char-expr | SIGN = scalar-default-char-expr |
         STATUS = scalar-default-char-expr
-        @ | CONVERT = scalar-default-char-expr
+        @ | CARRIAGECONTROL = scalar-default-char-expr
+          | CONVERT = scalar-default-char-expr
           | DISPOSE = scalar-default-char-expr
 R1206 file-name-expr -> scalar-default-char-expr
 R1207 iomsg-variable -> scalar-default-char-variable
@@ -654,7 +655,8 @@ R1231 inquire-spec ->
         STREAM = scalar-default-char-variable |
         STATUS = scalar-default-char-variable |
         WRITE = scalar-default-char-variable
-        @ | CONVERT = scalar-default-char-expr
+        @ | CARRIAGECONTROL = scalar-default-char-expr
+          | CONVERT = scalar-default-char-expr
           | DISPOSE = scalar-default-char-expr
 
 R1301 format-stmt -> FORMAT format-specification

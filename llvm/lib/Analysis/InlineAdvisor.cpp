@@ -84,9 +84,8 @@ private:
 
 } // namespace
 
-llvm::Optional<llvm::InlineCost>
-getDefaultInlineAdvice(CallBase &CB, FunctionAnalysisManager &FAM,
-                       const InlineParams &Params) {
+llvm::Optional<llvm::InlineCost> static getDefaultInlineAdvice(
+    CallBase &CB, FunctionAnalysisManager &FAM, const InlineParams &Params) {
   Function &Caller = *CB.getCaller();
   ProfileSummaryInfo *PSI =
       FAM.getResult<ModuleAnalysisManagerFunctionProxy>(Caller)
@@ -159,8 +158,17 @@ bool InlineAdvisorAnalysis::Result::tryCreate(InlineParams Params,
   case InliningAdvisorMode::Default:
     Advisor.reset(new DefaultInlineAdvisor(FAM, Params));
     break;
+  case InliningAdvisorMode::MandatoryOnly:
+    Advisor.reset(new MandatoryInlineAdvisor(FAM));
+    break;
   case InliningAdvisorMode::Development:
-    // To be added subsequently under conditional compilation.
+#ifdef LLVM_HAVE_TF_API
+    Advisor =
+        llvm::getDevelopmentModeAdvisor(M, MAM, [&FAM, Params](CallBase &CB) {
+          auto OIC = getDefaultInlineAdvice(CB, FAM, Params);
+          return OIC.hasValue();
+        });
+#endif
     break;
   case InliningAdvisorMode::Release:
 #ifdef LLVM_HAVE_TF_AOT
@@ -366,9 +374,35 @@ llvm::shouldInline(CallBase &CB,
   return IC;
 }
 
+std::string llvm::getCallSiteLocation(DebugLoc DLoc) {
+  std::ostringstream CallSiteLoc;
+  bool First = true;
+  for (DILocation *DIL = DLoc.get(); DIL; DIL = DIL->getInlinedAt()) {
+    if (!First)
+      CallSiteLoc << " @ ";
+    // Note that negative line offset is actually possible, but we use
+    // unsigned int to match line offset representation in remarks so
+    // it's directly consumable by relay advisor.
+    uint32_t Offset =
+        DIL->getLine() - DIL->getScope()->getSubprogram()->getLine();
+    uint32_t Discriminator = DIL->getBaseDiscriminator();
+    StringRef Name = DIL->getScope()->getSubprogram()->getLinkageName();
+    if (Name.empty())
+      Name = DIL->getScope()->getSubprogram()->getName();
+    CallSiteLoc << Name.str() << ":" << llvm::utostr(Offset);
+    if (Discriminator) {
+      CallSiteLoc << "." << llvm::utostr(Discriminator);
+    }
+    First = false;
+  }
+
+  return CallSiteLoc.str();
+}
+
 void llvm::addLocationToRemarks(OptimizationRemark &Remark, DebugLoc DLoc) {
-  if (!DLoc.get())
+  if (!DLoc.get()) {
     return;
+  }
 
   bool First = true;
   Remark << " at callsite ";
@@ -405,4 +439,39 @@ void llvm::emitInlinedInto(OptimizationRemarkEmitter &ORE, DebugLoc DLoc,
     addLocationToRemarks(Remark, DLoc);
     return Remark;
   });
+}
+
+std::unique_ptr<InlineAdvice> MandatoryInlineAdvisor::getAdvice(CallBase &CB) {
+  auto &Caller = *CB.getCaller();
+  auto &Callee = *CB.getCalledFunction();
+  auto &ORE = FAM.getResult<OptimizationRemarkEmitterAnalysis>(Caller);
+
+  bool Advice = MandatoryInliningKind::Always ==
+                    MandatoryInlineAdvisor::getMandatoryKind(CB, FAM, ORE) &&
+                &Caller != &Callee;
+  return std::make_unique<InlineAdvice>(this, CB, ORE, Advice);
+}
+
+MandatoryInlineAdvisor::MandatoryInliningKind
+MandatoryInlineAdvisor::getMandatoryKind(CallBase &CB,
+                                         FunctionAnalysisManager &FAM,
+                                         OptimizationRemarkEmitter &ORE) {
+  auto &Callee = *CB.getCalledFunction();
+
+  auto GetTLI = [&](Function &F) -> const TargetLibraryInfo & {
+    return FAM.getResult<TargetLibraryAnalysis>(F);
+  };
+
+  auto &TIR = FAM.getResult<TargetIRAnalysis>(Callee);
+
+  auto TrivialDecision =
+      llvm::getAttributeBasedInliningDecision(CB, &Callee, TIR, GetTLI);
+
+  if (TrivialDecision.hasValue()) {
+    if (TrivialDecision->isSuccess())
+      return MandatoryInliningKind::Always;
+    else
+      return MandatoryInliningKind::Never;
+  }
+  return MandatoryInliningKind::NotMandatory;
 }

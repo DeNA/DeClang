@@ -379,8 +379,12 @@ Optional<unsigned> Preprocessor::getSkippedRangeForExcludedConditionalBlock(
 
   std::pair<FileID, unsigned> HashFileOffset =
       SourceMgr.getDecomposedLoc(HashLoc);
-  const llvm::MemoryBuffer *Buf = SourceMgr.getBuffer(HashFileOffset.first);
-  auto It = ExcludedConditionalDirectiveSkipMappings->find(Buf);
+  Optional<llvm::MemoryBufferRef> Buf =
+      SourceMgr.getBufferOrNone(HashFileOffset.first);
+  if (!Buf)
+    return None;
+  auto It =
+      ExcludedConditionalDirectiveSkipMappings->find(Buf->getBufferStart());
   if (It == ExcludedConditionalDirectiveSkipMappings->end())
     return None;
 
@@ -2055,7 +2059,7 @@ Preprocessor::ImportAction Preprocessor::HandleHeaderIncludeOrImport(
   // some directives (e.g. #endif of a header guard) will never be seen.
   // Since this will lead to confusing errors, avoid the inclusion.
   if (Action == Enter && File && PreambleConditionalStack.isRecording() &&
-      SourceMgr.isMainFile(*File)) {
+      SourceMgr.isMainFile(File->getFileEntry())) {
     Diag(FilenameTok.getLocation(),
          diag::err_pp_including_mainfile_in_preamble);
     return {ImportAction::None};
@@ -2395,7 +2399,7 @@ bool Preprocessor::ReadMacroParameterList(MacroInfo *MI, Token &Tok) {
              diag::ext_variadic_macro);
 
       // OpenCL v1.2 s6.9.e: variadic macros are not supported.
-      if (LangOpts.OpenCL) {
+      if (LangOpts.OpenCL && !LangOpts.OpenCLCPlusPlus) {
         Diag(Tok, diag::ext_pp_opencl_variadic_macros);
       }
 
@@ -2833,6 +2837,8 @@ void Preprocessor::HandleDefineDirective(
       // C++ [cpp.predefined]p4, but allow it as an extension.
       if (OtherMI->isBuiltinMacro())
         Diag(MacroNameTok, diag::ext_pp_redef_builtin_macro);
+#if 0
+      //DELETE BY DECLANG
       // Macros must be identical.  This means all tokens and whitespace
       // separation must be the same.  C99 6.10.3p2.
       else if (!OtherMI->isAllowRedefinitionsWithoutWarning() &&
@@ -2841,6 +2847,7 @@ void Preprocessor::HandleDefineDirective(
           << MacroNameTok.getIdentifierInfo();
         Diag(OtherMI->getDefinitionLoc(), diag::note_previous_definition);
       }
+#endif
     }
     if (OtherMI->isWarnIfUnused())
       WarnUnusedMacroLocs.erase(OtherMI->getDefinitionLoc());

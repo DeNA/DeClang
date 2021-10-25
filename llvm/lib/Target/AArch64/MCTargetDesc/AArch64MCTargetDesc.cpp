@@ -53,11 +53,11 @@ createAArch64MCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
   if (CPU.empty()) {
     CPU = "generic";
 
-    if (TT.getArchName() == "arm64e")
-      CPU = "vortex";
+    if (TT.isArm64e())
+      CPU = "apple-a12";
   }
 
-  return createAArch64MCSubtargetInfoImpl(TT, CPU, FS);
+  return createAArch64MCSubtargetInfoImpl(TT, CPU, /*TuneCPU*/ CPU, FS);
 }
 
 void AArch64_MC::initLLVMToCVRegMapping(MCRegisterInfo *MRI) {

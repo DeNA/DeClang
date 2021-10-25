@@ -337,11 +337,9 @@ public:
     std::unique_ptr<TemplateParameterInfos> packed_args;
   };
 
-  clang::FunctionTemplateDecl *
-  CreateFunctionTemplateDecl(clang::DeclContext *decl_ctx,
-                             OptionalClangModuleID owning_module,
-                             clang::FunctionDecl *func_decl, const char *name,
-                             const TemplateParameterInfos &infos);
+  clang::FunctionTemplateDecl *CreateFunctionTemplateDecl(
+      clang::DeclContext *decl_ctx, OptionalClangModuleID owning_module,
+      clang::FunctionDecl *func_decl, const TemplateParameterInfos &infos);
 
   void CreateFunctionTemplateSpecializationInfo(
       clang::FunctionDecl *func_decl, clang::FunctionTemplateDecl *Template,
@@ -401,11 +399,10 @@ public:
 
   // Function Types
 
-  clang::FunctionDecl *
-  CreateFunctionDeclaration(clang::DeclContext *decl_ctx,
-                            OptionalClangModuleID owning_module,
-                            const char *name, const CompilerType &function_Type,
-                            int storage, bool is_inline);
+  clang::FunctionDecl *CreateFunctionDeclaration(
+      clang::DeclContext *decl_ctx, OptionalClangModuleID owning_module,
+      llvm::StringRef name, const CompilerType &function_Type,
+      clang::StorageClass storage, bool is_inline);
 
   CompilerType CreateFunctionType(const CompilerType &result_type,
                                   const CompilerType *args, unsigned num_args,
@@ -583,8 +580,7 @@ public:
   bool IsFloatingPointType(lldb::opaque_compiler_type_t type, uint32_t &count,
                            bool &is_complex) override;
 
-  bool IsFunctionType(lldb::opaque_compiler_type_t type,
-                      bool *is_variadic_ptr) override;
+  bool IsFunctionType(lldb::opaque_compiler_type_t type) override;
 
   uint32_t IsHomogeneousAggregate(lldb::opaque_compiler_type_t type,
                                   CompilerType *base_type_ptr) override;
@@ -605,6 +601,8 @@ public:
 
   bool IsEnumerationType(lldb::opaque_compiler_type_t type,
                          bool &is_signed) override;
+
+  bool IsScopedEnumerationType(lldb::opaque_compiler_type_t type) override;
 
   static bool IsObjCClassType(const CompilerType &type);
 
@@ -672,16 +670,7 @@ public:
 
   // Creating related types
 
-  /// Using the current type, create a new typedef to that type using
-  /// "typedef_name" as the name and "decl_ctx" as the decl context.
-  /// \param payload is an opaque TypePayloadClang.
-  static CompilerType
-  CreateTypedefType(const CompilerType &type, const char *typedef_name,
-                    const CompilerDeclContext &compiler_decl_ctx,
-                    uint32_t opaque_payload);
-
   CompilerType GetArrayElementType(lldb::opaque_compiler_type_t type,
-                                   uint64_t *stride,
                                    ExecutionContextScope *exe_scope) override;
 
   CompilerType GetArrayType(lldb::opaque_compiler_type_t type,
@@ -691,6 +680,9 @@ public:
 
   CompilerType
   GetFullyUnqualifiedType(lldb::opaque_compiler_type_t type) override;
+
+  CompilerType
+  GetEnumerationIntegerType(lldb::opaque_compiler_type_t type) override;
 
   // Returns -1 if this isn't a function of if the function doesn't have a
   // prototype Returns a value >= 0 if there is a prototype.
@@ -728,6 +720,9 @@ public:
 
   CompilerType AddRestrictModifier(lldb::opaque_compiler_type_t type) override;
 
+  /// Using the current type, create a new typedef to that type using
+  /// "typedef_name" as the name and "decl_ctx" as the decl context.
+  /// \param opaque_payload is an opaque TypePayloadClang.
   CompilerType CreateTypedef(lldb::opaque_compiler_type_t type,
                              const char *name,
                              const CompilerDeclContext &decl_ctx,
@@ -1057,7 +1052,8 @@ public:
   }
 
   clang::DeclarationName
-  GetDeclarationName(const char *name, const CompilerType &function_clang_type);
+  GetDeclarationName(llvm::StringRef name,
+                     const CompilerType &function_clang_type);
 
   clang::LangOptions *GetLangOpts() const {
     return m_language_options_up.get();
@@ -1141,7 +1137,7 @@ public:
   /// These ASTs are isolated from the main scratch AST and are each
   /// dedicated to a special language option/feature that makes the contained
   /// AST nodes incompatible with other AST nodes.
-  enum class IsolatedASTKind {
+  enum IsolatedASTKind {
     /// The isolated AST for declarations/types from expressions that imported
     /// type information from a C++ module. The templates from a C++ module
     /// often conflict with the templates we generate from debug information,
@@ -1202,8 +1198,8 @@ public:
                                     const ValueList &arg_value_list,
                                     const char *name) override;
 
-  UtilityFunction *GetUtilityFunction(const char *text,
-                                      const char *name) override;
+  std::unique_ptr<UtilityFunction>
+  CreateUtilityFunction(std::string text, std::string name) override;
 
   PersistentExpressionState *GetPersistentExpressionState() override;
 
@@ -1236,10 +1232,13 @@ private:
   /// imported types.
   std::unique_ptr<ClangASTSource> m_scratch_ast_source_up;
 
+  // FIXME: GCC 5.x doesn't support enum as map keys.
+  typedef int IsolatedASTKey;
+
   /// Map from IsolatedASTKind to their actual TypeSystemClang instance.
   /// This map is lazily filled with sub-ASTs and should be accessed via
   /// `GetSubAST` (which lazily fills this map).
-  std::unordered_map<int, std::unique_ptr<TypeSystemClang>>
+  std::unordered_map<IsolatedASTKey, std::unique_ptr<TypeSystemClang>>
       m_isolated_asts;
 };
 

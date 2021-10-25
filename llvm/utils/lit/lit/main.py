@@ -39,7 +39,8 @@ def main(builtin_params={}):
         config_prefix=opts.configPrefix,
         echo_all_commands=opts.echoAllCommands)
 
-    discovered_tests = lit.discovery.find_tests_for_inputs(lit_config, opts.test_paths)
+    discovered_tests = lit.discovery.find_tests_for_inputs(lit_config, opts.test_paths,
+                                                           opts.indirectlyRunCheck)
     if not discovered_tests:
         sys.stderr.write('error: did not discover any tests for provided path(s)\n')
         sys.exit(2)
@@ -80,9 +81,13 @@ def main(builtin_params={}):
                              'error.\n')
             sys.exit(2)
 
+    # When running multiple shards, don't include skipped tests in the xunit
+    # output since merging the files will result in duplicates.
+    tests_for_report = discovered_tests
     if opts.shard:
         (run, shards) = opts.shard
         selected_tests = filter_by_shard(selected_tests, run, shards, lit_config)
+        tests_for_report = selected_tests
         if not selected_tests:
             sys.stderr.write('warning: shard does not contain any tests.  '
                              'Consider decreasing the number of shards.\n')
@@ -96,13 +101,15 @@ def main(builtin_params={}):
     run_tests(selected_tests, lit_config, opts, len(discovered_tests))
     elapsed = time.time() - start
 
+    record_test_times(selected_tests, lit_config)
+
     if opts.time_tests:
         print_histogram(discovered_tests)
 
     print_results(discovered_tests, elapsed, opts)
 
     for report in opts.reports:
-        report.write_results(discovered_tests, elapsed)
+        report.write_results(tests_for_report, elapsed)
 
     if lit_config.numErrors:
         sys.stderr.write('\n%d error(s) in tests\n' % lit_config.numErrors)
@@ -150,21 +157,13 @@ def print_discovered(tests, show_suites, show_tests):
 
 
 def determine_order(tests, order):
-    assert order in ['default', 'random', 'failing-first']
-    if order == 'default':
-        tests.sort(key=lambda t: (not t.isEarlyTest(), t.getFullName()))
-    elif order == 'random':
+    from lit.cl_arguments import TestOrder
+    if order == TestOrder.RANDOM:
         import random
         random.shuffle(tests)
     else:
-        def by_mtime(test):
-            return os.path.getmtime(test.getFilePath())
-        tests.sort(key=by_mtime, reverse=True)
-
-
-def touch_file(test):
-    if test.isFailure():
-        os.utime(test.getFilePath(), None)
+        assert order == TestOrder.DEFAULT, 'Unknown TestOrder value'
+        tests.sort(key=lambda t: (not t.previous_failure, -t.previous_elapsed, t.getFullName()))
 
 
 def filter_by_shard(tests, run, shards, lit_config):
@@ -198,12 +197,7 @@ def run_tests(tests, lit_config, opts, discovered_tests):
     display = lit.display.create_display(opts, len(tests), discovered_tests,
                                          workers)
 
-    def progress_callback(test):
-        display.update(test)
-        if opts.order == 'failing-first':
-            touch_file(test)
-
-    run = lit.run.Run(tests, lit_config, workers, progress_callback,
+    run = lit.run.Run(tests, lit_config, workers, display.update,
                       opts.max_failures, opts.timeout)
 
     display.print_header()
@@ -250,6 +244,32 @@ def execute_in_tmp_dir(run, lit_config):
                 shutil.rmtree(tmp_dir)
             except Exception as e: 
                 lit_config.warning("Failed to delete temp directory '%s', try upgrading your version of Python to fix this" % tmp_dir)
+
+
+def record_test_times(tests, lit_config):
+    times_by_suite = {}
+    for t in tests:
+        if not t.result.elapsed:
+            continue
+        if not t.suite.exec_root in times_by_suite:
+            times_by_suite[t.suite.exec_root] = []
+        time = -t.result.elapsed if t.isFailure() else t.result.elapsed
+        # The "path" here is only used as a key into a dictionary. It is never
+        # used as an actual path to a filesystem API, therefore we use '/' as
+        # the canonical separator so that Unix and Windows machines can share
+        # timing data.
+        times_by_suite[t.suite.exec_root].append(('/'.join(t.path_in_suite),
+          t.result.elapsed))
+
+    for s, value in times_by_suite.items():
+        try:
+            path = os.path.join(s, '.lit_test_times.txt')
+            with open(path, 'w') as time_file:
+                for name, time in value:
+                    time_file.write(("%e" % time) + ' ' + name + '\n')
+        except:
+            lit_config.warning('Could not save test time: ' + path)
+            continue
 
 
 def print_histogram(tests):

@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_LIB_BASIC_TARGETS_AMDGPU_H
 #define LLVM_CLANG_LIB_BASIC_TARGETS_AMDGPU_H
 
+#include "clang/Basic/TargetID.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
 #include "llvm/ADT/StringSet.h"
@@ -40,6 +41,15 @@ class LLVM_LIBRARY_VISIBILITY AMDGPUTargetInfo final : public TargetInfo {
 
   llvm::AMDGPU::GPUKind GPUKind;
   unsigned GPUFeatures;
+  unsigned WavefrontSize;
+
+  /// Target ID is device name followed by optional feature name postfixed
+  /// by plus or minus sign delimitted by colon, e.g. gfx908:xnack+:sramecc-.
+  /// If the target ID contains feature+, map it to true.
+  /// If the target ID contains feature-, map it to false.
+  /// If the target ID does not contain a feature (default), do not map it.
+  llvm::StringMap<bool> OffloadArchFeatures;
+  std::string TargetID;
 
   bool hasFP64() const {
     return getTriple().getArch() == llvm::Triple::amdgcn ||
@@ -275,7 +285,8 @@ public:
   void setSupportedOpenCLOpts() override {
     auto &Opts = getSupportedOpenCLOpts();
     Opts.support("cl_clang_storage_class_specifiers");
-    Opts.support("cl_khr_icd");
+    Opts.support("__cl_clang_function_pointers");
+    Opts.support("__cl_clang_variadic_functions");
 
     bool IsAMDGCN = isAMDGCN(getTriple());
 
@@ -389,6 +400,37 @@ public:
   void setAuxTarget(const TargetInfo *Aux) override;
 
   bool hasExtIntType() const override { return true; }
+
+  // Record offload arch features since they are needed for defining the
+  // pre-defined macros.
+  bool handleTargetFeatures(std::vector<std::string> &Features,
+                            DiagnosticsEngine &Diags) override {
+    auto TargetIDFeatures =
+        getAllPossibleTargetIDFeatures(getTriple(), getArchNameAMDGCN(GPUKind));
+    llvm::for_each(Features, [&](const auto &F) {
+      assert(F.front() == '+' || F.front() == '-');
+      if (F == "+wavefrontsize64")
+        WavefrontSize = 64;
+      bool IsOn = F.front() == '+';
+      StringRef Name = StringRef(F).drop_front();
+      if (llvm::find(TargetIDFeatures, Name) == TargetIDFeatures.end())
+        return;
+      assert(OffloadArchFeatures.find(Name) == OffloadArchFeatures.end());
+      OffloadArchFeatures[Name] = IsOn;
+    });
+    return true;
+  }
+
+  Optional<std::string> getTargetID() const override {
+    if (!isAMDGCN(getTriple()))
+      return llvm::None;
+    // When -target-cpu is not set, we assume generic code that it is valid
+    // for all GPU and use an empty string as target ID to represent that.
+    if (GPUKind == llvm::AMDGPU::GK_NONE)
+      return std::string("");
+    return getCanonicalTargetID(getArchNameAMDGCN(GPUKind),
+                                OffloadArchFeatures);
+  }
 };
 
 } // namespace targets

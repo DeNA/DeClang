@@ -102,6 +102,24 @@ void RISCVInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
   MO.getExpr()->print(O, &MAI);
 }
 
+void RISCVInstPrinter::printBranchOperand(const MCInst *MI, uint64_t Address,
+                                          unsigned OpNo,
+                                          const MCSubtargetInfo &STI,
+                                          raw_ostream &O) {
+  const MCOperand &MO = MI->getOperand(OpNo);
+  if (!MO.isImm())
+    return printOperand(MI, OpNo, STI, O);
+
+  if (PrintBranchImmAsAddress) {
+    uint64_t Target = Address + MO.getImm();
+    if (!STI.hasFeature(RISCV::Feature64Bit))
+      Target &= 0xffffffff;
+    O << formatHex(Target);
+  } else {
+    O << MO.getImm();
+  }
+}
+
 void RISCVInstPrinter::printCSRSystemRegister(const MCInst *MI, unsigned OpNo,
                                               const MCSubtargetInfo &STI,
                                               raw_ostream &O) {
@@ -153,12 +171,7 @@ void RISCVInstPrinter::printAtomicMemOp(const MCInst *MI, unsigned OpNo,
 void RISCVInstPrinter::printVTypeI(const MCInst *MI, unsigned OpNo,
                                    const MCSubtargetInfo &STI, raw_ostream &O) {
   unsigned Imm = MI->getOperand(OpNo).getImm();
-  unsigned Sew = (Imm >> 2) & 0x7;
-  unsigned Lmul = Imm & 0x3;
-
-  Lmul = 0x1 << Lmul;
-  Sew = 0x1 << (Sew + 3);
-  O << "e" << Sew << ",m" << Lmul;
+  RISCVVType::printVType(Imm, O);
 }
 
 void RISCVInstPrinter::printVMaskReg(const MCInst *MI, unsigned OpNo,
@@ -172,15 +185,6 @@ void RISCVInstPrinter::printVMaskReg(const MCInst *MI, unsigned OpNo,
   O << ", ";
   printRegName(O, MO.getReg());
   O << ".t";
-}
-
-void RISCVInstPrinter::printSImm5Plus1(const MCInst *MI, unsigned OpNo,
-                                       const MCSubtargetInfo &STI,
-                                       raw_ostream &O) {
-  const MCOperand &MO = MI->getOperand(OpNo);
-
-  assert(MO.isImm() && "printSImm5Plus1 can only print constant operands");
-  O << MO.getImm() + 1;
 }
 
 const char *RISCVInstPrinter::getRegisterName(unsigned RegNo) {

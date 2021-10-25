@@ -817,10 +817,8 @@ SBTarget SBDebugger::CreateTargetWithFileAndArch(const char *filename,
         add_dependent_modules ? eLoadDependentsYes : eLoadDependentsNo, nullptr,
         target_sp);
 
-    if (error.Success()) {
-      m_opaque_sp->GetTargetList().SetSelectedTarget(target_sp.get());
+    if (error.Success())
       sb_target.SetSP(target_sp);
-    }
   }
 
   LLDB_LOGF(log,
@@ -846,10 +844,8 @@ SBTarget SBDebugger::CreateTarget(const char *filename) {
         add_dependent_modules ? eLoadDependentsYes : eLoadDependentsNo, nullptr,
         target_sp);
 
-    if (error.Success()) {
-      m_opaque_sp->GetTargetList().SetSelectedTarget(target_sp.get());
+    if (error.Success())
       sb_target.SetSP(target_sp);
-    }
   }
   Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_API));
   LLDB_LOGF(log,
@@ -864,7 +860,7 @@ SBTarget SBDebugger::GetDummyTarget() {
 
   SBTarget sb_target;
   if (m_opaque_sp) {
-    sb_target.SetSP(m_opaque_sp->GetDummyTarget()->shared_from_this());
+    sb_target.SetSP(m_opaque_sp->GetDummyTarget().shared_from_this());
   }
   Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_API));
   LLDB_LOGF(log, "SBDebugger(%p)::GetDummyTarget() => SBTarget(%p)",
@@ -885,8 +881,6 @@ bool SBDebugger::DeleteTarget(lldb::SBTarget &target) {
       result = m_opaque_sp->GetTargetList().DeleteTarget(target_sp);
       target_sp->Destroy();
       target.Clear();
-      const bool mandatory = true;
-      ModuleList::RemoveOrphanSharedModules(mandatory);
     }
   }
 
@@ -1006,7 +1000,7 @@ void SBDebugger::SetSelectedTarget(SBTarget &sb_target) {
 
   TargetSP target_sp(sb_target.GetSP());
   if (m_opaque_sp) {
-    m_opaque_sp->GetTargetList().SetSelectedTarget(target_sp.get());
+    m_opaque_sp->GetTargetList().SetSelectedTarget(target_sp);
   }
   if (log) {
     SBStream sstr;

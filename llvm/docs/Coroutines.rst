@@ -339,10 +339,10 @@ Coroutine Transformation
 One of the steps of coroutine lowering is building the coroutine frame. The
 def-use chains are analyzed to determine which objects need be kept alive across
 suspend points. In the coroutine shown in the previous section, use of virtual register 
-`%n.val` is separated from the definition by a suspend point, therefore, it 
+`%inc` is separated from the definition by a suspend point, therefore, it 
 cannot reside on the stack frame since the latter goes away once the coroutine 
 is suspended and control is returned back to the caller. An i32 slot is 
-allocated in the coroutine frame and `%n.val` is spilled and reloaded from that
+allocated in the coroutine frame and `%inc` is spilled and reloaded from that
 slot as needed.
 
 We also store addresses of the resume and destroy functions so that the 
@@ -1389,6 +1389,48 @@ The following table summarizes the handling of `coro.end`_ intrinsic.
 |            | Landingpad  | nothing           | nothing                       |
 +------------+-------------+-------------------+-------------------------------+
 
+
+'llvm.coro.end.async' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+::
+
+  declare i1 @llvm.coro.end.async(i8* <handle>, i1 <unwind>, ...)
+
+Overview:
+"""""""""
+
+The '``llvm.coro.end.async``' marks the point where execution of the resume part
+of the coroutine should end and control should return to the caller. As part of
+its variable tail arguments this instruction allows to specify a function and
+the function's arguments that are to be tail called as the last action before
+returning.
+
+
+Arguments:
+""""""""""
+
+The first argument should refer to the coroutine handle of the enclosing
+coroutine. A frontend is allowed to supply null as the first parameter, in this
+case `coro-early` pass will replace the null with an appropriate coroutine
+handle value.
+
+The second argument should be `true` if this coro.end is in the block that is
+part of the unwind sequence leaving the coroutine body due to an exception and
+`false` otherwise.
+
+The third argument if present should specify a function to be called.
+
+If the third argument is present, the remaining arguments are the arguments to
+the function call.
+
+.. code-block:: llvm
+
+  call i1 (i8*, i1, ...) @llvm.coro.end.async(
+                           i8* %hdl, i1 0,
+                           void (i8*, %async.task*, %async.actor*)* @must_tail_call_return,
+                           i8* %ctxt, %async.task* %task, %async.actor* %actor)
+  unreachable
+
 .. _coro.suspend:
 .. _suspend points:
 
@@ -1718,10 +1760,6 @@ earlier passes.
 
 Areas Requiring Attention
 =========================
-#. A coroutine frame is bigger than it could be. Adding stack packing and stack 
-   coloring like optimization on the coroutine frame will result in tighter
-   coroutine frames.
-
 #. Take advantage of the lifetime intrinsics for the data that goes into the
    coroutine frame. Leave lifetime intrinsics as is for the data that stays in
    allocas.

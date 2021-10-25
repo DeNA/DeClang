@@ -97,11 +97,7 @@ class Builder:
         Helper function to return the key-value string to specify the architecture
         used for the make system.
         """
-        arch = architecture if architecture else None
-        if not arch and configuration.arch:
-            arch = configuration.arch
-
-        return ("ARCH=" + arch) if arch else ""
+        return ("ARCH=" + architecture) if architecture else ""
 
     def getCCSpec(self, compiler):
         """
@@ -113,6 +109,16 @@ class Builder:
             cc = configuration.compiler
         if cc:
             return "CC=\"%s\"" % cc
+        else:
+            return ""
+
+    def getSwiftCSpec(self):
+        """
+        Helper function to return the key-value string to specify the Swift
+        compiler used for the make system.
+        """
+        if configuration.swiftCompiler:
+            return "SWIFTC=\"{}\"".format(configuration.swiftCompiler)
         else:
             return ""
 
@@ -151,6 +157,7 @@ class Builder:
                 self.getArchSpec(architecture),
                 self.getSwiftTargetFlags(architecture),
                 self.getCCSpec(compiler),
+                self.getSwiftCSpec(),
                 self.getExtraMakeArgs(),
                 self.getSDKRootSpec(),
                 self.getModuleCacheSpec(),
@@ -178,6 +185,7 @@ class Builder:
                 self.getArchSpec(architecture),
                 self.getSwiftTargetFlags(architecture),
                 self.getCCSpec(compiler),
+                self.getSwiftCSpec(),
                 self.getExtraMakeArgs(),
                 self.getSDKRootSpec(),
                 self.getModuleCacheSpec(),
@@ -204,6 +212,7 @@ class Builder:
                 self.getArchSpec(architecture),
                 self.getSwiftTargetFlags(architecture),
                 self.getCCSpec(compiler),
+                self.getSwiftCSpec(),
                 self.getExtraMakeArgs(),
                 self.getSDKRootSpec(),
                 self.getModuleCacheSpec(),
@@ -230,6 +239,7 @@ class Builder:
                 self.getArchSpec(architecture),
                 self.getSwiftTargetFlags(architecture),
                 self.getCCSpec(compiler),
+                self.getSwiftCSpec(),
                 self.getExtraMakeArgs(),
                 self.getSDKRootSpec(),
                 self.getModuleCacheSpec(),

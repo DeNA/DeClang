@@ -36,11 +36,12 @@ class HostTest : public testing::Test {
 protected:
   bool isSupportedArchAndOS() {
     // Initially this is only testing detection of the number of
-    // physical cores, which is currently only supported/tested for
-    // x86_64 Linux and Darwin.
+    // physical cores, which is currently only supported/tested on
+    // some systems.
     return (Host.isOSWindows() && llvm_is_multithreaded()) ||
-           (Host.isX86() &&
-            (Host.isOSDarwin() || Host.getOS() == Triple::Linux));
+           Host.isOSDarwin() || (Host.isX86() && Host.isOSLinux()) ||
+           (Host.isPPC64() && Host.isOSLinux()) ||
+           (Host.isSystemZ() && (Host.isOSLinux() || Host.isOSzOS()));
   }
 
   HostTest() : Host(Triple::normalize(sys::getProcessTriple())) {}
@@ -347,9 +348,15 @@ TEST_F(HostTest, getMacOSHostVersion) {
   unsigned HostMajor, HostMinor, HostMicro;
   ASSERT_EQ(HostTriple.getMacOSXVersion(HostMajor, HostMinor, HostMicro), true);
 
-  // Don't compare the 'Micro' version, as it's always '0' for the 'Darwin'
-  // triples.
-  ASSERT_EQ(std::tie(SystemMajor, SystemMinor), std::tie(HostMajor, HostMinor));
+  if (SystemMajor > 10) {
+    // Don't compare the 'Minor' and 'Micro' versions, as they're always '0' for
+    // the 'Darwin' triples on 11.x.
+    ASSERT_EQ(SystemMajor, HostMajor);
+  } else {
+    // Don't compare the 'Micro' version, as it's always '0' for the 'Darwin'
+    // triples.
+    ASSERT_EQ(std::tie(SystemMajor, SystemMinor), std::tie(HostMajor, HostMinor));
+  }
 }
 #endif
 

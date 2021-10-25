@@ -38,6 +38,7 @@
 
 #include <asl.h>
 #include <crt_externs.h>
+#include <dlfcn.h>
 #include <grp.h>
 #include <libproc.h>
 #include <pwd.h>
@@ -1108,39 +1109,54 @@ static Status LaunchProcessPosixSpawn(const char *exe_path,
     }
   }
 
-// posix_spawnattr_setbinpref_np appears to be an Apple extension per:
-// http://www.unix.com/man-page/OSX/3/posix_spawnattr_setbinpref_np/
-#if !defined(__arm__)
-  // Don't set the binpref if a shell was provided.  After all, that's only
+  // Don't set the binpref if a shell was provided. After all, that's only
   // going to affect what version of the shell is launched, not what fork of
   // the binary is launched.  We insert "arch --arch <ARCH> as part of the
   // shell invocation to do that job on OSX.
   if (launch_info.GetShell() == FileSpec()) {
-    // We don't need to do this for ARM, and we really shouldn't now that we
-    // have multiple CPU subtypes and no posix_spawnattr call that allows us to
-    // set which CPU subtype to launch...
     const ArchSpec &arch_spec = launch_info.GetArchitecture();
-    cpu_type_t cpu = arch_spec.GetMachOCPUType();
-    cpu_type_t sub = arch_spec.GetMachOCPUSubType();
-    if (cpu != 0 && cpu != static_cast<cpu_type_t>(UINT32_MAX) &&
-        cpu != static_cast<cpu_type_t>(LLDB_INVALID_CPUTYPE) &&
-        !(cpu == 0x01000007 && sub == 8)) // If haswell is specified, don't try
-                                          // to set the CPU type or we will fail
-    {
+    cpu_type_t cpu_type = arch_spec.GetMachOCPUType();
+    cpu_type_t cpu_subtype = arch_spec.GetMachOCPUSubType();
+    const bool set_cpu_type =
+        cpu_type != 0 && cpu_type != static_cast<cpu_type_t>(UINT32_MAX) &&
+        cpu_type != static_cast<cpu_type_t>(LLDB_INVALID_CPUTYPE);
+    const bool set_cpu_subtype =
+        cpu_subtype != 0 &&
+        cpu_subtype != static_cast<cpu_subtype_t>(UINT32_MAX) &&
+        cpu_subtype != CPU_SUBTYPE_X86_64_H;
+    if (set_cpu_type) {
       size_t ocount = 0;
-      error.SetError(::posix_spawnattr_setbinpref_np(&attr, 1, &cpu, &ocount),
-                     eErrorTypePOSIX);
-      if (error.Fail())
-        LLDB_LOG(log,
-                 "error: {0}, ::posix_spawnattr_setbinpref_np ( &attr, 1, "
-                 "cpu_type = {1:x}, count => {2} )",
-                 error, cpu, ocount);
+      typedef int (*posix_spawnattr_setarchpref_np_t)(
+          posix_spawnattr_t *, size_t, cpu_type_t *, cpu_subtype_t *, size_t *);
+      posix_spawnattr_setarchpref_np_t posix_spawnattr_setarchpref_np_fn =
+          (posix_spawnattr_setarchpref_np_t)dlsym(
+              RTLD_DEFAULT, "posix_spawnattr_setarchpref_np");
+      if (set_cpu_subtype && posix_spawnattr_setarchpref_np_fn) {
+        error.SetError((*posix_spawnattr_setarchpref_np_fn)(
+                           &attr, 1, &cpu_type, &cpu_subtype, &ocount),
+                       eErrorTypePOSIX);
+        if (error.Fail())
+          LLDB_LOG(log,
+                   "error: {0}, ::posix_spawnattr_setarchpref_np ( &attr, 1, "
+                   "cpu_type = {1:x}, cpu_subtype = {1:x}, count => {2} )",
+                   error, cpu_type, cpu_subtype, ocount);
 
-      if (error.Fail() || ocount != 1)
-        return error;
+        if (error.Fail() || ocount != 1)
+          return error;
+      } else {
+        error.SetError(
+            ::posix_spawnattr_setbinpref_np(&attr, 1, &cpu_type, &ocount),
+            eErrorTypePOSIX);
+        if (error.Fail())
+          LLDB_LOG(log,
+                   "error: {0}, ::posix_spawnattr_setbinpref_np ( &attr, 1, "
+                   "cpu_type = {1:x}, count => {2} )",
+                   error, cpu_type, ocount);
+        if (error.Fail() || ocount != 1)
+          return error;
+      }
     }
   }
-#endif
 
   const char *tmp_argv[2];
   char *const *argv = const_cast<char *const *>(

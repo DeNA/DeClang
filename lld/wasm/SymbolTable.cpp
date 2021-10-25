@@ -206,12 +206,12 @@ DefinedFunction *SymbolTable::addSyntheticFunction(StringRef name,
                                         flags, nullptr, function);
 }
 
-// Adds an optional, linker generated, data symbols.  The symbol will only be
+// Adds an optional, linker generated, data symbol.  The symbol will only be
 // added if there is an undefine reference to it, or if it is explicitly
 // exported via the --export flag.  Otherwise we don't add the symbol and return
 // nullptr.
 DefinedData *SymbolTable::addOptionalDataSymbol(StringRef name,
-                                                uint32_t value) {
+                                                uint64_t value) {
   Symbol *s = find(name);
   if (!s && (config->exportAll || config->exportedSymbols.count(name) != 0))
     s = insertName(name).first;
@@ -239,6 +239,18 @@ DefinedGlobal *SymbolTable::addSyntheticGlobal(StringRef name, uint32_t flags,
   syntheticGlobals.emplace_back(global);
   return replaceSymbol<DefinedGlobal>(insertName(name).first, name, flags,
                                       nullptr, global);
+}
+
+DefinedGlobal *SymbolTable::addOptionalGlobalSymbols(StringRef name,
+                                                     uint32_t flags,
+                                                     InputGlobal *global) {
+  LLVM_DEBUG(dbgs() << "addOptionalGlobalSymbols: " << name << " -> " << global
+                    << "\n");
+  Symbol *s = find(name);
+  if (!s || s->isDefined())
+    return nullptr;
+  syntheticGlobals.emplace_back(global);
+  return replaceSymbol<DefinedGlobal>(s, name, flags, nullptr, global);
 }
 
 static bool shouldReplace(const Symbol *existing, InputFile *newFile,
@@ -458,11 +470,16 @@ Symbol *SymbolTable::addUndefinedFunction(StringRef name,
                                      file, sig, isCalledDirectly);
   };
 
-  if (wasInserted)
+  if (wasInserted) {
     replaceSym();
-  else if (auto *lazy = dyn_cast<LazySymbol>(s))
-    lazy->fetch();
-  else {
+  } else if (auto *lazy = dyn_cast<LazySymbol>(s)) {
+    if ((flags & WASM_SYMBOL_BINDING_MASK) == WASM_SYMBOL_BINDING_WEAK) {
+      lazy->setWeak();
+      lazy->signature = sig;
+    } else {
+      lazy->fetch();
+    }
+  } else {
     auto existingFunction = dyn_cast<FunctionSymbol>(s);
     if (!existingFunction) {
       reportTypeError(s, file, WASM_SYMBOL_TYPE_FUNCTION);
@@ -499,12 +516,16 @@ Symbol *SymbolTable::addUndefinedData(StringRef name, uint32_t flags,
   if (s->traced)
     printTraceSymbolUndefined(name, file);
 
-  if (wasInserted)
+  if (wasInserted) {
     replaceSymbol<UndefinedData>(s, name, flags, file);
-  else if (auto *lazy = dyn_cast<LazySymbol>(s))
-    lazy->fetch();
-  else if (s->isDefined())
+  } else if (auto *lazy = dyn_cast<LazySymbol>(s)) {
+    if ((flags & WASM_SYMBOL_BINDING_MASK) == WASM_SYMBOL_BINDING_WEAK)
+      lazy->setWeak();
+    else
+      lazy->fetch();
+  } else if (s->isDefined()) {
     checkDataType(s, file);
+  }
   return s;
 }
 
@@ -652,7 +673,19 @@ InputFunction *SymbolTable::replaceWithUnreachable(Symbol *sym,
   // to be exported outside the object file.
   replaceSymbol<DefinedFunction>(sym, debugName, WASM_SYMBOL_BINDING_LOCAL,
                                  nullptr, func);
+  // Ensure the stub function doesn't get a table entry.  Its address
+  // should always compare equal to the null pointer.
+  sym->isStub = true;
   return func;
+}
+
+void SymbolTable::replaceWithUndefined(Symbol *sym) {
+  // Add a synthetic dummy for weak undefined functions.  These dummies will
+  // be GC'd if not used as the target of any "call" instructions.
+  StringRef debugName = saver.save("undefined_weak:" + toString(*sym));
+  replaceWithUnreachable(sym, *sym->getSignature(), debugName);
+  // Hide our dummy to prevent export.
+  sym->setHidden(true);
 }
 
 // For weak undefined functions, there may be "call" instructions that reference
@@ -661,29 +694,35 @@ InputFunction *SymbolTable::replaceWithUnreachable(Symbol *sym,
 // the call instruction that passes Wasm validation.
 void SymbolTable::handleWeakUndefines() {
   for (Symbol *sym : getSymbols()) {
-    if (!sym->isUndefWeak())
-      continue;
-
-    const WasmSignature *sig = sym->getSignature();
-    if (!sig) {
-      // It is possible for undefined functions not to have a signature (eg. if
-      // added via "--undefined"), but weak undefined ones do have a signature.
-      // Lazy symbols may not be functions and therefore Sig can still be null
-      // in some circumstance.
-      assert(!isa<FunctionSymbol>(sym));
-      continue;
+    if (sym->isUndefWeak()) {
+      if (sym->getSignature()) {
+        replaceWithUndefined(sym);
+      } else {
+        // It is possible for undefined functions not to have a signature (eg.
+        // if added via "--undefined"), but weak undefined ones do have a
+        // signature.  Lazy symbols may not be functions and therefore Sig can
+        // still be null in some circumstance.
+        assert(!isa<FunctionSymbol>(sym));
+      }
     }
-
-    // Add a synthetic dummy for weak undefined functions.  These dummies will
-    // be GC'd if not used as the target of any "call" instructions.
-    StringRef debugName = saver.save("undefined:" + toString(*sym));
-    InputFunction* func = replaceWithUnreachable(sym, *sig, debugName);
-    // Ensure it compares equal to the null pointer, and so that table relocs
-    // don't pull in the stub body (only call-operand relocs should do that).
-    func->setTableIndex(0);
-    // Hide our dummy to prevent export.
-    sym->setHidden(true);
   }
+}
+
+DefinedFunction *SymbolTable::createUndefinedStub(const WasmSignature &sig) {
+  if (stubFunctions.count(sig))
+    return stubFunctions[sig];
+  LLVM_DEBUG(dbgs() << "createUndefinedStub: " << toString(sig) << "\n");
+  auto *sym = reinterpret_cast<DefinedFunction *>(make<SymbolUnion>());
+  sym->isUsedInRegularObj = true;
+  sym->canInline = true;
+  sym->traced = false;
+  sym->forceExport = false;
+  sym->signature = &sig;
+  replaceSymbol<DefinedFunction>(
+      sym, "undefined_stub", WASM_SYMBOL_VISIBILITY_HIDDEN, nullptr, nullptr);
+  replaceWithUnreachable(sym, sig, "undefined_stub");
+  stubFunctions[sig] = sym;
+  return sym;
 }
 
 static void reportFunctionSignatureMismatch(StringRef symName,

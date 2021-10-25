@@ -16,6 +16,7 @@
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
+#include "swift/SymbolGraphGen/SymbolGraphOptions.h"
 #include "lldb/Core/SwiftForward.h"
 #include "lldb/Core/ThreadSafeDenseMap.h"
 #include "lldb/Core/ThreadSafeDenseSet.h"
@@ -79,6 +80,39 @@ class ClangExternalASTSourceCallbacks;
 
 CompilerType ToCompilerType(swift::Type qual_type);
 
+namespace detail {
+/// Serves as the key for caching calls to LoadLibraryUsingPaths.
+struct SwiftLibraryLookupRequest {
+  std::string library_name;
+  std::vector<std::string> search_paths;
+  bool check_rpath = false;
+  uint32_t process_uid = 0;
+
+  bool operator==(const SwiftLibraryLookupRequest &o) const {
+    return std::tie(library_name, search_paths, check_rpath, process_uid) ==
+        std::tie(o.library_name, o.search_paths, o.check_rpath, o.process_uid);
+  }
+};
+} // namespace detail
+} // namespace lldb_private
+
+namespace std {
+template <> struct hash<lldb_private::detail::SwiftLibraryLookupRequest> {
+  using argument_type = lldb_private::detail::SwiftLibraryLookupRequest;
+  using result_type = std::size_t;
+
+  result_type operator()(const argument_type &Arg) const {
+    result_type result = std::hash<decltype(Arg.library_name)>()(Arg.library_name);
+    result ^= std::hash<decltype(Arg.check_rpath)>()(Arg.check_rpath);
+    result ^= std::hash<decltype(Arg.process_uid)>()(Arg.process_uid);
+    for (const std::string &search_path : Arg.search_paths)
+      result ^= std::hash<std::string>()(search_path);
+    return result;
+  }
+};
+} // end namespace std
+
+namespace lldb_private {
 /// This "middle" class between TypeSystemSwiftTypeRef and
 /// SwiftASTContextForExpressions will eventually go away, as more and
 /// more functionality becomes available in TypeSystemSwiftTypeRef.
@@ -133,6 +167,10 @@ public:
                   Target *target = nullptr);
 
   SwiftASTContext(const SwiftASTContext &rhs) = delete;
+  
+  TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() override {
+    return m_typeref_typesystem;
+  }
 
   ~SwiftASTContext();
 
@@ -171,6 +209,8 @@ public:
   swift::SourceManager &GetSourceManager();
 
   swift::LangOptions &GetLanguageOptions();
+
+  swift::symbolgraphgen::SymbolGraphOptions &GetSymbolGraphOptions();
 
   swift::TypeCheckerOptions &GetTypeCheckerOptions();
 
@@ -452,8 +492,7 @@ public:
 
   bool IsDefined(lldb::opaque_compiler_type_t type) override;
 
-  bool IsFunctionType(lldb::opaque_compiler_type_t type,
-                      bool *is_variadic_ptr) override;
+  bool IsFunctionType(lldb::opaque_compiler_type_t type) override;
 
   size_t
   GetNumberOfFunctionArguments(lldb::opaque_compiler_type_t type) override;
@@ -540,7 +579,6 @@ public:
   CompilerType GetTypeRefType(lldb::opaque_compiler_type_t type);
 
   CompilerType GetArrayElementType(lldb::opaque_compiler_type_t type,
-                                   uint64_t *stride,
                                    ExecutionContextScope *exe_scope) override;
 
   CompilerType GetCanonicalType(lldb::opaque_compiler_type_t type) override;
@@ -742,15 +780,26 @@ public:
                                lldb::StackFrameWP &stack_frame_wp,
                                swift::SourceFile &source_file, Status &error);
 
-  /// Retrieve the modules imported by the compilation unit.
-  static bool GetCompileUnitImports(
-      SwiftASTContext &swift_ast_context, SymbolContext &sc,
-      lldb::StackFrameWP &stack_frame_wp,
+  /// Retrieve/import the modules imported by the compilation
+  /// unit. Early-exists with false if there was an import failure.
+  bool GetCompileUnitImports(
+      SymbolContext &sc, lldb::StackFrameWP &stack_frame_wp,
       llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
           &modules,
       Status &error);
 
+  /// Perform all the implicit imports for the current frame.
+  void PerformCompileUnitImports(SymbolContext &sc,
+                                 lldb::StackFrameWP &stack_frame_wp,
+                                 Status &error);
+
 protected:
+  bool GetCompileUnitImportsImpl(
+      SymbolContext &sc, lldb::StackFrameWP &stack_frame_wp,
+      llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
+          *modules,
+      Status &error);
+
   /// This map uses the string value of ConstStrings as the key, and the
   /// TypeBase
   /// * as the value. Since the ConstString strings are uniqued, we can use
@@ -832,6 +881,12 @@ protected:
   lldb_private::Process *m_process = nullptr;
   Module *m_module = nullptr;
   std::string m_platform_sdk_path;
+  /// All previously library loads in LoadLibraryUsingPaths with their
+  /// respective result (true = loaded, false = failed to load).
+  std::unordered_map<detail::SwiftLibraryLookupRequest, bool>
+      library_load_cache;
+  /// A cache for GetCompileUnitImports();
+  llvm::DenseSet<std::pair<Module *, lldb::user_id_t>> m_cu_imports;
 
   typedef std::map<Module *, std::vector<lldb::DataBufferSP>> ASTFileDataMap;
   ASTFileDataMap m_ast_file_data_map;

@@ -1147,14 +1147,14 @@ ValueObjectSP ABISysV_x86_64::GetReturnValueObjectImpl(
         }
 
         if (!already_copied) {
-        // These two tests are just sanity checks.  If I somehow get the type
-        // calculation wrong above it is better to just return nothing than to
-        // assert or crash.
-        if (!copy_from_extractor)
-          return return_valobj_sp;
-        if (copy_from_offset + field_byte_width >
-            copy_from_extractor->GetByteSize())
-          return return_valobj_sp;
+          // These two tests are just sanity checks.  If I somehow get the type
+          // calculation wrong above it is better to just return nothing than to
+          // assert or crash.
+          if (!copy_from_extractor)
+            return return_valobj_sp;
+          if (copy_from_offset + field_byte_width >
+              copy_from_extractor->GetByteSize())
+            return return_valobj_sp;
 
           copy_from_extractor->CopyByteOrderedData(
               copy_from_offset, field_byte_width,
@@ -1237,6 +1237,7 @@ bool ABISysV_x86_64::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
   const int32_t ptr_size = 8;
   row->GetCFAValue().SetIsRegisterPlusOffset(dwarf_rbp, 2 * ptr_size);
   row->SetOffset(0);
+  row->SetUnspecifiedRegistersAreUndefined(true);
 
   row->SetRegisterLocationToAtCFAPlusOffset(fp_reg_num, ptr_size * -2, true);
   row->SetRegisterLocationToAtCFAPlusOffset(pc_reg_num, ptr_size * -1, true);

@@ -75,6 +75,7 @@ endif()
 file(TO_CMAKE_PATH ${LLVM_DIR} LLVM_DIR)
 list(APPEND CMAKE_MODULE_PATH "${LLVM_DIR}")
 list(APPEND CMAKE_MODULE_PATH "${SWIFT_CMAKE_DIR}")
+
 include(AddLLVM)
 include(TableGen)
 include(HandleLLVMOptions)

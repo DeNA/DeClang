@@ -6,7 +6,6 @@
 // REQUIRES: libomptarget-debug
 
 #include <stdlib.h>
-#include <stdio.h>
 
 int *allocate(size_t n) {
   int *ptr = malloc(sizeof(int) * n);
@@ -33,6 +32,11 @@ int main(void) {
   deallocate(V, 10);
 // CHECK-NOT: RefCount=2
   cnt = malloc(sizeof(int));
+  *cnt = 0;
+#pragma omp target map(cnt[:1])
+  foo();
+  printf("Cnt = %d.\n", *cnt);
+// CHECK: Cnt = 1.
   *cnt = 0;
 #pragma omp target data map(cnt[:1])
 #pragma omp target

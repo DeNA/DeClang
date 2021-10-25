@@ -46,19 +46,19 @@ class TestSwiftDynamicTypeResolutionImportConflict(TestBase):
         self.runCmd('settings set symbols.clang-modules-cache-path "%s"'
                     % mod_cache)
         self.build()
-
-        target = self.dbg.CreateTarget(self.getBuildArtifact("a.out"))
-        self.registerSharedLibrariesWithTarget(target, ['Dylib', 'Conflict'])
-
-        lldbutil.run_to_source_breakpoint(self, "break here",
-                                          lldb.SBFileSpec('main.swift'))
+        target, _, _, _ = lldbutil.run_to_source_breakpoint(self, "break here",
+                                          lldb.SBFileSpec('main.swift'),
+                                          extra_images=['Dylib', 'Conflict'])
         # Destroy the scratch context with a dynamic type lookup.
         self.expect("target var -d run-target -- foofoo",
                     substrs=['(Conflict.C) foofoo'])
         self.expect("target var -- foofoo",
                     substrs=['(Conflict.C) foofoo'])
-        lldbutil.run_to_source_breakpoint(self, "break here",
-                                          lldb.SBFileSpec('Dylib.swift'))
+        dylib_breakpoint = target.BreakpointCreateBySourceRegex(
+            'break here', lldb.SBFileSpec('Dylib.swift'))
+        self.assertGreater(dylib_breakpoint.GetNumLocations(), 0)
+
+        self.expect("continue")
         self.expect("bt", substrs=['Dylib.swift'])
         self.expect("fr v -d no-dynamic-values -- input",
                     substrs=['(Dylib.LibraryProtocol) input'])
@@ -69,4 +69,4 @@ class TestSwiftDynamicTypeResolutionImportConflict(TestBase):
         self.expect("fr v -d run-target -- input",
                     substrs=['(Dylib.LibraryProtocol) input'])
         self.expect("expr -d run-target -- input",
-                    substrs=['(Dylib.LibraryProtocol)'])
+                    substrs=['(a.FromMainModule)'])

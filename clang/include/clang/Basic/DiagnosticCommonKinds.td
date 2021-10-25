@@ -111,6 +111,8 @@ def err_module_cycle : Error<"cyclic dependency in module '%0': %1">,
   DefaultFatal;
 def err_module_prebuilt : Error<
   "error in loading module '%0' from prebuilt module path">, DefaultFatal;
+def err_module_rebuild_finalized : Error<
+  "cannot rebuild module '%0' as it is already finalized">, DefaultFatal;
 def note_pragma_entered_here : Note<"#pragma entered here">;
 def note_decl_hiding_tag_type : Note<
   "%1 %0 is hidden by a non-type declaration of %0 here">;
@@ -234,6 +236,12 @@ def err_seh___finally_block : Error<
 // Sema && AST
 def note_invalid_subexpr_in_const_expr : Note<
   "subexpression not valid in a constant expression">;
+def note_constexpr_invalid_template_arg : Note<
+  "%select{pointer|reference}0 to %select{|subobject of }1"
+  "%select{type_info object|string literal|temporary object|"
+  "predefined '%3' variable}2 is not allowed in a template argument">;
+def err_constexpr_invalid_template_arg : Error<
+  note_constexpr_invalid_template_arg.Text>;
 
 // Sema && Frontend
 let CategoryName = "Inline Assembly Issue" in {

@@ -111,7 +111,7 @@ size_t ValueObjectDynamicValue::CalculateNumChildren(uint32_t max) {
     return m_parent->GetNumChildren(max);
 }
 
-uint64_t ValueObjectDynamicValue::GetByteSize() {
+llvm::Optional<uint64_t> ValueObjectDynamicValue::GetByteSize() {
   const bool success = UpdateValueIfNeeded(false);
   if (success && m_dynamic_type_info.HasType()) {
     ExecutionContext exe_ctx(GetExecutionContextRef());
@@ -168,16 +168,19 @@ bool ValueObjectDynamicValue::UpdateValue() {
   LanguageRuntime *runtime = nullptr;
   lldb::LanguageType known_type = m_parent->GetObjectRuntimeLanguage();
 
+#ifdef LLDB_ENABLE_SWIFT
   // An Objective-C object inside a Swift frame.
   if (known_type == eLanguageTypeObjC)
-    if (StackFrame *frame = exe_ctx.GetFramePtr())
-      if (frame->GetLanguage() == lldb::eLanguageTypeSwift) {
-        runtime = process->GetLanguageRuntime(lldb::eLanguageTypeSwift);
-        if (runtime)
-          found_dynamic_type = runtime->GetDynamicTypeAndAddress(
-              *m_parent, m_use_dynamic, class_type_or_name, dynamic_address,
-              value_type);
-      }
+    if ((exe_ctx.GetFramePtr() &&
+         exe_ctx.GetFramePtr()->GetLanguage() == lldb::eLanguageTypeSwift) ||
+        (exe_ctx.GetTargetPtr() && exe_ctx.GetTargetPtr()->IsSwiftREPL())) {
+      runtime = process->GetLanguageRuntime(lldb::eLanguageTypeSwift);
+      if (runtime)
+        found_dynamic_type = runtime->GetDynamicTypeAndAddress(
+            *m_parent, m_use_dynamic, class_type_or_name, dynamic_address,
+            value_type);
+    }
+#endif // LLDB_ENABLE_SWIFT
   if (!found_dynamic_type &&
       known_type != lldb::eLanguageTypeUnknown &&
       known_type != lldb::eLanguageTypeC) {
@@ -440,7 +443,10 @@ bool ValueObjectDynamicValue::DynamicValueTypeInfoNeedsUpdate() {
   auto *cached_ctx = m_value.GetCompilerType().GetTypeSystem();
   llvm::Optional<SwiftASTContextReader> scratch_ctx =
       GetScratchSwiftASTContext();
-  return scratch_ctx ? (cached_ctx == scratch_ctx->get()) : !cached_ctx;
+
+  if (!scratch_ctx || !cached_ctx)
+    return true;
+  return cached_ctx != scratch_ctx->get();
 #else // !LLDB_ENABLE_SWIFT
   return false;
 #endif // LLDB_ENABLE_SWIFT

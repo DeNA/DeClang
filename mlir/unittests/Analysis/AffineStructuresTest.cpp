@@ -15,22 +15,11 @@
 
 namespace mlir {
 
-/// Evaluate the value of the given affine expression at the specified point.
-/// The expression is a list of coefficients for the dimensions followed by the
-/// constant term.
-int64_t valueAt(ArrayRef<int64_t> expr, ArrayRef<int64_t> point) {
-  assert(expr.size() == 1 + point.size());
-  int64_t value = expr.back();
-  for (unsigned i = 0; i < point.size(); ++i)
-    value += expr[i] * point[i];
-  return value;
-}
-
 /// If 'hasValue' is true, check that findIntegerSample returns a valid sample
 /// for the FlatAffineConstraints fac.
 ///
 /// If hasValue is false, check that findIntegerSample does not return None.
-void checkSample(bool hasValue, const FlatAffineConstraints &fac) {
+static void checkSample(bool hasValue, const FlatAffineConstraints &fac) {
   Optional<SmallVector<int64_t, 8>> maybeSample = fac.findIntegerSample();
   if (!hasValue) {
     EXPECT_FALSE(maybeSample.hasValue());
@@ -41,16 +30,13 @@ void checkSample(bool hasValue, const FlatAffineConstraints &fac) {
     }
   } else {
     ASSERT_TRUE(maybeSample.hasValue());
-    for (unsigned i = 0; i < fac.getNumEqualities(); ++i)
-      EXPECT_EQ(valueAt(fac.getEquality(i), *maybeSample), 0);
-    for (unsigned i = 0; i < fac.getNumInequalities(); ++i)
-      EXPECT_GE(valueAt(fac.getInequality(i), *maybeSample), 0);
+    EXPECT_TRUE(fac.containsPoint(*maybeSample));
   }
 }
 
 /// Construct a FlatAffineConstraints from a set of inequality and
 /// equality constraints.
-FlatAffineConstraints
+static FlatAffineConstraints
 makeFACFromConstraints(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs,
                        ArrayRef<SmallVector<int64_t, 4>> eqs) {
   FlatAffineConstraints fac(ineqs.size(), eqs.size(), dims + 1, dims);
@@ -66,9 +52,9 @@ makeFACFromConstraints(unsigned dims, ArrayRef<SmallVector<int64_t, 4>> ineqs,
 /// orderings may cause the algorithm to proceed differently. At least some of
 ///.these permutations should make it past the heuristics and test the
 /// implementation of the GBR algorithm itself.
-void checkPermutationsSample(bool hasValue, unsigned nDim,
-                             ArrayRef<SmallVector<int64_t, 4>> ineqs,
-                             ArrayRef<SmallVector<int64_t, 4>> eqs) {
+static void checkPermutationsSample(bool hasValue, unsigned nDim,
+                                    ArrayRef<SmallVector<int64_t, 4>> ineqs,
+                                    ArrayRef<SmallVector<int64_t, 4>> eqs) {
   SmallVector<unsigned, 4> perm(nDim);
   std::iota(perm.begin(), perm.end(), 0);
   auto permute = [&perm](ArrayRef<int64_t> coeffs) {
@@ -130,7 +116,7 @@ TEST(FlatAffineConstraintsTest, FindSampleTest) {
 
   // The next two sets are large sets that should take a long time to sample
   // with a naive branch and bound algorithm but can be sampled efficiently with
-  // the GBR algroithm.
+  // the GBR algorithm.
   //
   // This is a triangle with vertices at (1/3, 0), (2/3, 0) and (10000, 10000).
   checkSample(
@@ -272,6 +258,119 @@ TEST(FlatAffineConstraintsTest, IsIntegerEmptyTest) {
                   },
                   {{2, -3, 0, 0, 0}, {1, -1, 6, 0, -1}, {1, 1, 0, -6, -2}})
                   .isIntegerEmpty());
+}
+
+TEST(FlatAffineConstraintsTest, removeRedundantConstraintsTest) {
+  FlatAffineConstraints fac = makeFACFromConstraints(1,
+                                                     {
+                                                         {1, -2}, // x >= 2.
+                                                         {-1, 2}  // x <= 2.
+                                                     },
+                                                     {{1, -2}}); // x == 2.
+  fac.removeRedundantConstraints();
+
+  // Both inequalities are redundant given the equality. Both have been removed.
+  EXPECT_EQ(fac.getNumInequalities(), 0u);
+  EXPECT_EQ(fac.getNumEqualities(), 1u);
+
+  FlatAffineConstraints fac2 =
+      makeFACFromConstraints(2,
+                             {
+                                 {1, 0, -3}, // x >= 3.
+                                 {0, 1, -2}  // y >= 2 (redundant).
+                             },
+                             {{1, -1, 0}}); // x == y.
+  fac2.removeRedundantConstraints();
+
+  // The second inequality is redundant and should have been removed. The
+  // remaining inequality should be the first one.
+  EXPECT_EQ(fac2.getNumInequalities(), 1u);
+  EXPECT_THAT(fac2.getInequality(0), testing::ElementsAre(1, 0, -3));
+  EXPECT_EQ(fac2.getNumEqualities(), 1u);
+
+  FlatAffineConstraints fac3 =
+      makeFACFromConstraints(3, {},
+                             {{1, -1, 0, 0},   // x == y.
+                              {1, 0, -1, 0},   // x == z.
+                              {0, 1, -1, 0}}); // y == z.
+  fac3.removeRedundantConstraints();
+
+  // One of the three equalities can be removed.
+  EXPECT_EQ(fac3.getNumInequalities(), 0u);
+  EXPECT_EQ(fac3.getNumEqualities(), 2u);
+
+  FlatAffineConstraints fac4 = makeFACFromConstraints(
+      17,
+      {{0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1},
+       {0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 500},
+       {0, 0, 0, -16, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1},
+       {0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 998},
+       {0, 0, 0, 16, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15},
+       {0, 0, 0, 0, -16, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1},
+       {0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 998},
+       {0, 0, 0, 0, 16, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15},
+       {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 500},
+       {0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 15},
+       {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, -16, 0, 0, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -16, 0, 1, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, -1},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 998},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, -1, 0, 0, 15},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 1},
+       {0, 0, 0, 0, 0, 0, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 8, 8},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, -1, 8, 8},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, -8, -1},
+       {0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, -8, -1},
+       {0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, -10},
+       {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 10},
+       {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, -13},
+       {0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 13},
+       {0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -10},
+       {0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10},
+       {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -13},
+       {-1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 13}},
+      {});
+
+  // The above is a large set of constraints without any redundant constraints,
+  // as verified by the Fourier-Motzkin based removeRedundantInequalities.
+  unsigned nIneq = fac4.getNumInequalities();
+  unsigned nEq = fac4.getNumEqualities();
+  fac4.removeRedundantInequalities();
+  ASSERT_EQ(fac4.getNumInequalities(), nIneq);
+  ASSERT_EQ(fac4.getNumEqualities(), nEq);
+  // Now we test that removeRedundantConstraints does not find any constraints
+  // to be redundant either.
+  fac4.removeRedundantConstraints();
+  EXPECT_EQ(fac4.getNumInequalities(), nIneq);
+  EXPECT_EQ(fac4.getNumEqualities(), nEq);
+
+  FlatAffineConstraints fac5 =
+      makeFACFromConstraints(2,
+                             {
+                                 {128, 0, 127}, // [0]: 128x >= -127.
+                                 {-1, 0, 7},    // [1]: x <= 7.
+                                 {-128, 1, 0},  // [2]: y >= 128x.
+                                 {0, 1, 0}      // [3]: y >= 0.
+                             },
+                             {});
+  // [0] implies that 128x >= 0, since x has to be an integer. (This should be
+  // caught by GCDTightenInqualities().)
+  // So [2] and [0] imply [3] since we have y >= 128x >= 0.
+  fac5.removeRedundantConstraints();
+  EXPECT_EQ(fac5.getNumInequalities(), 3u);
+  SmallVector<int64_t, 8> redundantConstraint = {0, 1, 0};
+  for (unsigned i = 0; i < 3; ++i) {
+    // Ensure that the removed constraint was the redundant constraint [3].
+    EXPECT_NE(fac5.getInequality(i), ArrayRef<int64_t>(redundantConstraint));
+  }
 }
 
 } // namespace mlir

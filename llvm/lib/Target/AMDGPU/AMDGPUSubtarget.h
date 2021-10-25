@@ -50,15 +50,16 @@ class StringRef;
 class AMDGPUSubtarget {
 public:
   enum Generation {
-    R600 = 0,
-    R700 = 1,
-    EVERGREEN = 2,
-    NORTHERN_ISLANDS = 3,
-    SOUTHERN_ISLANDS = 4,
-    SEA_ISLANDS = 5,
-    VOLCANIC_ISLANDS = 6,
-    GFX9 = 7,
-    GFX10 = 8
+    INVALID = 0,
+    R600 = 1,
+    R700 = 2,
+    EVERGREEN = 3,
+    NORTHERN_ISLANDS = 4,
+    SOUTHERN_ISLANDS = 5,
+    SEA_ISLANDS = 6,
+    VOLCANIC_ISLANDS = 7,
+    GFX9 = 8,
+    GFX10 = 9
   };
 
 private:
@@ -78,7 +79,7 @@ protected:
   bool EnablePromoteAlloca;
   bool HasTrigReducedRange;
   unsigned MaxWavesPerEU;
-  int LocalMemorySize;
+  unsigned LocalMemorySize;
   char WavefrontSizeLog2;
 
 public:
@@ -202,7 +203,7 @@ public:
     return WavefrontSizeLog2;
   }
 
-  int getLocalMemorySize() const {
+  unsigned getLocalMemorySize() const {
     return LocalMemorySize;
   }
 
@@ -239,7 +240,11 @@ public:
   /// subtarget without any kind of limitation.
   unsigned getMaxWavesPerEU() const { return MaxWavesPerEU; }
 
-  /// Creates value range metadata on an workitemid.* inrinsic call or load.
+  /// Return the maximum workitem ID value in the function, for the given (0, 1,
+  /// 2) dimension.
+  unsigned getMaxWorkitemID(const Function &Kernel, unsigned Dimension) const;
+
+  /// Creates value range metadata on an workitemid.* intrinsic call or load.
   bool makeLIDRangeMetadata(Instruction *I) const;
 
   /// \returns Number of bytes of arguments that are passed to a shader or
@@ -309,12 +314,11 @@ protected:
   bool FastDenormalF32;
   bool HalfRate64Ops;
 
-  // Dynamially set bits that enable features.
+  // Dynamically set bits that enable features.
   bool FlatForGlobal;
   bool AutoWaitcntBeforeBarrier;
-  bool CodeObjectV3;
   bool UnalignedScratchAccess;
-  bool UnalignedBufferAccess;
+  bool UnalignedAccessMode;
   bool HasApertureRegs;
   bool EnableXNACK;
   bool DoesNotSupportXNACK;
@@ -394,6 +398,8 @@ protected:
   bool HasMFMAInlineLiteralBug;
   bool HasVertexCache;
   short TexVTXClauseSize;
+  bool UnalignedBufferAccess;
+  bool UnalignedDSAccess;
   bool ScalarizeGlobal;
 
   bool HasVcmpxPermlaneHazard;
@@ -405,6 +411,8 @@ protected:
   bool HasNSAtoVMEMBug;
   bool HasOffset3fBug;
   bool HasFlatSegmentOffsetBug;
+  bool HasImageStoreD16Bug;
+  bool HasImageGather4D16Bug;
 
   // Dummy feature to use for assembler in tablegen.
   bool FeatureDisable;
@@ -415,10 +423,10 @@ private:
   SITargetLowering TLInfo;
   SIFrameLowering FrameLowering;
 
+public:
   // See COMPUTE_TMPRING_SIZE.WAVESIZE, 13-bit field in units of 256-dword.
   static const unsigned MaxWaveScratchSize = (256 * 4) * ((1 << 13) - 1);
 
-public:
   GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
                const GCNTargetMachine &TM);
   ~GCNSubtarget() override;
@@ -471,7 +479,7 @@ public:
     return &InstrItins;
   }
 
-  void ParseSubtargetFeatures(StringRef CPU, StringRef FS);
+  void ParseSubtargetFeatures(StringRef CPU, StringRef TuneCPU, StringRef FS);
 
   Generation getGeneration() const {
     return (Generation)Gen;
@@ -486,8 +494,8 @@ public:
     return LDSBankCount;
   }
 
-  unsigned getMaxPrivateElementSize() const {
-    return MaxPrivateElementSize;
+  unsigned getMaxPrivateElementSize(bool ForBufferRSrc = false) const {
+    return (ForBufferRSrc || !enableFlatScratch()) ? MaxPrivateElementSize : 16;
   }
 
   unsigned getConstantBusLimit(unsigned Opcode) const;
@@ -518,6 +526,10 @@ public:
 
   bool hasAddr64() const {
     return (getGeneration() < AMDGPUSubtarget::VOLCANIC_ISLANDS);
+  }
+
+  bool hasFlat() const {
+    return (getGeneration() > AMDGPUSubtarget::SOUTHERN_ISLANDS);
   }
 
   // Return true if the target only has the reverse operand versions of VALU
@@ -665,6 +677,11 @@ public:
     return CIInsts && EnableDS128;
   }
 
+  /// \return If target supports ds_read/write_b96/128.
+  bool hasDS96AndDS128() const {
+    return CIInsts;
+  }
+
   /// Have v_trunc_f64, v_ceil_f64, v_rndne_f64
   bool haveRoundOpsF64() const {
     return CIInsts;
@@ -686,17 +703,28 @@ public:
     return AutoWaitcntBeforeBarrier;
   }
 
-  bool hasCodeObjectV3() const {
-    // FIXME: Need to add code object v3 support for mesa and pal.
-    return isAmdHsaOS() ? CodeObjectV3 : false;
-  }
-
   bool hasUnalignedBufferAccess() const {
     return UnalignedBufferAccess;
   }
 
+  bool hasUnalignedBufferAccessEnabled() const {
+    return UnalignedBufferAccess && UnalignedAccessMode;
+  }
+
+  bool hasUnalignedDSAccess() const {
+    return UnalignedDSAccess;
+  }
+
+  bool hasUnalignedDSAccessEnabled() const {
+    return UnalignedDSAccess && UnalignedAccessMode;
+  }
+
   bool hasUnalignedScratchAccess() const {
     return UnalignedScratchAccess;
+  }
+
+  bool hasUnalignedAccessMode() const {
+    return UnalignedAccessMode;
   }
 
   bool hasApertureRegs() const {
@@ -733,6 +761,13 @@ public:
 
   bool hasFlatScratchInsts() const {
     return FlatScratchInsts;
+  }
+
+  // Check if target supports ST addressing mode with FLAT scratch instructions.
+  // The ST addressing mode means no registers are used, either VGPR or SGPR,
+  // but only immediate offset is swizzled and added to the FLAT scratch base.
+  bool hasFlatScratchSTMode() const {
+    return hasFlatScratchInsts() && hasGFX10_3Insts();
   }
 
   bool hasScalarFlatScratchInsts() const {
@@ -791,6 +826,10 @@ public:
     return CIInsts;
   }
 
+  /// \returns true if the target has integer add/sub instructions that do not
+  /// produce a carry-out. This includes v_add_[iu]32, v_sub_[iu]32,
+  /// v_add_[iu]16, and v_sub_[iu]16, all of which support the clamp modifier
+  /// for saturation.
   bool hasAddNoCarry() const {
     return AddNoCarryInsts;
   }
@@ -918,6 +957,8 @@ public:
     return true;
   }
 
+  bool useAA() const override;
+
   bool enableSubRegLiveness() const override {
     return true;
   }
@@ -932,6 +973,8 @@ public:
   bool enableEarlyIfConversion() const override {
     return true;
   }
+
+  bool enableFlatScratch() const;
 
   void overrideSchedPolicy(MachineSchedPolicy &Policy,
                            unsigned NumRegionInstrs) const override;
@@ -1002,9 +1045,11 @@ public:
     return HasOffset3fBug;
   }
 
-  bool hasNSAEncoding() const {
-    return HasNSAEncoding;
-  }
+  bool hasImageStoreD16Bug() const { return HasImageStoreD16Bug; }
+
+  bool hasImageGather4D16Bug() const { return HasImageGather4D16Bug; }
+
+  bool hasNSAEncoding() const { return HasNSAEncoding; }
 
   bool hasGFX10_BEncoding() const {
     return GFX10_BEncoding;
@@ -1039,10 +1084,6 @@ public:
   // \returns true if the subtarget supports DWORDX3 load/store instructions.
   bool hasDwordx3LoadStores() const {
     return CIInsts;
-  }
-
-  bool hasSMovFedHazard() const {
-    return getGeneration() == AMDGPUSubtarget::GFX9;
   }
 
   bool hasReadM0MovRelInterpHazard() const {
@@ -1210,6 +1251,10 @@ public:
     return getWavefrontSize() == 32;
   }
 
+  bool isWave64() const {
+    return getWavefrontSize() == 64;
+  }
+
   const TargetRegisterClass *getBoolRC() const {
     return getRegisterInfo()->getBoolRC();
   }
@@ -1291,7 +1336,7 @@ public:
     return &TSInfo;
   }
 
-  void ParseSubtargetFeatures(StringRef CPU, StringRef FS);
+  void ParseSubtargetFeatures(StringRef CPU, StringRef TuneCPU, StringRef FS);
 
   Generation getGeneration() const {
     return Gen;

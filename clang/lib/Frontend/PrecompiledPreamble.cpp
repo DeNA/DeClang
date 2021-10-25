@@ -208,6 +208,11 @@ public:
     Callbacks.AfterPCHEmitted(Writer);
   }
 
+  bool BeginSourceFileAction(CompilerInstance &CI) override {
+    assert(CI.getLangOpts().CompilingPCH);
+    return ASTFrontendAction::BeginSourceFileAction(CI);
+  }
+
   bool shouldEraseOutputFiles() override { return !hasEmittedPreamblePCH(); }
   bool hasCodeCompletionSupport() const override { return false; }
   bool hasASTFileSupport() const override { return false; }
@@ -298,9 +303,9 @@ template <class T> bool moveOnNoError(llvm::ErrorOr<T> Val, T &Output) {
 } // namespace
 
 PreambleBounds clang::ComputePreambleBounds(const LangOptions &LangOpts,
-                                            const llvm::MemoryBuffer *Buffer,
+                                            const llvm::MemoryBufferRef &Buffer,
                                             unsigned MaxLines) {
-  return Lexer::ComputePreamble(Buffer->getBuffer(), LangOpts, MaxLines);
+  return Lexer::ComputePreamble(Buffer.getBuffer(), LangOpts, MaxLines);
 }
 
 llvm::ErrorOr<PrecompiledPreamble> PrecompiledPreamble::Build(
@@ -396,6 +401,8 @@ llvm::ErrorOr<PrecompiledPreamble> PrecompiledPreamble::Build(
   auto PreambleDepCollector = std::make_shared<PreambleDependencyCollector>();
   Clang->addDependencyCollector(PreambleDepCollector);
 
+  Clang->getLangOpts().CompilingPCH = true;
+
   // Remap the main source file to the preamble buffer.
   StringRef MainFilePath = FrontendOpts.Inputs[0].getFile();
   auto PreambleInputBuffer = llvm::MemoryBuffer::getMemBufferCopy(
@@ -456,7 +463,8 @@ llvm::ErrorOr<PrecompiledPreamble> PrecompiledPreamble::Build(
           PrecompiledPreamble::PreambleFileHash::createForFile(File->getSize(),
                                                                ModTime);
     } else {
-      const llvm::MemoryBuffer *Buffer = SourceMgr.getMemoryBufferForFile(File);
+      llvm::MemoryBufferRef Buffer =
+          SourceMgr.getMemoryBufferForFileOrFake(File);
       FilesInPreamble[File->getName()] =
           PrecompiledPreamble::PreambleFileHash::createForMemoryBuffer(Buffer);
     }
@@ -542,7 +550,7 @@ bool PrecompiledPreamble::CanReuse(const CompilerInvocation &Invocation,
   llvm::StringMap<PreambleFileHash> OverridenFileBuffers;
   for (const auto &RB : PreprocessorOpts.RemappedFileBuffers) {
     const PrecompiledPreamble::PreambleFileHash PreambleHash =
-        PreambleFileHash::createForMemoryBuffer(RB.second);
+        PreambleFileHash::createForMemoryBuffer(RB.second->getMemBufferRef());
     llvm::vfs::Status Status;
     if (moveOnNoError(VFS->status(RB.first), Status))
       OverriddenFiles[Status.getUniqueID()] = PreambleHash;
@@ -613,7 +621,7 @@ void PrecompiledPreamble::AddImplicitPreamble(
 void PrecompiledPreamble::OverridePreamble(
     CompilerInvocation &CI, IntrusiveRefCntPtr<llvm::vfs::FileSystem> &VFS,
     llvm::MemoryBuffer *MainFileBuffer) const {
-  auto Bounds = ComputePreambleBounds(*CI.getLangOpts(), MainFileBuffer, 0);
+  auto Bounds = ComputePreambleBounds(*CI.getLangOpts(), *MainFileBuffer, 0);
   configurePreamble(Bounds, CI, VFS, MainFileBuffer);
 }
 
@@ -727,7 +735,7 @@ PrecompiledPreamble::PCHStorage::getKind() const {
 
 PrecompiledPreamble::TempPCHFile &PrecompiledPreamble::PCHStorage::asFile() {
   assert(getKind() == Kind::TempFile);
-  return *reinterpret_cast<TempPCHFile *>(Storage.buffer);
+  return *reinterpret_cast<TempPCHFile *>(&Storage);
 }
 
 const PrecompiledPreamble::TempPCHFile &
@@ -738,7 +746,7 @@ PrecompiledPreamble::PCHStorage::asFile() const {
 PrecompiledPreamble::InMemoryPreamble &
 PrecompiledPreamble::PCHStorage::asMemory() {
   assert(getKind() == Kind::InMemory);
-  return *reinterpret_cast<InMemoryPreamble *>(Storage.buffer);
+  return *reinterpret_cast<InMemoryPreamble *>(&Storage);
 }
 
 const PrecompiledPreamble::InMemoryPreamble &
@@ -776,13 +784,13 @@ PrecompiledPreamble::PreambleFileHash::createForFile(off_t Size,
 
 PrecompiledPreamble::PreambleFileHash
 PrecompiledPreamble::PreambleFileHash::createForMemoryBuffer(
-    const llvm::MemoryBuffer *Buffer) {
+    const llvm::MemoryBufferRef &Buffer) {
   PreambleFileHash Result;
-  Result.Size = Buffer->getBufferSize();
+  Result.Size = Buffer.getBufferSize();
   Result.ModTime = 0;
 
   llvm::MD5 MD5Ctx;
-  MD5Ctx.update(Buffer->getBuffer().data());
+  MD5Ctx.update(Buffer.getBuffer().data());
   MD5Ctx.final(Result.MD5);
 
   return Result;
@@ -804,7 +812,8 @@ void PrecompiledPreamble::configurePreamble(
   PreprocessorOpts.PrecompiledPreambleBytes.first = Bounds.Size;
   PreprocessorOpts.PrecompiledPreambleBytes.second =
       Bounds.PreambleEndsAtStartOfLine;
-  PreprocessorOpts.DisablePCHValidation = true;
+  PreprocessorOpts.DisablePCHOrModuleValidation =
+      DisableValidationForModuleKind::PCH;
 
   setupPreambleStorage(Storage, PreprocessorOpts, VFS);
 }

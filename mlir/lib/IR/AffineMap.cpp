@@ -8,10 +8,11 @@
 
 #include "mlir/IR/AffineMap.h"
 #include "AffineMapDetail.h"
-#include "mlir/IR/Attributes.h"
-#include "mlir/IR/StandardTypes.h"
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/MathExtras.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -226,6 +227,10 @@ AffineExpr AffineMap::getResult(unsigned idx) const {
   return map->results[idx];
 }
 
+unsigned AffineMap::getDimPosition(unsigned idx) const {
+  return getResult(idx).cast<AffineDimExpr>().getPosition();
+}
+
 /// Folds the results of the application of an affine map on the provided
 /// operands to a constant if possible. Returns false if the folding happens,
 /// true otherwise.
@@ -314,7 +319,7 @@ AffineMap AffineMap::compose(AffineMap map) {
   for (unsigned idx = 0; idx < numDims; ++idx) {
     newDims[idx] = getAffineDimExpr(idx, getContext());
   }
-  SmallVector<AffineExpr, 8> newSymbols(numSymbols);
+  SmallVector<AffineExpr, 8> newSymbols(numSymbols - numSymbolsThisMap);
   for (unsigned idx = numSymbolsThisMap; idx < numSymbols; ++idx) {
     newSymbols[idx - numSymbolsThisMap] =
         getAffineSymbolExpr(idx, getContext());
@@ -434,19 +439,36 @@ AffineMap mlir::inversePermutation(AffineMap map) {
 }
 
 AffineMap mlir::concatAffineMaps(ArrayRef<AffineMap> maps) {
-  unsigned numResults = 0;
+  unsigned numResults = 0, numDims = 0, numSymbols = 0;
   for (auto m : maps)
     numResults += m.getNumResults();
-  unsigned numDims = 0;
   SmallVector<AffineExpr, 8> results;
   results.reserve(numResults);
   for (auto m : maps) {
-    assert(m.getNumSymbols() == 0 && "expected map without symbols");
-    results.append(m.getResults().begin(), m.getResults().end());
+    for (auto res : m.getResults())
+      results.push_back(res.shiftSymbols(m.getNumSymbols(), numSymbols));
+
+    numSymbols += m.getNumSymbols();
     numDims = std::max(m.getNumDims(), numDims);
   }
-  return AffineMap::get(numDims, /*numSymbols=*/0, results,
+  return AffineMap::get(numDims, numSymbols, results,
                         maps.front().getContext());
+}
+
+AffineMap mlir::getProjectedMap(AffineMap map,
+                                ArrayRef<unsigned> projectedDimensions) {
+  DenseSet<unsigned> projectedDims(projectedDimensions.begin(),
+                                   projectedDimensions.end());
+  MLIRContext *context = map.getContext();
+  SmallVector<AffineExpr, 4> resultExprs;
+  for (auto dim : enumerate(llvm::seq<unsigned>(0, map.getNumDims()))) {
+    if (!projectedDims.count(dim.value()))
+      resultExprs.push_back(getAffineDimExpr(dim.index(), context));
+    else
+      resultExprs.push_back(getAffineConstantExpr(0, context));
+  }
+  return map.compose(AffineMap::get(
+      map.getNumDims() - projectedDimensions.size(), 0, resultExprs, context));
 }
 
 //===----------------------------------------------------------------------===//

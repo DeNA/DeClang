@@ -6,15 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/ADT/StringRef.h"
-
 #include "CommandObjectCommands.h"
 #include "CommandObjectHelp.h"
+#include "CommandObjectRegexCommand.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/IOHandler.h"
 #include "lldb/Interpreter/CommandHistory.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
-#include "lldb/Interpreter/CommandObjectRegexCommand.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionArgParser.h"
 #include "lldb/Interpreter/OptionValueBoolean.h"
@@ -24,6 +22,7 @@
 #include "lldb/Interpreter/ScriptInterpreter.h"
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/StringList.h"
+#include "llvm/ADT/StringRef.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -465,7 +464,7 @@ protected:
         OptionArgVectorSP(new OptionArgVector);
 
     if (CommandObjectSP cmd_obj_sp =
-            m_interpreter.GetCommandSPExact(cmd_obj.GetCommandName(), false)) {
+            m_interpreter.GetCommandSPExact(cmd_obj.GetCommandName())) {
       if (m_interpreter.AliasExists(alias_command) ||
           m_interpreter.UserCommandExists(alias_command)) {
         result.AppendWarningWithFormat(
@@ -559,10 +558,9 @@ protected:
 
     if (!args.empty()) {
       CommandObjectSP tmp_sp =
-          m_interpreter.GetCommandSPExact(cmd_obj->GetCommandName(), false);
+          m_interpreter.GetCommandSPExact(cmd_obj->GetCommandName());
       if (use_subcommand)
-        tmp_sp = m_interpreter.GetCommandSPExact(sub_cmd_obj->GetCommandName(),
-                                                 false);
+        tmp_sp = m_interpreter.GetCommandSPExact(sub_cmd_obj->GetCommandName());
 
       args.GetCommandString(args_string);
     }
@@ -993,7 +991,7 @@ protected:
       std::string subst(std::string(regex_sed.substr(
           second_separator_char_pos + 1,
           third_separator_char_pos - second_separator_char_pos - 1)));
-      m_regex_cmd_up->AddRegexCommand(regex.c_str(), subst.c_str());
+      m_regex_cmd_up->AddRegexCommand(regex, subst);
     }
     return error;
   }

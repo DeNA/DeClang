@@ -143,6 +143,8 @@ public:
     case CC_Swift:
     case CC_OpenCLKernel:
       return CCCR_OK;
+    case CC_SwiftAsync:
+      return CCCR_Error;
     default:
       return CCCR_Warning;
     }
@@ -157,6 +159,10 @@ public:
   const char *getLongDoubleMangling() const override { return "g"; }
 
   bool hasExtIntType() const override { return true; }
+
+  int getEHDataRegisterNumber(unsigned RegNo) const override {
+    return RegNo < 4 ? 6 + RegNo : -1;
+  }
 };
 } // namespace targets
 } // namespace clang

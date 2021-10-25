@@ -994,9 +994,14 @@ protected:
       return false;
     }
 
-    GetSelectedOrDummyTarget()
-        .GetFrameRecognizerManager()
-        .RemoveRecognizerWithID(recognizer_id);
+    if (!GetSelectedOrDummyTarget()
+             .GetFrameRecognizerManager()
+             .RemoveRecognizerWithID(recognizer_id)) {
+      result.AppendErrorWithFormat("'%s' is not a valid recognizer id.\n",
+                                   command.GetArgumentAtIndex(0));
+      result.SetStatus(eReturnStatusFailed);
+      return false;
+    }
     result.SetStatus(eReturnStatusSuccessFinishResult);
     return result.Succeeded();
   }

@@ -60,7 +60,10 @@ endfunction()
 # llvm dependencies in the current scope to the empty set.
 set(LLVM_COMMON_DEPENDS)
 
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -Wl,-sectcreate,__TEXT,__info_plist,${CMAKE_CURRENT_SOURCE_DIR}/../resources/lldb-debugserver-Info.plist")
+set(DEBUGSERVER_RESOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../resources")
+set(DEBUGSERVER_INFO_PLIST "${DEBUGSERVER_RESOURCE_DIR}/lldb-debugserver-Info.plist")
+
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -Wl,-sectcreate,__TEXT,__info_plist,${DEBUGSERVER_INFO_PLIST}")
 
 check_cxx_compiler_flag("-Wno-gnu-zero-variadic-macro-arguments"
                         CXX_SUPPORTS_NO_GNU_ZERO_VARIADIC_MACRO_ARGUMENTS)
@@ -99,7 +102,7 @@ set_property(GLOBAL PROPERTY
   LLDB_DEBUGSERVER_CODESIGN_IDENTITY ${debugserver_codesign_identity})
 
 if(APPLE)
-  if(IOS)
+  if(APPLE_EMBEDDED)
     find_library(BACKBOARD_LIBRARY BackBoardServices
       PATHS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
     find_library(FRONTBOARD_LIBRARY FrontBoardServices
@@ -109,6 +112,10 @@ if(APPLE)
     find_library(MOBILESERVICES_LIBRARY MobileCoreServices
       PATHS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
     find_library(LOCKDOWN_LIBRARY lockdown)
+    if (APPLE_EMBEDDED STREQUAL "watchos")
+      find_library(CAROUSELSERVICES_LIBRARY CarouselServices
+        PATHS ${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks)
+    endif()
 
     if(NOT BACKBOARD_LIBRARY)
       set(SKIP_TEST_DEBUGSERVER ON CACHE BOOL "" FORCE)
@@ -121,13 +128,18 @@ if(HAVE_LIBCOMPRESSION)
 endif()
 
 if(LLDB_USE_ENTITLEMENTS)
-  if(IOS)
-    set(entitlements ${CMAKE_CURRENT_SOURCE_DIR}/debugserver-entitlements.plist)
+  if(APPLE_EMBEDDED)
+    set(entitlements ${DEBUGSERVER_RESOURCE_DIR}/debugserver-entitlements.plist)
   else()
-    # Same entitlements file as used for lldb-server
-    set(entitlements ${LLDB_SOURCE_DIR}/resources/debugserver-macosx-entitlements.plist)
+    if (LLDB_USE_PRIVATE_ENTITLEMENTS)
+      set(entitlements ${DEBUGSERVER_RESOURCE_DIR}/debugserver-macosx-private-entitlements.plist)
+    else()
+      set(entitlements ${DEBUGSERVER_RESOURCE_DIR}/debugserver-macosx-entitlements.plist)
+    endif()
   endif()
 endif()
+
+add_definitions(-DLLDB_USE_OS_LOG)
 
 if(${CMAKE_OSX_SYSROOT} MATCHES ".Internal.sdk$")
   message(STATUS "LLDB debugserver energy support is enabled")
@@ -200,7 +212,12 @@ set(lldbDebugserverCommonSources
   ${generated_mach_interfaces}
   ${DEBUGSERVER_VERS_GENERATED_FILE})
 
-add_library(lldbDebugserverCommon ${lldbDebugserverCommonSources})
+# Tell LLVM not to complain about these source files.
+set(LLVM_OPTIONAL_SOURCES
+  ${lldbDebugserverCommonSources}
+  debugserver.cpp)
+
+add_lldb_library(lldbDebugserverCommon ${lldbDebugserverCommonSources})
 set_target_properties(lldbDebugserverCommon PROPERTIES FOLDER "lldb libraries/debugserver")
 
 target_link_libraries(lldbDebugserverCommon
@@ -212,6 +229,7 @@ target_link_libraries(lldbDebugserverCommon
                       ${SPRINGBOARD_LIBRARY}
                       ${MOBILESERVICES_LIBRARY}
                       ${LOCKDOWN_LIBRARY}
+                      ${CAROUSELSERVICES_LIBRARY}
                       lldbDebugserverArchSupport
                       lldbDebugserverDarwin_DarwinLog
                       ${FOUNDATION_LIBRARY}
@@ -222,7 +240,6 @@ if(HAVE_LIBCOMPRESSION)
   set_property(TARGET lldbDebugserverCommon APPEND PROPERTY
                 COMPILE_DEFINITIONS HAVE_LIBCOMPRESSION)
 endif()
-set(LLVM_OPTIONAL_SOURCES ${lldbDebugserverCommonSources})
 add_lldb_tool(debugserver ADD_TO_FRAMEWORK
   debugserver.cpp
   LINK_LIBS lldbDebugserverCommon
@@ -258,12 +275,17 @@ endif()
 
 set_target_properties(debugserver PROPERTIES FOLDER "lldb libraries/debugserver")
 
-if(IOS)
+if(APPLE_EMBEDDED)
   set_property(TARGET lldbDebugserverCommon APPEND PROPERTY COMPILE_DEFINITIONS
     WITH_LOCKDOWN
     WITH_FBS
     WITH_BKS
     )
+  if(CAROUSELSERVICES_LIBRARY)
+    set_property(TARGET lldbDebugserverCommon APPEND PROPERTY COMPILE_DEFINITIONS
+      WITH_CAROUSEL
+      )
+  endif()
   set_property(TARGET debugserver APPEND PROPERTY COMPILE_DEFINITIONS
     WITH_LOCKDOWN
     WITH_FBS
@@ -273,7 +295,7 @@ if(IOS)
     -F${CMAKE_OSX_SYSROOT}/System/Library/PrivateFrameworks
     )
 
-  add_library(lldbDebugserverCommon_NonUI ${lldbDebugserverCommonSources})
+  add_lldb_library(lldbDebugserverCommon_NonUI ${lldbDebugserverCommonSources})
   target_link_libraries(lldbDebugserverCommon_NonUI
                       INTERFACE ${COCOA_LIBRARY}
                       ${CORE_FOUNDATION_LIBRARY}

@@ -566,8 +566,16 @@ Value *llvm::lowerObjectSizeCall(IntrinsicInst *ObjectSize,
       Value *UseZero =
           Builder.CreateICmpULT(SizeOffsetPair.first, SizeOffsetPair.second);
       ResultSize = Builder.CreateZExtOrTrunc(ResultSize, ResultType);
-      return Builder.CreateSelect(UseZero, ConstantInt::get(ResultType, 0),
-                                  ResultSize);
+      Value *Ret = Builder.CreateSelect(
+          UseZero, ConstantInt::get(ResultType, 0), ResultSize);
+
+      // The non-constant size expression cannot evaluate to -1.
+      if (!isa<Constant>(SizeOffsetPair.first) ||
+          !isa<Constant>(SizeOffsetPair.second))
+        Builder.CreateAssumption(
+            Builder.CreateICmpNE(Ret, ConstantInt::get(ResultType, -1)));
+
+      return Ret;
     }
   }
 
@@ -676,13 +684,14 @@ SizeOffsetType ObjectSizeOffsetVisitor::visitAllocaInst(AllocaInst &I) {
 }
 
 SizeOffsetType ObjectSizeOffsetVisitor::visitArgument(Argument &A) {
+  Type *MemoryTy = A.getPointeeInMemoryValueType();
   // No interprocedural analysis is done at the moment.
-  if (!A.hasPassPointeeByValueAttr()) {
+  if (!MemoryTy|| !MemoryTy->isSized()) {
     ++ObjectVisitorArgument;
     return unknown();
   }
-  PointerType *PT = cast<PointerType>(A.getType());
-  APInt Size(IntTyBits, DL.getTypeAllocSize(PT->getElementType()));
+
+  APInt Size(IntTyBits, DL.getTypeAllocSize(MemoryTy));
   return std::make_pair(align(Size, A.getParamAlignment()), Zero);
 }
 

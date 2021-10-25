@@ -159,8 +159,9 @@ void AArch64TargetInfo::fillValidCPUList(
 
 void AArch64TargetInfo::getTargetDefinesARMV81A(const LangOptions &Opts,
                                                 MacroBuilder &Builder) const {
-  // FIXME: Armv8.1 makes __ARM_FEATURE_CRC32 mandatory. Handle it here.
   Builder.defineMacro("__ARM_FEATURE_QRDMX", "1");
+  Builder.defineMacro("__ARM_FEATURE_ATOMICS", "1");
+  Builder.defineMacro("__ARM_FEATURE_CRC32", "1");
 }
 
 void AArch64TargetInfo::getTargetDefinesARMV82A(const LangOptions &Opts,
@@ -180,8 +181,6 @@ void AArch64TargetInfo::getTargetDefinesARMV83A(const LangOptions &Opts,
 void AArch64TargetInfo::getTargetDefinesARMV84A(const LangOptions &Opts,
                                                 MacroBuilder &Builder) const {
   // Also include the Armv8.3 defines
-  // FIXME: Armv8.4 makes __ARM_FEATURE_ATOMICS, defined in GCC, mandatory.
-  // Add and handle it here.
   getTargetDefinesARMV83A(Opts, Builder);
 }
 
@@ -199,6 +198,12 @@ void AArch64TargetInfo::getTargetDefinesARMV86A(const LangOptions &Opts,
   // - __ARM_FEATURE_MATMUL_INT8
   // Handle them here.
   getTargetDefinesARMV85A(Opts, Builder);
+}
+
+void AArch64TargetInfo::getTargetDefinesARMV87A(const LangOptions &Opts,
+                                                MacroBuilder &Builder) const {
+  // Also include the Armv8.6 defines
+  getTargetDefinesARMV86A(Opts, Builder);
 }
 
 void AArch64TargetInfo::getTargetDefines(const LangOptions &Opts,
@@ -308,6 +313,9 @@ void AArch64TargetInfo::getTargetDefines(const LangOptions &Opts,
   if (HasMatMul)
     Builder.defineMacro("__ARM_FEATURE_MATMUL_INT8", "1");
 
+  if (HasLSE)
+    Builder.defineMacro("__ARM_FEATURE_ATOMICS", "1");
+
   if (HasBFloat16) {
     Builder.defineMacro("__ARM_FEATURE_BF16", "1");
     Builder.defineMacro("__ARM_FEATURE_BF16_VECTOR_ARITHMETIC", "1");
@@ -373,6 +381,9 @@ void AArch64TargetInfo::getTargetDefines(const LangOptions &Opts,
   case llvm::AArch64::ArchKind::ARMV8_6A:
     getTargetDefinesARMV86A(Opts, Builder);
     break;
+  case llvm::AArch64::ArchKind::ARMV8_7A:
+    getTargetDefinesARMV87A(Opts, Builder);
+    break;
   }
 
   // All of the __sync_(bool|val)_compare_and_swap_(1|2|4|8) builtins work.
@@ -380,6 +391,11 @@ void AArch64TargetInfo::getTargetDefines(const LangOptions &Opts,
   Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_2");
   Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4");
   Builder.defineMacro("__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8");
+
+  if (Opts.ArmSveVectorBits) {
+    Builder.defineMacro("__ARM_FEATURE_SVE_BITS", Twine(Opts.ArmSveVectorBits));
+    Builder.defineMacro("__ARM_FEATURE_SVE_VECTOR_OPERATORS");
+  }
 }
 
 ArrayRef<Builtin::Info> AArch64TargetInfo::getTargetBuiltins() const {
@@ -408,6 +424,7 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
   HasFP16FML = false;
   HasMTE = false;
   HasTME = false;
+  HasLS64 = false;
   HasMatMul = false;
   HasBFloat16 = false;
   HasSVE2 = false;
@@ -417,6 +434,7 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
   HasSVE2BitPerm = false;
   HasMatmulFP64 = false;
   HasMatmulFP32 = false;
+  HasLSE = false;
 
   ArchKind = llvm::AArch64::ArchKind::ARMV8A;
 
@@ -482,6 +500,10 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       ArchKind = llvm::AArch64::ArchKind::ARMV8_5A;
     if (Feature == "+v8.6a")
       ArchKind = llvm::AArch64::ArchKind::ARMV8_6A;
+    if (Feature == "+v8.7a")
+      ArchKind = llvm::AArch64::ArchKind::ARMV8_7A;
+    if (Feature == "+v8r")
+      ArchKind = llvm::AArch64::ArchKind::ARMV8R;
     if (Feature == "+fullfp16")
       HasFullFP16 = true;
     if (Feature == "+dotprod")
@@ -496,6 +518,10 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasMatMul = true;
     if (Feature == "+bf16")
       HasBFloat16 = true;
+    if (Feature == "+lse")
+      HasLSE = true;
+    if (Feature == "+ls64")
+      HasLS64 = true;
   }
 
   setDataLayout();
@@ -508,6 +534,7 @@ AArch64TargetInfo::checkCallingConvention(CallingConv CC) const {
   switch (CC) {
   case CC_C:
   case CC_Swift:
+  case CC_SwiftAsync:
   case CC_PreserveMost:
   case CC_PreserveAll:
   case CC_OpenCLKernel:
@@ -786,6 +813,7 @@ WindowsARM64TargetInfo::checkCallingConvention(CallingConv CC) const {
   case CC_PreserveMost:
   case CC_PreserveAll:
   case CC_Swift:
+  case CC_SwiftAsync:
   case CC_Win64:
     return CCCR_OK;
   default:
@@ -854,7 +882,7 @@ DarwinAArch64TargetInfo::DarwinAArch64TargetInfo(const llvm::Triple &Triple,
     UseZeroLengthBitfieldAlignment = true;
     TheCXXABI.set(TargetCXXABI::WatchOS);
   } else
-    TheCXXABI.set(TargetCXXABI::iOS64);
+    TheCXXABI.set(TargetCXXABI::AppleARM64);
 }
 
 void DarwinAArch64TargetInfo::getOSDefines(const LangOptions &Opts,
@@ -871,7 +899,7 @@ void DarwinAArch64TargetInfo::getOSDefines(const LangOptions &Opts,
   Builder.defineMacro("__arm64", "1");
   Builder.defineMacro("__arm64__", "1");
 
-  if (Triple.getArchName() == "arm64e")
+  if (Triple.isArm64e())
     Builder.defineMacro("__arm64e__", "1");
 
   getDarwinDefines(Builder, Opts, Triple, PlatformName, PlatformMinVersion);

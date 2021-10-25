@@ -11,8 +11,20 @@ class TestCase(TestBase):
     mydir = TestBase.compute_mydir(__file__)
 
     @no_debug_info_test
+    def test_fwd_decl(self):
+        # Declare a forward decl and import it to the scratch AST.
+        self.expect_expr("struct S; S *s = nullptr; s", result_type="S *")
+
+    @no_debug_info_test
     def test_struct(self):
         # Declare a struct and import it to the scratch AST.
+        self.expect("expr struct S {}; S s; s", substrs=["= {}"])
+
+    @no_debug_info_test
+    def test_struct_with_fwd_decl(self):
+        # Import the forward decl to the scratch AST.
+        self.expect_expr("struct S; S *s = nullptr; s", result_type="S *")
+        # Merge the definition into the scratch AST.
         self.expect("expr struct S {}; S s; s", substrs=["= {}"])
 
     @no_debug_info_test

@@ -29,7 +29,6 @@
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BlockFrequencyInfo.h"
 #include "llvm/Analysis/BranchProbabilityInfo.h"
 #include "llvm/Analysis/CFG.h"
@@ -70,6 +69,7 @@
 #include <algorithm>
 #include <limits>
 #include <cassert>
+#include <string>
 
 #define DEBUG_TYPE "hotcoldsplit"
 
@@ -78,16 +78,27 @@ STATISTIC(NumColdRegionsOutlined, "Number of cold regions outlined.");
 
 using namespace llvm;
 
-static cl::opt<bool> EnableStaticAnalyis("hot-cold-static-analysis",
-                              cl::init(true), cl::Hidden);
+static cl::opt<bool> EnableStaticAnalysis("hot-cold-static-analysis",
+                                          cl::init(true), cl::Hidden);
 
 static cl::opt<int>
     SplittingThreshold("hotcoldsplit-threshold", cl::init(2), cl::Hidden,
                        cl::desc("Base penalty for splitting cold code (as a "
                                 "multiple of TCC_Basic)"));
 
+static cl::opt<bool> EnableColdSection(
+    "enable-cold-section", cl::init(false), cl::Hidden,
+    cl::desc("Enable placement of extracted cold functions"
+             " into a separate section after hot-cold splitting."));
+
+static cl::opt<std::string>
+    ColdSectionName("hotcoldsplit-cold-section-name", cl::init("__llvm_cold"),
+                    cl::Hidden,
+                    cl::desc("Name for the section containing cold functions "
+                             "extracted by hot-cold splitting."));
+
 static cl::opt<int> MaxParametersForSplit(
-    "hotcoldsplit-max-params", cl::init(8), cl::Hidden,
+    "hotcoldsplit-max-params", cl::init(4), cl::Hidden,
     cl::desc("Maximum number of parameters for a split function"));
 
 namespace {
@@ -226,11 +237,11 @@ bool HotColdSplitting::shouldOutlineFrom(const Function &F) const {
 }
 
 /// Get the benefit score of outlining \p Region.
-static int getOutliningBenefit(ArrayRef<BasicBlock *> Region,
-                               TargetTransformInfo &TTI) {
+static InstructionCost getOutliningBenefit(ArrayRef<BasicBlock *> Region,
+                                           TargetTransformInfo &TTI) {
   // Sum up the code size costs of non-terminator instructions. Tight coupling
   // with \ref getOutliningPenalty is needed to model the costs of terminators.
-  int Benefit = 0;
+  InstructionCost Benefit = 0;
   for (BasicBlock *BB : Region)
     for (Instruction &I : BB->instructionsWithoutDebug())
       if (&I != BB->getTerminator())
@@ -264,7 +275,7 @@ static int getOutliningPenalty(ArrayRef<BasicBlock *> Region,
     }
 
     for (BasicBlock *SuccBB : successors(BB)) {
-      if (find(Region, SuccBB) == Region.end()) {
+      if (!is_contained(Region, SuccBB)) {
         NoBlocksReturn = false;
         SuccsOutsideRegion.insert(SuccBB);
       }
@@ -292,7 +303,7 @@ static int getOutliningPenalty(ArrayRef<BasicBlock *> Region,
     }
   }
 
-  // Apply an penalty for calling the split function. Factor in the cost of
+  // Apply a penalty for calling the split function. Factor in the cost of
   // materializing all of the parameters.
   int NumOutputsAndSplitPhis = NumOutputs + NumSplitExitPhis;
   int NumParams = NumInputs + NumOutputsAndSplitPhis;
@@ -347,12 +358,12 @@ Function *HotColdSplitting::extractColdRegion(
   // splitting.
   SetVector<Value *> Inputs, Outputs, Sinks;
   CE.findInputsOutputs(Inputs, Outputs, Sinks);
-  int OutliningBenefit = getOutliningBenefit(Region, TTI);
+  InstructionCost OutliningBenefit = getOutliningBenefit(Region, TTI);
   int OutliningPenalty =
       getOutliningPenalty(Region, Inputs.size(), Outputs.size());
   LLVM_DEBUG(dbgs() << "Split profitability: benefit = " << OutliningBenefit
                     << ", penalty = " << OutliningPenalty << "\n");
-  if (OutliningBenefit <= OutliningPenalty)
+  if (!OutliningBenefit.isValid() || OutliningBenefit <= OutliningPenalty)
     return nullptr;
 
   Function *OrigF = Region[0]->getParent();
@@ -366,8 +377,12 @@ Function *HotColdSplitting::extractColdRegion(
     }
     CI->setIsNoInline();
 
-    if (OrigF->hasSection())
-      OutF->setSection(OrigF->getSection());
+    if (EnableColdSection)
+      OutF->setSection(ColdSectionName);
+    else {
+      if (OrigF->hasSection())
+        OutF->setSection(OrigF->getSection());
+    }
 
     markFunctionCold(*OutF, BFI != nullptr);
 
@@ -610,7 +625,7 @@ bool HotColdSplitting::outlineColdRegions(Function &F, bool HasProfileSummary) {
       continue;
 
     bool Cold = (BFI && PSI->isColdBlock(BB, BFI)) ||
-                (EnableStaticAnalyis && unlikelyExecuted(*BB));
+                (EnableStaticAnalysis && unlikelyExecuted(*BB));
     if (!Cold)
       continue;
 

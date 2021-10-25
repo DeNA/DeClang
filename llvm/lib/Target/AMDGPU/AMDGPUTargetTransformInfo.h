@@ -33,6 +33,7 @@
 namespace llvm {
 
 class AMDGPUTargetLowering;
+class InstCombiner;
 class Loop;
 class ScalarEvolution;
 class Type;
@@ -75,8 +76,9 @@ class GCNTTIImpl final : public BasicTTIImplBase<GCNTTIImpl> {
   const GCNSubtarget *ST;
   const SITargetLowering *TLI;
   AMDGPUTTIImpl CommonTTI;
-  bool IsGraphicsShader;
+  bool IsGraphics;
   bool HasFP32Denormals;
+  bool HasFP64FP16Denormals;
   unsigned MaxVGPRs;
 
   const FeatureBitset InlineFeatureIgnoreList = {
@@ -86,8 +88,8 @@ class GCNTTIImpl final : public BasicTTIImplBase<GCNTTIImpl> {
     AMDGPU::FeatureEnableUnsafeDSOffsetFolding,
     AMDGPU::FeatureFlatForGlobal,
     AMDGPU::FeaturePromoteAlloca,
-    AMDGPU::FeatureUnalignedBufferAccess,
     AMDGPU::FeatureUnalignedScratchAccess,
+    AMDGPU::FeatureUnalignedAccessMode,
 
     AMDGPU::FeatureAutoWaitcntBeforeBarrier,
 
@@ -95,7 +97,6 @@ class GCNTTIImpl final : public BasicTTIImplBase<GCNTTIImpl> {
     AMDGPU::FeatureSGPRInitBug,
     AMDGPU::FeatureXNACK,
     AMDGPU::FeatureTrapHandler,
-    AMDGPU::FeatureCodeObjectV3,
 
     // The default assumption needs to be ecc is enabled, but no directly
     // exposed operations depend on it, so it can be safely inlined.
@@ -113,35 +114,42 @@ class GCNTTIImpl final : public BasicTTIImplBase<GCNTTIImpl> {
     return TargetTransformInfo::TCC_Basic;
   }
 
-  static inline int getHalfRateInstrCost() {
-    return 2 * TargetTransformInfo::TCC_Basic;
+  static inline int getHalfRateInstrCost(
+      TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput) {
+    return CostKind == TTI::TCK_CodeSize ? 2
+                                         : 2 * TargetTransformInfo::TCC_Basic;
   }
 
   // TODO: The size is usually 8 bytes, but takes 4x as many cycles. Maybe
   // should be 2 or 4.
-  static inline int getQuarterRateInstrCost() {
-    return 3 * TargetTransformInfo::TCC_Basic;
+  static inline int getQuarterRateInstrCost(
+      TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput) {
+    return CostKind == TTI::TCK_CodeSize ? 2
+                                         : 4 * TargetTransformInfo::TCC_Basic;
   }
 
-   // On some parts, normal fp64 operations are half rate, and others
-   // quarter. This also applies to some integer operations.
-  inline int get64BitInstrCost() const {
-    return ST->hasHalfRate64Ops() ?
-      getHalfRateInstrCost() : getQuarterRateInstrCost();
+  // On some parts, normal fp64 operations are half rate, and others
+  // quarter. This also applies to some integer operations.
+  inline int get64BitInstrCost(
+      TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput) const {
+    return ST->hasHalfRate64Ops() ? getHalfRateInstrCost(CostKind)
+                                  : getQuarterRateInstrCost(CostKind);
   }
 
 public:
   explicit GCNTTIImpl(const AMDGPUTargetMachine *TM, const Function &F)
-    : BaseT(TM, F.getParent()->getDataLayout()),
-      ST(static_cast<const GCNSubtarget*>(TM->getSubtargetImpl(F))),
-      TLI(ST->getTargetLowering()),
-      CommonTTI(TM, F),
-      IsGraphicsShader(AMDGPU::isShader(F.getCallingConv())),
-      HasFP32Denormals(AMDGPU::SIModeRegisterDefaults(F).allFP32Denormals()),
-      MaxVGPRs(ST->getMaxNumVGPRs(
-          std::max(ST->getWavesPerEU(F).first,
-                   ST->getWavesPerEUForWorkGroup(
-                       ST->getFlatWorkGroupSizes(F).second)))) {}
+      : BaseT(TM, F.getParent()->getDataLayout()),
+        ST(static_cast<const GCNSubtarget *>(TM->getSubtargetImpl(F))),
+        TLI(ST->getTargetLowering()), CommonTTI(TM, F),
+        IsGraphics(AMDGPU::isGraphics(F.getCallingConv())),
+        MaxVGPRs(ST->getMaxNumVGPRs(
+            std::max(ST->getWavesPerEU(F).first,
+                     ST->getWavesPerEUForWorkGroup(
+                         ST->getFlatWorkGroupSizes(F).second)))) {
+    AMDGPU::SIModeRegisterDefaults Mode(F);
+    HasFP32Denormals = Mode.allFP32Denormals();
+    HasFP64FP16Denormals = Mode.allFP64FP16Denormals();
+  }
 
   bool hasBranchDivergence() { return true; }
   bool useGPUDivergenceAnalysis() const;
@@ -162,6 +170,7 @@ public:
   unsigned getNumberOfRegisters(unsigned RCID) const;
   unsigned getRegisterBitWidth(bool Vector) const;
   unsigned getMinVectorRegisterBitWidth() const;
+  unsigned getMaximumVF(unsigned ElemWidth, unsigned Opcode) const;
   unsigned getLoadVectorFactor(unsigned VF, unsigned LoadSize,
                                unsigned ChainSizeInBytes,
                                VectorType *VecTy) const;
@@ -213,7 +222,7 @@ public:
   unsigned getFlatAddressSpace() const {
     // Don't bother running InferAddressSpaces pass on graphics shaders which
     // don't use flat addressing.
-    if (IsGraphicsShader)
+    if (IsGraphics)
       return -1;
     return AMDGPUAS::FLAT_ADDRESS;
   }
@@ -222,6 +231,16 @@ public:
                                   Intrinsic::ID IID) const;
   Value *rewriteIntrinsicWithAddressSpace(IntrinsicInst *II, Value *OldV,
                                           Value *NewV) const;
+
+  bool canSimplifyLegacyMulToMul(const Value *Op0, const Value *Op1,
+                                 InstCombiner &IC) const;
+  Optional<Instruction *> instCombineIntrinsic(InstCombiner &IC,
+                                               IntrinsicInst &II) const;
+  Optional<Value *> simplifyDemandedVectorEltsIntrinsic(
+      InstCombiner &IC, IntrinsicInst &II, APInt DemandedElts, APInt &UndefElts,
+      APInt &UndefElts2, APInt &UndefElts3,
+      std::function<void(Instruction *, unsigned, APInt, APInt &)>
+          SimplifyAndSetOp) const;
 
   unsigned getVectorSplitCost() { return 0; }
 

@@ -272,7 +272,7 @@ SBProcess SBTarget::LoadCore(const char *core_file, lldb::SBError &error) {
     FileSpec filespec(core_file);
     FileSystem::Instance().Resolve(filespec);
     ProcessSP process_sp(target_sp->CreateProcess(
-        target_sp->GetDebugger().GetListener(), "", &filespec));
+        target_sp->GetDebugger().GetListener(), "", &filespec, false));
     if (process_sp) {
       error.SetError(process_sp->LoadCore());
       if (error.Success())
@@ -572,10 +572,11 @@ lldb::SBProcess SBTarget::ConnectRemote(SBListener &listener, const char *url,
     std::lock_guard<std::recursive_mutex> guard(target_sp->GetAPIMutex());
     if (listener.IsValid())
       process_sp =
-          target_sp->CreateProcess(listener.m_opaque_sp, plugin_name, nullptr);
+          target_sp->CreateProcess(listener.m_opaque_sp, plugin_name, nullptr,
+                                   true);
     else
       process_sp = target_sp->CreateProcess(
-          target_sp->GetDebugger().GetListener(), plugin_name, nullptr);
+          target_sp->GetDebugger().GetListener(), plugin_name, nullptr, true);
 
     if (process_sp) {
       sb_process.SetSP(process_sp);
@@ -710,7 +711,7 @@ size_t SBTarget::ReadMemory(const SBAddress addr, void *buf, size_t size,
   if (target_sp) {
     std::lock_guard<std::recursive_mutex> guard(target_sp->GetAPIMutex());
     bytes_read =
-        target_sp->ReadMemory(addr.ref(), false, buf, size, sb_error.ref());
+        target_sp->ReadMemory(addr.ref(), buf, size, sb_error.ref(), true);
   } else {
     sb_error.SetErrorString("invalid target");
   }
@@ -1131,8 +1132,8 @@ SBTarget::BreakpointCreateForException(lldb::LanguageType language,
 
   // BEGIN SWIFT
   SBStringList no_extra_args;
-  return BreakpointCreateForException(language, catch_bp, throw_bp,
-                                      no_extra_args);
+  return LLDB_RECORD_RESULT(BreakpointCreateForException(
+      language, catch_bp, throw_bp, no_extra_args));
   // END SWIFT
 }
 
@@ -2145,12 +2146,12 @@ lldb::SBInstructionList SBTarget::ReadInstructions(lldb::SBAddress base_addr,
     if (addr_ptr) {
       DataBufferHeap data(
           target_sp->GetArchitecture().GetMaximumOpcodeByteSize() * count, 0);
-      bool prefer_file_cache = false;
+      bool force_live_memory = true;
       lldb_private::Status error;
       lldb::addr_t load_addr = LLDB_INVALID_ADDRESS;
       const size_t bytes_read =
-          target_sp->ReadMemory(*addr_ptr, prefer_file_cache, data.GetBytes(),
-                                data.GetByteSize(), error, &load_addr);
+          target_sp->ReadMemory(*addr_ptr, data.GetBytes(), data.GetByteSize(),
+                                error, force_live_memory, &load_addr);
       const bool data_from_file = load_addr == LLDB_INVALID_ADDRESS;
       sb_instructions.SetDisassembler(Disassembler::DisassembleBytes(
           target_sp->GetArchitecture(), nullptr, flavor_string, *addr_ptr,
@@ -2469,6 +2470,21 @@ lldb::addr_t SBTarget::GetStackRedZoneSize() {
   return 0;
 }
 
+bool SBTarget::IsLoaded(const SBModule &module) const {
+  LLDB_RECORD_METHOD_CONST(bool, SBTarget, IsLoaded, (const lldb::SBModule &),
+                           module);
+
+  TargetSP target_sp(GetSP());
+  if (!target_sp)
+    return false;
+
+  ModuleSP module_sp(module.GetSP());
+  if (!module_sp)
+    return false;
+
+  return module_sp->IsLoadedInTarget(target_sp.get());
+}
+
 lldb::SBLaunchInfo SBTarget::GetLaunchInfo() const {
   LLDB_RECORD_METHOD_CONST_NO_ARGS(lldb::SBLaunchInfo, SBTarget, GetLaunchInfo);
 
@@ -2634,6 +2650,9 @@ void RegisterMethods<SBTarget>(Registry &R) {
   LLDB_REGISTER_METHOD(lldb::SBBreakpoint, SBTarget,
                        BreakpointCreateForException,
                        (lldb::LanguageType, bool, bool));
+  LLDB_REGISTER_METHOD(lldb::SBBreakpoint, SBTarget,
+                       BreakpointCreateForException,
+                       (lldb::LanguageType, bool, bool, SBStringList &));
   LLDB_REGISTER_METHOD(
       lldb::SBBreakpoint, SBTarget, BreakpointCreateFromScript,
       (const char *, lldb::SBStructuredData &, const lldb::SBFileSpecList &,
@@ -2741,6 +2760,8 @@ void RegisterMethods<SBTarget>(Registry &R) {
   LLDB_REGISTER_METHOD(lldb::SBValue, SBTarget, EvaluateExpression,
                        (const char *, const lldb::SBExpressionOptions &));
   LLDB_REGISTER_METHOD(lldb::addr_t, SBTarget, GetStackRedZoneSize, ());
+  LLDB_REGISTER_METHOD_CONST(bool, SBTarget, IsLoaded,
+                             (const lldb::SBModule &));
   LLDB_REGISTER_METHOD_CONST(lldb::SBLaunchInfo, SBTarget, GetLaunchInfo, ());
   LLDB_REGISTER_METHOD(void, SBTarget, SetLaunchInfo,
                        (const lldb::SBLaunchInfo &));

@@ -38,9 +38,12 @@ set(LIBUNWIND_HEADERS
     dwarf2.h
     DwarfInstructions.hpp
     DwarfParser.hpp
+    EHHeaderParser.hpp
+    FrameHeaderCache.hpp
     libunwind_ext.h
     Registers.hpp
     RWMutex.hpp
+    Unwind-EHABI.h
     UnwindCursor.hpp
     ../include/libunwind.h
     ../include/unwind.h
@@ -121,9 +124,6 @@ if (LIBUNWIND_ENABLE_SHARED)
     target_compile_options(unwind_shared PRIVATE /GR-)
   else()
     target_compile_options(unwind_shared PRIVATE -fno-rtti)
-  endif()
-  if(COMMAND llvm_setup_rpath)
-    llvm_setup_rpath(unwind_shared)
   endif()
   target_link_libraries(unwind_shared PRIVATE ${LIBUNWIND_LIBRARIES})
   set_target_properties(unwind_shared PROPERTIES

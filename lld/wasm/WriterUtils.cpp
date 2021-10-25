@@ -32,6 +32,8 @@ std::string toString(ValType type) {
     return "v128";
   case ValType::EXNREF:
     return "exnref";
+  case ValType::FUNCREF:
+    return "funcref";
   case ValType::EXTERNREF:
     return "externref";
   }
@@ -119,8 +121,8 @@ void writeSig(raw_ostream &os, const WasmSignature &sig) {
     writeValueType(os, paramType, "param type");
   }
   writeUleb128(os, sig.Returns.size(), "result Count");
-  if (sig.Returns.size()) {
-    writeValueType(os, sig.Returns[0], "result type");
+  for (ValType returnType : sig.Returns) {
+    writeValueType(os, returnType, "result type");
   }
 }
 
@@ -132,6 +134,14 @@ void writeI32Const(raw_ostream &os, int32_t number, const Twine &msg) {
 void writeI64Const(raw_ostream &os, int64_t number, const Twine &msg) {
   writeU8(os, WASM_OPCODE_I64_CONST, "i64.const");
   writeSleb128(os, number, msg);
+}
+
+void writePtrConst(raw_ostream &os, int64_t number, bool is64,
+                   const Twine &msg) {
+  if (is64)
+    writeI64Const(os, number, msg);
+  else
+    writeI32Const(os, static_cast<int32_t>(number), msg);
 }
 
 void writeMemArg(raw_ostream &os, uint32_t alignment, uint64_t offset) {
@@ -193,7 +203,7 @@ void writeEvent(raw_ostream &os, const WasmEvent &event) {
   writeEventType(os, event.Type);
 }
 
-void writeTableType(raw_ostream &os, const llvm::wasm::WasmTable &type) {
+void writeTableType(raw_ostream &os, const WasmTableType &type) {
   writeU8(os, WASM_TYPE_FUNCREF, "table type");
   writeLimits(os, type.Limits);
 }

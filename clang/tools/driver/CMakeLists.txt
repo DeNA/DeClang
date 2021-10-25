@@ -24,10 +24,6 @@ if(CLANG_PLUGIN_SUPPORT)
   set(support_plugins SUPPORT_PLUGINS)
 endif()
 
-if(NOT CLANG_BUILT_STANDALONE)
-  set(tablegen_deps intrinsics_gen)
-endif()
-
 add_clang_tool(clang
   driver.cpp
   cc1_main.cpp
@@ -35,7 +31,7 @@ add_clang_tool(clang
   cc1gen_reproducer_main.cpp
 
   DEPENDS
-  ${tablegen_deps}
+  intrinsics_gen
   ${support_plugins}
   )
 
@@ -122,4 +118,27 @@ if(CLANG_ORDER_FILE AND
     target_link_libraries(clang PRIVATE ${LINKER_ORDER_FILE_OPTION})
     set_target_properties(clang PROPERTIES LINK_DEPENDS ${CLANG_ORDER_FILE})
   endif()
+endif()
+
+# Add features.json file into usr/share/clang
+set(features_file_src "${CMAKE_CURRENT_SOURCE_DIR}/features.json")
+set(features_file_dest "${CMAKE_BINARY_DIR}/share/clang/features.json")
+
+add_custom_command(OUTPUT ${features_file_dest}
+                   COMMAND ${CMAKE_COMMAND} -E make_directory
+                     ${CMAKE_BINARY_DIR}/share/clang
+                   COMMAND ${CMAKE_COMMAND} -E copy
+                     ${features_file_src}
+                     ${features_file_dest}
+                   DEPENDS ${features_file_src})
+
+add_custom_target(clang-features-file DEPENDS ${features_file_dest})
+add_dependencies(clang clang-features-file)
+install(FILES ${features_file_dest}
+        DESTINATION "share/clang"
+        COMPONENT clang)
+if(NOT LLVM_ENABLE_IDE)
+  add_llvm_install_targets("install-features-file"
+                           DEPENDS clang-features-file
+                           COMPONENT clang)
 endif()

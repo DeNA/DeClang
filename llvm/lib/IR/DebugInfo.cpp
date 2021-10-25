@@ -262,8 +262,7 @@ bool DebugInfoFinder::addScope(DIScope *Scope) {
 }
 
 static MDNode *updateLoopMetadataDebugLocationsImpl(
-    MDNode *OrigLoopID,
-    function_ref<DILocation *(const DILocation &)> Updater) {
+    MDNode *OrigLoopID, function_ref<Metadata *(Metadata *)> Updater) {
   assert(OrigLoopID && OrigLoopID->getNumOperands() > 0 &&
          "Loop ID needs at least one operand");
   assert(OrigLoopID && OrigLoopID->getOperand(0).get() == OrigLoopID &&
@@ -274,11 +273,10 @@ static MDNode *updateLoopMetadataDebugLocationsImpl(
 
   for (unsigned i = 1; i < OrigLoopID->getNumOperands(); ++i) {
     Metadata *MD = OrigLoopID->getOperand(i);
-    if (DILocation *DL = dyn_cast<DILocation>(MD)) {
-      if (DILocation *NewDL = Updater(*DL))
-        MDs.push_back(NewDL);
-    } else
-      MDs.push_back(MD);
+    if (!MD)
+      MDs.push_back(nullptr);
+    else if (Metadata *NewMD = Updater(MD))
+      MDs.push_back(NewMD);
   }
 
   MDNode *NewLoopID = MDNode::getDistinct(OrigLoopID->getContext(), MDs);
@@ -288,7 +286,7 @@ static MDNode *updateLoopMetadataDebugLocationsImpl(
 }
 
 void llvm::updateLoopMetadataDebugLocations(
-    Instruction &I, function_ref<DILocation *(const DILocation &)> Updater) {
+    Instruction &I, function_ref<Metadata *(Metadata *)> Updater) {
   MDNode *OrigLoopID = I.getMetadata(LLVMContext::MD_loop);
   if (!OrigLoopID)
     return;
@@ -296,26 +294,64 @@ void llvm::updateLoopMetadataDebugLocations(
   I.setMetadata(LLVMContext::MD_loop, NewLoopID);
 }
 
+/// Return true if a node is a DILocation or if a DILocation is
+/// indirectly referenced by one of the node's children.
+static bool isDILocationReachable(SmallPtrSetImpl<Metadata *> &Visited,
+                                  SmallPtrSetImpl<Metadata *> &Reachable,
+                                  Metadata *MD) {
+  MDNode *N = dyn_cast_or_null<MDNode>(MD);
+  if (!N)
+    return false;
+  if (Reachable.count(N) || isa<DILocation>(N))
+    return true;
+  if (!Visited.insert(N).second)
+    return false;
+  for (auto &OpIt : N->operands()) {
+    Metadata *Op = OpIt.get();
+    if (isDILocationReachable(Visited, Reachable, Op)) {
+      Reachable.insert(N);
+      return true;
+    }
+  }
+  return false;
+}
+
 static MDNode *stripDebugLocFromLoopID(MDNode *N) {
   assert(!N->operands().empty() && "Missing self reference?");
+  SmallPtrSet<Metadata *, 8> Visited, DILocationReachable;
+  // If we already visited N, there is nothing to do.
+  if (!Visited.insert(N).second)
+    return N;
 
-  // if there is no debug location, we do not have to rewrite this MDNode.
-  if (std::none_of(N->op_begin() + 1, N->op_end(), [](const MDOperand &Op) {
-        return isa<DILocation>(Op.get());
-      }))
+  // If there is no debug location, we do not have to rewrite this
+  // MDNode. This loop also initializes DILocationReachable, later
+  // needed by updateLoopMetadataDebugLocationsImpl; the use of
+  // count_if avoids an early exit.
+  if (!std::count_if(N->op_begin() + 1, N->op_end(),
+                     [&Visited, &DILocationReachable](const MDOperand &Op) {
+                       return isa<DILocation>(Op.get()) ||
+                              isDILocationReachable(
+                                  Visited, DILocationReachable, Op.get());
+                     }))
     return N;
 
   // If there is only the debug location without any actual loop metadata, we
   // can remove the metadata.
-  if (std::none_of(N->op_begin() + 1, N->op_end(), [](const MDOperand &Op) {
-        return !isa<DILocation>(Op.get());
-      }))
+  if (std::all_of(
+          N->op_begin() + 1, N->op_end(),
+          [&Visited, &DILocationReachable](const MDOperand &Op) {
+            return isa<DILocation>(Op.get()) ||
+                   isDILocationReachable(Visited, DILocationReachable,
+                                         Op.get());
+          }))
     return nullptr;
 
-  auto dropDebugLoc = [](const DILocation &) -> DILocation * {
-    return nullptr;
-  };
-  return updateLoopMetadataDebugLocationsImpl(N, dropDebugLoc);
+  return updateLoopMetadataDebugLocationsImpl(
+      N, [&DILocationReachable](Metadata *MD) -> Metadata * {
+        if (isa<DILocation>(MD) || DILocationReachable.count(MD))
+          return nullptr;
+        return MD;
+      });
 }
 
 bool llvm::stripDebugInfo(Function &F) {
@@ -325,7 +361,7 @@ bool llvm::stripDebugInfo(Function &F) {
     F.setSubprogram(nullptr);
   }
 
-  DenseMap<MDNode*, MDNode*> LoopIDsMap;
+  DenseMap<MDNode *, MDNode *> LoopIDsMap;
   for (BasicBlock &BB : F) {
     for (auto II = BB.begin(), End = BB.end(); II != End;) {
       Instruction &I = *II++; // We may delete the instruction, increment now.
@@ -650,15 +686,18 @@ bool llvm::stripNonLineTableDebugInfo(Module &M) {
           MDNode *InlinedAt = DL.getInlinedAt();
           Scope = remap(Scope);
           InlinedAt = remap(InlinedAt);
-          return DebugLoc::get(DL.getLine(), DL.getCol(), Scope, InlinedAt);
+          return DILocation::get(M.getContext(), DL.getLine(), DL.getCol(),
+                                 Scope, InlinedAt);
         };
 
         if (I.getDebugLoc() != DebugLoc())
           I.setDebugLoc(remapDebugLoc(I.getDebugLoc()));
 
         // Remap DILocations in llvm.loop attachments.
-        updateLoopMetadataDebugLocations(I, [&](const DILocation &Loc) {
-          return remapDebugLoc(&Loc).get();
+        updateLoopMetadataDebugLocations(I, [&](Metadata *MD) -> Metadata * {
+          if (auto *Loc = dyn_cast_or_null<DILocation>(MD))
+            return remapDebugLoc(Loc).get();
+          return MD;
         });
 
         // Strip heapallocsite attachments, they point into the DIType system.
@@ -714,12 +753,12 @@ void Instruction::dropLocation() {
 
   // Set a line 0 location for calls to preserve scope information in case
   // inlining occurs.
-  const DISubprogram *SP = getFunction()->getSubprogram();
+  DISubprogram *SP = getFunction()->getSubprogram();
   if (SP)
     // If a function scope is available, set it on the line 0 location. When
     // hoisting a call to a predecessor block, using the function scope avoids
     // making it look like the callee was reached earlier than it should be.
-    setDebugLoc(DebugLoc::get(0, 0, SP));
+    setDebugLoc(DILocation::get(getContext(), 0, 0, SP));
   else
     // The parent function has no scope. Go ahead and drop the location. If
     // the parent function is inlined, and the callee has a subprogram, the

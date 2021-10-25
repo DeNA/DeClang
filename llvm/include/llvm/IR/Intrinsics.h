@@ -125,7 +125,8 @@ namespace Intrinsic {
       VecElementArgument,
       Subdivide2Argument,
       Subdivide4Argument,
-      VecOfBitcastsToInt
+      VecOfBitcastsToInt,
+      AMX
     } Kind;
 
     union {
@@ -188,10 +189,8 @@ namespace Intrinsic {
     }
 
     static IITDescriptor getVector(unsigned Width, bool IsScalable) {
-      IITDescriptor Result;
-      Result.Kind = Vector;
-      Result.Vector_Width.Min = Width;
-      Result.Vector_Width.Scalable = IsScalable;
+      IITDescriptor Result = {Vector, {0}};
+      Result.Vector_Width = ElementCount::get(Width, IsScalable);
       return Result;
     }
   };

@@ -208,6 +208,8 @@ StringRef ARMTargetInfo::getCPUAttr() const {
     return "8_5A";
   case llvm::ARM::ArchKind::ARMV8_6A:
     return "8_6A";
+  case llvm::ARM::ArchKind::ARMV8_7A:
+    return "8_7A";
   case llvm::ARM::ArchKind::ARMV8MBaseline:
     return "8M_BASE";
   case llvm::ARM::ArchKind::ARMV8MMainline:
@@ -1118,6 +1120,7 @@ ARMTargetInfo::checkCallingConvention(CallingConv CC) const {
   case CC_AAPCS:
   case CC_AAPCS_VFP:
   case CC_Swift:
+  case CC_SwiftAsync:
   case CC_OpenCLKernel:
     return CCCR_OK;
   default:
@@ -1197,6 +1200,7 @@ WindowsARMTargetInfo::checkCallingConvention(CallingConv CC) const {
   case CC_PreserveMost:
   case CC_PreserveAll:
   case CC_Swift:
+  case CC_SwiftAsync:
     return CCCR_OK;
   default:
     return CCCR_Warning;

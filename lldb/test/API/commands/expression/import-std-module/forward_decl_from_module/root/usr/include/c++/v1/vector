@@ -1,4 +1,4 @@
-#include "stdio.h"
+#include "libc_header.h"
 
 namespace std {
   inline namespace __1 {

@@ -1,3 +1,10 @@
+add_custom_target(lldb-api-test-deps)
+add_dependencies(lldb-api-test-deps lldb-test-deps)
+
+add_lit_testsuites(LLDB-API
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  DEPENDS lldb-api-test-deps)
+
 function(add_python_test_target name test_script args comment)
   set(PYTHON_TEST_COMMAND
     ${Python3_EXECUTABLE}
@@ -51,14 +58,10 @@ set(LLDB_TEST_USER_ARGS
 # hash of filename and .text section, there *will* be conflicts inside
 # the build directory.
 set(LLDB_TEST_COMMON_ARGS
-  -S nm
   -u CXXFLAGS
   -u CFLAGS
   ${SWIFT_TEST_ARGS}
   )
-
-# Configure the traces directory.
-set(LLDB_TEST_TRACE_DIRECTORY "${PROJECT_BINARY_DIR}/lldb-test-traces" CACHE PATH "The test traces directory.")
 
 # Set the path to the default lldb test executable.
 set(LLDB_DEFAULT_TEST_EXECUTABLE "${LLVM_RUNTIME_OUTPUT_INTDIR}/lldb${CMAKE_EXECUTABLE_SUFFIX}")
@@ -85,9 +88,6 @@ if ("${LLDB_TEST_COMPILER}" STREQUAL "")
 endif()
 
 if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
-  # All tests are currently flaky on Windows, so rerun them all once when they fail.
-  set(LLDB_TEST_COMMON_ARGS ${LLDB_TEST_COMMON_ARGS} --rerun-all-issues)
-
   set(LLDB_TEST_DEBUG_TEST_CRASHES
     0
     CACHE BOOL "(Windows only) Enables debugging of tests in the test suite by showing the crash dialog when lldb crashes")
@@ -161,7 +161,6 @@ if(LLDB_BUILT_STANDALONE)
   string(REPLACE ${LLVM_RUNTIME_OUTPUT_INTDIR} ${config_runtime_output_dir} LLDB_SOURCE_DIR "${LLDB_SOURCE_DIR}")
   string(REPLACE ${LLVM_RUNTIME_OUTPUT_INTDIR} ${config_runtime_output_dir} LLDB_FRAMEWORK_DIR "${LLDB_FRAMEWORK_DIR}")
   string(REPLACE ${LLVM_RUNTIME_OUTPUT_INTDIR} ${config_runtime_output_dir} LLDB_TEST_BUILD_DIRECTORY "${LLDB_TEST_BUILD_DIRECTORY}")
-  string(REPLACE ${LLVM_RUNTIME_OUTPUT_INTDIR} ${config_runtime_output_dir} LLDB_TEST_TRACE_DIRECTORY "${LLDB_TEST_TRACE_DIRECTORY}")
   string(REPLACE ${LLVM_RUNTIME_OUTPUT_INTDIR} ${config_runtime_output_dir} LLDB_TEST_EXECUTABLE "${LLDB_TEST_EXECUTABLE}")
   string(REPLACE ${LLVM_RUNTIME_OUTPUT_INTDIR} ${config_runtime_output_dir} LLDB_TEST_COMPILER "${LLDB_TEST_COMPILER}")
   string(REPLACE ${LLVM_RUNTIME_OUTPUT_INTDIR} ${config_runtime_output_dir} LLDB_TEST_DSYMUTIL "${LLDB_TEST_DSYMUTIL}")
@@ -191,7 +190,6 @@ endif()
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_DOTEST_ARGS "${LLDB_DOTEST_ARGS}")
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_SOURCE_DIR "${LLDB_SOURCE_DIR}")
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_BUILD_DIRECTORY "${LLDB_TEST_BUILD_DIRECTORY}")
-string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_TRACE_DIRECTORY "${LLDB_TEST_TRACE_DIRECTORY}")
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_EXECUTABLE "${LLDB_TEST_EXECUTABLE}")
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_COMPILER "${LLDB_TEST_COMPILER}")
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_DSYMUTIL "${LLDB_TEST_DSYMUTIL}")
@@ -199,17 +197,35 @@ string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_FILECHEC
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_YAML2OBJ "${LLDB_TEST_YAML2OBJ}")
 string(REPLACE ${CMAKE_CFG_INTDIR} ${dotest_args_replacement} LLDB_TEST_SERVER "${LLDB_TEST_SERVER}")
 
-# Configure the API test suite.
 configure_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.site.cfg.py
   MAIN_CONFIG
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py)
 
-if (CMAKE_GENERATOR STREQUAL "Xcode")
-  # Xcode does not get the auto-generated targets. We need to create
-  # check-lldb-api manually.
-  add_lit_testsuite(check-lldb-api "Running lldb api test suite"
-    ${CMAKE_CURRENT_BINARY_DIR}
-    DEPENDS lldb-test-deps)
-endif()
+# Targets for running the test suite on the different Apple simulators.
+add_lit_testsuite(check-lldb-simulator-ios
+  "Running lldb test suite on the iOS simulator"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  PARAMS "lldb-run-with-simulator=ios"
+  EXCLUDE_FROM_CHECK_ALL
+  DEPENDS lldb-api-test-deps)
+
+add_lit_testsuite(check-lldb-simulator-watchos
+  "Running lldb test suite on the watchOS simulator"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  PARAMS "lldb-run-with-simulator=watchos"
+  EXCLUDE_FROM_CHECK_ALL
+  DEPENDS lldb-api-test-deps)
+
+add_lit_testsuite(check-lldb-simulator-tvos
+  "Running lldb test suite on the tvOS simulator"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  PARAMS "lldb-run-with-simulator=tvos"
+  EXCLUDE_FROM_CHECK_ALL
+  DEPENDS lldb-api-test-deps)
+
+add_lit_testsuite(check-lldb-api "Running lldb api test suite"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  EXCLUDE_FROM_CHECK_ALL
+  DEPENDS lldb-api-test-deps)

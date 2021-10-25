@@ -40,6 +40,12 @@ bool CompilerType::IsAnonymousType() const {
   return false;
 }
 
+bool CompilerType::IsScopedEnumerationType() const {
+  if (IsValid())
+    return m_type_system->IsScopedEnumerationType(m_type);
+  return false;
+}
+
 bool CompilerType::IsArrayType(CompilerType *element_type_ptr, uint64_t *size,
                                bool *is_incomplete) const {
   if (IsValid())
@@ -92,9 +98,9 @@ bool CompilerType::IsCStringType(uint32_t &length) const {
   return false;
 }
 
-bool CompilerType::IsFunctionType(bool *is_variadic_ptr) const {
+bool CompilerType::IsFunctionType() const {
   if (IsValid())
-    return m_type_system->IsFunctionType(m_type, is_variadic_ptr);
+    return m_type_system->IsFunctionType(m_type);
   return false;
 }
 
@@ -326,10 +332,10 @@ unsigned CompilerType::GetTypeQualifiers() const {
 
 // Creating related types
 
-CompilerType CompilerType::GetArrayElementType(ExecutionContextScope *exe_scope,
-                                               uint64_t *stride) const {
+CompilerType
+CompilerType::GetArrayElementType(ExecutionContextScope *exe_scope) const {
   if (IsValid()) {
-    return m_type_system->GetArrayElementType(m_type, stride, exe_scope);
+    return m_type_system->GetArrayElementType(m_type, exe_scope);
   }
   return CompilerType();
 }
@@ -350,6 +356,12 @@ CompilerType CompilerType::GetCanonicalType() const {
 CompilerType CompilerType::GetFullyUnqualifiedType() const {
   if (IsValid())
     return m_type_system->GetFullyUnqualifiedType(m_type);
+  return CompilerType();
+}
+
+CompilerType CompilerType::GetEnumerationIntegerType() const {
+  if (IsValid())
+    return m_type_system->GetEnumerationIntegerType(m_type);
   return CompilerType();
 }
 

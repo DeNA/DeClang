@@ -63,7 +63,8 @@ config.substitutions.append(('%PATH%', config.environment['PATH']))
 tool_dirs = [config.clang_tools_dir, config.llvm_tools_dir]
 
 tools = [
-    'c-index-test', 'clang-diff', 'clang-format', 'clang-tblgen', 'opt', 'llvm-ifs',
+    'apinotes-test', 'c-index-test', 'clang-diff', 'clang-format',
+    'clang-tblgen', 'opt', 'llvm-ifs', 'yaml2obj',
     ToolSubst('%clang_extdef_map', command=FindTool(
         'clang-extdef-mapping'), unresolved='ignore'),
 ]
@@ -90,6 +91,7 @@ llvm_config.add_tool_substitutions(tools, tool_dirs)
 config.substitutions.append(
     ('%hmaptool', "'%s' %s" % (config.python_executable,
                              os.path.join(config.clang_tools_dir, 'hmaptool'))))
+
 
 # Plugins (loadable modules)
 if config.has_plugins and config.llvm_plugin_ext:
@@ -169,6 +171,12 @@ if platform.system() not in ['Windows']:
 # *-apple-macosx should also be XFAILED when 'darwin' is XFAILED.
 if lit.util.isMacOSTriple(config.target_triple):
    config.available_features.add('darwin')
+
+# Features
+known_arches = ["x86_64", "mips64", "ppc64", "aarch64"]
+if (any(config.target_triple.startswith(x) for x in known_arches)):
+  config.available_features.add("clang-target-64-bits")
+
 
 def calculate_arch_features(arch_string):
     features = []

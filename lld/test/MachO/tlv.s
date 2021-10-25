@@ -1,0 +1,72 @@
+# REQUIRES: x86
+# RUN: mkdir -p %t
+# RUN: llvm-mc -filetype=obj -triple=x86_64-apple-darwin %s -o %t/test.o
+
+# RUN: %lld -lSystem -o %t/test %t/test.o
+# RUN: llvm-readobj --file-headers %t/test | FileCheck %s --check-prefix=HEADER
+# RUN: llvm-objdump -D --bind --rebase %t/test | FileCheck %s
+
+# RUN: %lld -lSystem -pie -o %t/test %t/test.o
+# RUN: llvm-readobj --file-headers %t/test | FileCheck %s --check-prefix=HEADER
+# RUN: llvm-objdump -D --bind --rebase %t/test | FileCheck %s
+
+# HEADER: MH_HAS_TLV_DESCRIPTORS
+
+# CHECK:       Disassembly of section __TEXT,__text:
+# CHECK-EMPTY:
+# CHECK-NEXT:  <_main>:
+# CHECK-NEXT:  leaq    {{.*}}(%rip), %rax  # {{.*}} <_foo>
+# CHECK-NEXT:  leaq    {{.*}}(%rip), %rax  # {{.*}} <_bar>
+# CHECK-NEXT:  retq
+# CHECK-EMPTY:
+# CHECK-NEXT:  Disassembly of section __DATA,__thread_data:
+# CHECK-EMPTY:
+# CHECK-NEXT:  <_foo$tlv$init>:
+# CHECK-NEXT:  00 00
+# CHECK-NEXT:  00 00
+# CHECK-EMPTY:
+# CHECK-NEXT:  <_bar$tlv$init>:
+# CHECK-NEXT:  00 00
+# CHECK-NEXT:  00 00
+# CHECK-EMPTY:
+# CHECK-NEXT:  Disassembly of section __DATA,__thread_vars:
+# CHECK-EMPTY:
+# CHECK-NEXT: <_foo>:
+# CHECK-NEXT:          ...
+# CHECK-EMPTY:
+# CHECK-NEXT:  <_bar>:
+# CHECK-NEXT:          ...
+# CHECK-NEXT:  04 00
+# CHECK-NEXT:  00 00
+# CHECK-NEXT:  00 00
+# CHECK-NEXT:  00 00
+
+## Make sure we don't emit rebase opcodes for relocations in __thread_vars.
+# CHECK:       Rebase table:
+# CHECK-NEXT:  segment  section            address     type
+# CHECK-NEXT:  Bind table:
+# CHECK:       __DATA  __thread_vars   0x{{[0-9a-f]*}}  pointer 0 libSystem __tlv_bootstrap
+# CHECK:       __DATA  __thread_vars   0x{{[0-9a-f]*}}  pointer 0 libSystem __tlv_bootstrap
+
+.globl _main
+_main:
+  mov _foo@TLVP(%rip), %rax
+  mov _bar@TLVP(%rip), %rax
+  ret
+
+.section	__DATA,__thread_data,thread_local_regular
+_foo$tlv$init:
+  .space 4
+_bar$tlv$init:
+  .space 4
+
+.section	__DATA,__thread_vars,thread_local_variables
+.globl	_foo, _bar
+_foo:
+  .quad	__tlv_bootstrap
+  .quad	0
+  .quad	_foo$tlv$init
+_bar:
+  .quad	__tlv_bootstrap
+  .quad	0
+  .quad	_bar$tlv$init

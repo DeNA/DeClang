@@ -1163,6 +1163,8 @@ public:
     case CK_FloatingToIntegral:
     case CK_FloatingToBoolean:
     case CK_FloatingCast:
+    case CK_FloatingToFixedPoint:
+    case CK_FixedPointToFloating:
     case CK_FixedPointCast:
     case CK_FixedPointToBoolean:
     case CK_FixedPointToIntegral:
@@ -1649,8 +1651,8 @@ llvm::Constant *ConstantEmitter::tryEmitPrivateForVarInit(const VarDecl &D) {
         if (CD->isTrivial() && CD->isDefaultConstructor())
           return CGM.EmitNullConstant(D.getType());
       }
-    InConstantContext = true;
   }
+  InConstantContext = D.hasConstantInitialization();
 
   QualType destType = D.getType();
 
@@ -1925,6 +1927,10 @@ ConstantLValue
 ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
   // Handle values.
   if (const ValueDecl *D = base.dyn_cast<const ValueDecl*>()) {
+    // The constant always points to the canonical declaration. We want to look
+    // at properties of the most recent declaration at the point of emission.
+    D = cast<ValueDecl>(D->getMostRecentDecl());
+
     if (D->hasAttr<WeakRefAttr>())
       return CGM.GetWeakRefReference(D).getPointer();
 
@@ -1965,6 +1971,9 @@ ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
 
     if (auto *GD = dyn_cast<MSGuidDecl>(D))
       return CGM.GetAddrOfMSGuidDecl(GD);
+
+    if (auto *TPO = dyn_cast<TemplateParamObjectDecl>(D))
+      return CGM.GetAddrOfTemplateParamObject(TPO);
 
     return nullptr;
   }
@@ -2271,8 +2280,7 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const APValue &Value,
   case APValue::Union:
     return ConstStructBuilder::BuildStruct(*this, Value, DestType);
   case APValue::Array: {
-    const ConstantArrayType *CAT =
-        CGM.getContext().getAsConstantArrayType(DestType);
+    const ArrayType *ArrayTy = CGM.getContext().getAsArrayType(DestType);
     unsigned NumElements = Value.getArraySize();
     unsigned NumInitElts = Value.getArrayInitializedElts();
 
@@ -2280,7 +2288,7 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const APValue &Value,
     llvm::Constant *Filler = nullptr;
     if (Value.hasArrayFiller()) {
       Filler = tryEmitAbstractForMemory(Value.getArrayFiller(),
-                                        CAT->getElementType());
+                                        ArrayTy->getElementType());
       if (!Filler)
         return nullptr;
     }
@@ -2295,7 +2303,7 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const APValue &Value,
     llvm::Type *CommonElementType = nullptr;
     for (unsigned I = 0; I < NumInitElts; ++I) {
       llvm::Constant *C = tryEmitPrivateForMemory(
-          Value.getArrayInitializedElt(I), CAT->getElementType());
+          Value.getArrayInitializedElt(I), ArrayTy->getElementType());
       if (!C) return nullptr;
 
       if (I == 0)
@@ -2303,16 +2311,6 @@ llvm::Constant *ConstantEmitter::tryEmitPrivate(const APValue &Value,
       else if (C->getType() != CommonElementType)
         CommonElementType = nullptr;
       Elts.push_back(C);
-    }
-
-    // This means that the array type is probably "IncompleteType" or some
-    // type that is not ConstantArray.
-    if (CAT == nullptr && CommonElementType == nullptr && !NumInitElts) {
-      const ArrayType *AT = CGM.getContext().getAsArrayType(DestType);
-      CommonElementType = CGM.getTypes().ConvertType(AT->getElementType());
-      llvm::ArrayType *AType = llvm::ArrayType::get(CommonElementType,
-                                                    NumElements);
-      return llvm::ConstantAggregateZero::get(AType);
     }
 
     llvm::ArrayType *Desired =

@@ -41,18 +41,23 @@ std::string aarch64::getAArch64TargetCPU(const ArgList &Args,
   if (CPU == "native")
     return std::string(llvm::sys::getHostCPUName());
 
-  // arm64e requires v8.3a and only runs on vortex and later CPUs.
-  if (Triple.getArchName() == "arm64e") {
-    // Honor -mcpu as long it doesn't specify an older CPU than "vortex".
+  // arm64e requires v8.3a and only runs on apple-a12 and later CPUs.
+  if (Triple.isArm64e()) {
+    // Honor -mcpu as long it doesn't specify an older CPU than a12.
     if (CPU.size() && (CPU != "cyclone"))
       return CPU;
 
-    // Otherwise default to "vortex".
-    return "vortex";
+    return "apple-a12";
   }
 
   if (CPU.size())
     return CPU;
+
+  if (Triple.isTargetMachineMac() &&
+      Triple.getArch() == llvm::Triple::aarch64) {
+    // Apple Silicon macs default to A12 CPUs.
+    return "apple-a12";
+  }
 
   // Make sure we pick the appropriate Apple CPU if -arch is used or when
   // targetting a Darwin OS.
@@ -79,9 +84,10 @@ static bool DecodeAArch64Features(const Driver &D, StringRef text,
     else
       return false;
 
-    // +sve implies +f32mm if the base architecture is v8.6A
+    // +sve implies +f32mm if the base architecture is v8.6A or v8.7A
     // it isn't the case in general that sve implies both f64mm and f32mm
-    if ((ArchKind == llvm::AArch64::ArchKind::ARMV8_6A) && Feature == "sve")
+    if ((ArchKind == llvm::AArch64::ArchKind::ARMV8_6A ||
+         ArchKind == llvm::AArch64::ArchKind::ARMV8_7A) && Feature == "sve")
       Features.push_back("+f32mm");
   }
   return true;
@@ -105,7 +111,7 @@ static bool DecodeAArch64Mcpu(const Driver &D, StringRef Mcpu, StringRef &CPU,
     if (!llvm::AArch64::getArchFeatures(ArchKind, Features))
       return false;
 
-    unsigned Extension = llvm::AArch64::getDefaultExtensions(CPU, ArchKind);
+    uint64_t Extension = llvm::AArch64::getDefaultExtensions(CPU, ArchKind);
     if (!llvm::AArch64::getExtensionFeatures(Extension, Features))
       return false;
    }

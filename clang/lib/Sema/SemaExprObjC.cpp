@@ -1394,6 +1394,9 @@ ExprResult Sema::ParseObjCProtocolExpression(IdentifierInfo *ProtocolId,
     Diag(ProtoLoc, diag::err_undeclared_protocol) << ProtocolId;
     return true;
   }
+  if (PDecl->isNonRuntimeProtocol())
+    Diag(ProtoLoc, diag::err_objc_non_runtime_protocol_in_protocol_expr)
+        << PDecl;
   if (PDecl->hasDefinition())
     PDecl = PDecl->getDefinition();
 
@@ -2449,8 +2452,8 @@ static void applyCocoaAPICheck(Sema &S, const ObjCMessageExpr *Msg,
   SourceManager &SM = S.SourceMgr;
   edit::Commit ECommit(SM, S.LangOpts);
   if (refactor(Msg,*S.NSAPIObj, ECommit)) {
-    DiagnosticBuilder Builder = S.Diag(MsgLoc, DiagID)
-                        << Msg->getSelector() << Msg->getSourceRange();
+    auto Builder = S.Diag(MsgLoc, DiagID)
+                   << Msg->getSelector() << Msg->getSourceRange();
     // FIXME: Don't emit diagnostic at all if fixits are non-commitable.
     if (!ECommit.isCommitable())
       return;
@@ -3143,9 +3146,8 @@ ExprResult Sema::BuildInstanceMessage(Expr *Receiver,
     if (ReceiverType->isObjCClassType() && !isImplicit &&
         !(Receiver->isObjCSelfExpr() && getLangOpts().ObjCAutoRefCount)) {
       {
-        DiagnosticBuilder Builder =
-            Diag(Receiver->getExprLoc(),
-                 diag::err_messaging_class_with_direct_method);
+        auto Builder = Diag(Receiver->getExprLoc(),
+                            diag::err_messaging_class_with_direct_method);
         if (Receiver->isObjCSelfExpr()) {
           Builder.AddFixItHint(FixItHint::CreateReplacement(
               RecRange, Method->getClassInterface()->getName()));
@@ -3157,7 +3159,7 @@ ExprResult Sema::BuildInstanceMessage(Expr *Receiver,
 
     if (SuperLoc.isValid()) {
       {
-        DiagnosticBuilder Builder =
+        auto Builder =
             Diag(SuperLoc, diag::err_messaging_super_with_direct_method);
         if (ReceiverType->isObjCClassType()) {
           Builder.AddFixItHint(FixItHint::CreateReplacement(
@@ -3740,15 +3742,11 @@ bool Sema::isKnownName(StringRef name) {
   return LookupName(R, TUScope, false);
 }
 
-static void addFixitForObjCARCConversion(Sema &S,
-                                         DiagnosticBuilder &DiagB,
-                                         Sema::CheckedConversionKind CCK,
-                                         SourceLocation afterLParen,
-                                         QualType castType,
-                                         Expr *castExpr,
-                                         Expr *realCast,
-                                         const char *bridgeKeyword,
-                                         const char *CFBridgeName) {
+template <typename DiagBuilderT>
+static void addFixitForObjCARCConversion(
+    Sema &S, DiagBuilderT &DiagB, Sema::CheckedConversionKind CCK,
+    SourceLocation afterLParen, QualType castType, Expr *castExpr,
+    Expr *realCast, const char *bridgeKeyword, const char *CFBridgeName) {
   // We handle C-style and implicit casts here.
   switch (CCK) {
   case Sema::CCK_ImplicitConversion:
@@ -3925,9 +3923,9 @@ diagnoseObjCARCConversion(Sema &S, SourceRange castRange,
     assert(CreateRule != ACC_bottom && "This cast should already be accepted.");
     if (CreateRule != ACC_plusOne)
     {
-      DiagnosticBuilder DiagB =
-        (CCK != Sema::CCK_OtherCast) ? S.Diag(noteLoc, diag::note_arc_bridge)
-                              : S.Diag(noteLoc, diag::note_arc_cstyle_bridge);
+      auto DiagB = (CCK != Sema::CCK_OtherCast)
+                       ? S.Diag(noteLoc, diag::note_arc_bridge)
+                       : S.Diag(noteLoc, diag::note_arc_cstyle_bridge);
 
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
                                    castType, castExpr, realCast, "__bridge ",
@@ -3935,12 +3933,12 @@ diagnoseObjCARCConversion(Sema &S, SourceRange castRange,
     }
     if (CreateRule != ACC_plusZero)
     {
-      DiagnosticBuilder DiagB =
-        (CCK == Sema::CCK_OtherCast && !br) ?
-          S.Diag(noteLoc, diag::note_arc_cstyle_bridge_transfer) << castExprType :
-          S.Diag(br ? castExpr->getExprLoc() : noteLoc,
-                 diag::note_arc_bridge_transfer)
-            << castExprType << br;
+      auto DiagB = (CCK == Sema::CCK_OtherCast && !br)
+                       ? S.Diag(noteLoc, diag::note_arc_cstyle_bridge_transfer)
+                             << castExprType
+                       : S.Diag(br ? castExpr->getExprLoc() : noteLoc,
+                                diag::note_arc_bridge_transfer)
+                             << castExprType << br;
 
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
                                    castType, castExpr, realCast, "__bridge_transfer ",
@@ -3966,21 +3964,21 @@ diagnoseObjCARCConversion(Sema &S, SourceRange castRange,
     assert(CreateRule != ACC_bottom && "This cast should already be accepted.");
     if (CreateRule != ACC_plusOne)
     {
-      DiagnosticBuilder DiagB =
-      (CCK != Sema::CCK_OtherCast) ? S.Diag(noteLoc, diag::note_arc_bridge)
-                               : S.Diag(noteLoc, diag::note_arc_cstyle_bridge);
+      auto DiagB = (CCK != Sema::CCK_OtherCast)
+                       ? S.Diag(noteLoc, diag::note_arc_bridge)
+                       : S.Diag(noteLoc, diag::note_arc_cstyle_bridge);
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
                                    castType, castExpr, realCast, "__bridge ",
                                    nullptr);
     }
     if (CreateRule != ACC_plusZero)
     {
-      DiagnosticBuilder DiagB =
-        (CCK == Sema::CCK_OtherCast && !br) ?
-          S.Diag(noteLoc, diag::note_arc_cstyle_bridge_retained) << castType :
-          S.Diag(br ? castExpr->getExprLoc() : noteLoc,
-                 diag::note_arc_bridge_retained)
-            << castType << br;
+      auto DiagB = (CCK == Sema::CCK_OtherCast && !br)
+                       ? S.Diag(noteLoc, diag::note_arc_cstyle_bridge_retained)
+                             << castType
+                       : S.Diag(br ? castExpr->getExprLoc() : noteLoc,
+                                diag::note_arc_bridge_retained)
+                             << castType << br;
 
       addFixitForObjCARCConversion(S, DiagB, CCK, afterLParen,
                                    castType, castExpr, realCast, "__bridge_retained ",
@@ -4466,8 +4464,8 @@ Sema::CheckObjCConversion(SourceRange castRange, QualType castType,
   // If the result is +1, consume it here.
   case ACC_plusOne:
     castExpr = ImplicitCastExpr::Create(Context, castExpr->getType(),
-                                        CK_ARCConsumeObject, castExpr,
-                                        nullptr, VK_RValue);
+                                        CK_ARCConsumeObject, castExpr, nullptr,
+                                        VK_RValue, FPOptionsOverride());
     Cleanup.setExprNeedsCleanups(true);
     return ACR_okay;
   }
@@ -4693,9 +4691,9 @@ ExprResult Sema::BuildObjCBridgedCast(SourceLocation LParenLoc,
 
     case OBC_BridgeRetained:
       // Produce the object before casting it.
-      SubExpr = ImplicitCastExpr::Create(Context, FromType,
-                                         CK_ARCProduceObject,
-                                         SubExpr, nullptr, VK_RValue);
+      SubExpr = ImplicitCastExpr::Create(Context, FromType, CK_ARCProduceObject,
+                                         SubExpr, nullptr, VK_RValue,
+                                         FPOptionsOverride());
       break;
 
     case OBC_BridgeTransfer: {
@@ -4734,7 +4732,7 @@ ExprResult Sema::BuildObjCBridgedCast(SourceLocation LParenLoc,
   if (MustConsume) {
     Cleanup.setExprNeedsCleanups(true);
     Result = ImplicitCastExpr::Create(Context, T, CK_ARCConsumeObject, Result,
-                                      nullptr, VK_RValue);
+                                      nullptr, VK_RValue, FPOptionsOverride());
   }
 
   return Result;

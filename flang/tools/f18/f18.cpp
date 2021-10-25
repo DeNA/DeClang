@@ -8,6 +8,7 @@
 
 // Temporary Fortran front end driver main program for development scaffolding.
 
+#include "f18_version.h"
 #include "flang/Common/Fortran-features.h"
 #include "flang/Common/default-kinds.h"
 #include "flang/Evaluate/expression.h"
@@ -21,10 +22,13 @@
 #include "flang/Parser/provenance.h"
 #include "flang/Parser/unparse.h"
 #include "flang/Semantics/expression.h"
+#include "flang/Semantics/runtime-type-info.h"
 #include "flang/Semantics/semantics.h"
 #include "flang/Semantics/unparse-with-symbols.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Program.h"
+#include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdio>
 #include <cstring>
@@ -34,11 +38,7 @@
 #include <optional>
 #include <stdlib.h>
 #include <string>
-#include <sys/wait.h>
-#include <unistd.h>
 #include <vector>
-
-#include "f18_version.h"
 
 static std::list<std::string> argList(int argc, char *const argv[]) {
   std::list<std::string> result;
@@ -70,7 +70,7 @@ std::vector<std::string> filesToDelete;
 void CleanUpAtExit() {
   for (const auto &path : filesToDelete) {
     if (!path.empty()) {
-      unlink(path.data());
+      llvm::sys::fs::remove(path);
     }
   }
 }
@@ -90,6 +90,7 @@ struct DriverOptions {
   bool forcedForm{false}; // -Mfixed or -Mfree appeared
   bool warnOnNonstandardUsage{false}; // -Mstandard
   bool warningsAreErrors{false}; // -Werror
+  bool byteswapio{false}; // -byteswapio
   Fortran::parser::Encoding encoding{Fortran::parser::Encoding::UTF_8};
   bool parseOnly{false};
   bool dumpProvenance{false};
@@ -99,7 +100,6 @@ struct DriverOptions {
   bool dumpParseTree{false};
   bool dumpPreFirTree{false};
   bool dumpSymbols{false};
-  bool debugResolveNames{false};
   bool debugNoSemantics{false};
   bool debugModuleWriter{false};
   bool measureTree{false};
@@ -111,36 +111,29 @@ struct DriverOptions {
   bool getSymbolsSources{false};
 };
 
-bool ParentProcess() {
-  if (fork() == 0) {
-    return false; // in child process
-  }
-  int childStat{0};
-  wait(&childStat);
-  if (!WIFEXITED(childStat) || WEXITSTATUS(childStat) != 0) {
-    exit(EXIT_FAILURE);
-  }
-  return true;
-}
-
-void Exec(std::vector<char *> &argv, bool verbose = false) {
+void Exec(std::vector<llvm::StringRef> &argv, bool verbose = false) {
   if (verbose) {
     for (size_t j{0}; j < argv.size(); ++j) {
       llvm::errs() << (j > 0 ? " " : "") << argv[j];
     }
     llvm::errs() << '\n';
   }
-  argv.push_back(nullptr);
-  execvp(argv[0], &argv[0]);
-  llvm::errs() << "execvp(" << argv[0]
-               << ") failed: " << llvm::sys::StrError(errno) << '\n';
-  exit(EXIT_FAILURE);
+  std::string ErrMsg;
+  llvm::ErrorOr<std::string> Program = llvm::sys::findProgramByName(argv[0]);
+  if (!Program)
+    ErrMsg = Program.getError().message();
+  if (!Program ||
+      llvm::sys::ExecuteAndWait(
+          Program.get(), argv, llvm::None, {}, 0, 0, &ErrMsg)) {
+    llvm::errs() << "execvp(" << argv[0] << ") failed: " << ErrMsg << '\n';
+    exit(EXIT_FAILURE);
+  }
 }
 
 void RunOtherCompiler(DriverOptions &driver, char *source, char *relo) {
-  std::vector<char *> argv;
+  std::vector<llvm::StringRef> argv;
   for (size_t j{0}; j < driver.F18_FCArgs.size(); ++j) {
-    argv.push_back(driver.F18_FCArgs[j].data());
+    argv.push_back(driver.F18_FCArgs[j]);
   }
   char dashC[3] = "-c", dashO[3] = "-o";
   argv.push_back(dashC);
@@ -195,9 +188,10 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
     DriverOptions &driver,
     const Fortran::common::IntrinsicTypeDefaultKinds &defaultKinds) {
   Fortran::parser::AllSources allSources;
+  Fortran::parser::AllCookedSources allCookedSources{allSources};
   allSources.set_encoding(driver.encoding);
   Fortran::semantics::SemanticsContext semanticsContext{
-      defaultKinds, options.features, allSources};
+      defaultKinds, options.features, allCookedSources};
   semanticsContext.set_moduleDirectory(driver.moduleDirectory)
       .set_moduleFileSuffix(driver.moduleFileSuffix)
       .set_searchDirectories(driver.searchDirectories)
@@ -211,12 +205,12 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
     }
   }
   options.searchDirectories = driver.searchDirectories;
-  Fortran::parser::Parsing parsing{semanticsContext.allSources()};
+  Fortran::parser::Parsing parsing{allCookedSources};
   parsing.Prescan(path, options);
   if (!parsing.messages().empty() &&
       (driver.warningsAreErrors || parsing.messages().AnyFatalError())) {
-    llvm::errs() << driver.prefix << "could not scan " << path << '\n';
-    parsing.messages().Emit(llvm::errs(), parsing.cooked());
+    llvm::errs() << driver.prefix << "Could not scan " << path << '\n';
+    parsing.messages().Emit(llvm::errs(), allCookedSources);
     exitStatus = EXIT_FAILURE;
     return {};
   }
@@ -225,7 +219,7 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
     return {};
   }
   if (driver.dumpCookedChars) {
-    parsing.messages().Emit(llvm::errs(), parsing.cooked());
+    parsing.messages().Emit(llvm::errs(), allCookedSources);
     parsing.DumpCookedChars(llvm::outs());
     return {};
   }
@@ -235,17 +229,17 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
     return {};
   }
   parsing.ClearLog();
-  parsing.messages().Emit(llvm::errs(), parsing.cooked());
+  parsing.messages().Emit(llvm::errs(), allCookedSources);
   if (!parsing.consumedWholeFile()) {
     parsing.EmitMessage(llvm::errs(), parsing.finalRestingPlace(),
-        "parser FAIL (final position)");
+        "Parser FAIL (final position)");
     exitStatus = EXIT_FAILURE;
     return {};
   }
   if ((!parsing.messages().empty() &&
           (driver.warningsAreErrors || parsing.messages().AnyFatalError())) ||
       !parsing.parseTree()) {
-    llvm::errs() << driver.prefix << "could not parse " << path << '\n';
+    llvm::errs() << driver.prefix << "Could not parse " << path << '\n';
     exitStatus = EXIT_FAILURE;
     return {};
   }
@@ -253,23 +247,32 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
   if (driver.measureTree) {
     MeasureParseTree(parseTree);
   }
-  if (!driver.debugNoSemantics || driver.debugResolveNames ||
-      driver.dumpSymbols || driver.dumpUnparseWithSymbols ||
-      driver.getDefinition || driver.getSymbolsSources) {
+  if (!driver.debugNoSemantics || driver.dumpSymbols ||
+      driver.dumpUnparseWithSymbols || driver.getDefinition ||
+      driver.getSymbolsSources) {
     Fortran::semantics::Semantics semantics{semanticsContext, parseTree,
-        parsing.cooked(), driver.debugModuleWriter};
+        parsing.cooked().AsCharBlock(), driver.debugModuleWriter};
     semantics.Perform();
     semantics.EmitMessages(llvm::errs());
-    if (driver.dumpSymbols) {
-      semantics.DumpSymbols(llvm::outs());
-    }
     if (semantics.AnyFatalError()) {
-      llvm::errs() << driver.prefix << "semantic errors in " << path << '\n';
+      if (driver.dumpSymbols) {
+        semantics.DumpSymbols(llvm::outs());
+      }
+      llvm::errs() << driver.prefix << "Semantic errors in " << path << '\n';
       exitStatus = EXIT_FAILURE;
       if (driver.dumpParseTree) {
         Fortran::parser::DumpTree(llvm::outs(), parseTree, &asFortran);
       }
       return {};
+    }
+    auto tables{
+        Fortran::semantics::BuildRuntimeDerivedTypeTables(semanticsContext)};
+    if (!tables.schemata) {
+      llvm::errs() << driver.prefix
+                   << "could not find module file for __fortran_type_info\n";
+    }
+    if (driver.dumpSymbols) {
+      semantics.DumpSymbols(llvm::outs());
     }
     if (driver.dumpUnparseWithSymbols) {
       Fortran::semantics::UnparseWithSymbols(
@@ -281,7 +284,7 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
       return {};
     }
     if (driver.getDefinition) {
-      if (auto cb{parsing.cooked().GetCharBlockFromLineAndColumns(
+      if (auto cb{allCookedSources.GetCharBlockFromLineAndColumns(
               driver.getDefinitionArgs.line,
               driver.getDefinitionArgs.startColumn,
               driver.getDefinitionArgs.endColumn)}) {
@@ -290,7 +293,7 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
           llvm::errs() << "Found symbol name: " << symbol->name().ToString()
                        << "\n";
           if (auto sourceInfo{
-                  parsing.cooked().GetSourcePositionRange(symbol->name())}) {
+                  allCookedSources.GetSourcePositionRange(symbol->name())}) {
             llvm::outs() << symbol->name().ToString() << ": "
                          << sourceInfo->first.file.path() << ", "
                          << sourceInfo->first.line << ", "
@@ -330,16 +333,16 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
 
   std::string relo{RelocatableName(driver, path)};
 
-  char tmpSourcePath[32];
-  std::snprintf(tmpSourcePath, sizeof tmpSourcePath, "/tmp/f18-%lx.f90",
-      static_cast<unsigned long>(getpid()));
+  llvm::SmallString<32> tmpSourcePath;
   {
-    std::error_code EC;
-    llvm::raw_fd_ostream tmpSource(tmpSourcePath, EC, llvm::sys::fs::F_None);
+    int fd;
+    std::error_code EC =
+        llvm::sys::fs::createUniqueFile("f18-%%%%.f90", fd, tmpSourcePath);
     if (EC) {
       llvm::errs() << EC.message() << "\n";
       std::exit(EXIT_FAILURE);
     }
+    llvm::raw_fd_ostream tmpSource(fd, /*shouldClose*/ true);
     Unparse(tmpSource, parseTree, driver.encoding, true /*capitalize*/,
         options.features.IsEnabled(
             Fortran::common::LanguageFeature::BackslashEscapes),
@@ -347,49 +350,41 @@ std::string CompileFortran(std::string path, Fortran::parser::Options options,
         driver.unparseTypedExprsToF18_FC ? &asFortran : nullptr);
   }
 
-  if (ParentProcess()) {
-    filesToDelete.push_back(tmpSourcePath);
-    if (!driver.compileOnly && driver.outputPath.empty()) {
-      filesToDelete.push_back(relo);
-    }
-    return relo;
+  RunOtherCompiler(driver, tmpSourcePath.data(), relo.data());
+  filesToDelete.emplace_back(tmpSourcePath);
+  if (!driver.compileOnly && driver.outputPath.empty()) {
+    filesToDelete.push_back(relo);
   }
-  RunOtherCompiler(driver, tmpSourcePath, relo.data());
-  return {};
+  return relo;
 }
 
 std::string CompileOtherLanguage(std::string path, DriverOptions &driver) {
   std::string relo{RelocatableName(driver, path)};
-  if (ParentProcess()) {
-    if (!driver.compileOnly && driver.outputPath.empty()) {
-      filesToDelete.push_back(relo);
-    }
-    return relo;
-  }
   RunOtherCompiler(driver, path.data(), relo.data());
-  return {};
+  if (!driver.compileOnly && driver.outputPath.empty()) {
+    filesToDelete.push_back(relo);
+  }
+  return relo;
 }
 
 void Link(std::vector<std::string> &liblist, std::vector<std::string> &objects,
     DriverOptions &driver) {
-  if (!ParentProcess()) {
-    std::vector<char *> argv;
-    for (size_t j{0}; j < driver.F18_FCArgs.size(); ++j) {
-      argv.push_back(driver.F18_FCArgs[j].data());
-    }
-    for (auto &obj : objects) {
-      argv.push_back(obj.data());
-    }
-    if (!driver.outputPath.empty()) {
-      char dashO[3] = "-o";
-      argv.push_back(dashO);
-      argv.push_back(driver.outputPath.data());
-    }
-    for (auto &lib : liblist) {
-      argv.push_back(lib.data());
-    }
-    Exec(argv, driver.verbose);
+  std::vector<llvm::StringRef> argv;
+  for (size_t j{0}; j < driver.F18_FCArgs.size(); ++j) {
+    argv.push_back(driver.F18_FCArgs[j].data());
   }
+  for (auto &obj : objects) {
+    argv.push_back(obj.data());
+  }
+  if (!driver.outputPath.empty()) {
+    char dashO[3] = "-o";
+    argv.push_back(dashO);
+    argv.push_back(driver.outputPath.data());
+  }
+  for (auto &lib : liblist) {
+    argv.push_back(lib.data());
+  }
+  Exec(argv, driver.verbose);
 }
 
 int printVersion() {
@@ -494,7 +489,7 @@ int main(int argc, char *const argv[]) {
       driver.warnOnNonstandardUsage = true;
     } else if (arg == "-fopenacc") {
       options.features.Enable(Fortran::common::LanguageFeature::OpenACC);
-      options.predefinitions.emplace_back("_OPENACC", "201911");
+      options.predefinitions.emplace_back("_OPENACC", "202011");
     } else if (arg == "-fopenmp") {
       options.features.Enable(Fortran::common::LanguageFeature::OpenMP);
       options.predefinitions.emplace_back("_OPENMP", "201511");
@@ -516,6 +511,12 @@ int main(int argc, char *const argv[]) {
       options.features.Enable(
           Fortran::parser::LanguageFeature::LogicalAbbreviations,
           arg == "-flogical-abbreviations");
+    } else if (arg == "-fimplicit-none-type-always") {
+      options.features.Enable(
+          Fortran::common::LanguageFeature::ImplicitNoneTypeAlways);
+    } else if (arg == "-fimplicit-none-type-never") {
+      options.features.Enable(
+          Fortran::common::LanguageFeature::ImplicitNoneTypeNever);
     } else if (arg == "-fdebug-dump-provenance") {
       driver.dumpProvenance = true;
       options.needProvenanceRangeToCharBlockMappings = true;
@@ -525,15 +526,12 @@ int main(int argc, char *const argv[]) {
       driver.dumpPreFirTree = true;
     } else if (arg == "-fdebug-dump-symbols") {
       driver.dumpSymbols = true;
-    } else if (arg == "-fdebug-resolve-names") {
-      driver.debugResolveNames = true;
     } else if (arg == "-fdebug-module-writer") {
       driver.debugModuleWriter = true;
     } else if (arg == "-fdebug-measure-parse-tree") {
       driver.measureTree = true;
     } else if (arg == "-fdebug-instrumented-parse") {
       options.instrumentedParse = true;
-    } else if (arg == "-fdebug-semantics") {
     } else if (arg == "-fdebug-no-semantics") {
       driver.debugNoSemantics = true;
     } else if (arg == "-funparse") {
@@ -573,8 +571,6 @@ int main(int argc, char *const argv[]) {
       } else {
         driver.F18_FCArgs.push_back("-fdefault-integer-8");
       }
-    } else if (arg == "-Mlargearray") {
-    } else if (arg == "-Mnolargearray") {
     } else if (arg == "-flarge-sizes") {
       defaultKinds.set_sizeIntegerKind(8);
     } else if (arg == "-fno-large-sizes") {
@@ -614,7 +610,10 @@ int main(int argc, char *const argv[]) {
       driver.getDefinitionArgs = {arguments[0], arguments[1], arguments[2]};
     } else if (arg == "-fget-symbols-sources") {
       driver.getSymbolsSources = true;
-    } else if (arg == "-h" || arg == "-help" || arg == "--help" || arg == "-?") {
+    } else if (arg == "-byteswapio") {
+      driver.byteswapio = true; // TODO: Pass to lowering, generate call
+    } else if (arg == "-h" || arg == "-help" || arg == "--help" ||
+        arg == "-?") {
       llvm::errs()
           << "f18: LLVM Fortran compiler\n"
           << "\n"
@@ -622,7 +621,8 @@ int main(int argc, char *const argv[]) {
           << "\n"
           << "Defaults:\n"
           << "  When invoked with input files, and no options to tell\n"
-          << "  it otherwise, f18 will unparse its input and pass that on to an\n"
+          << "  it otherwise, f18 will unparse its input and pass that on to "
+             "an\n"
           << "  external compiler to continue the compilation.\n"
           << "  The external compiler is specified by the F18_FC environment\n"
           << "  variable. The default is 'gfortran'.\n"
@@ -637,8 +637,6 @@ int main(int argc, char *const argv[]) {
           << "  -M[no]backslash      disable[enable] \\escapes in literals\n"
           << "  -Mstandard           enable conformance warnings\n"
           << "  -std=<standard>      enable conformance warnings\n"
-          << "  -fenable=<feature>   enable a language feature\n"
-          << "  -fdisable=<feature>  disable a language feature\n"
           << "  -r8 | -fdefault-real-8 | -i8 | -fdefault-integer-8 | "
              "-fdefault-double-8   change default kinds of intrinsic types\n"
           << "  -Werror              treat warnings as errors\n"
@@ -655,18 +653,20 @@ int main(int argc, char *const argv[]) {
           << "  -fdebug-dump-provenance\n"
           << "  -fdebug-dump-parse-tree\n"
           << "  -fdebug-dump-symbols\n"
-          << "  -fdebug-resolve-names\n"
           << "  -fdebug-instrumented-parse\n"
           << "  -fdebug-no-semantics  disable semantic checks\n"
           << "  -fget-definition\n"
           << "  -fget-symbols-sources\n"
           << "  -v -c -o -I -D -U    have their usual meanings\n"
           << "  -help                print this again\n"
-          << "Unrecognised options are passed through to the external compiler\n"
+          << "Unrecognised options are passed through to the external "
+             "compiler\n"
           << "set by F18_FC (see defaults).\n";
       return exitStatus;
     } else if (arg == "-V" || arg == "--version") {
       return printVersion();
+    } else if (arg == "-fdebug-stack-trace") {
+      llvm::sys::PrintStackTraceOnErrorSignal(llvm::StringRef{}, true);
     } else {
       driver.F18_FCArgs.push_back(arg);
       if (arg == "-v") {
@@ -731,7 +731,7 @@ int main(int argc, char *const argv[]) {
       objlist.push_back(relo);
     }
   }
-  if (!objlist.empty()) {
+  if (!driver.compileOnly && !objlist.empty()) {
     Link(liblist, objlist, driver);
   }
   return exitStatus;

@@ -21,10 +21,6 @@ FileHeader:
   Data:    ELFDATA2LSB
   Type:    ET_DYN
   Machine: EM_X86_64
-## We simulate no section header table by
-## overriding the ELF header properties.
-  EShOff:  0x0
-  EShNum:  0x0
 Sections:
   - Name:    .rela.dyn
     Type:    SHT_RELA
@@ -57,12 +53,11 @@ Sections:
 DynamicSymbols:
   - Name: foo
 ProgramHeaders:
-  - Type:  PT_LOAD
-    Sections:
-      - Section: .rela.dyn
-      - Section: .dynamic
-        Section: .dynsym
-        Section: .dynstr
-  - Type:  PT_DYNAMIC
-    Sections:
-      - Section: .dynamic
+  - Type:     PT_LOAD
+    FirstSec: .rela.dyn
+    LastSec:  .dynstr
+  - Type:     PT_DYNAMIC
+    FirstSec: .dynamic
+    LastSec:  .dynamic
+SectionHeaderTable:
+  NoHeaders: true

@@ -6,6 +6,7 @@ import json
 import unittest2
 
 
+@skipIfReproducer
 class TestSimulatorPlatformLaunching(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
@@ -73,6 +74,7 @@ class TestSimulatorPlatformLaunching(TestBase):
         self.expect('image list -b -t', patterns=['a\.out '+triple_re])
         self.check_debugserver(log, os+env, vers)
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('iphone')
@@ -83,6 +85,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='ios', vers='', env='simulator',
                       expected_load_command='LC_BUILD_VERSION')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('appletv')
@@ -93,6 +96,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='tvos', vers='', env='simulator',
                       expected_load_command='LC_BUILD_VERSION')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('watch')
@@ -105,6 +109,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='watchos', vers='', env='simulator',
                       expected_load_command='LC_BUILD_VERSION')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('watch')
@@ -135,6 +140,7 @@ class TestSimulatorPlatformLaunching(TestBase):
         self.run_with(arch=self.getArchitecture(),
                       os='macosx', vers='10.9', env='',
                       expected_load_command='LC_VERSION_MIN_MACOSX')
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('iphone')
@@ -147,6 +153,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='ios', vers='11.0', env='simulator',
                       expected_load_command='LC_VERSION_MIN_IPHONEOS')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('iphone')
@@ -159,6 +166,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='ios', vers='13.0', env='simulator',
                       expected_load_command='LC_BUILD_VERSION')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('iphone')
@@ -170,6 +178,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='ios', vers='11.0', env='simulator',
                       expected_load_command='LC_BUILD_VERSION')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('appletv')
@@ -182,6 +191,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='tvos', vers='11.0', env='simulator',
                       expected_load_command='LC_VERSION_MIN_TVOS')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('appletv')
@@ -193,6 +203,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='tvos', vers='11.0', env='simulator',
                       expected_load_command='LC_BUILD_VERSION')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('watch')
@@ -206,6 +217,7 @@ class TestSimulatorPlatformLaunching(TestBase):
                       os='watchos', vers='4.0', env='simulator',
                       expected_load_command='LC_VERSION_MIN_WATCHOS')
 
+    @skipIfAsan
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @apple_simulator_test('watch')

@@ -38,6 +38,11 @@ class DirectoryWatcherWindows : public clang::DirectoryWatcher {
   SmallString<MAX_PATH> Path;
   HANDLE Terminate;
 
+  std::mutex Mutex;
+  bool WatcherActive = false;
+  bool NotifierActive = false;
+  std::condition_variable Ready;
+
   class EventQueue {
     std::mutex M;
     std::queue<DirectoryWatcher::Event> Q;
@@ -83,28 +88,23 @@ DirectoryWatcherWindows::DirectoryWatcherWindows(
   // Pre-compute the real location as we will be handing over the directory
   // handle to the watcher and performing synchronous operations.
   {
-    DWORD Length = GetFinalPathNameByHandleW(DirectoryHandle, NULL, 0, 0);
-
-    std::vector<WCHAR> Buffer;
-    Buffer.resize(Length);
-
-    Length = GetFinalPathNameByHandleW(DirectoryHandle, Buffer.data(),
-                                       Buffer.size(), 0);
-    Buffer.resize(Length);
-
-    llvm::sys::windows::UTF16ToUTF8(Buffer.data(), Buffer.size(), Path);
+    DWORD Size = GetFinalPathNameByHandleW(DirectoryHandle, NULL, 0, 0);
+    std::unique_ptr<WCHAR[]> Buffer{new WCHAR[Size]};
+    Size = GetFinalPathNameByHandleW(DirectoryHandle, Buffer.get(), Size, 0);
+    Buffer[Size] = L'\0';
+    llvm::sys::windows::UTF16ToUTF8(Buffer.get(), Size, Path);
   }
 
-  Notifications.resize(4 * (sizeof(FILE_NOTIFY_INFORMATION) +
-                            MAX_PATH * sizeof(WCHAR)));
+  size_t EntrySize = sizeof(FILE_NOTIFY_INFORMATION) + MAX_PATH * sizeof(WCHAR);
+  Notifications.resize((4 * EntrySize) / sizeof(DWORD));
 
   memset(&Overlapped, 0, sizeof(Overlapped));
   Overlapped.hEvent =
-      CreateEventW(NULL, /*bManualReset=*/TRUE, /*bInitialState=*/FALSE, NULL);
+      CreateEventW(NULL, /*bManualReset=*/FALSE, /*bInitialState=*/FALSE, NULL);
   assert(Overlapped.hEvent && "unable to create event");
 
-  Terminate = CreateEventW(NULL, /*bManualReset=*/TRUE,
-                           /*bInitialState=*/FALSE, NULL);
+  Terminate =
+      CreateEventW(NULL, /*bManualReset=*/TRUE, /*bInitialState=*/FALSE, NULL);
 
   WatcherThread = std::thread([this, DirectoryHandle]() {
     this->WatcherThreadProc(DirectoryHandle);
@@ -115,6 +115,11 @@ DirectoryWatcherWindows::DirectoryWatcherWindows(
 
   HandlerThread = std::thread([this, WaitForInitialSync]() {
     this->NotifierThreadProc(WaitForInitialSync);
+  });
+
+  std::unique_lock<std::mutex> lock(Mutex);
+  Ready.wait(lock, [this] {
+    return this->WatcherActive && this->NotifierActive;
   });
 }
 
@@ -128,10 +133,19 @@ DirectoryWatcherWindows::~DirectoryWatcherWindows() {
 }
 
 void DirectoryWatcherWindows::InitialScan() {
+  std::unique_lock<std::mutex> lock(Mutex);
+  Ready.wait(lock, [this] { return this->WatcherActive; });
+
   Callback(getAsFileEvents(scanDirectory(Path.data())), /*IsInitial=*/true);
 }
 
 void DirectoryWatcherWindows::WatcherThreadProc(HANDLE DirectoryHandle) {
+  {
+    std::unique_lock<std::mutex> lock(Mutex);
+    WatcherActive = true;
+  }
+  Ready.notify_one();
+
   while (true) {
     // We do not guarantee subdirectories, but macOS already provides
     // subdirectories, might as well as ...
@@ -139,15 +153,14 @@ void DirectoryWatcherWindows::WatcherThreadProc(HANDLE DirectoryHandle) {
     DWORD NotifyFilter = FILE_NOTIFY_CHANGE_FILE_NAME
                        | FILE_NOTIFY_CHANGE_DIR_NAME
                        | FILE_NOTIFY_CHANGE_SIZE
-                       | FILE_NOTIFY_CHANGE_LAST_ACCESS
                        | FILE_NOTIFY_CHANGE_LAST_WRITE
                        | FILE_NOTIFY_CHANGE_CREATION;
 
     DWORD BytesTransferred;
     if (!ReadDirectoryChangesW(DirectoryHandle, Notifications.data(),
-                               Notifications.size(), WatchSubtree,
-                               NotifyFilter, &BytesTransferred, &Overlapped,
-                               NULL)) {
+                               Notifications.size() * sizeof(DWORD),
+                               WatchSubtree, NotifyFilter, &BytesTransferred,
+                               &Overlapped, NULL)) {
       Q.emplace(DirectoryWatcher::Event::EventKind::WatcherGotInvalidated,
                 "");
       break;
@@ -193,25 +206,19 @@ void DirectoryWatcherWindows::WatcherThreadProc(HANDLE DirectoryHandle) {
       DirectoryWatcher::Event::EventKind Kind =
           DirectoryWatcher::Event::EventKind::WatcherGotInvalidated;
       switch (I->Action) {
-      case FILE_ACTION_MODIFIED:
-        Kind = DirectoryWatcher::Event::EventKind::Modified;
-        break;
       case FILE_ACTION_ADDED:
+      case FILE_ACTION_MODIFIED:
+      case FILE_ACTION_RENAMED_NEW_NAME:
         Kind = DirectoryWatcher::Event::EventKind::Modified;
         break;
       case FILE_ACTION_REMOVED:
-        Kind = DirectoryWatcher::Event::EventKind::Removed;
-        break;
       case FILE_ACTION_RENAMED_OLD_NAME:
         Kind = DirectoryWatcher::Event::EventKind::Removed;
-        break;
-      case FILE_ACTION_RENAMED_NEW_NAME:
-        Kind = DirectoryWatcher::Event::EventKind::Modified;
         break;
       }
 
       SmallString<MAX_PATH> filename;
-      sys::windows::UTF16ToUTF8(I->FileName, I->FileNameLength / 2,
+      sys::windows::UTF16ToUTF8(I->FileName, I->FileNameLength / sizeof(WCHAR),
                                 filename);
       Q.emplace(Kind, filename);
     }
@@ -225,6 +232,12 @@ void DirectoryWatcherWindows::NotifierThreadProc(bool WaitForInitialSync) {
   // scan when we enter the thread.
   if (!WaitForInitialSync)
     this->InitialScan();
+
+  {
+    std::unique_lock<std::mutex> lock(Mutex);
+    NotifierActive = true;
+  }
+  Ready.notify_one();
 
   while (true) {
     DirectoryWatcher::Event E = Q.pop_front();
@@ -283,8 +296,8 @@ clang::DirectoryWatcher::create(StringRef Path,
     return error(GetLastError());
 
   // NOTE: We use the watcher instance as a RAII object to discard the handles
-  // for the directory and the IOCP in case of an error.  Hence, this is early
-  // allocated, with the state being written directly to the watcher.
+  // for the directory in case of an error.  Hence, this is early allocated,
+  // with the state being written directly to the watcher.
   return std::make_unique<DirectoryWatcherWindows>(
       DirectoryHandle, WaitForInitialSync, Receiver);
 }

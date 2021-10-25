@@ -149,6 +149,7 @@ add_lldb_test_dependency(
   llvm-nm
   llvm-mc
   llvm-objcopy
+  llvm-pdbutil
   llvm-readobj
   )
 
@@ -173,6 +174,7 @@ llvm_canonicalize_cmake_booleans(
   LLDB_ENABLE_LZMA
   LLVM_ENABLE_ZLIB
   LLVM_ENABLE_SHARED_LIBS
+  LLDB_USE_SYSTEM_DEBUGSERVER
   LLDB_IS_64_BITS)
 
 # BEGIN SWIFT
@@ -193,19 +195,13 @@ configure_lit_site_cfg(
   MAIN_CONFIG
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.cfg.py)
 
-add_lit_testsuites(LLDB
-  ${CMAKE_CURRENT_SOURCE_DIR}
-  DEPENDS lldb-test-deps)
-
-add_lit_testsuite(check-lldb-lit "Running lldb lit test suite"
+add_lit_testsuite(check-lldb "Running lldb lit test suite"
   ${CMAKE_CURRENT_BINARY_DIR}
-  DEPENDS lldb-test-deps)
-set_target_properties(check-lldb-lit PROPERTIES FOLDER "lldb tests")
-
-add_custom_target(check-lldb)
-add_dependencies(check-lldb lldb-test-deps)
-set_target_properties(check-lldb PROPERTIES FOLDER "lldb misc")
-add_dependencies(check-lldb check-lldb-lit)
+  DEPENDS
+    lldb-api-test-deps
+    lldb-shell-test-deps
+    lldb-unit-test-deps)
+set_target_properties(check-lldb PROPERTIES FOLDER "lldb tests")
 
 # BEGIN SWIFT MOD
 add_lit_testsuite(check-lldb-swift

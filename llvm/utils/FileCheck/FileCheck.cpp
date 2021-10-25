@@ -15,12 +15,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/FileCheck/FileCheck.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/FileCheck.h"
 #include <cmath>
 using namespace llvm;
 
@@ -76,6 +76,10 @@ static cl::opt<bool> AllowEmptyInput(
     "allow-empty", cl::init(false),
     cl::desc("Allow the input file to be empty. This is useful when making\n"
              "checks that some error message does not occur, for example."));
+
+static cl::opt<bool> AllowUnusedPrefixes(
+    "allow-unused-prefixes", cl::init(true),
+    cl::desc("Allow prefixes to be specified but not appear in the test."));
 
 static cl::opt<bool> MatchFullLines(
     "match-full-lines", cl::init(false),
@@ -324,7 +328,7 @@ struct InputAnnotation {
 };
 
 /// Get an abbreviation for the check type.
-std::string GetCheckTypeAbbreviation(Check::FileCheckType Ty) {
+static std::string GetCheckTypeAbbreviation(Check::FileCheckType Ty) {
   switch (Ty) {
   case Check::CheckPlain:
     if (Ty.getCount() > 1)
@@ -402,6 +406,18 @@ BuildInputAnnotations(const SourceMgr &SM, unsigned CheckFileBufferID,
     LabelWidth = std::max((std::string::size_type)LabelWidth, A.Label.size());
 
     A.Marker = GetMarker(DiagItr->MatchTy);
+    if (!DiagItr->Note.empty()) {
+      A.Marker.Note = DiagItr->Note;
+      // It's less confusing if notes that don't actually have ranges don't have
+      // markers.  For example, a marker for 'with "VAR" equal to "5"' would
+      // seem to indicate where "VAR" matches, but the location we actually have
+      // for the marker simply points to the start of the match/search range for
+      // the full pattern of which the substitution is potentially just one
+      // component.
+      if (DiagItr->InputStartLine == DiagItr->InputEndLine &&
+          DiagItr->InputStartCol == DiagItr->InputEndCol)
+        A.Marker.Lead = ' ';
+    }
     A.FoundAndExpectedMatch =
         DiagItr->MatchTy == FileCheckDiag::MatchFoundAndExpected;
 
@@ -759,6 +775,7 @@ int main(int argc, char **argv) {
     return 2;
 
   Req.AllowEmptyInput = AllowEmptyInput;
+  Req.AllowUnusedPrefixes = AllowUnusedPrefixes;
   Req.EnableVarScope = EnableVarScope;
   Req.AllowDeprecatedDagOverlap = AllowDeprecatedDagOverlap;
   Req.Verbose = Verbose;

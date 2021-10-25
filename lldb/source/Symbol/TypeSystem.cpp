@@ -6,22 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-//
-//  TypeSystem.cpp
-//  lldb
-//
-//  Created by Ryan Brown on 3/29/15.
-//
-//
-
 #include "lldb/Symbol/TypeSystem.h"
-
-#include <set>
-
-#include "lldb/Utility/Status.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Expression/UtilityFunction.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/Language.h"
+#include "lldb/Utility/Status.h"
+
+#include <set>
 
 using namespace lldb_private;
 using namespace lldb;
@@ -199,6 +191,11 @@ TypeSystem::DeclContextFindDeclByName(void *opaque_decl_ctx, ConstString name,
   return std::vector<CompilerDecl>();
 }
 
+std::unique_ptr<UtilityFunction>
+TypeSystem::CreateUtilityFunction(std::string text, std::string name) {
+  return {};
+}
+
 #pragma mark TypeSystemMap
 
 TypeSystemMap::TypeSystemMap()
@@ -246,9 +243,9 @@ void TypeSystemMap::ForEach(std::function<bool(TypeSystem *)> const &callback) {
   }
 }
 
-llvm::Expected<TypeSystem &>
-TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
-                                        Module *module, bool can_create) {
+llvm::Expected<TypeSystem &> TypeSystemMap::GetTypeSystemForLanguage(
+    lldb::LanguageType language,
+    llvm::Optional<CreateCallback> create_callback) {
   llvm::Error error = llvm::Error::success();
   assert(!error); // Check the success value when assertions are enabled
   std::lock_guard<std::mutex> guard(m_mutex);
@@ -290,7 +287,7 @@ TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
       }
     }
 
-    if (!can_create) {
+    if (!create_callback) {
       error = llvm::make_error<llvm::StringError>(
           "Unable to find type system for language " +
               llvm::StringRef(Language::GetNameForLanguageType(language)),
@@ -298,7 +295,7 @@ TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
     } else {
       // Cache even if we get a shared pointer that contains a null type system
       // back
-      auto type_system_sp = TypeSystem::CreateInstance(language, module);
+      TypeSystemSP type_system_sp = (*create_callback)();
       m_map[language] = type_system_sp;
       if (type_system_sp.get()) {
         llvm::consumeError(std::move(error));
@@ -318,72 +315,31 @@ TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
 llvm::Expected<TypeSystem &>
 TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
                                         Target *target, bool can_create,
+// BEGIN: SWIFT
                                         const char *compiler_options) {
-  llvm::Error error = llvm::Error::success();
-  assert(!error); // Check the success value when assertions are enabled
-  std::lock_guard<std::mutex> guard(m_mutex);
-  if (m_clear_in_progress) {
-    error = llvm::make_error<llvm::StringError>(
-        "Unable to get TypeSystem because TypeSystemMap is being cleared",
-        llvm::inconvertibleErrorCode());
-  } else {
-    collection::iterator pos = m_map.find(language);
-    if (pos != m_map.end()) {
-      auto *type_system = pos->second.get();
-      if (type_system) {
-        llvm::consumeError(std::move(error));
-        return *type_system;
-      }
-      error = llvm::make_error<llvm::StringError>(
-          "TypeSystem for language " +
-              llvm::StringRef(Language::GetNameForLanguageType(language)) +
-              " doesn't exist",
-          llvm::inconvertibleErrorCode());
-      return std::move(error);
-    }
-
-    for (const auto &pair : m_map) {
-      if (pair.second && pair.second->SupportsLanguage(language)) {
-        // Add a new mapping for "language" to point to an already existing
-        // TypeSystem that supports this language
-        m_map[language] = pair.second;
-        if (pair.second.get()) {
-          llvm::consumeError(std::move(error));
-          return *pair.second.get();
-        }
-        error = llvm::make_error<llvm::StringError>(
-            "TypeSystem for language " +
-                llvm::StringRef(Language::GetNameForLanguageType(language)) +
-                " doesn't exist",
-            llvm::inconvertibleErrorCode());
-        return std::move(error);
-      }
-    }
-
-    if (!can_create) {
-      error = llvm::make_error<llvm::StringError>(
-          "Unable to find type system for language " +
-              llvm::StringRef(Language::GetNameForLanguageType(language)),
-          llvm::inconvertibleErrorCode());
-    } else {
-      // Cache even if we get a shared pointer that contains a null type system
-      // back
-      auto type_system_sp = TypeSystem::CreateInstance(language, target,
-                                                       compiler_options);
-      m_map[language] = type_system_sp;
-      if (type_system_sp.get()) {
-        llvm::consumeError(std::move(error));
-        return *type_system_sp.get();
-      }
-      error = llvm::make_error<llvm::StringError>(
-          "TypeSystem for language " +
-              llvm::StringRef(Language::GetNameForLanguageType(language)) +
-              " doesn't exist",
-          llvm::inconvertibleErrorCode());
-    }
+// END: SWIFT
+  if (can_create) {
+    return GetTypeSystemForLanguage(
+        language, llvm::Optional<CreateCallback>([language, target,
+// BEGIN SWIFT
+                                                  compiler_options]() {
+          return TypeSystem::CreateInstance(language, target, compiler_options);
+// END SWIFT
+        }));
   }
+  return GetTypeSystemForLanguage(language);
+}
 
-  return std::move(error);
+llvm::Expected<TypeSystem &>
+TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
+                                        Module *module, bool can_create) {
+  if (can_create) {
+    return GetTypeSystemForLanguage(
+        language, llvm::Optional<CreateCallback>([language, module]() {
+          return TypeSystem::CreateInstance(language, module);
+        }));
+  }
+  return GetTypeSystemForLanguage(language);
 }
 
 void TypeSystemMap::RemoveTypeSystemsForLanguage(lldb::LanguageType language) {

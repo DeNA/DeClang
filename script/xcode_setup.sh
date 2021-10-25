@@ -17,7 +17,7 @@ case $key in
     shift # past value
     ;;
     -h|--help)
-    echo "Usage: $0 -x {xcode_app_dir} -p {xcode_project_path}" >&2
+    echo "Usage: $0 -x={xcode_app_dir} -p={xcode_project_path}" >&2
     exit
     shift # past argument
     ;;
@@ -75,6 +75,5 @@ COMPILER_INDEX_STORE_ENABLE = NO;\\
 ~g" "$pbxproj"
 sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = YES;~COMPILER_INDEX_STORE_ENABLE = NO;~g' "$pbxproj"
 sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = DEFAULT;~COMPILER_INDEX_STORE_ENABLE = NO;~g' "$pbxproj"
-# sed -i '' $'s~CLANG_ENABLE_MODULES = YES;~CLANG_ENABLE_MODULES = NO;~g' "$pbxproj"
 
 # popd >/dev/null

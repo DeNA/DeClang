@@ -17,6 +17,7 @@
 #include "LinkUtils.h"
 #include "MachOUtils.h"
 #include "Reproducer.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -91,6 +92,7 @@ struct DsymutilOptions {
   bool InputIsYAMLDebugMap = false;
   bool PaperTrailWarnings = false;
   bool Verify = false;
+  bool ForceKeepFunctionForStatic = false;
   std::string SymbolMap;
   std::string OutputFile;
   std::string Toolchain;
@@ -157,9 +159,7 @@ static Error verifyOptions(const DsymutilOptions &Options) {
                                    errc::invalid_argument);
   }
 
-  if (Options.LinkOpts.Update &&
-      std::find(Options.InputFiles.begin(), Options.InputFiles.end(), "-") !=
-          Options.InputFiles.end()) {
+  if (Options.LinkOpts.Update && llvm::is_contained(Options.InputFiles, "-")) {
     // FIXME: We cannot use stdin for an update because stdin will be
     // consumed by the BinaryHolder during the debugmap parsing, and
     // then we will want to consume it again in DwarfLinker. If we
@@ -231,6 +231,8 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
   Options.LinkOpts.Update = Args.hasArg(OPT_update);
   Options.LinkOpts.Verbose = Args.hasArg(OPT_verbose);
   Options.LinkOpts.Statistics = Args.hasArg(OPT_statistics);
+  Options.LinkOpts.KeepFunctionForStatic =
+      Args.hasArg(OPT_keep_func_for_static);
 
   if (opt::Arg *ReproducerPath = Args.getLastArg(OPT_use_reproducer)) {
     Options.ReproMode = ReproducerMode::Use;

@@ -1130,8 +1130,8 @@ bool InterleavedLoadCombineImpl::combine(std::list<VectorInfo> &InterleavedLoad,
   std::set<Instruction *> Is;
   std::set<Instruction *> SVIs;
 
-  unsigned InterleavedCost;
-  unsigned InstructionCost = 0;
+  InstructionCost InterleavedCost;
+  InstructionCost InstructionCost = 0;
 
   // Get the interleave factor
   unsigned Factor = InterleavedLoad.size();
@@ -1173,6 +1173,10 @@ bool InterleavedLoadCombineImpl::combine(std::list<VectorInfo> &InterleavedLoad,
         return false;
     }
   }
+
+  // We need to have a valid cost in order to proceed.
+  if (!InstructionCost.isValid())
+    return false;
 
   // We know that all LoadInst are within the same BB. This guarantees that
   // either everything or nothing is loaded.
@@ -1236,8 +1240,7 @@ bool InterleavedLoadCombineImpl::combine(std::list<VectorInfo> &InterleavedLoad,
       Mask.push_back(i + j * Factor);
 
     Builder.SetInsertPoint(VI.SVI);
-    auto SVI = Builder.CreateShuffleVector(LI, UndefValue::get(LI->getType()),
-                                           Mask, "interleaved.shuffle");
+    auto SVI = Builder.CreateShuffleVector(LI, Mask, "interleaved.shuffle");
     VI.SVI->replaceAllUsesWith(SVI);
     i++;
   }

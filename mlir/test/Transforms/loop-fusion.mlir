@@ -462,7 +462,7 @@ func @should_not_fuse_if_inst_in_loop_nest() {
   // CHECK-NEXT:   affine.store %{{.*}}, %{{.*}}[%{{.*}}] : memref<10xf32>
   // CHECK-NEXT: }
   // CHECK:      affine.for %{{.*}} = 0 to 10 {
-  // CHECK-NEXT:   affine.if #set0(%{{.*}}) {
+  // CHECK-NEXT:   affine.if #set(%{{.*}}) {
   // CHECK-NEXT:   }
   // CHECK-NEXT:   affine.load %{{.*}}[%{{.*}}] : memref<10xf32>
   // CHECK-NEXT: }
@@ -785,7 +785,7 @@ func @should_fuse_at_src_depth1_and_dst_depth1() {
 }
 
 // -----
-// CHECK: [[$MAP0:#map[0-9]+]] = affine_map<(d0, d1) -> (d0 * 10 + d1)>
+// CHECK: [[$MAP0:#map[0-9]*]] = affine_map<(d0, d1) -> (d0 * 10 + d1)>
 
 // CHECK-LABEL: func @should_fuse_src_depth1_at_dst_depth2
 func @should_fuse_src_depth1_at_dst_depth2() {
@@ -1935,16 +1935,16 @@ func @fuse_across_dim_mismatch(%arg0: memref<4x4x16x1xf32>, %arg1: memref<144x9x
   }
   return
 }
-// MAXIMAL:      #map0 = affine_map<(d0, d1) -> (d0 * 16 + d1)>
+// MAXIMAL:      #map = affine_map<(d0, d1) -> (d0 * 16 + d1)>
 // MAXIMAL-LABEL: func @fuse_across_dim_mismatch
 // MAXIMAL:        alloc() : memref<1x1xf32>
 // MAXIMAL:        affine.for %{{.*}} = 0 to 9 {
 // MAXIMAL-NEXT:    affine.for %{{.*}} = 0 to 9 {
 // MAXIMAL-NEXT:      affine.for %{{.*}} = 0 to 4 {
 // MAXIMAL-NEXT:        affine.for %{{.*}} = 0 to 16 {
-// MAXIMAL-NEXT:          affine.apply #map0(%{{.*}}, %{{.*}})
+// MAXIMAL-NEXT:          affine.apply #map(%{{.*}}, %{{.*}})
 // MAXIMAL-NEXT:          affine.store %{{.*}}, %{{.*}}[0, 0] : memref<1x1xf32>
-// MAXIMAL-NEXT:          affine.apply #map0(%{{.*}}, %{{.*}})
+// MAXIMAL-NEXT:          affine.apply #map(%{{.*}}, %{{.*}})
 // MAXIMAL-NEXT:          affine.load %{{.*}}[0, 0] : memref<1x1xf32>
 // MAXIMAL-NEXT:        }
 // MAXIMAL-NEXT:      }
@@ -2634,3 +2634,32 @@ func @should_not_fuse_since_top_level_non_affine_users(%in0 : memref<32xf32>,
 // CHECK:  affine.for
 // CHECK:    mulf
 // CHECK:    subf
+
+// -----
+
+// MAXIMAL-LABEL: func @fuse_minor_affine_map
+func @fuse_minor_affine_map(%in: memref<128xf32>, %out: memref<20x512xf32>) {
+  %tmp = alloc() : memref<128xf32>
+
+  affine.for %arg4 = 0 to 128 {
+    %ld = affine.load %in[%arg4] : memref<128xf32>
+    affine.store %ld, %tmp[%arg4] : memref<128xf32>
+  }
+
+  affine.for %arg3 = 0 to 20 {
+    affine.for %arg4 = 0 to 512 {
+      %ld = affine.load %tmp[%arg4 mod 128] : memref<128xf32>
+      affine.store %ld, %out[%arg3, %arg4] : memref<20x512xf32>
+    }
+  }
+
+  return
+}
+
+// TODO: The size of the private memref is not properly computed in the presence
+// of the 'mod' operation. It should be memref<1xf32> instead of
+// memref<128xf32>: https://bugs.llvm.org/show_bug.cgi?id=46973
+// MAXIMAL:       alloc() : memref<128xf32>
+// MAXIMAL:       affine.for
+// MAXIMAL-NEXT:    affine.for
+// MAXIMAL-NOT:   affine.for

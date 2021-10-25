@@ -326,13 +326,13 @@ void CudaInstallationDetector::AddCudaIncludeArgs(
 void CudaInstallationDetector::CheckCudaVersionSupportsArch(
     CudaArch Arch) const {
   if (Arch == CudaArch::UNKNOWN || Version == CudaVersion::UNKNOWN ||
-      ArchsWithBadVersion.count(Arch) > 0)
+      ArchsWithBadVersion[(int)Arch])
     return;
 
   auto MinVersion = MinVersionForCudaArch(Arch);
   auto MaxVersion = MaxVersionForCudaArch(Arch);
   if (Version < MinVersion || Version > MaxVersion) {
-    ArchsWithBadVersion.insert(Arch);
+    ArchsWithBadVersion[(int)Arch] = true;
     D.Diag(diag::err_drv_cuda_version_unsupported)
         << CudaArchToString(Arch) << CudaVersionToString(MinVersion)
         << CudaVersionToString(MaxVersion) << InstallPath
@@ -384,7 +384,7 @@ static DeviceDebugInfoLevel mustEmitDebugInfo(const ArgList &Args) {
     }
     return IsDebugEnabled ? EmitSameDebugInfoAsHost : DebugDirectivesOnly;
   }
-  return DisableDebugInfo;
+  return willEmitRemarks(Args) ? DebugDirectivesOnly : DisableDebugInfo;
 }
 
 void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
@@ -494,7 +494,7 @@ void NVPTX::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
       JA, *this,
       ResponseFileSupport{ResponseFileSupport::RF_Full, llvm::sys::WEM_UTF8,
                           "--options-file"},
-      Exec, CmdArgs, Inputs));
+      Exec, CmdArgs, Inputs, Output));
 }
 
 static bool shouldIncludePTX(const ArgList &Args, const char *gpu_arch) {
@@ -563,7 +563,7 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       JA, *this,
       ResponseFileSupport{ResponseFileSupport::RF_Full, llvm::sys::WEM_UTF8,
                           "--options-file"},
-      Exec, CmdArgs, Inputs));
+      Exec, CmdArgs, Inputs, Output));
 }
 
 void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
@@ -644,7 +644,7 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
       JA, *this,
       ResponseFileSupport{ResponseFileSupport::RF_Full, llvm::sys::WEM_UTF8,
                           "--options-file"},
-      Exec, CmdArgs, Inputs));
+      Exec, CmdArgs, Inputs, Output));
 }
 
 /// CUDA toolchain.  Our assembler is ptxas, and our "linker" is fatbinary,

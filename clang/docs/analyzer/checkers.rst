@@ -1764,7 +1764,7 @@ Check for integer to enumeration casts that could result in undefined values.
  void foo() {
    TestEnum t = static_cast(-1);
        // warn: the value provided to the cast expression is not in
-                the valid range of values for the enum
+       //       the valid range of values for the enum
 
 .. _alpha-cplusplus-InvalidatedIterator:
 
@@ -2545,6 +2545,7 @@ The goal of this rule is to make sure that any uncounted local variable is backe
 These are examples of cases that we consider safe:
 
   .. code-block:: cpp
+
     void foo1() {
       RefPtr<RefCountable> counted;
       // The scope of uncounted is EMBEDDED in the scope of counted.

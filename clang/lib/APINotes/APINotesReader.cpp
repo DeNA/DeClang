@@ -371,7 +371,7 @@ namespace {
                                           const uint8_t *&data) {
       ObjCMethodInfo info;
       uint8_t payload = *data++;
-      info.Required = payload & 0x01;
+      info.RequiredInit = payload & 0x01;
       payload >>= 1;
       info.DesignatedInit = payload & 0x01;
       payload >>= 1;
@@ -527,7 +527,7 @@ namespace {
 
       uint8_t payload = *data++;
       if (payload > 0) {
-        info.SwiftWrapper = static_cast<SwiftWrapperKind>((payload & 0x3) - 1);
+        info.SwiftWrapper = static_cast<SwiftNewTypeKind>((payload & 0x3) - 1);
       }
 
       readCommonTypeInfo(data, info);

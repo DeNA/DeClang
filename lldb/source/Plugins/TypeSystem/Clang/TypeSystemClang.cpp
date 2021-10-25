@@ -148,10 +148,11 @@ void addOverridesForMethod(clang::CXXMethodDecl *decl) {
     return;
 
   clang::CXXBasePaths paths;
+  llvm::SmallVector<clang::NamedDecl *, 4> decls;
 
   auto find_overridden_methods =
-      [decl](const clang::CXXBaseSpecifier *specifier,
-             clang::CXXBasePath &path) {
+      [&decls, decl](const clang::CXXBaseSpecifier *specifier,
+                     clang::CXXBasePath &path) {
         if (auto *base_record = llvm::dyn_cast<clang::CXXRecordDecl>(
                 specifier->getType()->getAs<clang::RecordType>()->getDecl())) {
 
@@ -163,6 +164,7 @@ void addOverridesForMethod(clang::CXXMethodDecl *decl) {
             if (auto *baseDtorDecl = base_record->getDestructor()) {
               if (baseDtorDecl->isVirtual()) {
                 path.Decls = baseDtorDecl;
+                decls.push_back(baseDtorDecl);
                 return true;
               } else
                 return false;
@@ -175,6 +177,7 @@ void addOverridesForMethod(clang::CXXMethodDecl *decl) {
                     llvm::dyn_cast<clang::CXXMethodDecl>(path.Decls.front()))
               if (method_decl->isVirtual() && !isOverload(decl, method_decl)) {
                 path.Decls = method_decl;
+                decls.push_back(method_decl);
                 return true;
               }
           }
@@ -184,7 +187,7 @@ void addOverridesForMethod(clang::CXXMethodDecl *decl) {
       };
 
   if (decl->getParent()->lookupInBases(find_overridden_methods, paths)) {
-    for (auto *overridden_decl : paths.found_decls())
+    for (auto *overridden_decl : decls)
       decl->addOverriddenMethod(
           llvm::cast<clang::CXXMethodDecl>(overridden_decl));
   }
@@ -1433,7 +1436,7 @@ static TemplateParameterList *CreateTemplateParameterList(
 
 clang::FunctionTemplateDecl *TypeSystemClang::CreateFunctionTemplateDecl(
     clang::DeclContext *decl_ctx, OptionalClangModuleID owning_module,
-    clang::FunctionDecl *func_decl, const char *name,
+    clang::FunctionDecl *func_decl,
     const TemplateParameterInfos &template_param_infos) {
   //    /// Create a function template node.
   ASTContext &ast = getASTContext();
@@ -1671,9 +1674,9 @@ bool TypeSystemClang::FieldIsBitfield(FieldDecl *field,
   if (field->isBitField()) {
     Expr *bit_width_expr = field->getBitWidth();
     if (bit_width_expr) {
-      llvm::APSInt bit_width_apsint;
-      if (bit_width_expr->isIntegerConstantExpr(bit_width_apsint, ast)) {
-        bitfield_bit_size = bit_width_apsint.getLimitedValue(UINT32_MAX);
+      if (Optional<llvm::APSInt> bit_width_apsint =
+              bit_width_expr->getIntegerConstantExpr(ast)) {
+        bitfield_bit_size = bit_width_apsint->getLimitedValue(UINT32_MAX);
         return true;
       }
     }
@@ -1979,11 +1982,8 @@ TypeSystemClang::GetOpaqueCompilerType(clang::ASTContext *ast,
 #pragma mark Function Types
 
 clang::DeclarationName
-TypeSystemClang::GetDeclarationName(const char *name,
+TypeSystemClang::GetDeclarationName(llvm::StringRef name,
                                     const CompilerType &function_clang_type) {
-  if (!name || !name[0])
-    return clang::DeclarationName();
-
   clang::OverloadedOperatorKind op_kind = clang::NUM_OVERLOADED_OPERATORS;
   if (!IsOperator(name, op_kind) || op_kind == clang::NUM_OVERLOADED_OPERATORS)
     return DeclarationName(&getASTContext().Idents.get(
@@ -2011,6 +2011,9 @@ TypeSystemClang::GetDeclarationName(const char *name,
 PrintingPolicy TypeSystemClang::GetTypePrintingPolicy() {
   clang::PrintingPolicy printing_policy(getASTContext().getPrintingPolicy());
   printing_policy.SuppressTagKeyword = true;
+  // Inline namespaces are important for some type formatters (e.g., libc++
+  // and libstdc++ are differentiated by their inline namespaces).
+  printing_policy.SuppressInlineNamespace = false;
   printing_policy.SuppressUnwrittenScope = false;
   // Default arguments are also always important for type formatters. Otherwise
   // we would need to always specify two type names for the setups where we do
@@ -2037,8 +2040,8 @@ std::string TypeSystemClang::GetTypeNameForDecl(const NamedDecl *named_decl) {
 
 FunctionDecl *TypeSystemClang::CreateFunctionDeclaration(
     clang::DeclContext *decl_ctx, OptionalClangModuleID owning_module,
-    const char *name, const CompilerType &function_clang_type, int storage,
-    bool is_inline) {
+    llvm::StringRef name, const CompilerType &function_clang_type,
+    clang::StorageClass storage, bool is_inline) {
   FunctionDecl *func_decl = nullptr;
   ASTContext &ast = getASTContext();
   if (!decl_ctx)
@@ -2053,11 +2056,12 @@ FunctionDecl *TypeSystemClang::CreateFunctionDeclaration(
   func_decl->setDeclContext(decl_ctx);
   func_decl->setDeclName(declarationName);
   func_decl->setType(ClangUtil::GetQualType(function_clang_type));
-  func_decl->setStorageClass(static_cast<clang::StorageClass>(storage));
+  func_decl->setStorageClass(storage);
   func_decl->setInlineSpecified(is_inline);
   func_decl->setHasWrittenPrototype(hasWrittenPrototype);
-  func_decl->setConstexprKind(isConstexprSpecified ? CSK_constexpr
-                                                   : CSK_unspecified);
+  func_decl->setConstexprKind(isConstexprSpecified
+                                  ? ConstexprSpecKind::Constexpr
+                                  : ConstexprSpecKind::Unspecified);
   SetOwningModule(func_decl, owning_module);
   if (func_decl)
     decl_ctx->addDecl(func_decl);
@@ -2925,20 +2929,11 @@ bool TypeSystemClang::IsCStringType(lldb::opaque_compiler_type_t type,
   return false;
 }
 
-bool TypeSystemClang::IsFunctionType(lldb::opaque_compiler_type_t type,
-                                     bool *is_variadic_ptr) {
+bool TypeSystemClang::IsFunctionType(lldb::opaque_compiler_type_t type) {
   if (type) {
     clang::QualType qual_type = RemoveWrappingTypes(GetCanonicalQualType(type));
 
     if (qual_type->isFunctionType()) {
-      if (is_variadic_ptr) {
-        const clang::FunctionProtoType *function_proto_type =
-            llvm::dyn_cast<clang::FunctionProtoType>(qual_type.getTypePtr());
-        if (function_proto_type)
-          *is_variadic_ptr = function_proto_type->isVariadic();
-        else
-          *is_variadic_ptr = false;
-      }
       return true;
     }
 
@@ -2951,8 +2946,8 @@ bool TypeSystemClang::IsFunctionType(lldb::opaque_compiler_type_t type,
       const clang::ReferenceType *reference_type =
           llvm::cast<clang::ReferenceType>(qual_type.getTypePtr());
       if (reference_type)
-        return IsFunctionType(reference_type->getPointeeType().getAsOpaquePtr(),
-                              nullptr);
+        return IsFunctionType(
+            reference_type->getPointeeType().getAsOpaquePtr());
     } break;
     }
   }
@@ -3160,6 +3155,20 @@ bool TypeSystemClang::IsEnumerationType(lldb::opaque_compiler_type_t type,
       IsIntegerType(enum_type->getDecl()->getIntegerType().getAsOpaquePtr(),
                     is_signed);
       return true;
+    }
+  }
+
+  return false;
+}
+
+bool TypeSystemClang::IsScopedEnumerationType(
+    lldb::opaque_compiler_type_t type) {
+  if (type) {
+    const clang::EnumType *enum_type = llvm::dyn_cast<clang::EnumType>(
+        GetCanonicalQualType(type)->getCanonicalTypeInternal());
+
+    if (enum_type) {
+      return enum_type->isScopedEnumeralType();
     }
   }
 
@@ -3713,6 +3722,7 @@ TypeSystemClang::GetDisplayTypeName(lldb::opaque_compiler_type_t type,
   printing_policy.SuppressTagKeyword = true;
   printing_policy.SuppressScope = false;
   printing_policy.SuppressUnwrittenScope = true;
+  printing_policy.SuppressInlineNamespace = true;
   return ConstString(qual_type.getAsString(printing_policy));
 }
 
@@ -4140,7 +4150,6 @@ unsigned TypeSystemClang::GetTypeQualifiers(lldb::opaque_compiler_type_t type) {
 
 CompilerType
 TypeSystemClang::GetArrayElementType(lldb::opaque_compiler_type_t type,
-                                     uint64_t *stride,
                                      ExecutionContextScope *exe_scope) {
   if (type) {
     clang::QualType qual_type(GetQualType(type));
@@ -4151,14 +4160,7 @@ TypeSystemClang::GetArrayElementType(lldb::opaque_compiler_type_t type,
     if (!array_eletype)
       return CompilerType();
 
-    CompilerType element_type = GetType(clang::QualType(array_eletype, 0));
-
-    // TODO: the real stride will be >= this value.. find the real one!
-    if (stride)
-      if (Optional<uint64_t> size = element_type.GetByteSize(exe_scope))
-        *stride = *size;
-
-    return element_type;
+    return GetType(clang::QualType(array_eletype, 0));
   }
   return CompilerType();
 }
@@ -4205,6 +4207,13 @@ TypeSystemClang::GetFullyUnqualifiedType(lldb::opaque_compiler_type_t type) {
   if (type)
     return GetType(
         GetFullyUnqualifiedType_Impl(&getASTContext(), GetQualType(type)));
+  return CompilerType();
+}
+
+CompilerType
+TypeSystemClang::GetEnumerationIntegerType(lldb::opaque_compiler_type_t type) {
+  if (type)
+    return GetEnumerationIntegerType(GetType(GetCanonicalQualType(type)));
   return CompilerType();
 }
 
@@ -4429,39 +4438,6 @@ TypeSystemClang::GetNonReferenceType(lldb::opaque_compiler_type_t type) {
   return CompilerType();
 }
 
-CompilerType TypeSystemClang::CreateTypedefType(
-    const CompilerType &type, const char *typedef_name,
-    const CompilerDeclContext &compiler_decl_ctx, uint32_t payload) {
-  if (type && typedef_name && typedef_name[0]) {
-    TypeSystemClang *ast =
-        llvm::dyn_cast<TypeSystemClang>(type.GetTypeSystem());
-    if (!ast)
-      return CompilerType();
-    clang::ASTContext &clang_ast = ast->getASTContext();
-    clang::QualType qual_type(ClangUtil::GetQualType(type));
-
-    clang::DeclContext *decl_ctx =
-        TypeSystemClang::DeclContextGetAsDeclContext(compiler_decl_ctx);
-    if (!decl_ctx)
-      decl_ctx = ast->getASTContext().getTranslationUnitDecl();
-
-    clang::TypedefDecl *decl =
-        clang::TypedefDecl::CreateDeserialized(clang_ast, 0);
-    decl->setDeclContext(decl_ctx);
-    decl->setDeclName(&clang_ast.Idents.get(typedef_name));
-    decl->setTypeSourceInfo(clang_ast.getTrivialTypeSourceInfo(qual_type));
-
-    SetOwningModule(decl, TypePayloadClang(payload).GetOwningModule());
-    decl->setAccess(clang::AS_public); // TODO respect proper access specifier
-
-    decl_ctx->addDecl(decl);
-
-    // Get a uniqued clang::QualType for the typedef decl type
-    return ast->GetType(clang_ast.getTypedefType(decl));
-  }
-  return CompilerType();
-}
-
 CompilerType
 TypeSystemClang::GetPointeeType(lldb::opaque_compiler_type_t type) {
   if (type) {
@@ -4543,7 +4519,7 @@ TypeSystemClang::AddRestrictModifier(lldb::opaque_compiler_type_t type) {
 CompilerType TypeSystemClang::CreateTypedef(
     lldb::opaque_compiler_type_t type, const char *typedef_name,
     const CompilerDeclContext &compiler_decl_ctx, uint32_t payload) {
-  if (type) {
+  if (type && typedef_name && typedef_name[0]) {
     clang::ASTContext &clang_ast = getASTContext();
     clang::QualType qual_type(GetQualType(type));
 
@@ -4552,10 +4528,12 @@ CompilerType TypeSystemClang::CreateTypedef(
     if (!decl_ctx)
       decl_ctx = getASTContext().getTranslationUnitDecl();
 
-    clang::TypedefDecl *decl = clang::TypedefDecl::Create(
-        clang_ast, decl_ctx, clang::SourceLocation(), clang::SourceLocation(),
-        &clang_ast.Idents.get(typedef_name),
-        clang_ast.getTrivialTypeSourceInfo(qual_type));
+    clang::TypedefDecl *decl =
+        clang::TypedefDecl::CreateDeserialized(clang_ast, 0);
+    decl->setDeclContext(decl_ctx);
+    decl->setDeclName(&clang_ast.Idents.get(typedef_name));
+    decl->setTypeSourceInfo(clang_ast.getTrivialTypeSourceInfo(qual_type));
+    decl_ctx->addDecl(decl);
     SetOwningModule(decl, TypePayloadClang(payload).GetOwningModule());
 
     clang::TagDecl *tdecl = nullptr;
@@ -4869,6 +4847,12 @@ lldb::Encoding TypeSystemClang::GetEncoding(lldb::opaque_compiler_type_t type,
     case clang::BuiltinType::OCLIntelSubgroupAVCImeDualRefStreamin:
       break;
 
+    // PowerPC -- Matrix Multiply Assist
+    case clang::BuiltinType::VectorPair:
+    case clang::BuiltinType::VectorQuad:
+      break;
+
+    // ARM -- Scalable Vector Extension
     case clang::BuiltinType::SveBool:
     case clang::BuiltinType::SveInt8:
     case clang::BuiltinType::SveInt8x2:
@@ -6569,8 +6553,10 @@ size_t TypeSystemClang::GetIndexOfChildMemberWithName(
           if (cxx_record_decl->lookupInBases(
                   [decl_name](const clang::CXXBaseSpecifier *specifier,
                               clang::CXXBasePath &path) {
-                    return clang::CXXRecordDecl::FindOrdinaryMember(
-                        specifier, path, decl_name);
+                    path.Decls =
+                        specifier->getType()->getAsCXXRecordDecl()->lookup(
+                            decl_name);
+                    return !path.Decls.empty();
                   },
                   paths)) {
             clang::CXXBasePaths::const_paths_iterator path,
@@ -7453,7 +7439,7 @@ clang::CXXMethodDecl *TypeSystemClang::AddMethodToCXXRecordType(
     cxx_dtor_decl->setType(method_qual_type);
     cxx_dtor_decl->setImplicit(is_artificial);
     cxx_dtor_decl->setInlineSpecified(is_inline);
-    cxx_dtor_decl->setConstexprKind(CSK_unspecified);
+    cxx_dtor_decl->setConstexprKind(ConstexprSpecKind::Unspecified);
     cxx_method_decl = cxx_dtor_decl;
   } else if (decl_name == cxx_record_decl->getDeclName()) {
     cxx_ctor_decl = clang::CXXConstructorDecl::CreateDeserialized(
@@ -7465,7 +7451,7 @@ clang::CXXMethodDecl *TypeSystemClang::AddMethodToCXXRecordType(
     cxx_ctor_decl->setType(method_qual_type);
     cxx_ctor_decl->setImplicit(is_artificial);
     cxx_ctor_decl->setInlineSpecified(is_inline);
-    cxx_ctor_decl->setConstexprKind(CSK_unspecified);
+    cxx_ctor_decl->setConstexprKind(ConstexprSpecKind::Unspecified);
     cxx_ctor_decl->setNumCtorInitializers(0);
     cxx_ctor_decl->setExplicitSpecifier(explicit_spec);
     cxx_method_decl = cxx_ctor_decl;
@@ -7491,7 +7477,7 @@ clang::CXXMethodDecl *TypeSystemClang::AddMethodToCXXRecordType(
         cxx_method_decl->setType(method_qual_type);
         cxx_method_decl->setStorageClass(SC);
         cxx_method_decl->setInlineSpecified(is_inline);
-        cxx_method_decl->setConstexprKind(CSK_unspecified);
+        cxx_method_decl->setConstexprKind(ConstexprSpecKind::Unspecified);
       } else if (num_params == 0) {
         // Conversion operators don't take params...
         auto *cxx_conversion_decl =
@@ -7504,7 +7490,7 @@ clang::CXXMethodDecl *TypeSystemClang::AddMethodToCXXRecordType(
         cxx_conversion_decl->setType(method_qual_type);
         cxx_conversion_decl->setInlineSpecified(is_inline);
         cxx_conversion_decl->setExplicitSpecifier(explicit_spec);
-        cxx_conversion_decl->setConstexprKind(CSK_unspecified);
+        cxx_conversion_decl->setConstexprKind(ConstexprSpecKind::Unspecified);
         cxx_method_decl = cxx_conversion_decl;
       }
     }
@@ -7517,7 +7503,7 @@ clang::CXXMethodDecl *TypeSystemClang::AddMethodToCXXRecordType(
       cxx_method_decl->setType(method_qual_type);
       cxx_method_decl->setInlineSpecified(is_inline);
       cxx_method_decl->setStorageClass(SC);
-      cxx_method_decl->setConstexprKind(CSK_unspecified);
+      cxx_method_decl->setConstexprKind(ConstexprSpecKind::Unspecified);
     }
   }
   SetMemberOwningModule(cxx_method_decl, cxx_record_decl);
@@ -9264,11 +9250,11 @@ CompilerType TypeSystemClang::DeclGetFunctionArgumentType(void *opaque_decl,
 std::vector<CompilerDecl> TypeSystemClang::DeclContextFindDeclByName(
     void *opaque_decl_ctx, ConstString name, const bool ignore_using_decls) {
   std::vector<CompilerDecl> found_decls;
-  if (opaque_decl_ctx) {
+  SymbolFile *symbol_file = GetSymbolFile();
+  if (opaque_decl_ctx && symbol_file) {
     DeclContext *root_decl_ctx = (DeclContext *)opaque_decl_ctx;
     std::set<DeclContext *> searched;
     std::multimap<DeclContext *, DeclContext *> search_queue;
-    SymbolFile *symbol_file = GetSymbolFile();
 
     for (clang::DeclContext *decl_context = root_decl_ctx;
          decl_context != nullptr && found_decls.empty();
@@ -9362,10 +9348,10 @@ uint32_t TypeSystemClang::CountDeclLevels(clang::DeclContext *frame_decl_ctx,
                                           clang::DeclContext *child_decl_ctx,
                                           ConstString *child_name,
                                           CompilerType *child_type) {
-  if (frame_decl_ctx) {
+  SymbolFile *symbol_file = GetSymbolFile();
+  if (frame_decl_ctx && symbol_file) {
     std::set<DeclContext *> searched;
     std::multimap<DeclContext *, DeclContext *> search_queue;
-    SymbolFile *symbol_file = GetSymbolFile();
 
     // Get the lookup scope for the decl we're trying to find.
     clang::DeclContext *parent_decl_ctx = child_decl_ctx->getParent();
@@ -9671,14 +9657,16 @@ FunctionCaller *ScratchTypeSystemClang::GetFunctionCaller(
                                  arg_value_list, name);
 }
 
-UtilityFunction *
-ScratchTypeSystemClang::GetUtilityFunction(const char *text,
-                                                  const char *name) {
+std::unique_ptr<UtilityFunction>
+ScratchTypeSystemClang::CreateUtilityFunction(std::string text,
+                                              std::string name) {
   TargetSP target_sp = m_target_wp.lock();
   if (!target_sp)
-    return nullptr;
+    return {};
 
-  return new ClangUtilityFunction(*target_sp.get(), text, name);
+  return std::make_unique<ClangUtilityFunction>(
+      *target_sp.get(), std::move(text), std::move(name),
+      target_sp->GetDebugUtilityExpression());
 }
 
 PersistentExpressionState *
@@ -9711,15 +9699,14 @@ GetSpecializedASTName(ScratchTypeSystemClang::IsolatedASTKind feature) {
 }
 
 TypeSystemClang &ScratchTypeSystemClang::GetIsolatedAST(
-    ScratchTypeSystemClang::IsolatedASTKind feature_enum) {
-  int feature = static_cast<int>(feature_enum);
+    ScratchTypeSystemClang::IsolatedASTKind feature) {
   auto found_ast = m_isolated_asts.find(feature);
   if (found_ast != m_isolated_asts.end())
     return *found_ast->second;
 
   // Couldn't find the requested sub-AST, so create it now.
   std::unique_ptr<TypeSystemClang> new_ast;
-  new_ast.reset(new SpecializedScratchAST(GetSpecializedASTName(feature_enum),
+  new_ast.reset(new SpecializedScratchAST(GetSpecializedASTName(feature),
                                           m_triple, CreateASTSource()));
   m_isolated_asts[feature] = std::move(new_ast);
   return *m_isolated_asts[feature];

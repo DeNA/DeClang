@@ -265,7 +265,7 @@ public:
                       bool can_replace);
 
   lldb::CommandObjectSP GetCommandSPExact(llvm::StringRef cmd,
-                                          bool include_aliases) const;
+                                          bool include_aliases = false) const;
 
   CommandObject *GetCommandObject(llvm::StringRef cmd,
                                   StringList *matches = nullptr,
@@ -350,6 +350,10 @@ public:
                               CommandReturnObject &result);
 
   CommandObject *GetCommandObjectForCommand(llvm::StringRef &command_line);
+
+  /// Returns the auto-suggestion string that should be added to the given
+  /// command line.
+  llvm::Optional<std::string> GetAutoSuggestionForCommand(llvm::StringRef line);
 
   // This handles command line completion.
   void HandleCompletion(CompletionRequest &request);
@@ -496,6 +500,8 @@ public:
 
   bool GetEchoCommentCommands() const;
   void SetEchoCommentCommands(bool enable);
+
+  bool GetRepeatPreviousCommand() const;
 
   const CommandObject::CommandMap &GetUserCommands() const {
     return m_user_dict;

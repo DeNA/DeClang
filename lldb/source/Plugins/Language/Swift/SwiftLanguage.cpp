@@ -21,13 +21,13 @@
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/Variable.h"
 #include "lldb/Symbol/VariableList.h"
 
-#include "lldb/Target/SwiftLanguageRuntime.h"
 
 #include "ObjCRuntimeSyntheticProvider.h"
 #include "SwiftFormatters.h"
@@ -884,6 +884,15 @@ std::vector<ConstString> SwiftLanguage::GetPossibleFormattersMatches(
   if (use_dynamic == lldb::eNoDynamicValues)
     return result;
 
+  // There is no point in attempting to format Clang types here, since
+  // FormatManager will try to format all Swift types also as
+  // Objective-C types and vice versa.  Due to the incomplete
+  // ClangImporter implementation for C++, continuing here for
+  // Objective-C++ types can actually lead to crashes that can be
+  // avoided by just formatting those types as Objective-C types.
+  if (valobj.GetObjectRuntimeLanguage() == eLanguageTypeObjC)
+    return result;
+
   SwiftASTContextLock scratch_ctx_lock(&valobj.GetExecutionContextRef());
   CompilerType compiler_type(valobj.GetCompilerType());
 
@@ -892,25 +901,22 @@ std::vector<ConstString> SwiftLanguage::GetPossibleFormattersMatches(
   bool canBeSwiftDynamic = compiler_type.IsPossibleDynamicType(
       nullptr, check_cpp, check_objc);
 
-  if (canBeSwiftDynamic) {
-    do {
-      lldb::ProcessSP process_sp = valobj.GetProcessSP();
-      if (!process_sp)
-        break;
-      auto *runtime = SwiftLanguageRuntime::Get(process_sp);
-      if (runtime == nullptr)
-        break;
-      TypeAndOrName type_and_or_name;
-      Address address;
-      Value::ValueType value_type;
-      if (!runtime->GetDynamicTypeAndAddress(
-              valobj, use_dynamic, type_and_or_name, address, value_type))
-        break;
-      if (ConstString name = type_and_or_name.GetName())
-        result.push_back(name);
-    } while (false);
-  }
-
+  if (!canBeSwiftDynamic)
+    return result;
+  lldb::ProcessSP process_sp = valobj.GetProcessSP();
+  if (!process_sp)
+    return result;
+  auto *runtime = SwiftLanguageRuntime::Get(process_sp);
+  if (!runtime)
+    return result;
+  TypeAndOrName type_and_or_name;
+  Address address;
+  Value::ValueType value_type;
+  if (!runtime->GetDynamicTypeAndAddress(valobj, use_dynamic, type_and_or_name,
+                                         address, value_type))
+    return result;
+  if (ConstString name = type_and_or_name.GetName())
+    result.push_back(name);
   return result;
 }
 

@@ -21,7 +21,7 @@
 
 double *g;
 
-// CK1: @g = global double*
+// CK1: @g ={{.*}} global double*
 // CK1: [[MTYPE00:@.+]] = {{.*}}constant [2 x i64] [i64 51, i64 96]
 // CK1: [[MTYPE01:@.+]] = {{.*}}constant [1 x i64] [i64 99]
 // CK1: [[MTYPE03:@.+]] = {{.*}}constant [1 x i64] [i64 99]
@@ -216,7 +216,7 @@ void foo(float *&lr, T *&tr) {
   ++tr;
 
   // CK1:     [[T1:%.+]] = load float*, float** [[DECL:%.+]],
-  // CK1:     [[BP:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* %{{.+}}, i32 0, i32
+  // CK1:     [[BP:%.+]] = getelementptr inbounds [2 x i8*], [2 x i8*]* %{{.+}}, i32 0, i32 0
   // CK1:     [[CBP:%.+]] = bitcast i8** [[BP]] to float**
   // CK1:     store float* [[T1]], float** [[CBP]],
   // CK1:     call void @__tgt_target_data_begin{{.+}}[[MTYPE08]]

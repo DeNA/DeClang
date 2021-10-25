@@ -99,6 +99,9 @@ FEATURE(ptrauth_calls, LangOpts.PointerAuthCalls)
 FEATURE(ptrauth_returns, LangOpts.PointerAuthReturns)
 FEATURE(ptrauth_indirect_gotos, LangOpts.PointerAuthIndirectGotos)
 FEATURE(scudo, LangOpts.Sanitize.hasOneOf(SanitizerKind::Scudo))
+FEATURE(swiftasynccc,
+  PP.getTargetInfo().checkCallingConvention(CC_SwiftAsync) ==
+  clang::TargetInfo::CCCR_OK)
 // Objective-C features
 FEATURE(objc_arr, LangOpts.ObjCAutoRefCount) // FIXME: REMOVE?
 FEATURE(objc_arc, LangOpts.ObjCAutoRefCount)
@@ -263,6 +266,9 @@ EXTENSION(pragma_clang_attribute_external_declaration, true)
 EXTENSION(gnu_asm, LangOpts.GNUAsm)
 EXTENSION(gnu_asm_goto_with_outputs, LangOpts.GNUAsm)
 EXTENSION(matrix_types, LangOpts.MatrixTypes)
+EXTENSION(matrix_types_scalar_division, true)
+
+FEATURE(cxx_abi_relative_vtable, LangOpts.CPlusPlus && LangOpts.RelativeCXXABIVTables)
 
 #undef EXTENSION
 #undef FEATURE

@@ -19,6 +19,7 @@
 #include "sanitizer_common/sanitizer_placement_new.h"
 #include "sanitizer_common/sanitizer_symbolizer.h"
 #include "tsan_defs.h"
+#include "tsan_interface.h"
 #include "tsan_platform.h"
 #include "tsan_rtl.h"
 #include "tsan_mman.h"
@@ -56,12 +57,23 @@ Context *ctx;
 bool OnFinalize(bool failed);
 void OnInitialize();
 #else
+#include <dlfcn.h>
 SANITIZER_WEAK_CXX_DEFAULT_IMPL
 bool OnFinalize(bool failed) {
+#if !SANITIZER_GO
+  if (auto *ptr = dlsym(RTLD_DEFAULT, "__tsan_on_finalize"))
+    return reinterpret_cast<decltype(&__tsan_on_finalize)>(ptr)(failed);
+#endif
   return failed;
 }
 SANITIZER_WEAK_CXX_DEFAULT_IMPL
-void OnInitialize() {}
+void OnInitialize() {
+#if !SANITIZER_GO
+  if (auto *ptr = dlsym(RTLD_DEFAULT, "__tsan_on_initialize")) {
+    return reinterpret_cast<decltype(&__tsan_on_initialize)>(ptr)();
+  }
+#endif
+}
 #endif
 
 static char thread_registry_placeholder[sizeof(ThreadRegistry)];
@@ -256,7 +268,8 @@ void MapShadow(uptr addr, uptr size) {
   const uptr kPageSize = GetPageSizeCached();
   uptr shadow_begin = RoundDownTo((uptr)MemToShadow(addr), kPageSize);
   uptr shadow_end = RoundUpTo((uptr)MemToShadow(addr + size), kPageSize);
-  if (!MmapFixedNoReserve(shadow_begin, shadow_end - shadow_begin, "shadow"))
+  if (!MmapFixedSuperNoReserve(shadow_begin, shadow_end - shadow_begin,
+                               "shadow"))
     Die();
 
   // Meta shadow is 2:1, so tread carefully.
@@ -269,7 +282,8 @@ void MapShadow(uptr addr, uptr size) {
   if (!data_mapped) {
     // First call maps data+bss.
     data_mapped = true;
-    if (!MmapFixedNoReserve(meta_begin, meta_end - meta_begin, "meta shadow"))
+    if (!MmapFixedSuperNoReserve(meta_begin, meta_end - meta_begin,
+                                 "meta shadow"))
       Die();
   } else {
     // Mapping continous heap.
@@ -280,7 +294,8 @@ void MapShadow(uptr addr, uptr size) {
       return;
     if (meta_begin < mapped_meta_end)
       meta_begin = mapped_meta_end;
-    if (!MmapFixedNoReserve(meta_begin, meta_end - meta_begin, "meta shadow"))
+    if (!MmapFixedSuperNoReserve(meta_begin, meta_end - meta_begin,
+                                 "meta shadow"))
       Die();
     mapped_meta_end = meta_end;
   }
@@ -293,7 +308,7 @@ void MapThreadTrace(uptr addr, uptr size, const char *name) {
   CHECK_GE(addr, TraceMemBeg());
   CHECK_LE(addr + size, TraceMemEnd());
   CHECK_EQ(addr, addr & ~((64 << 10) - 1));  // windows wants 64K alignment
-  if (!MmapFixedNoReserve(addr, size, name)) {
+  if (!MmapFixedSuperNoReserve(addr, size, name)) {
     Printf("FATAL: ThreadSanitizer can not mmap thread trace (%p/%p)\n",
         addr, size);
     Die();
@@ -443,7 +458,8 @@ void MaybeSpawnBackgroundThread() {
 int Finalize(ThreadState *thr) {
   bool failed = false;
 
-  if (common_flags()->print_module_map == 1) PrintModuleMap();
+  if (common_flags()->print_module_map == 1)
+    DumpProcessMap();
 
   if (flags()->atexit_sleep_ms > 0 && ThreadCount(thr) > 1)
     SleepForMillis(flags()->atexit_sleep_ms);
@@ -957,7 +973,7 @@ static void MemoryRangeSet(ThreadState *thr, uptr pc, uptr addr, uptr size,
     u64 *p1 = p;
     p = RoundDown(end, kPageSize);
     UnmapOrDie((void*)p1, (uptr)p - (uptr)p1);
-    if (!MmapFixedNoReserve((uptr)p1, (uptr)p - (uptr)p1))
+    if (!MmapFixedSuperNoReserve((uptr)p1, (uptr)p - (uptr)p1))
       Die();
     // Set the ending.
     while (p < end) {

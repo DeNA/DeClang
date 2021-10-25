@@ -135,12 +135,17 @@ if(LLDB_ENABLE_PYTHON AND (BUILD_SHARED_LIBS OR LLVM_LINK_LLVM_DYLIB) AND UNIX A
 endif()
 
 if(Python3_RPATH)
-  set_property(TARGET liblldb APPEND PROPERTY INSTALL_RPATH "${Python3_RPATH}")
-  set_property(TARGET liblldb APPEND PROPERTY BUILD_RPATH   "${Python3_RPATH}")
-endif()
-
-if (MSVC)
-  set_source_files_properties(SBReproducer.cpp PROPERTIES COMPILE_FLAGS /bigobj)
+  lldb_setup_rpaths(liblldb
+    BUILD_RPATH
+      "${Python3_RPATH}"
+    INSTALL_RPATH
+      "@loader_path/../../../../../../../../Library/Frameworks/"
+      "@loader_path/../../../../../Developer/Library/Frameworks/"
+      "@loader_path/../../../../Developer/Library/Frameworks/"
+      "@loader_path/../../../../Frameworks"
+      "@loader_path/../../../"
+      "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/"
+    )
 endif()
 
 if(LLDB_ENABLE_PYTHON)
@@ -198,10 +203,10 @@ if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
   set_target_properties(liblldb_exports PROPERTIES FOLDER "lldb misc")
 endif()
 
-if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
+if (MSVC)
   # Only MSVC has the ABI compatibility problem and avoids using FindPythonLibs,
   # so only it needs to explicitly link against ${Python3_LIBRARIES}
-  if (MSVC AND LLDB_ENABLE_PYTHON)
+  if (LLDB_ENABLE_PYTHON)
     target_link_libraries(liblldb PRIVATE ${Python3_LIBRARIES})
   endif()
 else()
@@ -211,8 +216,26 @@ else()
   )
 endif()
 
-if (NOT LLDB_BUILT_STANDALONE)
+# The Clang expression parser in LLDB requires the Clang resource directory to function.
+if (TARGET clang-resource-headers)
+  # If building alongside Clang, just add a dependency to ensure it is build together with liblldb.
   add_dependencies(liblldb clang-resource-headers)
+else()
+  # In a standalone build create a symlink from the LLDB library directory that points to the
+  # resource directory in the Clang library directory. LLDB searches relative to its install path,
+  # and the symlink is created in the same relative path as the resource directory of Clang when
+  # building alongside Clang.
+  # When building the LLDB framework, this isn't necessary as there we copy everything we need into
+  # the framework (including the Clang resourece directory).
+  if(NOT LLDB_BUILD_FRAMEWORK)
+    get_target_property(liblldb_TARGET_FILE_DIR liblldb TARGET_FILE_DIR)
+    file(MAKE_DIRECTORY "${liblldb_TARGET_FILE_DIR}/clang")
+    add_custom_command(TARGET liblldb POST_BUILD
+      COMMENT "Linking Clang resource dir into LLDB build directory: ${liblldb_TARGET_FILE_DIR}/clang"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${liblldb_TARGET_FILE_DIR}/clang"
+      COMMAND ${CMAKE_COMMAND} -E create_symlink "${LLDB_EXTERNAL_CLANG_RESOURCE_DIR}" "${liblldb_TARGET_FILE_DIR}/clang/${LLDB_CLANG_RESOURCE_DIR_NAME}"
+    )
+  endif()
 endif()
 
 if(LLDB_BUILD_FRAMEWORK)

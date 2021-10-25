@@ -6,14 +6,13 @@
 # CHECK:      - Name:            .rodata.cst4
 # CHECK-NEXT:   Type:            SHT_PROGBITS
 # CHECK-NEXT:   Flags:           [ SHF_ALLOC, SHF_MERGE ]
-# CHECK-NEXT:   EntSize:         0x0000000000000004
+# CHECK-NEXT:   EntSize:         0x4
 
 --- !ELF
 FileHeader:
-  Class:           ELFCLASS64
-  Data:            ELFDATA2LSB
-  Type:            ET_REL
-  Machine:         EM_X86_64
+  Class: ELFCLASS64
+  Data:  ELFDATA2LSB
+  Type:  ET_REL
 Sections:
   - Name:            .rodata.cst4
     Type:            SHT_PROGBITS

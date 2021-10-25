@@ -3,6 +3,7 @@ add_llvm_component_library(LLVMTransformUtils
   AMDGPUEmitPrintf.cpp
   ASanStackFrameLayout.cpp
   AssumeBundleBuilder.cpp
+  AutoInitRemark.cpp
   BasicBlockUtils.cpp
   BreakCriticalEdges.cpp
   BuildLibCalls.cpp
@@ -35,20 +36,20 @@ add_llvm_component_library(LLVMTransformUtils
   LCSSA.cpp
   LibCallsShrinkWrap.cpp
   Local.cpp
+  LoopPeel.cpp
   LoopRotationUtils.cpp
   LoopSimplify.cpp
   LoopUnroll.cpp
   LoopUnrollAndJam.cpp
-  LoopUnrollPeel.cpp
   LoopUnrollRuntime.cpp
   LoopUtils.cpp
   LoopVersioning.cpp
   LowerInvoke.cpp
   LowerMemIntrinsics.cpp
   LowerSwitch.cpp
+  MatrixUtils.cpp
   Mem2Reg.cpp
   MetaRenamer.cpp
-  MisExpect.cpp
   ModuleUtils.cpp
   NameAnonGlobals.cpp
   PredicateInfo.cpp
@@ -78,4 +79,9 @@ add_llvm_component_library(LLVMTransformUtils
 
   DEPENDS
   intrinsics_gen
+
+  LINK_COMPONENTS
+  Analysis
+  Core
+  Support
   )

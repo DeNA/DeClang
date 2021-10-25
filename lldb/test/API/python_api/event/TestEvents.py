@@ -62,8 +62,8 @@ class EventAPITestCase(TestBase):
                                 False,     # Stop at entry
                                 error)     # error
 
-        self.assertTrue(
-            process.GetState() == lldb.eStateStopped,
+        self.assertEqual(
+            process.GetState(), lldb.eStateStopped,
             PROCESS_STOPPED)
 
         # Create an empty event object.
@@ -197,13 +197,13 @@ class EventAPITestCase(TestBase):
         self.assertTrue(event,
                         "My listening thread successfully received an event")
 
-    @skipIfFreeBSD  # llvm.org/pr21325
     @add_test_categories(['pyapi'])
     @expectedFailureAll(
         oslist=["linux"],
         bugnumber="llvm.org/pr23617 Flaky, fails ~1/10 cases")
     @skipIfWindows # This is flakey on Windows AND when it fails, it hangs: llvm.org/pr38373
-    @expectedFlakeyNetBSD
+    @expectedFailureAll(oslist=["freebsd"], bugnumber="llvm.org/pr48417")
+    @expectedFailureNetBSD
     def test_add_listener_to_broadcaster(self):
         """Exercise some SBBroadcaster APIs."""
         self.build()
@@ -315,5 +315,5 @@ class EventAPITestCase(TestBase):
         my_thread.join()
 
         # The final judgement. :-)
-        self.assertTrue(self.state == 'stopped',
+        self.assertEqual(self.state, 'stopped',
                         "Both expected state changed events received")

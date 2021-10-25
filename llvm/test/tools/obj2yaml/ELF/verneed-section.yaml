@@ -6,10 +6,10 @@
 # CHECK:      - Name:            .gnu.version_r
 # CHECK-NEXT:   Type:            SHT_GNU_verneed
 # CHECK-NEXT:   Flags:           [ SHF_ALLOC ]
-# CHECK-NEXT:   Address:         0x0000000000200250
+# CHECK-NEXT:   Address:         0x200250
 # CHECK-NEXT:   Link:            .dynstr
-# CHECK-NEXT:   AddressAlign:    0x0000000000000004
-# CHECK-NEXT:   Info:            0x0000000000000002
+# CHECK-NEXT:   AddressAlign:    0x4
+# CHECK-NEXT:   Info:            0x2
 # CHECK-NEXT:   Dependencies:
 # CHECK-NEXT:     - Version:         1
 # CHECK-NEXT:       File:            dso.so.0
@@ -32,11 +32,10 @@
 
 --- !ELF
 FileHeader:
-  Class:           ELFCLASS64
-  Data:            ELFDATA2LSB
-  Type:            ET_EXEC
-  Machine:         EM_X86_64
-  Entry:           0x0000000000201000
+  Class: ELFCLASS64
+  Data:  ELFDATA2LSB
+  Type:  ET_EXEC
+  Entry: 0x0000000000201000
 Sections:
   - Name:            .gnu.version_r
     Type:            SHT_GNU_verneed

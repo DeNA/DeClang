@@ -41,7 +41,6 @@ class TestLibraryIndirect(TestBase):
         return info
 
     @swiftTest
-    @skipIfLinux # rdar://problem/67348151
     def test_implementation_only_import_library(self):
         """Test `@_implementationOnly import` behind some indirection in a library used by the main executable
 
@@ -51,10 +50,6 @@ class TestLibraryIndirect(TestBase):
         def cleanup():
             lldbutil.execute_command("make cleanup")
         self.addTearDownHook(cleanup)
-
-        self.target = self.dbg.CreateTarget(self.getBuildArtifact("a.out"))
-        self.assertTrue(self.target, VALID_TARGET)
-        self.registerSharedLibrariesWithTarget(self.target, ['SomeLibrary'])
 
         if lldb.remote_platform:
             ext = 'so'
@@ -67,7 +62,10 @@ class TestLibraryIndirect(TestBase):
                 lldb.SBFileSpec(os.path.join(wd, filename)))
             self.assertFalse(err.Fail(), 'Failed to copy ' + filename)
 
-        lldbutil.run_to_source_breakpoint(self, "break here", lldb.SBFileSpec("main.swift"), self.launch_info())
+        lldbutil.run_to_source_breakpoint(
+            self, "break here",
+            lldb.SBFileSpec("main.swift"),
+            extra_images=['SomeLibrary'])
 
         # This test is deliberately checking what the user will see, rather than
         # the structure provided by the Python API, in order to test the recovery.
@@ -80,7 +78,6 @@ class TestLibraryIndirect(TestBase):
         self.expect("e container.wrapped.value", substrs=["(SomeLibraryCore.TwoInts)", "(first = 2, second = 3)"])
 
     @swiftTest
-    @skipIfLinux # rdar://problem/67348151
     def test_implementation_only_import_library_no_library_module(self):
         """Test `@_implementationOnly import` behind some indirection in a library used by the main executable, after removing the implementation-only library's swiftmodule
 
@@ -94,10 +91,6 @@ class TestLibraryIndirect(TestBase):
             lldbutil.execute_command("make cleanup")
         self.addTearDownHook(cleanup)
 
-        self.target = self.dbg.CreateTarget(self.getBuildArtifact("a.out"))
-        self.assertTrue(self.target, VALID_TARGET)
-        self.registerSharedLibrariesWithTarget(self.target, ['SomeLibrary'])
-
         if lldb.remote_platform:
             ext = 'so'
             if self.platformIsDarwin():
@@ -109,7 +102,9 @@ class TestLibraryIndirect(TestBase):
                 lldb.SBFileSpec(os.path.join(wd, filename)))
             self.assertFalse(err.Fail(), 'Failed to copy ' + filename)
 
-        lldbutil.run_to_source_breakpoint(self, "break here", lldb.SBFileSpec("main.swift"), self.launch_info())
+        lldbutil.run_to_source_breakpoint(self, "break here",
+                                          lldb.SBFileSpec("main.swift"),
+                                          extra_images=['SomeLibrary'])
 
         # This test is deliberately checking what the user will see, rather than
         # the structure provided by the Python API, in order to test the recovery.

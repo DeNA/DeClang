@@ -115,7 +115,7 @@
 // PS4 defaults to sce; -ggdb0 changes tuning but turns off debug info,
 // then -g turns it back on without affecting tuning.
 // RUN: %clang -### -c -ggdb0 -g -target x86_64-scei-ps4 %s 2>&1 \
-// RUN:             | FileCheck -check-prefix=G -check-prefix=G_GDB %s
+// RUN:             | FileCheck -check-prefix=G_GDB %s
 //
 // RUN: %clang -### -c -g1 %s 2>&1 \
 // RUN:             | FileCheck -check-prefix=GLTO_ONLY %s
@@ -196,8 +196,7 @@
 // RUN: %clang -### -c -gpubnames -gno-gnu-pubnames %s 2>&1 | FileCheck -check-prefix=NOPUB %s
 // RUN: %clang -### -c -gpubnames -gno-pubnames %s 2>&1 | FileCheck -check-prefix=NOPUB %s
 //
-// RUN: %clang -### -c -gsplit-dwarf %s 2>&1 | FileCheck -check-prefix=GPUB %s
-// RUN: %clang -### -c -gsplit-dwarf -gno-pubnames %s 2>&1 | FileCheck -check-prefix=NOPUB %s
+// RUN: %clang -### -c -gsplit-dwarf -g -gno-pubnames %s 2>&1 | FileCheck -check-prefix=NOPUB %s
 //
 // RUN: %clang -### -c -fdebug-ranges-base-address %s 2>&1 | FileCheck -check-prefix=RNGBSE %s
 // RUN: %clang -### -c %s 2>&1 | FileCheck -check-prefix=NORNGBSE %s
@@ -213,6 +212,9 @@
 //
 // RUN: %clang -### -fdebug-types-section -fno-debug-types-section -target x86_64-unknown-linux %s 2>&1 \
 // RUN:        | FileCheck -check-prefix=NOFDTS %s
+//
+// RUN: %clang -### -fdebug-types-section -target wasm32-unknown-unknown %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=FDTS %s
 //
 // RUN: %clang -### -fdebug-types-section -target x86_64-apple-darwin %s 2>&1 \
 // RUN:        | FileCheck -check-prefix=FDTSE %s
@@ -361,3 +363,14 @@
 // GEMBED_2:  error: invalid argument '-gembed-source' only allowed with '-gdwarf-5'
 // NOGEMBED_5-NOT:  "-gembed-source"
 // NOGEMBED_2-NOT:  error: invalid argument '-gembed-source' only allowed with '-gdwarf-5'
+//
+// RUN: %clang -### -g -fno-eliminate-unused-debug-types -c %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=DEBUG_UNUSED_TYPES %s
+// DEBUG_UNUSED_TYPES: "-debug-info-kind=unused-types"
+// DEBUG_UNUSED_TYPES-NOT: "-debug-info-kind=limited"
+// RUN: %clang -### -g -feliminate-unused-debug-types -c %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=NO_DEBUG_UNUSED_TYPES %s
+// RUN: %clang -### -fno-eliminate-unused-debug-types -g1 -c %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=NO_DEBUG_UNUSED_TYPES %s
+// NO_DEBUG_UNUSED_TYPES: "-debug-info-kind={{limited|line-tables-only|standalone}}"
+// NO_DEBUG_UNUSED_TYPES-NOT: "-debug-info-kind=unused-types"

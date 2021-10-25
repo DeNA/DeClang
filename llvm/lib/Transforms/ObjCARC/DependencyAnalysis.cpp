@@ -22,6 +22,7 @@
 #include "DependencyAnalysis.h"
 #include "ObjCARC.h"
 #include "ProvenanceAnalysis.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/CFG.h"
 
 using namespace llvm;
@@ -51,10 +52,8 @@ bool llvm::objcarc::CanAlterRefCount(const Instruction *Inst, const Value *Ptr,
   if (AliasAnalysis::onlyReadsMemory(MRB))
     return false;
   if (AliasAnalysis::onlyAccessesArgPointees(MRB)) {
-    const DataLayout &DL = Inst->getModule()->getDataLayout();
     for (const Value *Op : Call->args()) {
-      if (IsPotentialRetainableObjPtr(Op, *PA.getAA()) &&
-          PA.related(Ptr, Op, DL))
+      if (IsPotentialRetainableObjPtr(Op, *PA.getAA()) && PA.related(Ptr, Op))
         return true;
     }
     return false;
@@ -85,8 +84,6 @@ bool llvm::objcarc::CanUse(const Instruction *Inst, const Value *Ptr,
   if (Class == ARCInstKind::Call)
     return false;
 
-  const DataLayout &DL = Inst->getModule()->getDataLayout();
-
   // Consider various instructions which may have pointer arguments which are
   // not "uses".
   if (const ICmpInst *ICI = dyn_cast<ICmpInst>(Inst)) {
@@ -99,26 +96,24 @@ bool llvm::objcarc::CanUse(const Instruction *Inst, const Value *Ptr,
     // For calls, just check the arguments (and not the callee operand).
     for (auto OI = CS->arg_begin(), OE = CS->arg_end(); OI != OE; ++OI) {
       const Value *Op = *OI;
-      if (IsPotentialRetainableObjPtr(Op, *PA.getAA()) &&
-          PA.related(Ptr, Op, DL))
+      if (IsPotentialRetainableObjPtr(Op, *PA.getAA()) && PA.related(Ptr, Op))
         return true;
     }
     return false;
   } else if (const StoreInst *SI = dyn_cast<StoreInst>(Inst)) {
     // Special-case stores, because we don't care about the stored value, just
     // the store address.
-    const Value *Op = GetUnderlyingObjCPtr(SI->getPointerOperand(), DL);
+    const Value *Op = GetUnderlyingObjCPtr(SI->getPointerOperand());
     // If we can't tell what the underlying object was, assume there is a
     // dependence.
-    return IsPotentialRetainableObjPtr(Op, *PA.getAA()) &&
-           PA.related(Op, Ptr, DL);
+    return IsPotentialRetainableObjPtr(Op, *PA.getAA()) && PA.related(Op, Ptr);
   }
 
   // Check each operand for a match.
   for (User::const_op_iterator OI = Inst->op_begin(), OE = Inst->op_end();
        OI != OE; ++OI) {
     const Value *Op = *OI;
-    if (IsPotentialRetainableObjPtr(Op, *PA.getAA()) && PA.related(Ptr, Op, DL))
+    if (IsPotentialRetainableObjPtr(Op, *PA.getAA()) && PA.related(Ptr, Op))
       return true;
   }
   return false;

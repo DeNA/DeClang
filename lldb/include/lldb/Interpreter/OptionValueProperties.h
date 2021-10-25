@@ -23,8 +23,7 @@ class OptionValueProperties
     : public OptionValue,
       public std::enable_shared_from_this<OptionValueProperties> {
 public:
-  OptionValueProperties()
-      : OptionValue(), m_name(), m_properties(), m_name_to_index() {}
+  OptionValueProperties() = default;
 
   OptionValueProperties(ConstString name);
 
@@ -103,11 +102,6 @@ public:
 
   Status SetSubValue(const ExecutionContext *exe_ctx, VarSetOperationType op,
                      llvm::StringRef path, llvm::StringRef value) override;
-
-  virtual bool PredicateMatches(const ExecutionContext *exe_ctx,
-    llvm::StringRef predicate) const {
-    return false;
-  }
 
   OptionValueArch *
   GetPropertyAtIndexAsOptionValueArch(const ExecutionContext *exe_ctx,

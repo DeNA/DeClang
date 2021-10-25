@@ -26,7 +26,7 @@ class CaseStmt;
 class DoCatchStmt;
 class ExtensionDecl;
 class FuncDecl;
-class RepeatWhileStmt;
+class DoStmt;
 class ReturnStmt;
 class SourceFile;
 class VarDecl;
@@ -48,7 +48,7 @@ public:
   public:
     virtual ~VariableMetadataResult();
     constexpr static unsigned Type() { return 'Resu'; }
-    virtual unsigned GetType() { return Type(); }
+    unsigned GetType() override { return Type(); }
   };
 
   class VariableMetadataError
@@ -56,7 +56,7 @@ public:
   public:
     virtual ~VariableMetadataError();
     constexpr static unsigned Type() { return 'Erro'; }
-    virtual unsigned GetType() { return Type(); }
+    unsigned GetType() override { return Type(); }
   };
 
   typedef std::shared_ptr<VariableMetadata> VariableMetadataSP;
@@ -203,8 +203,8 @@ private:
   struct ResultLocationInfo {
     /// This points to the first stage tmp result decl.
     swift::VarDecl *tmp_var_decl = nullptr;
-    /// This is the RepeatWhile statement that we make up.
-    swift::RepeatWhileStmt *wrapper_stmt = nullptr;
+    /// This is the DoStmt statement that we make up.
+    swift::DoStmt *wrapper_stmt = nullptr;
     /// This is the expression returned by this block.
     swift::PatternBindingDecl *binding_decl = nullptr;
     /// This is the original expression that we resolved to this type.

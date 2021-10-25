@@ -12,7 +12,6 @@
 
 #include "llvm/Transforms/Utils/LoopRotationUtils.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/CodeMetrics.h"
@@ -44,6 +43,8 @@ using namespace llvm;
 
 #define DEBUG_TYPE "loop-rotate"
 
+STATISTIC(NumNotRotatedDueToHeaderSize,
+          "Number of loops not rotated due to the header size");
 STATISTIC(NumRotated, "Number of loops rotated");
 
 static cl::opt<bool>
@@ -64,15 +65,17 @@ class LoopRotate {
   const SimplifyQuery &SQ;
   bool RotationOnly;
   bool IsUtilMode;
+  bool PrepareForLTO;
 
 public:
   LoopRotate(unsigned MaxHeaderSize, LoopInfo *LI,
              const TargetTransformInfo *TTI, AssumptionCache *AC,
              DominatorTree *DT, ScalarEvolution *SE, MemorySSAUpdater *MSSAU,
-             const SimplifyQuery &SQ, bool RotationOnly, bool IsUtilMode)
+             const SimplifyQuery &SQ, bool RotationOnly, bool IsUtilMode,
+             bool PrepareForLTO)
       : MaxHeaderSize(MaxHeaderSize), LI(LI), TTI(TTI), AC(AC), DT(DT), SE(SE),
         MSSAU(MSSAU), SQ(SQ), RotationOnly(RotationOnly),
-        IsUtilMode(IsUtilMode) {}
+        IsUtilMode(IsUtilMode), PrepareForLTO(PrepareForLTO) {}
   bool processLoop(Loop *L);
 
 private:
@@ -300,7 +303,7 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
       CodeMetrics::collectEphemeralValues(L, AC, EphValues);
 
       CodeMetrics Metrics;
-      Metrics.analyzeBasicBlock(OrigHeader, *TTI, EphValues);
+      Metrics.analyzeBasicBlock(OrigHeader, *TTI, EphValues, PrepareForLTO);
       if (Metrics.notDuplicatable) {
         LLVM_DEBUG(
                    dbgs() << "LoopRotation: NOT rotating - contains non-duplicatable"
@@ -320,8 +323,14 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
                           << " instructions, which is more than the threshold ("
                           << MaxHeaderSize << " instructions): ";
                    L->dump());
+        ++NumNotRotatedDueToHeaderSize;
         return Rotated;
       }
+
+      // When preparing for LTO, avoid rotating loops with calls that could be
+      // inlined during the LTO stage.
+      if (PrepareForLTO && Metrics.NumInlineCandidates > 0)
+        return Rotated;
     }
 
     // Now, this loop is suitable for rotation.
@@ -496,12 +505,13 @@ bool LoopRotate::rotateLoop(Loop *L, bool SimplifiedLatch) {
       Updates.push_back({DominatorTree::Insert, OrigPreheader, Exit});
       Updates.push_back({DominatorTree::Insert, OrigPreheader, NewHeader});
       Updates.push_back({DominatorTree::Delete, OrigPreheader, OrigHeader});
-      DT->applyUpdates(Updates);
 
       if (MSSAU) {
-        MSSAU->applyUpdates(Updates, *DT);
+        MSSAU->applyUpdates(Updates, *DT, /*UpdateDT=*/true);
         if (VerifyMemorySSA)
           MSSAU->getMemorySSA()->verifyMemorySSA();
+      } else {
+        DT->applyUpdates(Updates);
       }
     }
 
@@ -742,13 +752,8 @@ bool llvm::LoopRotation(Loop *L, LoopInfo *LI, const TargetTransformInfo *TTI,
                         ScalarEvolution *SE, MemorySSAUpdater *MSSAU,
                         const SimplifyQuery &SQ, bool RotationOnly = true,
                         unsigned Threshold = unsigned(-1),
-                        bool IsUtilMode = true) {
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
+                        bool IsUtilMode = true, bool PrepareForLTO) {
   LoopRotate LR(Threshold, LI, TTI, AC, DT, SE, MSSAU, SQ, RotationOnly,
-                IsUtilMode);
-  if (MSSAU && VerifyMemorySSA)
-    MSSAU->getMemorySSA()->verifyMemorySSA();
-
+                IsUtilMode, PrepareForLTO);
   return LR.processLoop(L);
 }

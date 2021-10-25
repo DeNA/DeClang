@@ -55,7 +55,9 @@
 using namespace llvm;
 
 ARMBaseRegisterInfo::ARMBaseRegisterInfo()
-    : ARMGenRegisterInfo(ARM::LR, 0, 0, ARM::PC) {}
+    : ARMGenRegisterInfo(ARM::LR, 0, 0, ARM::PC) {
+  ARM_MC::initLLVMToCVRegMapping(this);
+}
 
 static unsigned getFramePointerReg(const ARMSubtarget &STI) {
   return STI.useR7AsFramePointer() ? ARM::R7 : ARM::R11;
@@ -77,6 +79,11 @@ ARMBaseRegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
     return CSR_NoRegs_SaveList;
   } else if (F.getCallingConv() == CallingConv::CFGuard_Check) {
     return CSR_Win_AAPCS_CFGuard_Check_SaveList;
+  } else if (F.getCallingConv() == CallingConv::SwiftTail) {
+    return STI.isTargetDarwin()
+               ? CSR_iOS_SwiftTail_SaveList
+               : (UseSplitPush ? CSR_AAPCS_SplitPush_SwiftTail_SaveList
+                               : CSR_AAPCS_SwiftTail_SaveList);
   } else if (F.hasFnAttribute("interrupt")) {
     if (STI.isMClass()) {
       // M-class CPUs have hardware which saves the registers needed to allow a
@@ -127,6 +134,10 @@ ARMBaseRegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     return CSR_NoRegs_RegMask;
   if (CC == CallingConv::CFGuard_Check)
     return CSR_Win_AAPCS_CFGuard_Check_RegMask;
+  if (CC == CallingConv::SwiftTail) {
+    return STI.isTargetDarwin() ? CSR_iOS_SwiftTail_RegMask
+                                : CSR_AAPCS_SwiftTail_RegMask;
+  }
   if (STI.getTargetLowering()->supportSwiftError() &&
       MF.getFunction().getAttributes().hasAttrSomewhere(Attribute::SwiftError))
     return STI.isTargetDarwin() ? CSR_iOS_SwiftError_RegMask
@@ -328,9 +339,13 @@ bool ARMBaseRegisterInfo::getRegAllocationHints(
   case ARMRI::RegPairOdd:
     Odd = 1;
     break;
-  default:
+  case ARMRI::RegLR:
     TargetRegisterInfo::getRegAllocationHints(VirtReg, Order, Hints, MF, VRM);
+    if (MRI.getRegClass(VirtReg)->contains(ARM::LR))
+      Hints.push_back(ARM::LR);
     return false;
+  default:
+    return TargetRegisterInfo::getRegAllocationHints(VirtReg, Order, Hints, MF, VRM);
   }
 
   // This register should preferably be even (Odd == 0) or odd (Odd == 1).

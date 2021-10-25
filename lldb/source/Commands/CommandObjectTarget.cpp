@@ -50,6 +50,7 @@
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/Timer.h"
 
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatAdapters.h"
 
@@ -208,8 +209,6 @@ private:
 
 #pragma mark CommandObjectTargetCreate
 
-// "target create"
-
 class CommandObjectTargetCreate : public CommandObjectParsed {
 public:
   CommandObjectTargetCreate(CommandInterpreter &interpreter)
@@ -221,9 +220,6 @@ public:
         m_platform_options(true), // Include the --platform option.
         m_core_file(LLDB_OPT_SET_1, false, "core", 'c', 0, eArgTypeFilename,
                     "Fullpath to a core file to use for this target."),
-        m_platform_path(LLDB_OPT_SET_1, false, "platform-path", 'P', 0,
-                        eArgTypePath,
-                        "Path to the remote file to use for this target."),
         m_symbol_file(LLDB_OPT_SET_1, false, "symfile", 's', 0,
                       eArgTypeFilename,
                       "Fullpath to a stand alone debug "
@@ -250,7 +246,6 @@ public:
     m_option_group.Append(&m_arch_option, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
     m_option_group.Append(&m_platform_options, LLDB_OPT_SET_ALL, 1);
     m_option_group.Append(&m_core_file, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
-    m_option_group.Append(&m_platform_path, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
     m_option_group.Append(&m_symbol_file, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
     m_option_group.Append(&m_remote_file, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
     m_option_group.Append(&m_add_dependents, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
@@ -323,122 +318,124 @@ protected:
           m_add_dependents.m_load_dependent_files, &m_platform_options,
           target_sp));
 
-      if (target_sp) {
-        // Only get the platform after we create the target because we might
-        // have switched platforms depending on what the arguments were to
-        // CreateTarget() we can't rely on the selected platform.
-
-        PlatformSP platform_sp = target_sp->GetPlatform();
-
-        if (remote_file) {
-          if (platform_sp) {
-            // I have a remote file.. two possible cases
-            if (file_spec && FileSystem::Instance().Exists(file_spec)) {
-              // if the remote file does not exist, push it there
-              if (!platform_sp->GetFileExists(remote_file)) {
-                Status err = platform_sp->PutFile(file_spec, remote_file);
-                if (err.Fail()) {
-                  result.AppendError(err.AsCString());
-                  result.SetStatus(eReturnStatusFailed);
-                  return false;
-                }
-              }
-            } else {
-              // there is no local file and we need one
-              // in order to make the remote ---> local transfer we need a
-              // platform
-              // TODO: if the user has passed in a --platform argument, use it
-              // to fetch the right platform
-              if (!platform_sp) {
-                result.AppendError(
-                    "unable to perform remote debugging without a platform");
-                result.SetStatus(eReturnStatusFailed);
-                return false;
-              }
-              if (file_path) {
-                // copy the remote file to the local file
-                Status err = platform_sp->GetFile(remote_file, file_spec);
-                if (err.Fail()) {
-                  result.AppendError(err.AsCString());
-                  result.SetStatus(eReturnStatusFailed);
-                  return false;
-                }
-              } else {
-                // make up a local file
-                result.AppendError("remote --> local transfer without local "
-                                   "path is not implemented yet");
-                result.SetStatus(eReturnStatusFailed);
-                return false;
-              }
-            }
-          } else {
-            result.AppendError("no platform found for target");
-            result.SetStatus(eReturnStatusFailed);
-            return false;
-          }
-        }
-
-        if (symfile || remote_file) {
-          ModuleSP module_sp(target_sp->GetExecutableModule());
-          if (module_sp) {
-            if (symfile)
-              module_sp->SetSymbolFileFileSpec(symfile);
-            if (remote_file) {
-              std::string remote_path = remote_file.GetPath();
-              target_sp->SetArg0(remote_path.c_str());
-              module_sp->SetPlatformFileSpec(remote_file);
-            }
-          }
-        }
-
-        debugger.GetTargetList().SetSelectedTarget(target_sp.get());
-        if (must_set_platform_path) {
-          ModuleSpec main_module_spec(file_spec);
-          ModuleSP module_sp =
-              target_sp->GetOrCreateModule(main_module_spec, true /* notify */);
-          if (module_sp)
-            module_sp->SetPlatformFileSpec(remote_file);
-        }
-
-        if (core_file) {
-          FileSpec core_file_dir;
-          core_file_dir.GetDirectory() = core_file.GetDirectory();
-          target_sp->AppendExecutableSearchPaths(core_file_dir);
-
-          ProcessSP process_sp(target_sp->CreateProcess(
-              GetDebugger().GetListener(), llvm::StringRef(), &core_file));
-
-          if (process_sp) {
-            // Seems weird that we Launch a core file, but that is what we
-            // do!
-            error = process_sp->LoadCore();
-
-            if (error.Fail()) {
-              result.AppendError(
-                  error.AsCString("can't find plug-in for core file"));
-              result.SetStatus(eReturnStatusFailed);
-              return false;
-            } else {
-              result.AppendMessageWithFormatv("Core file '{0}' ({1}) was loaded.\n", core_file.GetPath(),
-                  target_sp->GetArchitecture().GetArchitectureName());
-              result.SetStatus(eReturnStatusSuccessFinishNoResult);
-            }
-          } else {
-            result.AppendErrorWithFormatv(
-                "Unable to find process plug-in for core file '{0}'\n",
-                core_file.GetPath());
-            result.SetStatus(eReturnStatusFailed);
-          }
-        } else {
-          result.AppendMessageWithFormat(
-              "Current executable set to '%s' (%s).\n",
-              file_spec.GetPath().c_str(),
-              target_sp->GetArchitecture().GetArchitectureName());
-          result.SetStatus(eReturnStatusSuccessFinishNoResult);
-        }
-      } else {
+      if (!target_sp) {
         result.AppendError(error.AsCString());
         result.SetStatus(eReturnStatusFailed);
+        return false;
+      }
+
+      auto on_error = llvm::make_scope_exit(
+          [&target_list = debugger.GetTargetList(), &target_sp]() {
+            target_list.DeleteTarget(target_sp);
+          });
+
+      // Only get the platform after we create the target because we might
+      // have switched platforms depending on what the arguments were to
+      // CreateTarget() we can't rely on the selected platform.
+
+      PlatformSP platform_sp = target_sp->GetPlatform();
+
+      if (remote_file) {
+        if (platform_sp) {
+          // I have a remote file.. two possible cases
+          if (file_spec && FileSystem::Instance().Exists(file_spec)) {
+            // if the remote file does not exist, push it there
+            if (!platform_sp->GetFileExists(remote_file)) {
+              Status err = platform_sp->PutFile(file_spec, remote_file);
+              if (err.Fail()) {
+                result.AppendError(err.AsCString());
+                result.SetStatus(eReturnStatusFailed);
+                return false;
+              }
+            }
+          } else {
+            // there is no local file and we need one
+            // in order to make the remote ---> local transfer we need a
+            // platform
+            // TODO: if the user has passed in a --platform argument, use it
+            // to fetch the right platform
+            if (file_path) {
+              // copy the remote file to the local file
+              Status err = platform_sp->GetFile(remote_file, file_spec);
+              if (err.Fail()) {
+                result.AppendError(err.AsCString());
+                result.SetStatus(eReturnStatusFailed);
+                return false;
+              }
+            } else {
+              // make up a local file
+              result.AppendError("remote --> local transfer without local "
+                                 "path is not implemented yet");
+              result.SetStatus(eReturnStatusFailed);
+              return false;
+            }
+          }
+        } else {
+          result.AppendError("no platform found for target");
+          result.SetStatus(eReturnStatusFailed);
+          return false;
+        }
+      }
+
+      if (symfile || remote_file) {
+        ModuleSP module_sp(target_sp->GetExecutableModule());
+        if (module_sp) {
+          if (symfile)
+            module_sp->SetSymbolFileFileSpec(symfile);
+          if (remote_file) {
+            std::string remote_path = remote_file.GetPath();
+            target_sp->SetArg0(remote_path.c_str());
+            module_sp->SetPlatformFileSpec(remote_file);
+          }
+        }
+      }
+
+      if (must_set_platform_path) {
+        ModuleSpec main_module_spec(file_spec);
+        ModuleSP module_sp =
+            target_sp->GetOrCreateModule(main_module_spec, true /* notify */);
+        if (module_sp)
+          module_sp->SetPlatformFileSpec(remote_file);
+      }
+
+      if (core_file) {
+        FileSpec core_file_dir;
+        core_file_dir.GetDirectory() = core_file.GetDirectory();
+        target_sp->AppendExecutableSearchPaths(core_file_dir);
+
+        ProcessSP process_sp(target_sp->CreateProcess(
+            GetDebugger().GetListener(), llvm::StringRef(), &core_file, false));
+
+        if (process_sp) {
+          // Seems weird that we Launch a core file, but that is what we
+          // do!
+          error = process_sp->LoadCore();
+
+          if (error.Fail()) {
+            result.AppendError(
+                error.AsCString("can't find plug-in for core file"));
+            result.SetStatus(eReturnStatusFailed);
+            return false;
+          } else {
+            result.AppendMessageWithFormatv(
+                "Core file '{0}' ({1}) was loaded.\n", core_file.GetPath(),
+                target_sp->GetArchitecture().GetArchitectureName());
+            result.SetStatus(eReturnStatusSuccessFinishNoResult);
+            on_error.release();
+          }
+        } else {
+          result.AppendErrorWithFormatv(
+              "Unable to find process plug-in for core file '{0}'\n",
+              core_file.GetPath());
+          result.SetStatus(eReturnStatusFailed);
+        }
+      } else {
+        result.AppendMessageWithFormat(
+            "Current executable set to '%s' (%s).\n",
+            file_spec.GetPath().c_str(),
+            target_sp->GetArchitecture().GetArchitectureName());
+        result.SetStatus(eReturnStatusSuccessFinishNoResult);
+        on_error.release();
       }
     } else {
       result.AppendErrorWithFormat("'%s' takes exactly one executable path "
@@ -446,6 +443,7 @@ protected:
                                    m_cmd_name.c_str());
       result.SetStatus(eReturnStatusFailed);
     }
+
     return result.Succeeded();
   }
 
@@ -454,15 +452,12 @@ private:
   OptionGroupArchitecture m_arch_option;
   OptionGroupPlatform m_platform_options;
   OptionGroupFile m_core_file;
-  OptionGroupFile m_platform_path;
   OptionGroupFile m_symbol_file;
   OptionGroupFile m_remote_file;
   OptionGroupDependents m_add_dependents;
 };
 
 #pragma mark CommandObjectTargetList
-
-// "target list"
 
 class CommandObjectTargetList : public CommandObjectParsed {
 public:
@@ -495,8 +490,6 @@ protected:
 
 #pragma mark CommandObjectTargetSelect
 
-// "target select"
-
 class CommandObjectTargetSelect : public CommandObjectParsed {
 public:
   CommandObjectTargetSelect(CommandInterpreter &interpreter)
@@ -516,18 +509,11 @@ protected:
         TargetList &target_list = GetDebugger().GetTargetList();
         const uint32_t num_targets = target_list.GetNumTargets();
         if (target_idx < num_targets) {
-          TargetSP target_sp(target_list.GetTargetAtIndex(target_idx));
-          if (target_sp) {
-            Stream &strm = result.GetOutputStream();
-            target_list.SetSelectedTarget(target_sp.get());
-            bool show_stopped_process_status = false;
-            DumpTargetList(target_list, show_stopped_process_status, strm);
-            result.SetStatus(eReturnStatusSuccessFinishResult);
-          } else {
-            result.AppendErrorWithFormat("target #%u is NULL in target list\n",
-                                         target_idx);
-            result.SetStatus(eReturnStatusFailed);
-          }
+          target_list.SetSelectedTarget(target_idx);
+          Stream &strm = result.GetOutputStream();
+          bool show_stopped_process_status = false;
+          DumpTargetList(target_list, show_stopped_process_status, strm);
+          result.SetStatus(eReturnStatusSuccessFinishResult);
         } else {
           if (num_targets > 0) {
             result.AppendErrorWithFormat(
@@ -555,8 +541,6 @@ protected:
 };
 
 #pragma mark CommandObjectTargetDelete
-
-// "target delete"
 
 class CommandObjectTargetDelete : public CommandObjectParsed {
 public:
@@ -701,8 +685,6 @@ protected:
 };
 
 #pragma mark CommandObjectTargetVariable
-
-// "target variable"
 
 class CommandObjectTargetVariable : public CommandObjectParsed {
   static const uint32_t SHORT_OPTION_FILE = 0x66696c65; // 'file'
@@ -3437,9 +3419,34 @@ protected:
         continue;
 
       result.GetOutputStream().Printf(
-          "UNWIND PLANS for %s`%s (start addr 0x%" PRIx64 ")\n\n",
+          "UNWIND PLANS for %s`%s (start addr 0x%" PRIx64 ")\n",
           sc.module_sp->GetPlatformFileSpec().GetFilename().AsCString(),
           funcname.AsCString(), start_addr);
+
+      Args args;
+      target->GetUserSpecifiedTrapHandlerNames(args);
+      size_t count = args.GetArgumentCount();
+      for (size_t i = 0; i < count; i++) {
+        const char *trap_func_name = args.GetArgumentAtIndex(i);
+        if (strcmp(funcname.GetCString(), trap_func_name) == 0)
+          result.GetOutputStream().Printf(
+              "This function is "
+              "treated as a trap handler function via user setting.\n");
+      }
+      PlatformSP platform_sp(target->GetPlatform());
+      if (platform_sp) {
+        const std::vector<ConstString> trap_handler_names(
+            platform_sp->GetTrapHandlerSymbolNames());
+        for (ConstString trap_name : trap_handler_names) {
+          if (trap_name == funcname) {
+            result.GetOutputStream().Printf(
+                "This function's "
+                "name is listed by the platform as a trap handler.\n");
+          }
+        }
+      }
+
+      result.GetOutputStream().Printf("\n");
 
       UnwindPlanSP non_callsite_unwind_plan =
           func_unwinders_sp->GetUnwindPlanAtNonCallSite(*target, *thread);
@@ -4360,7 +4367,6 @@ protected:
                 module_spec.GetSymbolFileSpec() = symfile_spec;
             }
 
-            ArchSpec arch;
             bool symfile_exists =
                 FileSystem::Instance().Exists(module_spec.GetSymbolFileSpec());
 

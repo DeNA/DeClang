@@ -58,15 +58,8 @@ size_t ValueObjectChild::CalculateNumChildren(uint32_t max) {
 
 static void AdjustForBitfieldness(ConstString &name,
                                   uint8_t bitfield_bit_size) {
-  if (name && bitfield_bit_size) {
-    const char *compiler_type_name = name.AsCString();
-    if (compiler_type_name) {
-      std::vector<char> bitfield_type_name(strlen(compiler_type_name) + 32, 0);
-      ::snprintf(&bitfield_type_name.front(), bitfield_type_name.size(),
-                 "%s:%u", compiler_type_name, bitfield_bit_size);
-      name.SetCString(&bitfield_type_name.front());
-    }
-  }
+  if (name && bitfield_bit_size)
+    name.SetString(llvm::formatv("{0}:{1}", name, bitfield_bit_size).str());
 }
 
 ConstString ValueObjectChild::GetTypeName() {
@@ -148,7 +141,7 @@ bool ValueObjectChild::UpdateValue() {
                 // Read the pointer to the Objective-C object.
                 Target &target = process_sp->GetTarget();
                 size_t ptr_size = process_sp->GetAddressByteSize();
-                target.ReadMemory(addr, false, &addr, ptr_size, m_error);
+                target.ReadMemory(addr, &addr, ptr_size, m_error, true);
               }
             }
         // END Swift
@@ -244,9 +237,6 @@ bool ValueObjectChild::UpdateValue() {
             scalar.ExtractBitfield(8 * m_byte_size, 8 * m_byte_offset);
             m_value.GetScalar() = scalar;
           }
-          break;
-        default:
-          m_error.SetErrorString("parent has invalid value.");
           break;
         }
       }

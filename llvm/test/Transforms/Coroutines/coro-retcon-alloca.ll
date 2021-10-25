@@ -1,4 +1,5 @@
 ; RUN: opt < %s -enable-coroutines -O2 -S | FileCheck %s
+; RUN: opt < %s -enable-coroutines -passes='default<O2>' -S | FileCheck %s
 
 target datalayout = "p:64:64:64"
 
@@ -39,7 +40,7 @@ cleanup:
 ; CHECK-NEXT:    ret { i8*, i8*, i32 } [[RET]]
 ; CHECK-NEXT:  }
 
-; CHECK-LABEL: define internal { i8*, i8*, i32 } @f.resume.0(i8* noalias nonnull align 8 dereferenceable(1024) %0, i1 %1)
+; CHECK-LABEL: define internal { i8*, i8*, i32 } @f.resume.0(i8* {{.*}} %0, i1 %1)
 ; CHECK-NEXT:  :
 ; CHECK-NEXT:    [[T1:%.*]] = bitcast i8* %0 to i8**
 ; CHECK-NEXT:    [[ALLOC:%.*]] = load i8*, i8** [[T1]], align 8
@@ -82,7 +83,7 @@ cleanup:
 ; CHECK-NEXT:    ret { i8*, i32 } [[RET]]
 ; CHECK-NEXT:  }
 
-; CHECK-LABEL: define internal { i8*, i32 } @g.resume.0(i8* noalias nonnull align 8 dereferenceable(1024) %0, i1 %1)
+; CHECK-LABEL: define internal { i8*, i32 } @g.resume.0(i8* {{.*}} %0, i1 %1)
 ; CHECK-NEXT:  :
 ; CHECK-NEXT:    br i1 %1,
 ; CHECK:       :
@@ -131,7 +132,7 @@ cleanup:
 ; CHECK-NEXT:    ret { i8*, i32 } [[RET]]
 ; CHECK-NEXT:  }
 
-; CHECK-LABEL: define internal { i8*, i32 } @h.resume.0(i8* noalias nonnull align 8 dereferenceable(1024) %0, i1 %1)
+; CHECK-LABEL: define internal { i8*, i32 } @h.resume.0(i8* {{.*}} %0, i1 %1)
 ; CHECK-NEXT:  :
 ; CHECK-NEXT:    br i1 %1,
 ; CHECK:       :
@@ -179,7 +180,7 @@ loop2:
 ; CHECK-NEXT:    ret { i8*, i32 } [[RET]]
 ; CHECK-NEXT:  }
 
-; CHECK-LABEL: define internal { i8*, i32 } @i.resume.0(i8* noalias nonnull align 8 dereferenceable(1024) %0)
+; CHECK-LABEL: define internal { i8*, i32 } @i.resume.0(i8* {{.*}} %0)
 ; CHECK-NEXT:  :
 ; CHECK-NEXT:    [[NSLOT:%.*]] = bitcast i8* %0 to i32*
 ; CHECK-NEXT:    [[T1:%.*]] = load i32, i32* [[NSLOT]], align 8
@@ -225,6 +226,37 @@ forward:
   br label %back
 
 end:
+  call i1 @llvm.coro.end(i8* %hdl, i1 0)
+  unreachable
+}
+
+declare i32 @getSize()
+define {i8*, i32} @k(i8* %buffer, i32 %n, i1 %cond) {
+entry:
+  %id = call token @llvm.coro.id.retcon(i32 1024, i32 8, i8* %buffer, i8* bitcast ({i8*, i32} (i8*, i1)* @prototype_g to i8*), i8* bitcast (i8* (i32)* @allocate to i8*), i8* bitcast (void (i8*)* @deallocate to i8*))
+  %hdl = call i8* @llvm.coro.begin(token %id, i8* null)
+  br i1 %cond, label %alloca_block, label %non_alloca_block
+
+suspend:
+  %unwind = call i1 (...) @llvm.coro.suspend.retcon.i1(i32 %n)
+  br i1 %unwind, label %cleanup, label %resume
+
+resume:
+  br label %cleanup
+
+alloca_block:
+  %size = call i32 @getSize()
+  %alloca = call token @llvm.coro.alloca.alloc.i32(i32 %size, i32 8)
+  %ptr = call i8* @llvm.coro.alloca.get(token %alloca)
+  call void @use(i8* %ptr)
+  call void @llvm.coro.alloca.free(token %alloca)
+  br label %suspend
+
+non_alloca_block:
+  %ignore = call i32 @getSize()
+  br label %suspend
+
+cleanup:
   call i1 @llvm.coro.end(i8* %hdl, i1 0)
   unreachable
 }

@@ -8,9 +8,9 @@
 
 define void @can_sink_after_store(i32 %x, i32* %ptr, i64 %tc) local_unnamed_addr #0 {
 ; CHECK-LABEL: vector.ph:
-; CHECK:        %broadcast.splatinsert = insertelement <4 x i32> undef, i32 %x, i32 0
-; CHECK-NEXT:   %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> undef, <4 x i32> zeroinitializer
-; CHECK-NEXT:   %vector.recur.init = insertelement <4 x i32> undef, i32 %.pre, i32 3
+; CHECK:        %broadcast.splatinsert = insertelement <4 x i32> poison, i32 %x, i32 0
+; CHECK-NEXT:   %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> poison, <4 x i32> zeroinitializer
+; CHECK-NEXT:   %vector.recur.init = insertelement <4 x i32> poison, i32 %.pre, i32 3
 ; CHECK-NEXT:    br label %vector.body
 
 ; CHECK-LABEL: vector.body:
@@ -62,9 +62,9 @@ exit:
 ; and not introduce traps on additional paths.
 define void @sink_sdiv(i32 %x, i32* %ptr, i64 %tc) local_unnamed_addr #0 {
 ; CHECK-LABEL: vector.ph:
-; CHECK:        %broadcast.splatinsert = insertelement <4 x i32> undef, i32 %x, i32 0
-; CHECK-NEXT:   %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> undef, <4 x i32> zeroinitializer
-; CHECK-NEXT:   %vector.recur.init = insertelement <4 x i32> undef, i32 %.pre, i32 3
+; CHECK:        %broadcast.splatinsert = insertelement <4 x i32> poison, i32 %x, i32 0
+; CHECK-NEXT:   %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> poison, <4 x i32> zeroinitializer
+; CHECK-NEXT:   %vector.recur.init = insertelement <4 x i32> poison, i32 %.pre, i32 3
 ; CHECK-NEXT:    br label %vector.body
 
 ; CHECK-LABEL: vector.body:
@@ -265,5 +265,38 @@ bb13:                                             ; preds = %bb13, %bb
   br i1 %tmp12, label %bb13, label %bb74
 
 bb74:                                             ; preds = %bb13
+  ret void
+}
+
+; Users that are phi nodes cannot be sunk.
+define void @cannot_sink_phi(i32* %ptr) {
+; CHECK-LABEL: define void @cannot_sink_phi(
+; CHECK-NOT:   vector.body
+entry:
+  br label %loop.header
+
+loop.header:                                      ; preds = %if.end128, %for.cond108.preheader
+  %iv = phi i64 [ 1, %entry ], [ %iv.next, %loop.latch ]
+  %for = phi i32 [ 0, %entry ], [ %for.next, %loop.latch ]
+  %c.1 = icmp ult i64 %iv, 500
+  br i1 %c.1, label %if.truebb, label %if.falsebb
+
+if.truebb:                  ; preds = %for.body114
+  br label %loop.latch
+
+if.falsebb:                                       ; preds = %for.body114
+  br label %loop.latch
+
+loop.latch:                                        ; preds = %if.then122, %for.body114.if.end128_crit_edge
+  %first_time.1 = phi i32 [ 20, %if.truebb ], [ %for, %if.falsebb ]
+  %c.2 = icmp ult i64 %iv, 800
+  %for.next = select i1 %c.2, i32 30, i32 %first_time.1
+  %ptr.idx = getelementptr i32, i32* %ptr, i64 %iv
+  store i32 %for.next, i32* %ptr.idx
+  %iv.next = add nuw nsw i64 %iv, 1
+  %exitcond.not = icmp eq i64 %iv.next, 1000
+  br i1 %exitcond.not, label %exit, label %loop.header
+
+exit:
   ret void
 }

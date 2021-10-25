@@ -27,7 +27,7 @@
 #include <memory>
 
 #ifdef LLDB_ENABLE_SWIFT
-#include "lldb/Target/SwiftLanguageRuntime.h"
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #endif //LLDB_ENABLE_SWIFT
 
 using namespace lldb;
@@ -266,9 +266,9 @@ bool ThreadPlanCallFunction::DoPlanExplainsStop(Event *event_ptr) {
     stop_reason = eStopReasonNone;
   else
     stop_reason = m_real_stop_info_sp->GetStopReason();
-  LLDB_LOGF(log,
-            "ThreadPlanCallFunction::PlanExplainsStop: Got stop reason - %s.",
-            Thread::StopReasonAsCString(stop_reason));
+  LLDB_LOG(log,
+           "ThreadPlanCallFunction::PlanExplainsStop: Got stop reason - {0}.",
+           Thread::StopReasonAsString(stop_reason));
 
   if (stop_reason == eStopReasonBreakpoint && BreakpointsExplainStop())
     return true;

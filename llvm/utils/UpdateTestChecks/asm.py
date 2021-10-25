@@ -15,7 +15,9 @@ else:
 ##### Assembly parser
 
 ASM_FUNCTION_X86_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n(?:\s*\.?Lfunc_begin[^:\n]*:\n)?[^:]*?'
+    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*(@"?(?P=func)"?| -- Begin function (?P=func))\n(?:\s*\.?Lfunc_begin[^:\n]*:\n)?'
+    r'(?:\.L[^$]+\$local:\n)?'      # drop .L<func>$local:
+    r'(?:[ \t]+.cfi_startproc\n|.seh_proc[^\n]+\n)?'  # drop optional cfi
     r'(?P<body>^##?[ \t]+[^:]+:.*?)\s*'
     r'^\s*(?:[^:\n]+?:\s*\n\s*\.size|\.cfi_endproc|\.globl|\.comm|\.(?:sub)?section|#+ -- End function)',
     flags=(re.M | re.S))
@@ -28,7 +30,7 @@ ASM_FUNCTION_ARM_RE = re.compile(
         flags=(re.M | re.S))
 
 ASM_FUNCTION_AARCH64_RE = re.compile(
-     r'^_?(?P<func>[^:]+):[ \t]*\/\/[ \t]*@(?P=func)\n'
+     r'^_?(?P<func>[^:]+):[ \t]*\/\/[ \t]*@"?(?P=func)"?( (Function|Tail Call))?\n'
      r'(?:[ \t]+.cfi_startproc\n)?'  # drop optional cfi noise
      r'(?P<body>.*?)\n'
      # This list is incomplete
@@ -44,21 +46,21 @@ ASM_FUNCTION_ARM64_RE = re.compile(
      flags=(re.M | re.S))
 
 ASM_FUNCTION_AMDGPU_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*;+[ \t]*@(?P=func)\n[^:]*?'
+    r'^_?(?P<func>[^:]+):[ \t]*;+[ \t]*@"?(?P=func)"?\n[^:]*?'
     r'(?P<body>.*?)\n' # (body of the function)
     # This list is incomplete
     r'^\s*(\.Lfunc_end[0-9]+:\n|\.section)',
     flags=(re.M | re.S))
 
 ASM_FUNCTION_HEXAGON_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*//[ \t]*@(?P=func)\n[^:]*?'
+    r'^_?(?P<func>[^:]+):[ \t]*//[ \t]*@"?(?P=func)"?\n[^:]*?'
     r'(?P<body>.*?)\n' # (body of the function)
     # This list is incomplete
     r'.Lfunc_end[0-9]+:\n',
     flags=(re.M | re.S))
 
 ASM_FUNCTION_MIPS_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n[^:]*?' # f: (name of func)
+    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@"?(?P=func)"?\n[^:]*?' # f: (name of func)
     r'(?:^[ \t]+\.(frame|f?mask|set).*?\n)+'  # Mips+LLVM standard asm prologue
     r'(?P<body>.*?)\n'                        # (body of the function)
     # Mips+LLVM standard asm epilogue
@@ -68,51 +70,52 @@ ASM_FUNCTION_MIPS_RE = re.compile(
     flags=(re.M | re.S))
 
 ASM_FUNCTION_MSP430_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*;+[ \t]*@(?P=func)\n[^:]*?'
+    r'^_?(?P<func>[^:]+):[ \t]*;+[ \t]*@"?(?P=func)"?\n[^:]*?'
     r'(?P<body>.*?)\n'
     r'(\$|\.L)func_end[0-9]+:\n',             # $func_end0:
     flags=(re.M | re.S))
 
 ASM_FUNCTION_PPC_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n'
+    r'#[ \-\t]*Begin function (?P<func>[^.:]+)\n'
     r'.*?'
-    r'\.Lfunc_begin[0-9]+:\n'
-    r'(?:[ \t]+.cfi_startproc\n)?'
-    r'(?:\.Lfunc_[gl]ep[0-9]+:\n(?:[ \t]+.*?\n)*)*'
+    r'^[_.]?(?P=func):(?:[ \t]*#+[ \t]*@"?(?P=func)"?)?\n'
+    r'(?:^[^#]*\n)*'
     r'(?P<body>.*?)\n'
     # This list is incomplete
-    r'(?:^[ \t]*(?:\.long[ \t]+[^\n]+|\.quad[ \t]+[^\n]+)\n)*'
-    r'.Lfunc_end[0-9]+:\n',
+    r'(?:^[ \t]*(?:\.(?:long|quad|v?byte)[ \t]+[^\n]+)\n)*'
+    r'(?:\.Lfunc_end|L\.\.(?P=func))[0-9]+:\n',
     flags=(re.M | re.S))
 
 ASM_FUNCTION_RISCV_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n(?:\s*\.?Lfunc_begin[^:\n]*:\n)?[^:]*?'
+    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@"?(?P=func)"?\n'
+    r'(?:\s*\.?L(?P=func)\$local:\n)?'  # optional .L<func>$local: due to -fno-semantic-interposition
+    r'(?:\s*\.?Lfunc_begin[^:\n]*:\n)?[^:]*?'
     r'(?P<body>^##?[ \t]+[^:]+:.*?)\s*'
     r'.Lfunc_end[0-9]+:\n',
     flags=(re.M | re.S))
 
 ASM_FUNCTION_LANAI_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*!+[ \t]*@(?P=func)\n'
+    r'^_?(?P<func>[^:]+):[ \t]*!+[ \t]*@"?(?P=func)"?\n'
     r'(?:[ \t]+.cfi_startproc\n)?'  # drop optional cfi noise
     r'(?P<body>.*?)\s*'
     r'.Lfunc_end[0-9]+:\n',
     flags=(re.M | re.S))
 
 ASM_FUNCTION_SPARC_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*!+[ \t]*@(?P=func)\n'
+    r'^_?(?P<func>[^:]+):[ \t]*!+[ \t]*@"?(?P=func)"?\n'
     r'(?P<body>.*?)\s*'
     r'.Lfunc_end[0-9]+:\n',
     flags=(re.M | re.S))
 
 ASM_FUNCTION_SYSTEMZ_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n'
+    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@"?(?P=func)"?\n'
     r'[ \t]+.cfi_startproc\n'
     r'(?P<body>.*?)\n'
     r'.Lfunc_end[0-9]+:\n',
     flags=(re.M | re.S))
 
 ASM_FUNCTION_AARCH64_DARWIN_RE = re.compile(
-     r'^_(?P<func>[^:]+):[ \t]*;[ \t]@(?P=func)\n'
+     r'^_(?P<func>[^:]+):[ \t]*;[ \t]@"?(?P=func)"?\n'
      r'([ \t]*.cfi_startproc\n[\s]*)?'
      r'(?P<body>.*?)'
      r'([ \t]*.cfi_endproc\n[\s]*)?'
@@ -120,7 +123,7 @@ ASM_FUNCTION_AARCH64_DARWIN_RE = re.compile(
      flags=(re.M | re.S))
 
 ASM_FUNCTION_ARM_DARWIN_RE = re.compile(
-     r'^[ \t]*\.globl[ \t]*_(?P<func>[^ \t])[ \t]*@[ \t]--[ \t]Begin[ \t]function[ \t](?P=func)'
+     r'^[ \t]*\.globl[ \t]*_(?P<func>[^ \t])[ \t]*@[ \t]--[ \t]Begin[ \t]function[ \t]"?(?P=func)"?'
      r'(?P<directives>.*?)'
      r'^_(?P=func):\n[ \t]*'
      r'(?P<body>.*?)'
@@ -143,7 +146,7 @@ ASM_FUNCTION_ARM_IOS_RE = re.compile(
      flags=(re.M | re.S))
 
 ASM_FUNCTION_WASM32_RE = re.compile(
-    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n'
+    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@"?(?P=func)"?\n'
     r'(?P<body>.*?)\n'
     r'^\s*(\.Lfunc_end[0-9]+:\n|end_function)',
     flags=(re.M | re.S))
@@ -183,8 +186,9 @@ def scrub_asm_x86(asm, args):
   # Detect stack spills and reloads and hide their exact offset and whether
   # they used the stack pointer or frame pointer.
   asm = SCRUB_X86_SPILL_RELOAD_RE.sub(r'{{[-0-9]+}}(%\1{{[sb]}}p)\2', asm)
-  # Generically match the stack offset of a memory operand.
-  asm = SCRUB_X86_SP_RE.sub(r'{{[0-9]+}}(%\1)', asm)
+  if getattr(args, 'x86_scrub_sp', True):
+    # Generically match the stack offset of a memory operand.
+    asm = SCRUB_X86_SP_RE.sub(r'{{[0-9]+}}(%\1)', asm)
   if getattr(args, 'x86_scrub_rip', False):
     # Generically match a RIP-relative memory operand.
     asm = SCRUB_X86_RIP_RE.sub(r'{{.*}}(%rip)', asm)
@@ -329,7 +333,7 @@ def get_triple_from_march(march):
   print("Cannot find a triple. Assume 'x86'", file=sys.stderr)
   return 'x86'
 
-def build_function_body_dictionary_for_triple(args, raw_tool_output, triple, prefixes, func_dict):
+def get_run_handler(triple):
   target_handlers = {
       'i686': (scrub_asm_x86, ASM_FUNCTION_X86_RE),
       'x86': (scrub_asm_x86, ASM_FUNCTION_X86_RE),
@@ -343,6 +347,7 @@ def build_function_body_dictionary_for_triple(args, raw_tool_output, triple, pre
       'amdgcn': (scrub_asm_amdgpu, ASM_FUNCTION_AMDGPU_RE),
       'arm': (scrub_asm_arm_eabi, ASM_FUNCTION_ARM_RE),
       'arm64': (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_RE),
+      'arm64e': (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_DARWIN_RE),
       'arm64-apple-ios': (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_DARWIN_RE),
       'armv7-apple-ios' : (scrub_asm_arm_eabi, ASM_FUNCTION_ARM_IOS_RE),
       'armv7-apple-darwin': (scrub_asm_arm_eabi, ASM_FUNCTION_ARM_DARWIN_RE),
@@ -371,14 +376,12 @@ def build_function_body_dictionary_for_triple(args, raw_tool_output, triple, pre
   if handler is None:
     raise KeyError('Triple %r is not supported' % (triple))
 
-  scrubber, function_re = handler
-  common.build_function_body_dictionary(
-          function_re, scrubber, [args], raw_tool_output, prefixes,
-          func_dict, args.verbose, False)
+  return handler
 
 ##### Generator of assembly CHECK lines
 
 def add_asm_checks(output_lines, comment_marker, prefix_list, func_dict, func_name):
   # Label format is based on ASM string.
   check_label_format = '{} %s-LABEL: %s%s:'.format(comment_marker)
-  common.add_checks(output_lines, comment_marker, prefix_list, func_dict, func_name, check_label_format, True, False)
+  global_vars_seen_dict = {}
+  common.add_checks(output_lines, comment_marker, prefix_list, func_dict, func_name, check_label_format, True, False, global_vars_seen_dict)

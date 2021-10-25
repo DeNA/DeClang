@@ -45,7 +45,7 @@ void R600SchedStrategy::initialize(ScheduleDAGMI *dag) {
 void R600SchedStrategy::MoveUnits(std::vector<SUnit *> &QSrc,
                                   std::vector<SUnit *> &QDst)
 {
-  QDst.insert(QDst.end(), QSrc.begin(), QSrc.end());
+  llvm::append_range(QDst, QSrc);
   QSrc.clear();
 }
 
@@ -183,7 +183,7 @@ isPhysicalRegCopy(MachineInstr *MI) {
   if (MI->getOpcode() != R600::COPY)
     return false;
 
-  return !Register::isVirtualRegister(MI->getOperand(1).getReg());
+  return !MI->getOperand(1).getReg().isVirtual();
 }
 
 void R600SchedStrategy::releaseTopNode(SUnit *SU) {
@@ -207,9 +207,9 @@ void R600SchedStrategy::releaseBottomNode(SUnit *SU) {
 
 }
 
-bool R600SchedStrategy::regBelongsToClass(unsigned Reg,
+bool R600SchedStrategy::regBelongsToClass(Register Reg,
                                           const TargetRegisterClass *RC) const {
-  if (!Register::isVirtualRegister(Reg)) {
+  if (!Reg.isVirtual()) {
     return RC->contains(Reg);
   } else {
     return MRI->getRegClass(Reg) == RC;

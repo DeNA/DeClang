@@ -108,9 +108,11 @@ bool AMDGPUAnnotateUniformValues::isClobberedInFunction(LoadInst * Load) {
   for (auto &BB : Checklist) {
     BasicBlock::iterator StartIt = (!L && (BB == Load->getParent())) ?
       BasicBlock::iterator(Load) : BB->end();
-    auto Q = MDR->getPointerDependencyFrom(MemoryLocation(Ptr), true,
-                                           StartIt, BB, Load);
-    if (Q.isClobber() || Q.isUnknown())
+    auto Q = MDR->getPointerDependencyFrom(
+        MemoryLocation::getBeforeOrAfter(Ptr), true, StartIt, BB, Load);
+    if (Q.isClobber() || Q.isUnknown() ||
+        // Store defines the load and thus clobbers it.
+        (Q.isDef() && Q.getInst()->mayWriteToMemory()))
       return true;
   }
   return false;
@@ -140,10 +142,11 @@ void AMDGPUAnnotateUniformValues::visitLoadInst(LoadInst &I) {
   }
 
   bool NotClobbered = false;
+  bool GlobalLoad = isGlobalLoad(I);
   if (PtrI)
-    NotClobbered = !isClobberedInFunction(&I);
+    NotClobbered = GlobalLoad && !isClobberedInFunction(&I);
   else if (isa<Argument>(Ptr) || isa<GlobalValue>(Ptr)) {
-    if (isGlobalLoad(I) && !isClobberedInFunction(&I)) {
+    if (GlobalLoad && !isClobberedInFunction(&I)) {
       NotClobbered = true;
       // Lookup for the existing GEP
       if (noClobberClones.count(Ptr)) {

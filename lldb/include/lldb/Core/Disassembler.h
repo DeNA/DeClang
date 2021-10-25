@@ -271,6 +271,13 @@ public:
 
   lldb::InstructionSP GetInstructionAtIndex(size_t idx) const;
 
+  /// Get the instruction at the given address.
+  ///
+  /// \return
+  ///    A valid \a InstructionSP if the address could be found, or null
+  ///    otherwise.
+  lldb::InstructionSP GetInstructionAtAddress(const Address &addr);
+
   //------------------------------------------------------------------
   /// Get the index of the next branch instruction.
   ///
@@ -280,9 +287,6 @@ public:
   /// @param[in] start
   ///     The instruction index of the first instruction to check.
   ///
-  /// @param[in] target
-  ///     A LLDB target object that is used to resolve addresses.
-  ///    
   /// @param[in] ignore_calls
   ///     It true, then fine the first branch instruction that isn't
   ///     a function call (a branch that calls and returns to the next
@@ -299,7 +303,6 @@ public:
   ///     found.
   //------------------------------------------------------------------
   uint32_t GetIndexOfNextBranchInstruction(uint32_t start,
-                                           Target &target,
                                            bool ignore_calls,
                                            bool *found_calls) const;
 
@@ -391,10 +394,12 @@ public:
     lldb::addr_t value;
   };
 
-  static lldb::DisassemblerSP
-  DisassembleRange(const ArchSpec &arch, const char *plugin_name,
-                   const char *flavor, Target &target,
-                   const AddressRange &disasm_range, bool prefer_file_cache);
+  static lldb::DisassemblerSP DisassembleRange(const ArchSpec &arch,
+                                               const char *plugin_name,
+                                               const char *flavor,
+                                               Target &target,
+                                               const AddressRange &disasm_range,
+                                               bool force_live_memory = false);
 
   static lldb::DisassemblerSP
   DisassembleBytes(const ArchSpec &arch, const char *plugin_name,
@@ -423,7 +428,8 @@ public:
                          Stream &strm);
 
   size_t ParseInstructions(Target &target, Address address, Limit limit,
-                           Stream *error_strm_ptr, bool prefer_file_cache);
+                           Stream *error_strm_ptr,
+                           bool force_live_memory = false);
 
   virtual size_t DecodeInstructions(const Address &base_addr,
                                     const DataExtractor &data,

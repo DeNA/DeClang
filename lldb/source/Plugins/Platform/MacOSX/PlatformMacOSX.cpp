@@ -103,12 +103,6 @@ PlatformSP PlatformMacOSX::CreateInstance(bool force, const ArchSpec *arch) {
 /// Default Constructor
 PlatformMacOSX::PlatformMacOSX() : PlatformDarwin(true) {}
 
-/// Destructor.
-///
-/// The destructor is virtual since this class is designed to be
-/// inherited from by the plug-in instance.
-PlatformMacOSX::~PlatformMacOSX() {}
-
 ConstString PlatformMacOSX::GetSDKDirectory(lldb_private::Target &target) {
   ModuleSP exe_module_sp(target.GetExecutableModule());
   if (!exe_module_sp)
@@ -147,7 +141,33 @@ ConstString PlatformMacOSX::GetSDKDirectory(lldb_private::Target &target) {
 bool PlatformMacOSX::GetSupportedArchitectureAtIndex(uint32_t idx,
                                                      ArchSpec &arch) {
 #if defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
-  return ARMGetSupportedArchitectureAtIndex(idx, arch);
+  // macOS for ARM64 support both native and translated x86_64 processes
+  if (!m_num_arm_arches || idx < m_num_arm_arches) {
+    bool res = ARMGetSupportedArchitectureAtIndex(idx, arch);
+    if (res)
+      return true;
+    if (!m_num_arm_arches)
+      m_num_arm_arches = idx;
+  }
+
+  // We can't use x86GetSupportedArchitectureAtIndex() because it uses
+  // the system architecture for some of its return values and also
+  // has a 32bits variant.
+  if (idx == m_num_arm_arches) {
+    arch.SetTriple("x86_64-apple-macosx");
+    return true;
+  } else if (idx == m_num_arm_arches + 1) {
+    arch.SetTriple("x86_64-apple-ios-macabi");
+    return true;
+  } else if (idx == m_num_arm_arches + 2) {
+    arch.SetTriple("arm64-apple-ios");
+    return true;
+  } else if (idx == m_num_arm_arches + 3) {
+    arch.SetTriple("arm64e-apple-ios");
+    return true;
+  }
+
+  return false;
 #else
   return x86GetSupportedArchitectureAtIndex(idx, arch);
 #endif
@@ -157,10 +177,10 @@ lldb_private::Status PlatformMacOSX::GetSharedModule(
     const lldb_private::ModuleSpec &module_spec, Process *process,
     lldb::ModuleSP &module_sp,
     const lldb_private::FileSpecList *module_search_paths_ptr,
-    lldb::ModuleSP *old_module_sp_ptr, bool *did_create_ptr) {
-  Status error = GetSharedModuleWithLocalCache(
-      module_spec, module_sp, module_search_paths_ptr, old_module_sp_ptr,
-      did_create_ptr);
+    llvm::SmallVectorImpl<lldb::ModuleSP> *old_modules, bool *did_create_ptr) {
+  Status error = GetSharedModuleWithLocalCache(module_spec, module_sp,
+                                               module_search_paths_ptr,
+                                               old_modules, did_create_ptr);
 
   if (module_sp) {
     if (module_spec.GetArchitecture().GetCore() ==
@@ -171,15 +191,16 @@ lldb_private::Status PlatformMacOSX::GetSharedModule(
         ModuleSpec module_spec_x86_64(module_spec);
         module_spec_x86_64.GetArchitecture() = ArchSpec("x86_64-apple-macosx");
         lldb::ModuleSP x86_64_module_sp;
-        lldb::ModuleSP old_x86_64_module_sp;
+        llvm::SmallVector<lldb::ModuleSP, 1> old_x86_64_modules;
         bool did_create = false;
         Status x86_64_error = GetSharedModuleWithLocalCache(
             module_spec_x86_64, x86_64_module_sp, module_search_paths_ptr,
-            &old_x86_64_module_sp, &did_create);
+            &old_x86_64_modules, &did_create);
         if (x86_64_module_sp && x86_64_module_sp->GetObjectFile()) {
           module_sp = x86_64_module_sp;
-          if (old_module_sp_ptr)
-            *old_module_sp_ptr = old_x86_64_module_sp;
+          if (old_modules)
+            old_modules->append(old_x86_64_modules.begin(),
+                                old_x86_64_modules.end());
           if (did_create_ptr)
             *did_create_ptr = did_create;
           return x86_64_error;
@@ -189,7 +210,9 @@ lldb_private::Status PlatformMacOSX::GetSharedModule(
   }
 
   if (!module_sp) {
-      error = FindBundleBinaryInExecSearchPaths (module_spec, process, module_sp, module_search_paths_ptr, old_module_sp_ptr, did_create_ptr);
+    error = FindBundleBinaryInExecSearchPaths(module_spec, process, module_sp,
+                                              module_search_paths_ptr,
+                                              old_modules, did_create_ptr);
   }
   return error;
 }

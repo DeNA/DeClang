@@ -12,12 +12,12 @@
 
 #include "SwiftArray.h"
 
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
-#include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/Target.h"
 
 // FIXME: we should not need this
@@ -433,7 +433,8 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
 
       std::unique_ptr<SwiftArrayBufferHandler> handler;
       if (masked_storage_location == storage_location) {
-        CompilerType elem_type(valobj.GetCompilerType().GetArrayElementType(exe_scope));
+        CompilerType elem_type(
+            valobj.GetCompilerType().GetArrayElementType(exe_scope));
         handler.reset(new SwiftArrayNativeBufferHandler(
             valobj, storage_location, elem_type));
       } else {

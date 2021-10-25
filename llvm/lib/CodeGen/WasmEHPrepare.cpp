@@ -124,7 +124,6 @@ class WasmEHPrepare : public FunctionPass {
   void setupEHPadFunctions(Function &F);
   void prepareEHPad(BasicBlock *BB, bool NeedPersonality, bool NeedLSDA = false,
                     unsigned Index = 0);
-  void prepareTerminateCleanupPad(BasicBlock *BB);
 
 public:
   static char ID; // Pass identification, replacement for typeid
@@ -169,7 +168,7 @@ static void eraseDeadBBsAndChildren(const Container &BBs, DomTreeUpdater *DTU) {
   SmallVector<BasicBlock *, 8> WL(BBs.begin(), BBs.end());
   while (!WL.empty()) {
     auto *BB = WL.pop_back_val();
-    if (pred_begin(BB) != pred_end(BB))
+    if (!pred_empty(BB))
       continue;
     WL.append(succ_begin(BB), succ_end(BB));
     DeleteDeadBlock(BB, DTU);
@@ -205,7 +204,7 @@ bool WasmEHPrepare::prepareThrows(Function &F) {
       continue;
     Changed = true;
     auto *BB = ThrowI->getParent();
-    SmallVector<BasicBlock *, 4> Succs(succ_begin(BB), succ_end(BB));
+    SmallVector<BasicBlock *, 4> Succs(successors(BB));
     auto &InstList = BB->getInstList();
     InstList.erase(std::next(BasicBlock::iterator(ThrowI)), InstList.end());
     IRB.SetInsertPoint(BB);

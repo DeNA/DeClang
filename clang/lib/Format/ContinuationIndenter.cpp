@@ -284,7 +284,7 @@ bool ContinuationIndenter::canBreak(const LineState &State) {
   // The opening "{" of a braced list has to be on the same line as the first
   // element if it is nested in another braced init list or function call.
   if (!Current.MustBreakBefore && Previous.is(tok::l_brace) &&
-      Previous.isNot(TT_DictLiteral) && Previous.BlockKind == BK_BracedInit &&
+      Previous.isNot(TT_DictLiteral) && Previous.is(BK_BracedInit) &&
       Previous.Previous &&
       Previous.Previous->isOneOf(tok::l_brace, tok::l_paren, tok::comma))
     return false;
@@ -400,7 +400,9 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
     return true;
   if (Current.is(TT_SelectorName) && !Previous.is(tok::at) &&
       State.Stack.back().ObjCSelectorNameFound &&
-      State.Stack.back().BreakBeforeParameter)
+      State.Stack.back().BreakBeforeParameter &&
+      (Style.ObjCBreakBeforeNestedBlockParam ||
+       !Current.startsSequence(TT_SelectorName, tok::colon, tok::caret)))
     return true;
 
   unsigned NewLineColumn = getNewLineColumn(State);
@@ -501,7 +503,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
   // The following could be precomputed as they do not depend on the state.
   // However, as they should take effect only if the UnwrappedLine does not fit
   // into the ColumnLimit, they are checked here in the ContinuationIndenter.
-  if (Style.ColumnLimit != 0 && Previous.BlockKind == BK_Block &&
+  if (Style.ColumnLimit != 0 && Previous.is(BK_Block) &&
       Previous.is(tok::l_brace) && !Current.isOneOf(tok::r_brace, tok::comment))
     return true;
 
@@ -587,6 +589,12 @@ void ContinuationIndenter::addTokenOnCurrentLine(LineState &State, bool DryRun,
        State.Line->Type == LT_ImportStatement)) {
     Spaces += State.FirstIndent;
 
+    bool isPragmaLine =
+        State.Line->First->startsSequence(tok::hash, tok::pp_pragma);
+    // If indenting pragmas remove the extra space for the #.
+    if (Style.IndentPragmas && isPragmaLine)
+      Spaces--;
+
     // For preprocessor indent with tabs, State.Column will be 1 because of the
     // hash. This causes second-level indents onward to have an extra space
     // after the tabs. We avoid this misalignment by subtracting 1 from the
@@ -627,7 +635,7 @@ void ContinuationIndenter::addTokenOnCurrentLine(LineState &State, bool DryRun,
   // opening parenthesis. Don't break if it doesn't conserve columns.
   if (Style.AlignAfterOpenBracket == FormatStyle::BAS_AlwaysBreak &&
       (Previous.isOneOf(tok::l_paren, TT_TemplateOpener, tok::l_square) ||
-       (Previous.is(tok::l_brace) && Previous.BlockKind != BK_Block &&
+       (Previous.is(tok::l_brace) && Previous.isNot(BK_Block) &&
         Style.Cpp11BracedListStyle)) &&
       State.Column > getNewLineColumn(State) &&
       (!Previous.Previous || !Previous.Previous->isOneOf(
@@ -648,7 +656,7 @@ void ContinuationIndenter::addTokenOnCurrentLine(LineState &State, bool DryRun,
   if (Style.AlignAfterOpenBracket != FormatStyle::BAS_DontAlign &&
       !State.Stack.back().IsCSharpGenericTypeConstraint &&
       Previous.opensScope() && Previous.isNot(TT_ObjCMethodExpr) &&
-      (Current.isNot(TT_LineComment) || Previous.BlockKind == BK_BracedInit)) {
+      (Current.isNot(TT_LineComment) || Previous.is(BK_BracedInit))) {
     State.Stack.back().Indent = State.Column + Spaces;
     State.Stack.back().IsAligned = true;
   }
@@ -782,6 +790,22 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
     Penalty += Style.PenaltyBreakFirstLessLess;
 
   State.Column = getNewLineColumn(State);
+
+  // Add Penalty proportional to amount of whitespace away from FirstColumn
+  // This tends to penalize several lines that are far-right indented,
+  // and prefers a line-break prior to such a block, e.g:
+  //
+  // Constructor() :
+  //   member(value), looooooooooooooooong_member(
+  //                      looooooooooong_call(param_1, param_2, param_3))
+  // would then become
+  // Constructor() :
+  //   member(value),
+  //   looooooooooooooooong_member(
+  //       looooooooooong_call(param_1, param_2, param_3))
+  if (State.Column > State.FirstIndent)
+    Penalty +=
+        Style.PenaltyIndentedWhitespace * (State.Column - State.FirstIndent);
 
   // Indent nested blocks relative to this column, unless in a very specific
   // JavaScript special case where:
@@ -972,7 +996,7 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
     return (Style.IndentWidth * State.Line->First->IndentLevel) +
            Style.IndentWidth;
 
-  if (NextNonComment->is(tok::l_brace) && NextNonComment->BlockKind == BK_Block)
+  if (NextNonComment->is(tok::l_brace) && NextNonComment->is(BK_Block))
     return Current.NestingLevel == 0 ? State.FirstIndent
                                      : State.Stack.back().Indent;
   if ((Current.isOneOf(tok::r_brace, tok::r_square) ||
@@ -982,8 +1006,7 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
       State.Stack.size() > 1) {
     if (Current.closesBlockOrBlockTypeList(Style))
       return State.Stack[State.Stack.size() - 2].NestedBlockIndent;
-    if (Current.MatchingParen &&
-        Current.MatchingParen->BlockKind == BK_BracedInit)
+    if (Current.MatchingParen && Current.MatchingParen->is(BK_BracedInit))
       return State.Stack[State.Stack.size() - 2].LastSpace;
     return State.FirstIndent;
   }
@@ -1349,16 +1372,20 @@ void ContinuationIndenter::moveStatePastFakeLParens(LineState &State,
                    State.Stack.back().LastSpace);
     }
 
-    // If BreakBeforeBinaryOperators is set, un-indent a bit to account for
-    // the operator and keep the operands aligned
-    if (Style.AlignOperands == FormatStyle::OAS_AlignAfterOperator &&
-        Previous &&
+    if (Previous &&
         (Previous->getPrecedence() == prec::Assignment ||
          Previous->is(tok::kw_return) ||
          (*I == prec::Conditional && Previous->is(tok::question) &&
           Previous->is(TT_ConditionalExpr))) &&
-        !Newline)
-      NewParenState.UnindentOperator = true;
+        !Newline) {
+      // If BreakBeforeBinaryOperators is set, un-indent a bit to account for
+      // the operator and keep the operands aligned
+      if (Style.AlignOperands == FormatStyle::OAS_AlignAfterOperator)
+        NewParenState.UnindentOperator = true;
+      // Mark indentation as alignment if the expression is aligned.
+      if (Style.AlignOperands != FormatStyle::OAS_DontAlign)
+        NewParenState.IsAligned = true;
+    }
 
     // Do not indent relative to the fake parentheses inserted for "." or "->".
     // This is a special case to make the following to statements consistent:
@@ -1417,7 +1444,7 @@ void ContinuationIndenter::moveStatePastScopeOpener(LineState &State,
       State.Stack.back().IsCSharpGenericTypeConstraint)
     return;
 
-  if (Current.MatchingParen && Current.BlockKind == BK_Block) {
+  if (Current.MatchingParen && Current.is(BK_Block)) {
     moveStateToNewBlock(State);
     return;
   }
@@ -1486,9 +1513,8 @@ void ContinuationIndenter::moveStatePastScopeOpener(LineState &State,
         (State.Line->MustBeDeclaration && !BinPackDeclaration) ||
         (!State.Line->MustBeDeclaration && !Style.BinPackArguments) ||
         (Style.ExperimentalAutoDetectBinPacking &&
-         (Current.PackingKind == PPK_OnePerLine ||
-          (!BinPackInconclusiveFunctions &&
-           Current.PackingKind == PPK_Inconclusive)));
+         (Current.is(PPK_OnePerLine) ||
+          (!BinPackInconclusiveFunctions && Current.is(PPK_Inconclusive))));
 
     if (Current.is(TT_ObjCMethodExpr) && Current.MatchingParen &&
         Style.ObjCBreakBeforeNestedBlockParam) {

@@ -743,6 +743,8 @@ CodeGenRegisterClass::CodeGenRegisterClass(CodeGenRegBank &RegBank, Record *R)
       TopoSigs(RegBank.getNumTopoSigs()), EnumValue(-1) {
   GeneratePressureSet = R->getValueAsBit("GeneratePressureSet");
   std::vector<Record*> TypeList = R->getValueAsListOfDefs("RegTypes");
+  if (TypeList.empty())
+    PrintFatalError(R->getLoc(), "RegTypes list must not be empty!");
   for (unsigned i = 0, e = TypeList.size(); i != e; ++i) {
     Record *Type = TypeList[i];
     if (!Type->isSubClassOf("ValueType"))
@@ -751,7 +753,6 @@ CodeGenRegisterClass::CodeGenRegisterClass(CodeGenRegBank &RegBank, Record *R)
                           "' does not derive from the ValueType class!");
     VTs.push_back(getValueTypeByHwMode(Type, RegBank.getHwModes()));
   }
-  assert(!VTs.empty() && "RegisterClass must contain at least one ValueType!");
 
   // Allocation order 0 is the full set. AltOrders provides others.
   const SetTheory::RecVec *Elements = RegBank.getSets().expand(R);
@@ -998,6 +999,8 @@ CodeGenRegisterClass::getMatchingSubClassWithSubRegs(
                       const CodeGenRegisterClass *B) {
     // If there are multiple, identical register classes, prefer the original
     // register class.
+    if (A == B)
+      return false;
     if (A->getMembers().size() == B->getMembers().size())
       return A == this;
     return A->getMembers().size() > B->getMembers().size();
@@ -1235,8 +1238,7 @@ CodeGenSubRegIndex *CodeGenRegBank::getSubRegIdx(Record *Def) {
 
 const CodeGenSubRegIndex *
 CodeGenRegBank::findSubRegIdx(const Record* Def) const {
-  auto I = Def2SubRegIdx.find(Def);
-  return (I == Def2SubRegIdx.end()) ? nullptr : I->second;
+  return Def2SubRegIdx.lookup(Def);
 }
 
 CodeGenRegister *CodeGenRegBank::getReg(Record *Def) {
@@ -2008,7 +2010,7 @@ void CodeGenRegBank::computeRegUnitSets() {
     if (RCRegUnits.empty())
       continue;
 
-    LLVM_DEBUG(dbgs() << "RC " << RC.getName() << " Units: \n";
+    LLVM_DEBUG(dbgs() << "RC " << RC.getName() << " Units:\n";
                for (auto U
                     : RCRegUnits) printRegUnitName(U);
                dbgs() << "\n  UnitSetIDs:");

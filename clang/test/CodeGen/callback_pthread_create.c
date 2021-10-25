@@ -24,14 +24,10 @@ int pthread_create(pthread_t *, const pthread_attr_t *,
 const int GlobalVar = 0;
 
 static void *callee0(void *payload) {
-// IPCP:      define internal i8* @callee0
-// IPCP:        ret i8* null
   return payload;
 }
 
 static void *callee1(void *payload) {
-// IPCP:      define internal i8* @callee1
-// IPCP:        ret i8* bitcast (i32* @GlobalVar to i8*)
   return payload;
 }
 

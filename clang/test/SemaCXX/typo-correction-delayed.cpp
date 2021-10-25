@@ -149,7 +149,8 @@ void test() {
 }
 
 namespace PR21905 {
-int (*a) () = (void)Z;  // expected-error-re {{use of undeclared identifier 'Z'{{$}}}}
+int (*a)() = (void)Z; // expected-error-re {{use of undeclared identifier 'Z'{{$}}}} \
+                      // expected-error {{cannot initialize a variable of type 'int (*)()' with an rvalue of type 'void'}}
 }
 
 namespace PR21947 {
@@ -206,6 +207,15 @@ void f() { int a = Unknown::b(c); }  // expected-error {{use of undeclared ident
 namespace PR23350 {
 int z = 1 ? N : ;  // expected-error {{expected expression}}
 // expected-error-re@-1 {{use of undeclared identifier 'N'{{$}}}}
+}
+
+namespace noSecondaryDiags {
+void abcc(); // expected-note {{'abcc' declared here}}
+
+void test() {
+  // Verify the secondary diagnostic ".. convertible to 'bool'" is suppressed.
+  if (abc()) {} // expected-error {{use of undeclared identifier 'abc'; did you mean 'abcc'?}}
+}
 }
 
 // PR 23285. This test must be at the end of the file to avoid additional,

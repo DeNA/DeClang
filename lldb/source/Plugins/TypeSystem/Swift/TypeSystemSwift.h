@@ -28,7 +28,7 @@ class Decl;
 namespace lldb_private {
 class TypeSystemClang;
 class SwiftASTContext;
-
+class TypeSystemSwiftTypeRef;
 /// The implementation of lldb::Type's m_payload field for TypeSystemSwift.
 class TypePayloadSwift {
   /// Layout: bit 1 ... IsFixedValueBuffer.
@@ -109,6 +109,7 @@ public:
 
   static LanguageSet GetSupportedLanguagesForTypes();
   virtual SwiftASTContext *GetSwiftASTContext() = 0;
+  virtual TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() = 0;
   virtual Module *GetModule() const = 0;
   virtual lldb::TypeSP GetCachedType(ConstString mangled) = 0;
   virtual void SetCachedType(ConstString mangled,
@@ -181,6 +182,13 @@ public:
                            bool &is_complex) override;
   bool IsIntegerType(lldb::opaque_compiler_type_t type,
                      bool &is_signed) override;
+  bool IsScopedEnumerationType(lldb::opaque_compiler_type_t type) override {
+    return false;
+  }
+  CompilerType
+  GetEnumerationIntegerType(lldb::opaque_compiler_type_t type) override {
+    return {};
+  }
   bool IsScalarType(lldb::opaque_compiler_type_t type) override;
   bool IsCStringType(lldb::opaque_compiler_type_t type,
                      uint32_t &length) override {

@@ -10,10 +10,10 @@
 
 #include "lldb/Core/Address.h"
 #include "lldb/Core/AddressRange.h"
+#include "lldb/Core/Declaration.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Expression/DWARFExpression.h"
-#include "lldb/Symbol/Declaration.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -112,15 +112,15 @@ size_t ValueObjectVariable::CalculateNumChildren(uint32_t max) {
   return child_count <= max ? child_count : max;
 }
 
-uint64_t ValueObjectVariable::GetByteSize() {
+llvm::Optional<uint64_t> ValueObjectVariable::GetByteSize() {
   ExecutionContext exe_ctx(GetExecutionContextRef());
 
   CompilerType type(GetCompilerType());
 
   if (!type.IsValid())
-    return 0;
+    return {};
 
-  return type.GetByteSize(exe_ctx.GetBestExecutionContextScope()).getValueOr(0);
+  return type.GetByteSize(exe_ctx.GetBestExecutionContextScope());
 }
 
 lldb::ValueType ValueObjectVariable::GetValueType() const {
@@ -256,7 +256,6 @@ bool ValueObjectVariable::UpdateValue() {
         break;
       case Value::eValueTypeLoadAddress:
       case Value::eValueTypeScalar:
-      case Value::eValueTypeVector:
         SetAddressTypeOfChildren(eAddressTypeLoad);
         break;
       }
@@ -276,8 +275,7 @@ bool ValueObjectVariable::UpdateValue() {
                   Target &target = process_sp->GetTarget();
                   size_t ptr_size = process_sp->GetAddressByteSize();
                   lldb::addr_t deref_addr;
-                  target.ReadMemory(addr, false, &deref_addr, ptr_size,
-                                    m_error);
+                  target.ReadMemory(addr, &deref_addr, ptr_size, m_error, true);
                   m_value.GetScalar() = deref_addr;
                 }
               }
@@ -285,8 +283,6 @@ bool ValueObjectVariable::UpdateValue() {
 #endif // LLDB_ENABLE_SWIFT
 
       switch (value_type) {
-      case Value::eValueTypeVector:
-      // fall through
       case Value::eValueTypeScalar:
         // The variable value is in the Scalar value inside the m_value. We can
         // point our m_data right to it.
@@ -384,7 +380,6 @@ void ValueObjectVariable::DoUpdateChildrenAddressType(ValueObject &valobj) {
     break;
   case Value::eValueTypeLoadAddress:
   case Value::eValueTypeScalar:
-  case Value::eValueTypeVector:
     valobj.SetAddressTypeOfChildren(eAddressTypeLoad);
     break;
   }

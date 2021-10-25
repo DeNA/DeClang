@@ -31,8 +31,6 @@
 #include <utility>
 #include <vector>
 
-using namespace clang::ast_type_traits;
-
 namespace clang {
 namespace ast_matchers {
 namespace dynamic {
@@ -202,6 +200,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(cxxUnresolvedConstructExpr);
   REGISTER_MATCHER(decayedType);
   REGISTER_MATCHER(decl);
+  REGISTER_MATCHER(decompositionDecl);
   REGISTER_MATCHER(declCountIs);
   REGISTER_MATCHER(declRefExpr);
   REGISTER_MATCHER(declStmt);
@@ -225,8 +224,10 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(exprWithCleanups);
   REGISTER_MATCHER(fieldDecl);
   REGISTER_MATCHER(floatLiteral);
+  REGISTER_MATCHER(forCallable);
   REGISTER_MATCHER(forEach);
   REGISTER_MATCHER(forEachArgumentWithParam);
+  REGISTER_MATCHER(forEachArgumentWithParamType);
   REGISTER_MATCHER(forEachConstructorInitializer);
   REGISTER_MATCHER(forEachDescendant);
   REGISTER_MATCHER(forEachOverridden);
@@ -239,6 +240,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(functionProtoType);
   REGISTER_MATCHER(functionTemplateDecl);
   REGISTER_MATCHER(functionType);
+  REGISTER_MATCHER(genericSelectionExpr);
   REGISTER_MATCHER(gnuNullExpr);
   REGISTER_MATCHER(gotoStmt);
   REGISTER_MATCHER(has);
@@ -300,6 +302,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(hasLocalStorage);
   REGISTER_MATCHER(hasLoopInit);
   REGISTER_MATCHER(hasLoopVariable);
+  REGISTER_MATCHER(hasMemberName);
   REGISTER_MATCHER(hasMethod);
   REGISTER_MATCHER(hasName);
   REGISTER_MATCHER(hasNullSelector);
@@ -431,6 +434,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(isVirtual);
   REGISTER_MATCHER(isVirtualAsWritten);
   REGISTER_MATCHER(isVolatileQualified);
+  REGISTER_MATCHER(isWeak);
   REGISTER_MATCHER(isWritten);
   REGISTER_MATCHER(lValueReferenceType);
   REGISTER_MATCHER(labelDecl);
@@ -440,6 +444,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(materializeTemporaryExpr);
   REGISTER_MATCHER(member);
   REGISTER_MATCHER(memberExpr);
+  REGISTER_MATCHER(memberHasSameNameAsBoundNode);
   REGISTER_MATCHER(memberPointerType);
   REGISTER_MATCHER(namedDecl);
   REGISTER_MATCHER(namesType);
@@ -514,6 +519,7 @@ RegistryMaps::RegistryMaps() {
   REGISTER_MATCHER(templateArgumentCountIs);
   REGISTER_MATCHER(templateName);
   REGISTER_MATCHER(templateSpecializationType);
+  REGISTER_MATCHER(templateTemplateParmDecl);
   REGISTER_MATCHER(templateTypeParmDecl);
   REGISTER_MATCHER(templateTypeParmType);
   REGISTER_MATCHER(throughUsingDecl);

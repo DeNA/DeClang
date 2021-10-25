@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclCXX.h"
@@ -19,6 +19,7 @@
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/NestedNameSpecifier.h"
+#include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/TemplateBase.h"
 #include "clang/AST/TemplateName.h"
 #include "clang/AST/Type.h"
@@ -116,10 +117,13 @@ namespace {
     static bool canPrefixQualifiers(const Type *T, bool &NeedARCStrongQualifier);
     void spaceBeforePlaceHolder(raw_ostream &OS);
     void printTypeSpec(NamedDecl *D, raw_ostream &OS);
+    void printTemplateId(const TemplateSpecializationType *T, raw_ostream &OS,
+                         bool FullyQualify);
 
     void printBefore(QualType T, raw_ostream &OS);
     void printAfter(QualType T, raw_ostream &OS);
-    void AppendScope(DeclContext *DC, raw_ostream &OS);
+    void AppendScope(DeclContext *DC, raw_ostream &OS,
+                     DeclarationName NameInScope);
     void printTag(TagDecl *T, raw_ostream &OS);
     void printFunctionAfter(const FunctionType::ExtInfo &Info, raw_ostream &OS);
 #define ABSTRACT_TYPE(CLASS, PARENT)
@@ -656,6 +660,24 @@ void TypePrinter::printVectorBefore(const VectorType *T, raw_ostream &OS) {
     printBefore(T->getElementType(), OS);
     break;
   }
+  case VectorType::SveFixedLengthDataVector:
+  case VectorType::SveFixedLengthPredicateVector:
+    // FIXME: We prefer to print the size directly here, but have no way
+    // to get the size of the type.
+    OS << "__attribute__((__arm_sve_vector_bits__(";
+
+    if (T->getVectorKind() == VectorType::SveFixedLengthPredicateVector)
+      // Predicates take a bit per byte of the vector size, multiply by 8 to
+      // get the number of bits passed to the attribute.
+      OS << T->getNumElements() * 8;
+    else
+      OS << T->getNumElements();
+
+    OS << " * sizeof(";
+    print(T->getElementType(), OS, StringRef());
+    // Multiply by 8 for the number of bits.
+    OS << ") * 8))) ";
+    printBefore(T->getElementType(), OS);
   }
 }
 
@@ -703,6 +725,24 @@ void TypePrinter::printDependentVectorBefore(
     printBefore(T->getElementType(), OS);
     break;
   }
+  case VectorType::SveFixedLengthDataVector:
+  case VectorType::SveFixedLengthPredicateVector:
+    // FIXME: We prefer to print the size directly here, but have no way
+    // to get the size of the type.
+    OS << "__attribute__((__arm_sve_vector_bits__(";
+    if (T->getSizeExpr()) {
+      T->getSizeExpr()->printPretty(OS, nullptr, Policy);
+      if (T->getVectorKind() == VectorType::SveFixedLengthPredicateVector)
+        // Predicates take a bit per byte of the vector size, multiply by 8 to
+        // get the number of bits passed to the attribute.
+        OS << " * 8";
+      OS << " * sizeof(";
+      print(T->getElementType(), OS, StringRef());
+      // Multiply by 8 for the number of bits.
+      OS << ") * 8";
+    }
+    OS << "))) ";
+    printBefore(T->getElementType(), OS);
   }
 }
 
@@ -940,6 +980,9 @@ void TypePrinter::printFunctionAfter(const FunctionType::ExtInfo &Info,
     case CC_Swift:
       OS << " __attribute__((swiftcall))";
       break;
+    case CC_SwiftAsync:
+      OS << "__attribute__((swiftasynccall))";
+      break;
     case CC_PreserveMost:
       OS << " __attribute__((preserve_most))";
       break;
@@ -991,7 +1034,7 @@ void TypePrinter::printTypeSpec(NamedDecl *D, raw_ostream &OS) {
   // In C, this will always be empty except when the type
   // being printed is anonymous within other Record.
   if (!Policy.SuppressScope)
-    AppendScope(D->getDeclContext(), OS);
+    AppendScope(D->getDeclContext(), OS, D->getDeclName());
 
   IdentifierInfo *II = D->getIdentifier();
   OS << II->getName();
@@ -1181,20 +1224,34 @@ void TypePrinter::printDependentExtIntAfter(const DependentExtIntType *T,
                                             raw_ostream &OS) {}
 
 /// Appends the given scope to the end of a string.
-void TypePrinter::AppendScope(DeclContext *DC, raw_ostream &OS) {
-  if (DC->isTranslationUnit()) return;
-  if (DC->isFunctionOrMethod()) return;
-  AppendScope(DC->getParent(), OS);
+void TypePrinter::AppendScope(DeclContext *DC, raw_ostream &OS,
+                              DeclarationName NameInScope) {
+  if (DC->isTranslationUnit())
+    return;
+
+  // FIXME: Consider replacing this with NamedDecl::printNestedNameSpecifier,
+  // which can also print names for function and method scopes.
+  if (DC->isFunctionOrMethod())
+    return;
 
   if (const auto *NS = dyn_cast<NamespaceDecl>(DC)) {
-    if (Policy.SuppressUnwrittenScope &&
-        (NS->isAnonymousNamespace() || NS->isInline()))
-      return;
+    if (Policy.SuppressUnwrittenScope && NS->isAnonymousNamespace())
+      return AppendScope(DC->getParent(), OS, NameInScope);
+
+    // Only suppress an inline namespace if the name has the same lookup
+    // results in the enclosing namespace.
+    if (Policy.SuppressInlineNamespace && NS->isInline() && NameInScope &&
+        DC->getParent()->lookup(NameInScope).size() ==
+            DC->lookup(NameInScope).size())
+      return AppendScope(DC->getParent(), OS, NameInScope);
+
+    AppendScope(DC->getParent(), OS, NS->getDeclName());
     if (NS->getIdentifier())
       OS << NS->getName() << "::";
     else
       OS << "(anonymous namespace)::";
   } else if (const auto *Spec = dyn_cast<ClassTemplateSpecializationDecl>(DC)) {
+    AppendScope(DC->getParent(), OS, Spec->getDeclName());
     IncludeStrongLifetimeRAII Strong(Policy);
     OS << Spec->getIdentifier()->getName();
     const TemplateArgumentList &TemplateArgs = Spec->getTemplateArgs();
@@ -1203,12 +1260,15 @@ void TypePrinter::AppendScope(DeclContext *DC, raw_ostream &OS) {
         Spec->getSpecializedTemplate()->getTemplateParameters());
     OS << "::";
   } else if (const auto *Tag = dyn_cast<TagDecl>(DC)) {
+    AppendScope(DC->getParent(), OS, Tag->getDeclName());
     if (TypedefNameDecl *Typedef = Tag->getTypedefNameForAnonDecl())
       OS << Typedef->getIdentifier()->getName() << "::";
     else if (Tag->getIdentifier())
       OS << Tag->getIdentifier()->getName() << "::";
     else
       return;
+  } else {
+    AppendScope(DC->getParent(), OS, NameInScope);
   }
 }
 
@@ -1235,7 +1295,7 @@ void TypePrinter::printTag(TagDecl *D, raw_ostream &OS) {
   // In C, this will always be empty except when the type
   // being printed is anonymous within other Record.
   if (!Policy.SuppressScope)
-    AppendScope(D->getDeclContext(), OS);
+    AppendScope(D->getDeclContext(), OS, D->getDeclName());
 
   if (const IdentifierInfo *II = D->getIdentifier())
     OS << II->getName();
@@ -1307,6 +1367,22 @@ void TypePrinter::printTag(TagDecl *D, raw_ostream &OS) {
 }
 
 void TypePrinter::printRecordBefore(const RecordType *T, raw_ostream &OS) {
+  // Print the preferred name if we have one for this type.
+  for (const auto *PNA : T->getDecl()->specific_attrs<PreferredNameAttr>()) {
+    if (declaresSameEntity(PNA->getTypedefType()->getAsCXXRecordDecl(),
+                           T->getDecl())) {
+      // Find the outermost typedef or alias template.
+      QualType T = PNA->getTypedefType();
+      while (true) {
+        if (auto *TT = dyn_cast<TypedefType>(T))
+          return printTypeSpec(TT->getDecl(), OS);
+        if (auto *TST = dyn_cast<TemplateSpecializationType>(T))
+          return printTemplateId(TST, OS, /*FullyQualify=*/true);
+        T = T->getLocallyUnqualifiedSingleStepDesugaredType();
+      }
+    }
+  }
+
   printTag(T->getDecl(), OS);
 }
 
@@ -1366,18 +1442,30 @@ void TypePrinter::printSubstTemplateTypeParmPackAfter(
   printTemplateTypeParmAfter(T->getReplacedParameter(), OS);
 }
 
+void TypePrinter::printTemplateId(const TemplateSpecializationType *T,
+                                  raw_ostream &OS, bool FullyQualify) {
+  IncludeStrongLifetimeRAII Strong(Policy);
+
+  TemplateDecl *TD = T->getTemplateName().getAsTemplateDecl();
+  if (FullyQualify && TD) {
+    if (!Policy.SuppressScope)
+      AppendScope(TD->getDeclContext(), OS, TD->getDeclName());
+
+    IdentifierInfo *II = TD->getIdentifier();
+    OS << II->getName();
+  } else {
+    T->getTemplateName().print(OS, Policy);
+  }
+
+  const TemplateParameterList *TPL = TD ? TD->getTemplateParameters() : nullptr;
+  printTemplateArgumentList(OS, T->template_arguments(), Policy, TPL);
+  spaceBeforePlaceHolder(OS);
+}
+
 void TypePrinter::printTemplateSpecializationBefore(
                                             const TemplateSpecializationType *T,
                                             raw_ostream &OS) {
-  IncludeStrongLifetimeRAII Strong(Policy);
-  T->getTemplateName().print(OS, Policy);
-
-  const TemplateParameterList *TPL = nullptr;
-  if (TemplateDecl *TD = T->getTemplateName().getAsTemplateDecl())
-    TPL = TD->getTemplateParameters();
-
-  printTemplateArgumentList(OS, T->template_arguments(), Policy, TPL);
-  spaceBeforePlaceHolder(OS);
+  printTemplateId(T, OS, false);
 }
 
 void TypePrinter::printTemplateSpecializationAfter(
@@ -1589,6 +1677,8 @@ void TypePrinter::printAttributedAfter(const AttributedType *T,
 
   case attr::OpenCLPrivateAddressSpace:
   case attr::OpenCLGlobalAddressSpace:
+  case attr::OpenCLGlobalDeviceAddressSpace:
+  case attr::OpenCLGlobalHostAddressSpace:
   case attr::OpenCLLocalAddressSpace:
   case attr::OpenCLConstantAddressSpace:
   case attr::OpenCLGenericAddressSpace:
@@ -1626,6 +1716,7 @@ void TypePrinter::printAttributedAfter(const AttributedType *T,
   case attr::StdCall: OS << "stdcall"; break;
   case attr::ThisCall: OS << "thiscall"; break;
   case attr::SwiftCall: OS << "swiftcall"; break;
+  case attr::SwiftAsyncCall: OS << "swiftasynccall"; break;
   case attr::VectorCall: OS << "vectorcall"; break;
   case attr::Pascal: OS << "pascal"; break;
   case attr::MSABI: OS << "ms_abi"; break;
@@ -2071,6 +2162,10 @@ std::string Qualifiers::getAddrSpaceAsString(LangAS AS) {
     return "__constant";
   case LangAS::opencl_generic:
     return "__generic";
+  case LangAS::opencl_global_device:
+    return "__global_device";
+  case LangAS::opencl_global_host:
+    return "__global_host";
   case LangAS::cuda_device:
     return "__device__";
   case LangAS::cuda_constant:

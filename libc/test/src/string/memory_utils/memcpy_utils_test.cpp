@@ -162,7 +162,23 @@ TEST(MemcpyUtilsTest, CopyBlockOverlap) {
 
 TEST(MemcpyUtilsTest, CopyAlignedBlocks) {
   auto &trace = GetTrace();
-  // Destination is aligned already.
+  // Source is aligned and multiple of alignment.
+  //   "1111"
+  trace.Clear();
+  CopyAlignedBlocks<4>(I(0), I(0), 4);
+  EXPECT_STREQ(trace.Write(), "2222");
+  EXPECT_STREQ(trace.Read(), "2222");
+
+  // Source is aligned and multiple of alignment.
+  //   "11110000"
+  // + "00001111"
+  // = "11111111"
+  trace.Clear();
+  CopyAlignedBlocks<4>(I(0), I(0), 8);
+  EXPECT_STREQ(trace.Write(), "11111111");
+  EXPECT_STREQ(trace.Read(), "11111111");
+
+  // Source is aligned already overlap at end.
   //   "1111000000000"
   // + "0000111100000"
   // + "0000000011110"
@@ -173,16 +189,26 @@ TEST(MemcpyUtilsTest, CopyAlignedBlocks) {
   EXPECT_STREQ(trace.Write(), "1111111112221");
   EXPECT_STREQ(trace.Read(), "1111111112221");
 
-  // Misaligned destination
+  // Misaligned source.
   //   "01111000000000"
   // + "00001111000000"
   // + "00000000111100"
   // + "00000000001111"
   // = "01112111112211"
   trace.Clear();
-  CopyAlignedBlocks<4>(I(1), I(0), 13);
-  EXPECT_STREQ(trace.Write(), "01112111112211");
-  EXPECT_STREQ(trace.Read(), "1112111112211");
+  CopyAlignedBlocks<4>(I(0), I(1), 13);
+  EXPECT_STREQ(trace.Write(), "1112111112211");
+  EXPECT_STREQ(trace.Read(), "01112111112211");
+
+  // Misaligned source aligned at end.
+  //   "011110000000"
+  // + "000011110000"
+  // + "000000001111"
+  // = "011121111111"
+  trace.Clear();
+  CopyAlignedBlocks<4>(I(0), I(1), 11);
+  EXPECT_STREQ(trace.Write(), "11121111111");
+  EXPECT_STREQ(trace.Read(), "011121111111");
 }
 
 TEST(MemcpyUtilsTest, MaxReloads) {

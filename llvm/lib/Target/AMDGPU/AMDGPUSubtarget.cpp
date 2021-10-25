@@ -50,6 +50,15 @@ static cl::opt<bool> EnableVGPRIndexMode(
   cl::desc("Use GPR indexing mode instead of movrel for vector indexing"),
   cl::init(false));
 
+static cl::opt<bool> EnableFlatScratch(
+  "amdgpu-enable-flat-scratch",
+  cl::desc("Use flat scratch instructions"),
+  cl::init(false));
+
+static cl::opt<bool> UseAA("amdgpu-use-aa-in-codegen",
+                           cl::desc("Enable the use of AA during codegen."),
+                           cl::init(true));
+
 GCNSubtarget::~GCNSubtarget() = default;
 
 R600Subtarget &
@@ -57,7 +66,7 @@ R600Subtarget::initializeSubtargetDependencies(const Triple &TT,
                                                StringRef GPU, StringRef FS) {
   SmallString<256> FullFS("+promote-alloca,");
   FullFS += FS;
-  ParseSubtargetFeatures(GPU, FullFS);
+  ParseSubtargetFeatures(GPU, /*TuneCPU*/ GPU, FullFS);
 
   HasMulU24 = getGeneration() >= EVERGREEN;
   HasMulI24 = hasCaymanISA();
@@ -80,8 +89,9 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
   // Assuming ECC is enabled is the conservative default.
   SmallString<256> FullFS("+promote-alloca,+load-store-opt,+enable-ds128,+sram-ecc,+xnack,");
 
-  if (isAmdHsaOS()) // Turn on FlatForGlobal for HSA.
-    FullFS += "+flat-for-global,+unaligned-buffer-access,+trap-handler,";
+  // Turn on features that HSA ABI requires. Also turn on FlatForGlobal by default
+  if (isAmdHsaOS())
+    FullFS += "+flat-for-global,+unaligned-access-mode,+trap-handler,";
 
   FullFS += "+enable-prt-strict-null,"; // This is overridden by a disable in FS
 
@@ -97,16 +107,37 @@ GCNSubtarget::initializeSubtargetDependencies(const Triple &TT,
 
   FullFS += FS;
 
-  ParseSubtargetFeatures(GPU, FullFS);
+  ParseSubtargetFeatures(GPU, /*TuneCPU*/ GPU, FullFS);
+
+  // Implement the "generic" processors, which acts as the default when no
+  // generation features are enabled (e.g for -mcpu=''). HSA OS defaults to
+  // the first amdgcn target that supports flat addressing. Other OSes defaults
+  // to the first amdgcn target.
+  if (Gen == AMDGPUSubtarget::INVALID) {
+     Gen = TT.getOS() == Triple::AMDHSA ? AMDGPUSubtarget::SEA_ISLANDS
+                                        : AMDGPUSubtarget::SOUTHERN_ISLANDS;
+  }
 
   // We don't support FP64 for EG/NI atm.
   assert(!hasFP64() || (getGeneration() >= AMDGPUSubtarget::SOUTHERN_ISLANDS));
 
-  // Unless +-flat-for-global is specified, turn on FlatForGlobal for all OS-es
-  // on VI and newer hardware to avoid assertion failures due to missing ADDR64
-  // variants of MUBUF instructions.
-  if (!hasAddr64() && !FS.contains("flat-for-global")) {
+  // Targets must either support 64-bit offsets for MUBUF instructions, and/or
+  // support flat operations, otherwise they cannot access a 64-bit global
+  // address space
+  assert(hasAddr64() || hasFlat());
+  // Unless +-flat-for-global is specified, turn on FlatForGlobal for targets
+  // that do not support ADDR64 variants of MUBUF instructions. Such targets
+  // cannot use a 64 bit offset with a MUBUF instruction to access the global
+  // address space
+  if (!hasAddr64() && !FS.contains("flat-for-global") && !FlatForGlobal) {
+    ToggleFeature(AMDGPU::FeatureFlatForGlobal);
     FlatForGlobal = true;
+  }
+  // Unless +-flat-for-global is specified, use MUBUF instructions for global
+  // address space access if flat operations are not available.
+  if (!hasFlat() && !FS.contains("flat-for-global") && FlatForGlobal) {
+    ToggleFeature(AMDGPU::FeatureFlatForGlobal);
+    FlatForGlobal = false;
   }
 
   // Set defaults if needed.
@@ -170,10 +201,10 @@ AMDGPUSubtarget::AMDGPUSubtarget(const Triple &TT) :
 
 GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
                            const GCNTargetMachine &TM) :
-    AMDGPUGenSubtargetInfo(TT, GPU, FS),
+    AMDGPUGenSubtargetInfo(TT, GPU, /*TuneCPU*/ GPU, FS),
     AMDGPUSubtarget(TT),
     TargetTriple(TT),
-    Gen(TT.getOS() == Triple::AMDHSA ? SEA_ISLANDS : SOUTHERN_ISLANDS),
+    Gen(INVALID),
     InstrItins(getInstrItineraryForCPU(GPU)),
     LDSBankCount(0),
     MaxPrivateElementSize(0),
@@ -184,9 +215,8 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
 
     FlatForGlobal(false),
     AutoWaitcntBeforeBarrier(false),
-    CodeObjectV3(false),
     UnalignedScratchAccess(false),
-    UnalignedBufferAccess(false),
+    UnalignedAccessMode(false),
 
     HasApertureRegs(false),
     EnableXNACK(false),
@@ -257,6 +287,8 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     HasUnpackedD16VMem(false),
     LDSMisalignedBug(false),
     HasMFMAInlineLiteralBug(false),
+    UnalignedBufferAccess(false),
+    UnalignedDSAccess(false),
 
     ScalarizeGlobal(false),
 
@@ -269,6 +301,8 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
     HasNSAtoVMEMBug(false),
     HasOffset3fBug(false),
     HasFlatSegmentOffsetBug(false),
+    HasImageStoreD16Bug(false),
+    HasImageGather4D16Bug(false),
 
     FeatureDisable(false),
     InstrInfo(initializeSubtargetDependencies(TT, GPU, FS)),
@@ -281,6 +315,10 @@ GCNSubtarget::GCNSubtarget(const Triple &TT, StringRef GPU, StringRef FS,
   RegBankInfo.reset(new AMDGPURegisterBankInfo(*this));
   InstSelector.reset(new AMDGPUInstructionSelector(
   *this, *static_cast<AMDGPURegisterBankInfo *>(RegBankInfo.get()), TM));
+}
+
+bool GCNSubtarget::enableFlatScratch() const {
+  return EnableFlatScratch && hasFlatScratchInsts();
 }
 
 unsigned GCNSubtarget::getConstantBusLimit(unsigned Opcode) const {
@@ -436,6 +474,21 @@ std::pair<unsigned, unsigned> AMDGPUSubtarget::getWavesPerEU(
   return Requested;
 }
 
+static unsigned getReqdWorkGroupSize(const Function &Kernel, unsigned Dim) {
+  auto Node = Kernel.getMetadata("reqd_work_group_size");
+  if (Node && Node->getNumOperands() == 3)
+    return mdconst::extract<ConstantInt>(Node->getOperand(Dim))->getZExtValue();
+  return std::numeric_limits<unsigned>::max();
+}
+
+unsigned AMDGPUSubtarget::getMaxWorkitemID(const Function &Kernel,
+                                           unsigned Dimension) const {
+  unsigned ReqdSize = getReqdWorkGroupSize(Kernel, Dimension);
+  if (ReqdSize != std::numeric_limits<unsigned>::max())
+    return ReqdSize - 1;
+  return getFlatWorkGroupSizes(Kernel).second - 1;
+}
+
 bool AMDGPUSubtarget::makeLIDRangeMetadata(Instruction *I) const {
   Function *Kernel = I->getParent()->getParent();
   unsigned MinSize = 0;
@@ -472,11 +525,11 @@ bool AMDGPUSubtarget::makeLIDRangeMetadata(Instruction *I) const {
       default:
         break;
       }
+
       if (Dim <= 3) {
-        if (auto Node = Kernel->getMetadata("reqd_work_group_size"))
-          if (Node->getNumOperands() == 3)
-            MinSize = MaxSize = mdconst::extract<ConstantInt>(
-                                  Node->getOperand(Dim))->getZExtValue();
+        unsigned ReqdSize = getReqdWorkGroupSize(*Kernel, Dim);
+        if (ReqdSize != std::numeric_limits<unsigned>::max())
+          MinSize = MaxSize = ReqdSize;
       }
     }
   }
@@ -508,12 +561,15 @@ uint64_t AMDGPUSubtarget::getExplicitKernArgSize(const Function &F,
   MaxAlign = Align(1);
 
   for (const Argument &Arg : F.args()) {
-    Type *ArgTy = Arg.getType();
+    const bool IsByRef = Arg.hasByRefAttr();
+    Type *ArgTy = IsByRef ? Arg.getParamByRefType() : Arg.getType();
+    MaybeAlign Alignment = IsByRef ? Arg.getParamAlign() : None;
+    if (!Alignment)
+      Alignment = DL.getABITypeAlign(ArgTy);
 
-    const Align Alignment = DL.getABITypeAlign(ArgTy);
     uint64_t AllocSize = DL.getTypeAllocSize(ArgTy);
     ExplicitArgBytes = alignTo(ExplicitArgBytes, Alignment) + AllocSize;
-    MaxAlign = std::max(MaxAlign, Alignment);
+    MaxAlign = max(MaxAlign, Alignment);
   }
 
   return ExplicitArgBytes;
@@ -538,7 +594,7 @@ unsigned AMDGPUSubtarget::getKernArgSegmentSize(const Function &F,
 
 R600Subtarget::R600Subtarget(const Triple &TT, StringRef GPU, StringRef FS,
                              const TargetMachine &TM) :
-  R600GenSubtargetInfo(TT, GPU, FS),
+  R600GenSubtargetInfo(TT, GPU, /*TuneCPU*/GPU, FS),
   AMDGPUSubtarget(TT),
   InstrInfo(*this),
   FrameLowering(TargetFrameLowering::StackGrowsUp, getStackAlignment(), 0),
@@ -577,6 +633,8 @@ bool GCNSubtarget::hasMadF16() const {
 bool GCNSubtarget::useVGPRIndexMode() const {
   return !hasMovrel() || (EnableVGPRIndexMode && hasVGPRIndexMode());
 }
+
+bool GCNSubtarget::useAA() const { return UseAA; }
 
 unsigned GCNSubtarget::getOccupancyWithNumSGPRs(unsigned SGPRs) const {
   if (getGeneration() >= AMDGPUSubtarget::GFX10)
@@ -787,7 +845,7 @@ struct FillMFMAShadowMutation : ScheduleDAGMutation {
     for (unsigned I = 0; I < Succs.size(); ++I) {
       for (const SDep &SI : Succs[I]->Succs) {
         const SUnit *SU = SI.getSUnit();
-        if (SU != Succs[I] && llvm::find(Succs, SU) == Succs.end())
+        if (SU != Succs[I] && !llvm::is_contained(Succs, SU))
           Succs.push_back(SU);
       }
     }
@@ -795,7 +853,7 @@ struct FillMFMAShadowMutation : ScheduleDAGMutation {
     SmallPtrSet<const SUnit*, 32> Visited;
     while (!Preds.empty()) {
       const SUnit *SU = Preds.pop_back_val();
-      if (llvm::find(Succs, SU) != Succs.end())
+      if (llvm::is_contained(Succs, SU))
         return false;
       Visited.insert(SU);
       for (const SDep &SI : SU->Preds)

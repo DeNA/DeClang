@@ -83,6 +83,8 @@ private:
   bool expandSVESpillFill(MachineBasicBlock &MBB,
                           MachineBasicBlock::iterator MBBI, unsigned Opc,
                           unsigned N);
+  bool expandCALL_RVMARKER(MachineBasicBlock &MBB,
+                           MachineBasicBlock::iterator MBBI);
   bool expandStoreSwiftAsyncContext(MachineBasicBlock &MBB,
                                     MachineBasicBlock::iterator MBBI);
 };
@@ -629,6 +631,79 @@ bool AArch64ExpandPseudo::expandSVESpillFill(MachineBasicBlock &MBB,
   return true;
 }
 
+bool AArch64ExpandPseudo::expandCALL_RVMARKER(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
+  // Expand CALL_RVMARKER pseudo to a branch, followed by the special `mov x29,
+  // x29` marker. Mark the sequence as bundle, to avoid passes moving other code
+  // in between.
+  MachineInstr &MI = *MBBI;
+
+  MachineInstr *OriginalCall;
+  MachineOperand &CallTarget = MI.getOperand(0);
+  unsigned RegMaskStartIdx;
+  if (MI.getOperand(1).isImm()) {
+    // Pointer auth call.
+    MachineOperand &Discriminator = MI.getOperand(2);
+    assert(MI.getOperand(1).isImm() &&
+           "first operand of ptrauth call must be an immediate");
+    int64_t Imm = MI.getOperand(1).getImm();
+    assert((Imm == 0 || Imm == 1) && "invalid ptrauth immediate");
+    assert(Discriminator.isReg() &&
+           "ptrauth discriminator call must be a register");
+
+    if (Discriminator.getReg() != AArch64::XZR) {
+      unsigned Opc = Imm == 0 ? AArch64::BLRAA : AArch64::BLRAB;
+      OriginalCall =
+          BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(Opc)).getInstr();
+      OriginalCall->addOperand(CallTarget);
+      OriginalCall->addOperand(Discriminator);
+    } else {
+      assert(Discriminator.getReg() == AArch64::XZR &&
+             "*z versions of ptrauth calls need XZR as register operand");
+      unsigned Opc = Imm == 0 ? AArch64::BLRAAZ : AArch64::BLRABZ;
+      OriginalCall =
+          BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(Opc)).getInstr();
+      OriginalCall->addOperand(CallTarget);
+    }
+
+    RegMaskStartIdx = 3;
+  } else {
+    // Regular call.
+    assert((CallTarget.isGlobal() || CallTarget.isReg()) &&
+           "invalid operand for regular call");
+    unsigned Opc = CallTarget.isGlobal() ? AArch64::BL : AArch64::BLR;
+    OriginalCall =
+        BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(Opc)).getInstr();
+    OriginalCall->addOperand(CallTarget);
+    RegMaskStartIdx = 1;
+  }
+
+  // Skip argument register arguments. Those are added during ISel, but are not
+  // needed for the concrete branch.
+  while (!MI.getOperand(RegMaskStartIdx).isRegMask()) {
+    auto MOP = MI.getOperand(RegMaskStartIdx);
+    assert(MOP.isReg() && "can only add register operands");
+    OriginalCall->addOperand(MachineOperand::CreateReg(
+        MOP.getReg(), /*Def=*/false, /*Implicit=*/true));
+    RegMaskStartIdx++;
+  }
+  for (; RegMaskStartIdx < MI.getNumOperands(); ++RegMaskStartIdx)
+    OriginalCall->addOperand(MI.getOperand(RegMaskStartIdx));
+
+  auto *Marker = BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::ORRXrs))
+                     .addReg(AArch64::FP, RegState::Define)
+                     .addReg(AArch64::XZR)
+                     .addReg(AArch64::FP)
+                     .addImm(0)
+                     .getInstr();
+  if (MI.shouldUpdateCallSiteInfo())
+    MBB.getParent()->moveCallSiteInfo(&MI, Marker);
+  MI.eraseFromParent();
+  finalizeBundle(MBB, OriginalCall->getIterator(),
+                 std::next(Marker->getIterator()));
+  return true;
+}
+
 bool AArch64ExpandPseudo::expandStoreSwiftAsyncContext(
     MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI) {
   Register CtxReg = MBBI->getOperand(0).getReg();
@@ -1102,6 +1177,8 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
      return expandSVESpillFill(MBB, MBBI, AArch64::LDR_ZXI, 3);
    case AArch64::LDR_ZZXI:
      return expandSVESpillFill(MBB, MBBI, AArch64::LDR_ZXI, 2);
+   case AArch64::BLR_RVMARKER:
+     return expandCALL_RVMARKER(MBB, MBBI);
    case AArch64::StoreSwiftAsyncContext:
      return expandStoreSwiftAsyncContext(MBB, MBBI);
   }

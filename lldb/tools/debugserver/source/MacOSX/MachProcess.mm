@@ -79,6 +79,11 @@
 
 #endif // WITH_SPRINGBOARD
 
+#if WITH_CAROUSEL
+// For definition of CSLSOpenApplicationOptionForClockKit.
+#include <CarouselServices/CSLSOpenApplicationOptions.h>
+#endif // WITH_CAROUSEL
+
 #if defined(WITH_SPRINGBOARD) || defined(WITH_BKS) || defined(WITH_FBS)
 // This returns a CFRetained pointer to the Bundle ID for app_bundle_path,
 // or NULL if there was some problem getting the bundle id.
@@ -415,6 +420,12 @@ static bool FBSAddEventDataToOptions(NSMutableDictionary *options,
         DNBLog("Setting ActivateSuspended key in options dictionary.");
         [options setObject:@YES forKey: FBSOpenApplicationOptionKeyActivateSuspended];
         found_one = true;
+#if WITH_CAROUSEL
+      } else if (value.compare("WatchComplicationLaunch") == 0) {
+        DNBLog("Setting FBSOpenApplicationOptionKeyActivateSuspended key in options dictionary.");
+        [options setObject:@YES forKey: CSLSOpenApplicationOptionForClockKit];
+        found_one = true;
+#endif // WITH_CAROUSEL
       } else {
         DNBLogError("Unrecognized event type: %s.  Ignoring.", value.c_str());
         option_error.SetErrorString("Unrecognized event data.");
@@ -690,7 +701,7 @@ MachProcess::GetDeploymentInfo(const struct load_command &lc,
   // DYLD_FORCE_PLATFORM=6. In that case, force the platform to
   // macCatalyst and use the macCatalyst version of the host OS
   // instead of the macOS deployment target.
-  if (is_executable && GetProcessPlatformViaDYLDSPI() == PLATFORM_MACCATALYST) {
+  if (is_executable && GetPlatform() == PLATFORM_MACCATALYST) {
     info.platform = PLATFORM_MACCATALYST;
     std::string catalyst_version = GetMacCatalystVersionString();
     const char *major = catalyst_version.c_str();
@@ -1092,6 +1103,12 @@ struct dyld_process_cache_info {
   bool privateCache;
 };
 
+uint32_t MachProcess::GetPlatform() {
+  if (m_platform == 0)
+    m_platform = MachProcess::GetProcessPlatformViaDYLDSPI();
+  return m_platform;
+}
+
 uint32_t MachProcess::GetProcessPlatformViaDYLDSPI() {
   kern_return_t kern_ret;
   uint32_t platform = 0;
@@ -1147,7 +1164,7 @@ MachProcess::GetAllLoadedLibrariesInfos(nub_process_t pid) {
 
     std::vector<struct binary_image_information> image_infos;
     GetAllLoadedBinariesViaDYLDSPI(image_infos);
-    uint32_t platform = GetProcessPlatformViaDYLDSPI();
+    uint32_t platform = GetPlatform();
     const size_t image_count = image_infos.size();
     for (size_t i = 0; i < image_count; i++) {
       GetMachOInformationFromMemory(platform,
@@ -1178,7 +1195,7 @@ JSONGenerator::ObjectSP MachProcess::GetLibrariesInfoForAddresses(
 
     std::vector<struct binary_image_information> all_image_infos;
     GetAllLoadedBinariesViaDYLDSPI(all_image_infos);
-    uint32_t platform = GetProcessPlatformViaDYLDSPI();
+    uint32_t platform = GetPlatform();
 
     std::vector<struct binary_image_information> image_infos;
     const size_t macho_addresses_count = macho_addresses.size();
@@ -1344,6 +1361,7 @@ void MachProcess::Clear(bool detaching) {
   // Clear any cached thread list while the pid and task are still valid
 
   m_task.Clear();
+  m_platform = 0;
   // Now clear out all member variables
   m_pid = INVALID_NUB_PROCESS;
   if (!detaching)
@@ -1635,6 +1653,7 @@ bool MachProcess::Detach() {
 
   // NULL our task out as we have already restored all exception ports
   m_task.Clear();
+  m_platform = 0;
 
   // Clear out any notion of the process we once were
   const bool detaching = true;
@@ -2602,7 +2621,8 @@ void *MachProcess::ProfileThread(void *arg) {
   return NULL;
 }
 
-pid_t MachProcess::AttachForDebug(pid_t pid, char *err_str, size_t err_len) {
+pid_t MachProcess::AttachForDebug(pid_t pid, bool unmask_signals, char *err_str,
+                                  size_t err_len) {
   // Clear out and clean up from any current state
   Clear();
   if (pid != 0) {
@@ -2619,7 +2639,7 @@ pid_t MachProcess::AttachForDebug(pid_t pid, char *err_str, size_t err_len) {
 
     SetState(eStateAttaching);
     m_pid = pid;
-    if (!m_task.StartExceptionThread(err)) {
+    if (!m_task.StartExceptionThread(unmask_signals, err)) {
       const char *err_cstr = err.AsString();
       ::snprintf(err_str, err_len, "%s",
                  err_cstr ? err_cstr : "unable to start the exception thread");
@@ -2728,6 +2748,30 @@ std::string MachProcess::GetMacCatalystVersionString() {
   return {};
 }
 
+#if defined(WITH_SPRINGBOARD) || defined(WITH_BKS) || defined(WITH_FBS)
+/// Get the app bundle from the given path. Returns the empty string if the
+/// path doesn't appear to be an app bundle.
+static std::string GetAppBundle(std::string path) {
+  auto pos = path.rfind(".app");
+  // Path doesn't contain `.app`.
+  if (pos == std::string::npos)
+    return {};
+  // Path has `.app` extension.
+  if (pos == path.size() - 4)
+    return path.substr(0, pos + 4);
+
+  // Look for `.app` before a path separator.
+  do {
+    if (path[pos + 4] == '/')
+      return path.substr(0, pos + 4);
+    path = path.substr(0, pos);
+    pos = path.rfind(".app");
+  } while (pos != std::string::npos);
+
+  return {};
+}
+#endif
+
 // Do the process specific setup for attach.  If this returns NULL, then there's
 // no
 // platform specific stuff to be done to wait for the attach.  If you get
@@ -2751,10 +2795,8 @@ const void *MachProcess::PrepareForAttach(const char *path,
   if (!waitfor)
     return NULL;
 
-  const char *app_ext = strstr(path, ".app");
-  const bool is_app =
-      app_ext != NULL && (app_ext[4] == '\0' || app_ext[4] == '/');
-  if (!is_app) {
+  std::string app_bundle_path = GetAppBundle(path);
+  if (app_bundle_path.empty()) {
     DNBLogThreadedIf(
         LOG_PROCESS,
         "MachProcess::PrepareForAttach(): path '%s' doesn't contain .app, "
@@ -2779,8 +2821,6 @@ const void *MachProcess::PrepareForAttach(const char *path,
   if (launch_flavor != eLaunchFlavorSpringBoard)
     return NULL;
 #endif
-
-  std::string app_bundle_path(path, app_ext + strlen(".app"));
 
   CFStringRef bundleIDCFStr =
       CopyBundleIDForPath(app_bundle_path.c_str(), attach_err);
@@ -3108,7 +3148,7 @@ pid_t MachProcess::LaunchForDebug(
                                    // working directory for inferior to this
     const char *stdin_path, const char *stdout_path, const char *stderr_path,
     bool no_stdio, nub_launch_flavor_t launch_flavor, int disable_aslr,
-    const char *event_data, DNBError &launch_err) {
+    const char *event_data, bool unmask_signals, DNBError &launch_err) {
   // Clear out and clean up from any current state
   Clear();
 
@@ -3129,61 +3169,42 @@ pid_t MachProcess::LaunchForDebug(
     break;
 #ifdef WITH_FBS
   case eLaunchFlavorFBS: {
-    const char *app_ext = strstr(path, ".app");
-    if (app_ext && (app_ext[4] == '\0' || app_ext[4] == '/')) {
-      std::string app_bundle_path(path, app_ext + strlen(".app"));
+    std::string app_bundle_path = GetAppBundle(path);
+    if (!app_bundle_path.empty()) {
       m_flags |= (eMachProcessFlagsUsingFBS | eMachProcessFlagsBoardCalculated);
       if (BoardServiceLaunchForDebug(app_bundle_path.c_str(), argv, envp,
                                      no_stdio, disable_aslr, event_data,
-                                     launch_err) != 0)
+                                     unmask_signals, launch_err) != 0)
         return m_pid; // A successful SBLaunchForDebug() returns and assigns a
                       // non-zero m_pid.
-      else
-        break; // We tried a FBS launch, but didn't succeed lets get out
     }
+    DNBLog("Failed to launch '%s' with FBS", app_bundle_path);
   } break;
 #endif
 #ifdef WITH_BKS
   case eLaunchFlavorBKS: {
-    const char *app_ext = strstr(path, ".app");
-    if (app_ext && (app_ext[4] == '\0' || app_ext[4] == '/')) {
-      std::string app_bundle_path(path, app_ext + strlen(".app"));
+    std::string app_bundle_path = GetAppBundle(path);
+    if (!app_bundle_path.empty()) {
       m_flags |= (eMachProcessFlagsUsingBKS | eMachProcessFlagsBoardCalculated);
       if (BoardServiceLaunchForDebug(app_bundle_path.c_str(), argv, envp,
                                      no_stdio, disable_aslr, event_data,
-                                     launch_err) != 0)
+                                     unmask_signals, launch_err) != 0)
         return m_pid; // A successful SBLaunchForDebug() returns and assigns a
                       // non-zero m_pid.
-      else
-        break; // We tried a BKS launch, but didn't succeed lets get out
     }
+    DNBLog("Failed to launch '%s' with BKS", app_bundle_path);
   } break;
 #endif
 #ifdef WITH_SPRINGBOARD
-
   case eLaunchFlavorSpringBoard: {
-    //  .../whatever.app/whatever ?
-    //  Or .../com.apple.whatever.app/whatever -- be careful of ".app" in
-    //  "com.apple.whatever" here
-    const char *app_ext = strstr(path, ".app/");
-    if (app_ext == NULL) {
-      // .../whatever.app ?
-      int len = strlen(path);
-      if (len > 5) {
-        if (strcmp(path + len - 4, ".app") == 0) {
-          app_ext = path + len - 4;
-        }
-      }
-    }
-    if (app_ext) {
-      std::string app_bundle_path(path, app_ext + strlen(".app"));
+    std::string app_bundle_path = GetAppBundle(path);
+    if (!app_bundle_path.empty()) {
       if (SBLaunchForDebug(app_bundle_path.c_str(), argv, envp, no_stdio,
-                           disable_aslr, launch_err) != 0)
+                           disable_aslr, unmask_signals, launch_err) != 0)
         return m_pid; // A successful SBLaunchForDebug() returns and assigns a
                       // non-zero m_pid.
-      else
-        break; // We tried a springboard launch, but didn't succeed lets get out
     }
+    DNBLog("Failed to launch '%s' with SpringBoard", app_bundle_path);
   } break;
 
 #endif
@@ -3196,7 +3217,7 @@ pid_t MachProcess::LaunchForDebug(
     break;
 
   default:
-    // Invalid  launch
+    DNBLog("Failed to launch: invalid launch flavor: %d", launch_flavor);
     launch_err.SetError(NUB_GENERIC_ERROR, DNBError::Generic);
     return INVALID_NUB_PROCESS;
   }
@@ -3213,7 +3234,7 @@ pid_t MachProcess::LaunchForDebug(
     for (i = 0; (arg = argv[i]) != NULL; i++)
       m_args.push_back(arg);
 
-    m_task.StartExceptionThread(launch_err);
+    m_task.StartExceptionThread(unmask_signals, launch_err);
     if (launch_err.Fail()) {
       if (launch_err.AsString() == NULL)
         launch_err.SetErrorString("unable to start the exception thread");
@@ -3581,7 +3602,8 @@ static CFStringRef CopyBundleIDForPath(const char *app_bundle_path,
 
 pid_t MachProcess::SBLaunchForDebug(const char *path, char const *argv[],
                                     char const *envp[], bool no_stdio,
-                                    bool disable_aslr, DNBError &launch_err) {
+                                    bool disable_aslr, bool unmask_signals,
+                                    DNBError &launch_err) {
   // Clear out and clean up from any current state
   Clear();
 
@@ -3597,7 +3619,7 @@ pid_t MachProcess::SBLaunchForDebug(const char *path, char const *argv[],
     char const *arg;
     for (i = 0; (arg = argv[i]) != NULL; i++)
       m_args.push_back(arg);
-    m_task.StartExceptionThread(launch_err);
+    m_task.StartExceptionThread(unmask_signals, launch_err);
 
     if (launch_err.Fail()) {
       if (launch_err.AsString() == NULL)
@@ -3798,7 +3820,8 @@ pid_t MachProcess::SBForkChildForPTraceDebugging(
 #if defined(WITH_BKS) || defined(WITH_FBS)
 pid_t MachProcess::BoardServiceLaunchForDebug(
     const char *path, char const *argv[], char const *envp[], bool no_stdio,
-    bool disable_aslr, const char *event_data, DNBError &launch_err) {
+    bool disable_aslr, const char *event_data, bool unmask_signals,
+    DNBError &launch_err) {
   DNBLogThreadedIf(LOG_PROCESS, "%s( '%s', argv)", __FUNCTION__, path);
 
   // Fork a child process for debugging
@@ -3811,7 +3834,7 @@ pid_t MachProcess::BoardServiceLaunchForDebug(
     char const *arg;
     for (i = 0; (arg = argv[i]) != NULL; i++)
       m_args.push_back(arg);
-    m_task.StartExceptionThread(launch_err);
+    m_task.StartExceptionThread(unmask_signals, launch_err);
 
     if (launch_err.Fail()) {
       if (launch_err.AsString() == NULL)

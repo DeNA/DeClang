@@ -13,12 +13,12 @@
 #include "SwiftREPLMaterializer.h"
 #include "SwiftASTManipulator.h"
 
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "lldb/Core/DumpDataExtractor.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 #include "lldb/Expression/IRMemoryMap.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Utility/Log.h"
 
 #include "swift/Demangling/Demangle.h"
@@ -87,7 +87,7 @@ public:
   }
 
   void Materialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
-                   lldb::addr_t process_address, Status &err) {
+                   lldb::addr_t process_address, Status &err) override {
     // no action required
   }
 
@@ -155,7 +155,7 @@ public:
     ret->ValueUpdated();
 
     if (variable) {
-      const size_t pvar_byte_size = ret->GetByteSize();
+      const size_t pvar_byte_size = ret->GetByteSize().getValueOr(0);
       uint8_t *pvar_data = ret->GetValueBytes();
 
       Status read_error;
@@ -194,7 +194,7 @@ public:
 
   void Dematerialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
                      lldb::addr_t process_address, lldb::addr_t frame_top,
-                     lldb::addr_t frame_bottom, Status &err) {
+                     lldb::addr_t frame_bottom, Status &err) override {
     IRExecutionUnit *execution_unit =
         llvm::cast<SwiftREPLMaterializer>(m_parent)->GetExecutionUnit();
 
@@ -231,7 +231,8 @@ public:
         "Couldn't dematerialize result: corresponding symbol wasn't found");
   }
 
-  void DumpToLog(IRMemoryMap &map, lldb::addr_t process_address, Log *log) {
+  void DumpToLog(IRMemoryMap &map, lldb::addr_t process_address,
+                 Log *log) override {
     StreamString dump_stream;
 
     const lldb::addr_t load_addr = process_address + m_offset;
@@ -293,7 +294,7 @@ public:
     log->PutCString(dump_stream.GetData());
   }
 
-  void Wipe(IRMemoryMap &map, lldb::addr_t process_address) {
+  void Wipe(IRMemoryMap &map, lldb::addr_t process_address) override {
     m_temporary_allocation = LLDB_INVALID_ADDRESS;
     m_temporary_allocation_size = 0;
   }
@@ -337,13 +338,13 @@ public:
   }
 
   void Materialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
-                   lldb::addr_t process_address, Status &err) {
+                   lldb::addr_t process_address, Status &err) override {
     // no action required
   }
 
   void Dematerialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
                      lldb::addr_t process_address, lldb::addr_t frame_top,
-                     lldb::addr_t frame_bottom, Status &err) {
+                     lldb::addr_t frame_bottom, Status &err) override {
     if (llvm::cast<SwiftExpressionVariable>(m_persistent_variable_sp.get())
             ->GetIsComputed())
       return;
@@ -408,7 +409,7 @@ public:
         // FIXME: This may not work if the value is not bitwise-takable.
         execution_unit->ReadMemory(
             m_persistent_variable_sp->GetValueBytes(), var_addr,
-            m_persistent_variable_sp->GetByteSize(), read_error);
+            m_persistent_variable_sp->GetByteSize().getValueOr(0), read_error);
 
         if (!read_error.Success()) {
           err.SetErrorStringWithFormat(
@@ -432,7 +433,8 @@ public:
         m_persistent_variable_sp->GetName().GetCString());
   }
 
-  void DumpToLog(IRMemoryMap &map, lldb::addr_t process_address, Log *log) {
+  void DumpToLog(IRMemoryMap &map, lldb::addr_t process_address,
+                 Log *log) override {
     StreamString dump_stream;
 
     Status err;
@@ -470,10 +472,12 @@ public:
       if (!err.Success()) {
         dump_stream.Printf("  <could not be read>\n");
       } else {
-        DataBufferHeap data(m_persistent_variable_sp->GetByteSize(), 0);
+        DataBufferHeap data(
+            m_persistent_variable_sp->GetByteSize().getValueOr(0), 0);
 
         map.ReadMemory(data.GetBytes(), target_address,
-                       m_persistent_variable_sp->GetByteSize(), err);
+                       m_persistent_variable_sp->GetByteSize().getValueOr(0),
+                       err);
 
         if (!err.Success()) {
           dump_stream.Printf("  <could not be read>\n");
@@ -489,7 +493,7 @@ public:
     log->PutCString(dump_stream.GetData());
   }
 
-  void Wipe(IRMemoryMap &map, lldb::addr_t process_address) {}
+  void Wipe(IRMemoryMap &map, lldb::addr_t process_address) override {}
 
 private:
   lldb::ExpressionVariableSP m_persistent_variable_sp;

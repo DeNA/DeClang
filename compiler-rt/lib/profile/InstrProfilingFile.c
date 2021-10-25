@@ -8,6 +8,7 @@
 
 #if !defined(__Fuchsia__)
 
+#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -437,14 +438,12 @@ static void installExitSignalHandlers(void) {
   }
 }
 
-#ifndef _MSC_VER
+#if !defined(__Fuchsia__) && !defined(_WIN32)
 static void assertIsZero(int *i) {
   if (*i)
     PROF_WARN("Expected flag to be 0, but got: %d\n", *i);
 }
-#endif
 
-#if !defined(__Fuchsia__) && !defined(_WIN32)
 /* Write a partial profile to \p Filename, which is required to be backed by
  * the open file object \p File. */
 static int writeProfileWithFileObject(const char *Filename, FILE *File) {
@@ -729,6 +728,13 @@ static int containsExitOnSignalSpecifier(const char *FilenamePat, int I) {
          (isDigit(FilenamePat[I + 1]) && FilenamePat[I + 2] == 'x');
 }
 
+/* Assert that Idx does index past a string null terminator. Return the
+ * result of the check. */
+static int checkBounds(int Idx, int Strlen) {
+  assert(Idx <= Strlen && "Indexing past string null terminator");
+  return Idx <= Strlen;
+}
+
 /* Parses the pattern string \p FilenamePat and stores the result to
  * lprofcurFilename structure. */
 static int parseFilenamePattern(const char *FilenamePat,
@@ -738,6 +744,7 @@ static int parseFilenamePattern(const char *FilenamePat,
   char *Hostname = &lprofCurFilename.Hostname[0];
   int MergingEnabled = 0;
   char SignalNo;
+  int FilenamePatLen = strlen(FilenamePat);
 
   /* Clean up cached prefix and filename.  */
   if (lprofCurFilename.ProfilePathPrefix)
@@ -756,9 +763,12 @@ static int parseFilenamePattern(const char *FilenamePat,
     lprofCurFilename.OwnsFilenamePat = 1;
   }
   /* Check the filename for "%p", which indicates a pid-substitution. */
-  for (I = 0; FilenamePat[I]; ++I)
+  for (I = 0; checkBounds(I, FilenamePatLen) && FilenamePat[I]; ++I) {
     if (FilenamePat[I] == '%') {
-      if (FilenamePat[++I] == 'p') {
+      ++I; /* Advance to the next character. */
+      if (!checkBounds(I, FilenamePatLen))
+        break;
+      if (FilenamePat[I] == 'p') {
         if (!NumPids++) {
           if (snprintf(PidChars, MAX_PID_SIZE, "%ld", (long)getpid()) <= 0) {
             PROF_WARN("Unable to get pid for filename pattern %s. Using the "
@@ -792,7 +802,6 @@ static int parseFilenamePattern(const char *FilenamePat,
 
         __llvm_profile_set_page_size(getpagesize());
         __llvm_profile_enable_continuous_mode();
-        I++; /* advance to 'c' */
       } else if (containsExitOnSignalSpecifier(FilenamePat, I)) {
         if (lprofCurFilename.NumExitSignals == MAX_SIGNAL_HANDLERS) {
           PROF_WARN("%%x specifier has been specified too many times in %s.\n",
@@ -822,6 +831,7 @@ static int parseFilenamePattern(const char *FilenamePat,
         lprofCurFilename.MergePoolSize = MergePoolSize;
       }
     }
+  }
 
   lprofCurFilename.NumPids = NumPids;
   lprofCurFilename.NumHosts = NumHosts;

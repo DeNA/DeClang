@@ -52,10 +52,10 @@ AArch64CallLowering::AArch64CallLowering(const AArch64TargetLowering &TLI)
   : CallLowering(&TLI) {}
 
 namespace {
-struct IncomingArgHandler : public CallLowering::ValueHandler {
+struct IncomingArgHandler : public CallLowering::IncomingValueHandler {
   IncomingArgHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
                      CCAssignFn *AssignFn)
-      : ValueHandler(MIRBuilder, MRI, AssignFn), StackUsed(0) {}
+      : IncomingValueHandler(MIRBuilder, MRI, AssignFn), StackUsed(0) {}
 
   Register getStackAddress(uint64_t Size, int64_t Offset,
                            MachinePointerInfo &MPO) override {
@@ -101,9 +101,7 @@ struct IncomingArgHandler : public CallLowering::ValueHandler {
   /// How the physical register gets marked varies between formal
   /// parameters (it's a basic-block live-in), and a call instruction
   /// (it's an implicit-def of the BL).
-  virtual void markPhysRegUsed(unsigned PhysReg) = 0;
-
-  bool isIncomingArgumentHandler() const override { return true; }
+  virtual void markPhysRegUsed(MCRegister PhysReg) = 0;
 
   uint64_t StackUsed;
 };
@@ -113,7 +111,7 @@ struct FormalArgHandler : public IncomingArgHandler {
                    CCAssignFn *AssignFn)
     : IncomingArgHandler(MIRBuilder, MRI, AssignFn) {}
 
-  void markPhysRegUsed(unsigned PhysReg) override {
+  void markPhysRegUsed(MCRegister PhysReg) override {
     MIRBuilder.getMRI()->addLiveIn(PhysReg);
     MIRBuilder.getMBB().addLiveIn(PhysReg);
   }
@@ -124,23 +122,21 @@ struct CallReturnHandler : public IncomingArgHandler {
                     MachineInstrBuilder MIB, CCAssignFn *AssignFn)
     : IncomingArgHandler(MIRBuilder, MRI, AssignFn), MIB(MIB) {}
 
-  void markPhysRegUsed(unsigned PhysReg) override {
+  void markPhysRegUsed(MCRegister PhysReg) override {
     MIB.addDef(PhysReg, RegState::Implicit);
   }
 
   MachineInstrBuilder MIB;
 };
 
-struct OutgoingArgHandler : public CallLowering::ValueHandler {
+struct OutgoingArgHandler : public CallLowering::OutgoingValueHandler {
   OutgoingArgHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
                      MachineInstrBuilder MIB, CCAssignFn *AssignFn,
                      CCAssignFn *AssignFnVarArg, bool IsTailCall = false,
                      int FPDiff = 0)
-      : ValueHandler(MIRBuilder, MRI, AssignFn), MIB(MIB),
+      : OutgoingValueHandler(MIRBuilder, MRI, AssignFn), MIB(MIB),
         AssignFnVarArg(AssignFnVarArg), IsTailCall(IsTailCall), FPDiff(FPDiff),
         StackSize(0), SPReg(0) {}
-
-  bool isIncomingArgumentHandler() const override { return false; }
 
   Register getStackAddress(uint64_t Size, int64_t Offset,
                            MachinePointerInfo &MPO) override {
@@ -191,6 +187,8 @@ struct OutgoingArgHandler : public CallLowering::ValueHandler {
     if (!Arg.IsFixed)
       MaxSize = 0;
 
+    assert(Arg.Regs.size() == 1);
+
     Register ValVReg = VA.getLocInfo() != CCValAssign::LocInfo::FPExt
                            ? extendRegister(Arg.Regs[0], VA, MaxSize)
                            : Arg.Regs[0];
@@ -233,7 +231,8 @@ struct OutgoingArgHandler : public CallLowering::ValueHandler {
 } // namespace
 
 static bool doesCalleeRestoreStack(CallingConv::ID CallConv, bool TailCallOpt) {
-  return CallConv == CallingConv::Fast && TailCallOpt;
+  return (CallConv == CallingConv::Fast && TailCallOpt) ||
+         CallConv == CallingConv::Tail || CallConv == CallingConv::SwiftTail;
 }
 
 void AArch64CallLowering::splitToValueTypes(
@@ -276,6 +275,7 @@ void AArch64CallLowering::splitToValueTypes(
 bool AArch64CallLowering::lowerReturn(MachineIRBuilder &MIRBuilder,
                                       const Value *Val,
                                       ArrayRef<Register> VRegs,
+                                      FunctionLoweringInfo &FLI,
                                       Register SwiftErrorVReg) const {
   auto MIB = MIRBuilder.buildInstrNoInsert(AArch64::RET_ReallyLR);
   assert(((Val && !VRegs.empty()) || (!Val && VRegs.empty())) &&
@@ -421,7 +421,7 @@ static void handleMustTailForwardedRegisters(MachineIRBuilder &MIRBuilder,
   // Conservatively forward X8, since it might be used for an aggregate
   // return.
   if (!CCInfo.isAllocated(AArch64::X8)) {
-    unsigned X8VReg = MF.addLiveIn(AArch64::X8, &AArch64::GPR64RegClass);
+    Register X8VReg = MF.addLiveIn(AArch64::X8, &AArch64::GPR64RegClass);
     Forwards.push_back(ForwardedRegister(X8VReg, AArch64::X8, MVT::i64));
   }
 
@@ -442,7 +442,7 @@ bool AArch64CallLowering::fallBackToDAGISel(const Function &F) const {
 
 bool AArch64CallLowering::lowerFormalArguments(
     MachineIRBuilder &MIRBuilder, const Function &F,
-    ArrayRef<ArrayRef<Register>> VRegs) const {
+    ArrayRef<ArrayRef<Register>> VRegs, FunctionLoweringInfo &FLI) const {
   MachineFunction &MF = MIRBuilder.getMF();
   MachineBasicBlock &MBB = MIRBuilder.getMBB();
   MachineRegisterInfo &MRI = MF.getRegInfo();
@@ -525,8 +525,9 @@ bool AArch64CallLowering::lowerFormalArguments(
 }
 
 /// Return true if the calling convention is one that we can guarantee TCO for.
-static bool canGuaranteeTCO(CallingConv::ID CC) {
-  return CC == CallingConv::Fast;
+static bool canGuaranteeTCO(CallingConv::ID CC, bool GuaranteeTailCalls) {
+  return (CC == CallingConv::Fast && GuaranteeTailCalls) ||
+         CC == CallingConv::Tail || CC == CallingConv::SwiftTail;
 }
 
 /// Return true if we might ever do TCO for calls with this calling convention.
@@ -535,9 +536,12 @@ static bool mayTailCallThisCC(CallingConv::ID CC) {
   case CallingConv::C:
   case CallingConv::PreserveMost:
   case CallingConv::Swift:
+  case CallingConv::SwiftTail:
+  case CallingConv::Tail:
+  case CallingConv::Fast:
     return true;
   default:
-    return canGuaranteeTCO(CC);
+    return false;
   }
 }
 
@@ -761,8 +765,8 @@ bool AArch64CallLowering::isEligibleForTailCallOptimization(
   }
 
   // If we have -tailcallopt, then we're done.
-  if (MF.getTarget().Options.GuaranteedTailCallOpt)
-    return canGuaranteeTCO(CalleeCC) && CalleeCC == CallerF.getCallingConv();
+  if (canGuaranteeTCO(CalleeCC, MF.getTarget().Options.GuaranteedTailCallOpt))
+    return CalleeCC == CallerF.getCallingConv();
 
   // We don't have -tailcallopt, so we're allowed to change the ABI (sibcall).
   // Try to find cases where we can do that.
@@ -799,7 +803,7 @@ static unsigned getCallOpcode(const MachineFunction &CallerF, bool IsIndirect,
 
   // When BTI is enabled, we need to use TCRETURNriBTI to make sure that we use
   // x16 or x17.
-  if (CallerF.getFunction().hasFnAttribute("branch-target-enforcement"))
+  if (CallerF.getInfo<AArch64FunctionInfo>()->branchTargetEnforcement())
     return AArch64::TCRETURNriBTI;
 
   return AArch64::TCRETURNri;
@@ -815,11 +819,13 @@ bool AArch64CallLowering::lowerTailCall(
   AArch64FunctionInfo *FuncInfo = MF.getInfo<AArch64FunctionInfo>();
 
   // True when we're tail calling, but without -tailcallopt.
-  bool IsSibCall = !MF.getTarget().Options.GuaranteedTailCallOpt;
+  bool IsSibCall = !MF.getTarget().Options.GuaranteedTailCallOpt &&
+                   Info.CallConv != CallingConv::Tail &&
+                   Info.CallConv != CallingConv::SwiftTail;
 
   // TODO: Right now, regbankselect doesn't know how to handle the rtcGPR64
   // register class. Until we can do that, we should fall back here.
-  if (F.hasFnAttribute("branch-target-enforcement")) {
+  if (MF.getInfo<AArch64FunctionInfo>()->branchTargetEnforcement()) {
     LLVM_DEBUG(
         dbgs() << "Cannot lower indirect tail calls with BTI enabled yet.\n");
     return false;
@@ -882,6 +888,11 @@ bool AArch64CallLowering::lowerTailCall(
     // actually shrink the stack.
     FPDiff = NumReusableBytes - NumBytes;
 
+    // Update the required reserved area if this is the tail call requiring the
+    // most argument stack space.
+    if (FPDiff < 0 && FuncInfo->getTailCallReservedStack() < (unsigned)-FPDiff)
+      FuncInfo->setTailCallReservedStack(-FPDiff);
+
     // The stack pointer must be 16-byte aligned at all times it's used for a
     // memory operation, which in practice means at *all* times and in
     // particular across call boundaries. Therefore our own arguments started at
@@ -923,12 +934,12 @@ bool AArch64CallLowering::lowerTailCall(
   // sequence start and end here.
   if (!IsSibCall) {
     MIB->getOperand(1).setImm(FPDiff);
-    CallSeqStart.addImm(NumBytes).addImm(0);
+    CallSeqStart.addImm(0).addImm(0);
     // End the call sequence *before* emitting the call. Normally, we would
     // tidy the frame up after the call. However, here, we've laid out the
     // parameters so that when SP is reset, they will be in the correct
     // location.
-    MIRBuilder.buildInstr(AArch64::ADJCALLSTACKUP).addImm(NumBytes).addImm(0);
+    MIRBuilder.buildInstr(AArch64::ADJCALLSTACKUP).addImm(0).addImm(0);
   }
 
   // Now we can add the actual call instruction to the correct basic block.

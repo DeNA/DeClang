@@ -128,11 +128,11 @@ public:
 
   FILE *GetErrorFILE();
 
-  lldb::FileSP &GetInputFileSP();
+  lldb::FileSP GetInputFileSP();
 
-  lldb::StreamFileSP &GetOutputStreamFileSP();
+  lldb::StreamFileSP GetOutputStreamFileSP();
 
-  lldb::StreamFileSP &GetErrorStreamFileSP();
+  lldb::StreamFileSP GetErrorStreamFileSP();
 
   Debugger &GetDebugger() { return m_debugger; }
 
@@ -204,6 +204,9 @@ public:
   virtual void IOHandlerActivated(IOHandler &io_handler, bool interactive) {}
 
   virtual void IOHandlerDeactivated(IOHandler &io_handler) {}
+
+  virtual llvm::Optional<std::string> IOHandlerSuggestion(IOHandler &io_handler,
+                                                          llvm::StringRef line);
 
   virtual void IOHandlerComplete(IOHandler &io_handler,
                                  CompletionRequest &request);
@@ -421,6 +424,9 @@ private:
 
   static int FixIndentationCallback(Editline *editline, const StringList &lines,
                                     int cursor_position, void *baton);
+
+  static llvm::Optional<std::string> SuggestionCallback(llvm::StringRef line,
+                                                        void *baton);
 
   static void AutoCompleteCallback(CompletionRequest &request, void *baton);
 #endif

@@ -24,12 +24,9 @@ namespace Fortran::evaluate {
 
 bool IsImpliedShape(const Symbol &symbol0) {
   const Symbol &symbol{ResolveAssociations(symbol0)};
-  if (const auto *details{symbol.detailsIf<semantics::ObjectEntityDetails>()}) {
-    if (symbol.attrs().test(semantics::Attr::PARAMETER) && details->init()) {
-      return details->shape().IsImpliedShape();
-    }
-  }
-  return false;
+  const auto *details{symbol.detailsIf<semantics::ObjectEntityDetails>()};
+  return symbol.attrs().test(semantics::Attr::PARAMETER) && details &&
+      details->shape().IsImpliedShape();
 }
 
 bool IsExplicitShape(const Symbol &symbol0) {
@@ -626,6 +623,39 @@ auto GetShapeHelper::operator()(const ProcedureRef &call) const -> Result {
           }
         }
       }
+    } else if (intrinsic->name == "transfer") {
+      if (call.arguments().size() == 3 && call.arguments().at(2)) {
+        // SIZE= is present; shape is vector [SIZE=]
+        if (const auto *size{
+                UnwrapExpr<Expr<SomeInteger>>(call.arguments().at(2))}) {
+          return Shape{
+              MaybeExtentExpr{ConvertToType<ExtentType>(common::Clone(*size))}};
+        }
+      } else if (auto moldTypeAndShape{
+                     characteristics::TypeAndShape::Characterize(
+                         call.arguments().at(1), context_)}) {
+        if (GetRank(moldTypeAndShape->shape()) == 0) {
+          // SIZE= is absent and MOLD= is scalar: result is scalar
+          return Scalar();
+        } else {
+          // SIZE= is absent and MOLD= is array: result is vector whose
+          // length is determined by sizes of types.  See 16.9.193p4 case(ii).
+          if (auto sourceTypeAndShape{
+                  characteristics::TypeAndShape::Characterize(
+                      call.arguments().at(0), context_)}) {
+            auto sourceBytes{sourceTypeAndShape->MeasureSizeInBytes(context_)};
+            auto moldElementBytes{
+                moldTypeAndShape->type().MeasureSizeInBytes(context_, true)};
+            if (sourceBytes && moldElementBytes) {
+              ExtentExpr extent{Fold(context_,
+                  (std::move(*sourceBytes) + common::Clone(*moldElementBytes) -
+                      ExtentExpr{1}) /
+                      common::Clone(*moldElementBytes))};
+              return Shape{MaybeExtentExpr{std::move(extent)}};
+            }
+          }
+        }
+      }
     } else if (intrinsic->name == "transpose") {
       if (call.arguments().size() >= 1) {
         if (auto shape{(*this)(call.arguments().at(0))}) {
@@ -645,28 +675,39 @@ auto GetShapeHelper::operator()(const ProcedureRef &call) const -> Result {
   return std::nullopt;
 }
 
+// Check conformance of the passed shapes.  Only return true if we can verify
+// that they conform
 bool CheckConformance(parser::ContextualMessages &messages, const Shape &left,
-    const Shape &right, const char *leftIs, const char *rightIs) {
-  if (!left.empty() && !right.empty()) {
-    int n{GetRank(left)};
-    int rn{GetRank(right)};
-    if (n != rn) {
-      messages.Say("Rank of %1$s is %2$d, but %3$s has rank %4$d"_err_en_US,
-          leftIs, n, rightIs, rn);
-      return false;
-    } else {
-      for (int j{0}; j < n; ++j) {
-        if (auto leftDim{ToInt64(left[j])}) {
-          if (auto rightDim{ToInt64(right[j])}) {
-            if (*leftDim != *rightDim) {
-              messages.Say("Dimension %1$d of %2$s has extent %3$jd, "
-                           "but %4$s has extent %5$jd"_err_en_US,
-                  j + 1, leftIs, *leftDim, rightIs, *rightDim);
-              return false;
-            }
-          }
+    const Shape &right, const char *leftIs, const char *rightIs,
+    bool leftScalarExpandable, bool rightScalarExpandable,
+    bool leftIsDeferredShape, bool rightIsDeferredShape) {
+  int n{GetRank(left)};
+  if (n == 0 && leftScalarExpandable) {
+    return true;
+  }
+  int rn{GetRank(right)};
+  if (rn == 0 && rightScalarExpandable) {
+    return true;
+  }
+  if (n != rn) {
+    messages.Say("Rank of %1$s is %2$d, but %3$s has rank %4$d"_err_en_US,
+        leftIs, n, rightIs, rn);
+    return false;
+  }
+  for (int j{0}; j < n; ++j) {
+    if (auto leftDim{ToInt64(left[j])}) {
+      if (auto rightDim{ToInt64(right[j])}) {
+        if (*leftDim != *rightDim) {
+          messages.Say("Dimension %1$d of %2$s has extent %3$jd, "
+                       "but %4$s has extent %5$jd"_err_en_US,
+              j + 1, leftIs, *leftDim, rightIs, *rightDim);
+          return false;
         }
+      } else if (!rightIsDeferredShape) {
+        return false;
       }
+    } else if (!leftIsDeferredShape) {
+      return false;
     }
   }
   return true;

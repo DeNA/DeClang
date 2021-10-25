@@ -9,11 +9,11 @@
 #ifndef LLDB_TOOLS_LLDB_VSCODE_JSONUTILS_H
 #define LLDB_TOOLS_LLDB_VSCODE_JSONUTILS_H
 
-#include <stdint.h>
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/JSON.h"
 #include "VSCodeForward.h"
 #include "lldb/API/SBModule.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/JSON.h"
+#include <stdint.h>
 
 namespace lldb_vscode {
 
@@ -442,6 +442,18 @@ llvm::json::Value CreateVariable(lldb::SBValue v, int64_t variablesReference,
                                  int64_t varID, bool format_hex);
 
 llvm::json::Value CreateCompileUnit(lldb::SBCompileUnit unit);
+
+/// Create a runInTerminal reverse request object
+///
+/// \param[in] launch_request
+///     The original launch_request object whose fields are used to construct
+///     the reverse request object.
+///
+/// \return
+///     A "runInTerminal" JSON object that follows the specification outlined by
+///     Microsoft.
+llvm::json::Object
+CreateRunInTerminalReverseRequest(const llvm::json::Object &launch_request);
 
 } // namespace lldb_vscode
 

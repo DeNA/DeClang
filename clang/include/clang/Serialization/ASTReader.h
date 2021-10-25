@@ -23,6 +23,7 @@
 #include "clang/Lex/ExternalPreprocessorSource.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/PreprocessingRecord.h"
+#include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Sema/ExternalSemaSource.h"
 #include "clang/Sema/IdentifierResolver.h"
 #include "clang/Serialization/ASTBitCodes.h"
@@ -440,6 +441,9 @@ private:
   /// imported from. For non-module AST types it should be invalid.
   SourceLocation CurrentImportLoc;
 
+  /// The module kind that is currently deserializing.
+  Optional<ModuleKind> CurrentDeserializingModuleKind;
+
   /// The global module index, if loaded.
   std::unique_ptr<GlobalModuleIndex> GlobalIndex;
 
@@ -851,10 +855,10 @@ private:
   SourceLocation PointersToMembersPragmaLocation;
 
   /// The pragma float_control state.
-  Optional<unsigned> FpPragmaCurrentValue;
+  Optional<FPOptionsOverride> FpPragmaCurrentValue;
   SourceLocation FpPragmaCurrentLocation;
   struct FpPragmaStackEntry {
-    unsigned Value;
+    FPOptionsOverride Value;
     SourceLocation Location;
     SourceLocation PushLocation;
     StringRef SlotLabel;
@@ -893,8 +897,9 @@ private:
   /// Delete expressions to analyze at the end of translation unit.
   SmallVector<uint64_t, 8> DelayedDeleteExprs;
 
-  // A list of late parsed template function data.
-  SmallVector<uint64_t, 1> LateParsedTemplates;
+  // A list of late parsed template function data with their module files.
+  SmallVector<std::pair<ModuleFile *, SmallVector<uint64_t, 1>>, 4>
+      LateParsedTemplates;
 
   /// The IDs of all decls to be checked for deferred diags.
   ///
@@ -922,8 +927,8 @@ private:
   std::string isysroot;
 
   /// Whether to disable the normal validation performed on precompiled
-  /// headers when they are loaded.
-  bool DisableValidation;
+  /// headers and module files when they are loaded.
+  DisableValidationForModuleKind DisableValidationKind;
 
   /// Whether to accept an AST file with compiler errors.
   bool AllowASTWithCompilerErrors;
@@ -1206,6 +1211,8 @@ private:
 
   llvm::DenseMap<const Decl *, bool> DefinitionSource;
 
+  bool shouldDisableValidationForFile(const serialization::ModuleFile &M) const;
+
   /// Reads a statement from the specified cursor.
   Stmt *ReadStmtFromStream(ModuleFile &F);
 
@@ -1389,6 +1396,9 @@ private:
   llvm::iterator_range<PreprocessingRecord::iterator>
   getModulePreprocessedEntities(ModuleFile &Mod) const;
 
+  bool canRecoverFromOutOfDate(StringRef ModuleFileName,
+                               unsigned ClientLoadCapabilities);
+
 public:
   class ModuleDeclIterator
       : public llvm::iterator_adaptor_base<
@@ -1444,8 +1454,6 @@ private:
   void Error(StringRef Msg) const;
   void Error(unsigned DiagID, StringRef Arg1 = StringRef(),
              StringRef Arg2 = StringRef(), StringRef Arg3 = StringRef()) const;
-  void Error(unsigned DiagID, StringRef Arg1, StringRef Arg2,
-             unsigned Select) const;
   void Error(llvm::Error &&Err) const;
 
 public:
@@ -1468,9 +1476,9 @@ public:
   /// user. This is only used with relocatable PCH files. If non-NULL,
   /// a relocatable PCH file will use the default path "/".
   ///
-  /// \param DisableValidation If true, the AST reader will suppress most
+  /// \param DisableValidationKind If set, the AST reader will suppress most
   /// of its regular consistency checking, allowing the use of precompiled
-  /// headers that cannot be determined to be compatible.
+  /// headers and module files that cannot be determined to be compatible.
   ///
   /// \param AllowASTWithCompilerErrors If true, the AST reader will accept an
   /// AST file the was created out of an AST with compiler errors,
@@ -1491,7 +1499,9 @@ public:
   ASTReader(Preprocessor &PP, InMemoryModuleCache &ModuleCache,
             ASTContext *Context, const PCHContainerReader &PCHContainerRdr,
             ArrayRef<std::shared_ptr<ModuleFileExtension>> Extensions,
-            StringRef isysroot = "", bool DisableValidation = false,
+            StringRef isysroot = "",
+            DisableValidationForModuleKind DisableValidationKind =
+                DisableValidationForModuleKind::None,
             bool AllowASTWithCompilerErrors = false,
             bool AllowConfigurationMismatch = false,
             bool ValidateSystemInputs = false,
@@ -1530,7 +1540,11 @@ public:
     /// The client can handle an AST file that cannot load because it's
     /// compiled configuration doesn't match that of the context it was
     /// loaded into.
-    ARR_ConfigurationMismatch = 0x8
+    ARR_ConfigurationMismatch = 0x8,
+
+    /// If a module file is marked with errors treat it as out-of-date so the
+    /// caller can rebuild it.
+    ARR_TreatModuleWithErrorsAsOutOfDate = 0x10
   };
 
   /// Load the AST file designated by the given file name.
@@ -2076,8 +2090,6 @@ public:
   ///
   /// Note: overrides method in ExternalASTSource
   Module *getModule(unsigned ID) override;
-
-  bool DeclIsFromPCHWithObjectFile(const Decl *D) override;
 
   /// Retrieve the module file with a given local ID within the specified
   /// ModuleFile.

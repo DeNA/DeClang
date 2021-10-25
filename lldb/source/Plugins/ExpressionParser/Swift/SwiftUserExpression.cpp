@@ -19,6 +19,7 @@
 #include "SwiftREPLMaterializer.h"
 #include "SwiftExpressionSourceCode.h"
 
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/ExpressionParser.h"
@@ -29,9 +30,9 @@
 #include "lldb/Symbol/Type.h"
 #include "lldb/Symbol/Variable.h"
 #include "lldb/Symbol/VariableList.h"
-#include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/Timer.h"
 
 #include "swift/AST/Type.h"
 #include "swift/AST/Types.h"
@@ -160,6 +161,7 @@ findSwiftSelf(StackFrame &frame, lldb::VariableSP self_var_sp) {
 void SwiftUserExpression::ScanContext(ExecutionContext &exe_ctx, Status &err) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
   LLDB_LOG(log, "SwiftUserExpression::ScanContext()");
+  LLDB_SCOPED_TIMER();
 
   m_target = exe_ctx.GetTargetPtr();
   if (!m_target) {
@@ -275,6 +277,7 @@ bool SwiftUserExpression::Parse(DiagnosticManager &diagnostic_manager,
                                 bool keep_result_in_memory,
                                 bool generate_debug_info) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  LLDB_SCOPED_TIMER();
 
   Status err;
 
@@ -288,6 +291,8 @@ bool SwiftUserExpression::Parse(DiagnosticManager &diagnostic_manager,
 
   StackFrame *frame = exe_ctx.GetFramePtr();
   if (!frame) {
+    diagnostic_manager.PutString(eDiagnosticSeverityError,
+                                 "couldn't start parsing - no stack frame");
     LLDB_LOG(log, "no stack frame");
     return false;
   }
@@ -504,6 +509,7 @@ bool SwiftUserExpression::AddArguments(ExecutionContext &exe_ctx,
 
 lldb::ExpressionVariableSP SwiftUserExpression::GetResultAfterDematerialization(
     ExecutionContextScope *exe_scope) {
+  LLDB_SCOPED_TIMER();
   lldb::ExpressionVariableSP in_result_sp = m_result_delegate.GetVariable();
   lldb::ExpressionVariableSP in_error_sp = m_error_delegate.GetVariable();
 

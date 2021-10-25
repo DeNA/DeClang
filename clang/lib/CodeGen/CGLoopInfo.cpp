@@ -24,8 +24,7 @@ MDNode *
 LoopInfo::createLoopPropertiesMetadata(ArrayRef<Metadata *> LoopProperties) {
   LLVMContext &Ctx = Header->getContext();
   SmallVector<Metadata *, 4> NewLoopProperties;
-  TempMDTuple TempNode = MDNode::getTemporary(Ctx, None);
-  NewLoopProperties.push_back(TempNode.get());
+  NewLoopProperties.push_back(nullptr);
   NewLoopProperties.append(LoopProperties.begin(), LoopProperties.end());
 
   MDNode *LoopID = MDNode::getDistinct(Ctx, NewLoopProperties);
@@ -58,8 +57,7 @@ MDNode *LoopInfo::createPipeliningMetadata(const LoopAttributes &Attrs,
   }
 
   SmallVector<Metadata *, 4> Args;
-  TempMDTuple TempNode = MDNode::getTemporary(Ctx, None);
-  Args.push_back(TempNode.get());
+  Args.push_back(nullptr);
   Args.append(LoopProperties.begin(), LoopProperties.end());
 
   if (Attrs.PipelineInitiationInterval > 0) {
@@ -113,8 +111,7 @@ LoopInfo::createPartialUnrollMetadata(const LoopAttributes &Attrs,
                                               FollowupHasTransforms);
 
   SmallVector<Metadata *, 4> Args;
-  TempMDTuple TempNode = MDNode::getTemporary(Ctx, None);
-  Args.push_back(TempNode.get());
+  Args.push_back(nullptr);
   Args.append(LoopProperties.begin(), LoopProperties.end());
 
   // Setting unroll.count
@@ -176,8 +173,7 @@ LoopInfo::createUnrollAndJamMetadata(const LoopAttributes &Attrs,
                                                  FollowupHasTransforms);
 
   SmallVector<Metadata *, 4> Args;
-  TempMDTuple TempNode = MDNode::getTemporary(Ctx, None);
-  Args.push_back(TempNode.get());
+  Args.push_back(nullptr);
   Args.append(LoopProperties.begin(), LoopProperties.end());
 
   // Setting unroll_and_jam.count
@@ -250,8 +246,7 @@ LoopInfo::createLoopVectorizeMetadata(const LoopAttributes &Attrs,
                                                 FollowupHasTransforms);
 
   SmallVector<Metadata *, 4> Args;
-  TempMDTuple TempNode = MDNode::getTemporary(Ctx, None);
-  Args.push_back(TempNode.get());
+  Args.push_back(nullptr);
   Args.append(LoopProperties.begin(), LoopProperties.end());
 
   // Setting vectorize.predicate
@@ -307,7 +302,7 @@ LoopInfo::createLoopVectorizeMetadata(const LoopAttributes &Attrs,
         Ctx,
         {MDString::get(Ctx, "llvm.loop.vectorize.followup_all"), Followup}));
 
-  MDNode *LoopID = MDNode::get(Ctx, Args);
+  MDNode *LoopID = MDNode::getDistinct(Ctx, Args);
   LoopID->replaceOperandWith(0, LoopID);
   HasUserTransforms = true;
   return LoopID;
@@ -344,8 +339,7 @@ LoopInfo::createLoopDistributeMetadata(const LoopAttributes &Attrs,
       createLoopVectorizeMetadata(Attrs, LoopProperties, FollowupHasTransforms);
 
   SmallVector<Metadata *, 4> Args;
-  TempMDTuple TempNode = MDNode::getTemporary(Ctx, None);
-  Args.push_back(TempNode.get());
+  Args.push_back(nullptr);
   Args.append(LoopProperties.begin(), LoopProperties.end());
 
   Metadata *Vals[] = {MDString::get(Ctx, "llvm.loop.distribute.enable"),
@@ -359,7 +353,7 @@ LoopInfo::createLoopDistributeMetadata(const LoopAttributes &Attrs,
         Ctx,
         {MDString::get(Ctx, "llvm.loop.distribute.followup_all"), Followup}));
 
-  MDNode *LoopID = MDNode::get(Ctx, Args);
+  MDNode *LoopID = MDNode::getDistinct(Ctx, Args);
   LoopID->replaceOperandWith(0, LoopID);
   HasUserTransforms = true;
   return LoopID;
@@ -389,8 +383,7 @@ MDNode *LoopInfo::createFullUnrollMetadata(const LoopAttributes &Attrs,
   }
 
   SmallVector<Metadata *, 4> Args;
-  TempMDTuple TempNode = MDNode::getTemporary(Ctx, None);
-  Args.push_back(TempNode.get());
+  Args.push_back(nullptr);
   Args.append(LoopProperties.begin(), LoopProperties.end());
   Args.push_back(MDNode::get(Ctx, MDString::get(Ctx, "llvm.loop.unroll.full")));
 
@@ -418,10 +411,14 @@ MDNode *LoopInfo::createMetadata(
       LoopProperties.push_back(EndLoc.getAsMDNode());
   }
 
+  LLVMContext &Ctx = Header->getContext();
+  if (Attrs.MustProgress)
+    LoopProperties.push_back(
+        MDNode::get(Ctx, MDString::get(Ctx, "llvm.loop.mustprogress")));
+
   assert(!!AccGroup == Attrs.IsParallel &&
          "There must be an access group iff the loop is parallel");
   if (Attrs.IsParallel) {
-    LLVMContext &Ctx = Header->getContext();
     LoopProperties.push_back(MDNode::get(
         Ctx, {MDString::get(Ctx, "llvm.loop.parallel_accesses"), AccGroup}));
   }
@@ -438,7 +435,7 @@ LoopAttributes::LoopAttributes(bool IsParallel)
       VectorizePredicateEnable(LoopAttributes::Unspecified), VectorizeWidth(0),
       InterleaveCount(0), UnrollCount(0), UnrollAndJamCount(0),
       DistributeEnable(LoopAttributes::Unspecified), PipelineDisabled(false),
-      PipelineInitiationInterval(0) {}
+      PipelineInitiationInterval(0), MustProgress(false) {}
 
 void LoopAttributes::clear() {
   IsParallel = false;
@@ -453,6 +450,7 @@ void LoopAttributes::clear() {
   DistributeEnable = LoopAttributes::Unspecified;
   PipelineDisabled = false;
   PipelineInitiationInterval = 0;
+  MustProgress = false;
 }
 
 LoopInfo::LoopInfo(BasicBlock *Header, const LoopAttributes &Attrs,
@@ -476,7 +474,7 @@ LoopInfo::LoopInfo(BasicBlock *Header, const LoopAttributes &Attrs,
       Attrs.UnrollEnable == LoopAttributes::Unspecified &&
       Attrs.UnrollAndJamEnable == LoopAttributes::Unspecified &&
       Attrs.DistributeEnable == LoopAttributes::Unspecified && !StartLoc &&
-      !EndLoc)
+      !EndLoc && !Attrs.MustProgress)
     return;
 
   TempLoopID = MDNode::getTemporary(Header->getContext(), None);
@@ -577,8 +575,7 @@ void LoopInfoStack::push(BasicBlock *Header, clang::ASTContext &Ctx,
                          const clang::CodeGenOptions &CGOpts,
                          ArrayRef<const clang::Attr *> Attrs,
                          const llvm::DebugLoc &StartLoc,
-                         const llvm::DebugLoc &EndLoc) {
-
+                         const llvm::DebugLoc &EndLoc, bool MustProgress) {
   // Identify loop hint attributes from Attrs.
   for (const auto *Attr : Attrs) {
     const LoopHintAttr *LH = dyn_cast<LoopHintAttr>(Attr);
@@ -754,6 +751,8 @@ void LoopInfoStack::push(BasicBlock *Header, clang::ASTContext &Ctx,
       break;
     }
   }
+
+  setMustProgress(MustProgress);
 
   if (CGOpts.OptimizationLevel > 0)
     // Disable unrolling for the loop, if unrolling is disabled (via

@@ -3,6 +3,8 @@
 
 // REQUIRES: system-darwin
 // REQUIRES: swift
+// XFAIL: system-darwin
+// rdar://79052960
 
 // RUN: %lldb --repl < %s | FileCheck %s
 

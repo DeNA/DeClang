@@ -30,6 +30,8 @@ static const unsigned NVPTXAddrSpaceMap[] = {
     0, // opencl_private
     // FIXME: generic has to be added to the target
     0, // opencl_generic
+    1, // opencl_global_device
+    1, // opencl_global_host
     1, // cuda_device
     4, // cuda_constant
     3, // cuda_shared
@@ -126,8 +128,8 @@ public:
   void setSupportedOpenCLOpts() override {
     auto &Opts = getSupportedOpenCLOpts();
     Opts.support("cl_clang_storage_class_specifiers");
-    Opts.support("cl_khr_gl_sharing");
-    Opts.support("cl_khr_icd");
+    Opts.support("__cl_clang_function_pointers");
+    Opts.support("__cl_clang_variadic_functions");
 
     Opts.support("cl_khr_fp64");
     Opts.support("cl_khr_byte_addressable_store");

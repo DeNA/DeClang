@@ -53,9 +53,9 @@ static_library("Basic") {
     "DiagnosticIDs.cpp",
     "DiagnosticOptions.cpp",
     "ExpressionTraits.cpp",
+    "FileEntry.cpp",
     "FileManager.cpp",
     "FileSystemStatCache.cpp",
-    "FixedPoint.cpp",
     "IdentifierTable.cpp",
     "LangOptions.cpp",
     "LangStandards.cpp",
@@ -69,6 +69,7 @@ static_library("Basic") {
     "SourceLocation.cpp",
     "SourceManager.cpp",
     "Stack.cpp",
+    "TargetID.cpp",
     "TargetInfo.cpp",
     "Targets.cpp",
     "Targets/AArch64.cpp",
@@ -102,5 +103,4 @@ static_library("Basic") {
     "XRayInstr.cpp",
     "XRayLists.cpp",
   ]
-  defines = [ "HAVE_VCS_VERSION_INC" ]  # For Version.cpp
 }

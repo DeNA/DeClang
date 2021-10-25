@@ -208,6 +208,7 @@ StringRef sys::detail::getHostCPUNameForARM(StringRef ProcCpuinfoContent) {
             .Case("0xd41", "cortex-a78")
             .Case("0xd44", "cortex-x1")
             .Case("0xd0c", "neoverse-n1")
+            .Case("0xd49", "neoverse-n2")
             .Default("generic");
   }
 
@@ -323,7 +324,7 @@ StringRef sys::detail::getHostCPUNameForS390x(StringRef ProcCpuinfoContent) {
   SmallVector<StringRef, 32> CPUFeatures;
   for (unsigned I = 0, E = Lines.size(); I != E; ++I)
     if (Lines[I].startswith("features")) {
-      size_t Pos = Lines[I].find(":");
+      size_t Pos = Lines[I].find(':');
       if (Pos != StringRef::npos) {
         Lines[I].drop_front(Pos + 1).split(CPUFeatures, ' ');
         break;
@@ -730,6 +731,13 @@ getIntelProcessorTypeAndSubtype(unsigned Family, unsigned Model,
       *Subtype = X86::INTEL_COREI7_ICELAKE_SERVER;
       break;
 
+    // Sapphire Rapids:
+    case 0x8f:
+      CPU = "sapphirerapids";
+      *Type = X86::INTEL_COREI7;
+      *Subtype = X86::INTEL_COREI7_SAPPHIRERAPIDS;
+      break;
+
     case 0x1c: // Most 45 nm Intel Atom processors
     case 0x26: // 45 nm Atom Lincroft
     case 0x27: // 32 nm Atom Medfield
@@ -954,6 +962,14 @@ getAMDProcessorTypeAndSubtype(unsigned Family, unsigned Model,
     if (Model <= 0x0f) {
       *Subtype = X86::AMDFAM17H_ZNVER1;
       break; // 00h-0Fh: Zen1
+    }
+    break;
+  case 25:
+    CPU = "znver3";
+    *Type = X86::AMDFAM19H;
+    if (Model <= 0x0f) {
+      *Subtype = X86::AMDFAM19H_ZNVER3;
+      break; // 00h-0Fh: Zen3
     }
     break;
   default:
@@ -1272,7 +1288,28 @@ int computeHostNumPhysicalCores() {
   }
   return CPU_COUNT(&Enabled);
 }
-#elif defined(__APPLE__) && defined(__x86_64__)
+#elif defined(__linux__) && defined(__powerpc__)
+int computeHostNumPhysicalCores() {
+  cpu_set_t Affinity;
+  if (sched_getaffinity(0, sizeof(Affinity), &Affinity) == 0)
+    return CPU_COUNT(&Affinity);
+
+  // The call to sched_getaffinity() may have failed because the Affinity
+  // mask is too small for the number of CPU's on the system (i.e. the
+  // system has more than 1024 CPUs). Allocate a mask large enough for
+  // twice as many CPUs.
+  cpu_set_t *DynAffinity;
+  DynAffinity = CPU_ALLOC(2048);
+  if (sched_getaffinity(0, CPU_ALLOC_SIZE(2048), DynAffinity) == 0) {
+    int NumCPUs = CPU_COUNT(DynAffinity);
+    CPU_FREE(DynAffinity);
+    return NumCPUs;
+  }
+  return -1;
+}
+#elif defined(__linux__) && defined(__s390x__)
+int computeHostNumPhysicalCores() { return sysconf(_SC_NPROCESSORS_ONLN); }
+#elif defined(__APPLE__)
 #include <sys/param.h>
 #include <sys/sysctl.h>
 
@@ -1290,6 +1327,28 @@ int computeHostNumPhysicalCores() {
       return -1;
   }
   return count;
+}
+#elif defined(__MVS__)
+int computeHostNumPhysicalCores() {
+  enum {
+    // Byte offset of the pointer to the Communications Vector Table (CVT) in
+    // the Prefixed Save Area (PSA). The table entry is a 31-bit pointer and
+    // will be zero-extended to uintptr_t.
+    FLCCVT = 16,
+    // Byte offset of the pointer to the Common System Data Area (CSD) in the
+    // CVT. The table entry is a 31-bit pointer and will be zero-extended to
+    // uintptr_t.
+    CVTCSD = 660,
+    // Byte offset to the number of live CPs in the LPAR, stored as a signed
+    // 32-bit value in the table.
+    CSD_NUMBER_ONLINE_STANDARD_CPS = 264,
+  };
+  char *PSA = 0;
+  char *CVT = reinterpret_cast<char *>(
+      static_cast<uintptr_t>(reinterpret_cast<unsigned int &>(PSA[FLCCVT])));
+  char *CSD = reinterpret_cast<char *>(
+      static_cast<uintptr_t>(reinterpret_cast<unsigned int &>(CVT[CVTCSD])));
+  return reinterpret_cast<int &>(CSD[CSD_NUMBER_ONLINE_STANDARD_CPS]);
 }
 #elif defined(_WIN32) && LLVM_ENABLE_THREADS != 0
 // Defined in llvm/lib/Support/Windows/Threading.inc
@@ -1420,11 +1479,13 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["avx512bitalg"]    = HasLeaf7 && ((ECX >> 12) & 1) && HasAVX512Save;
   Features["avx512vpopcntdq"] = HasLeaf7 && ((ECX >> 14) & 1) && HasAVX512Save;
   Features["rdpid"]           = HasLeaf7 && ((ECX >> 22) & 1);
+  Features["kl"]              = HasLeaf7 && ((ECX >> 23) & 1); // key locker
   Features["cldemote"]        = HasLeaf7 && ((ECX >> 25) & 1);
   Features["movdiri"]         = HasLeaf7 && ((ECX >> 27) & 1);
   Features["movdir64b"]       = HasLeaf7 && ((ECX >> 28) & 1);
   Features["enqcmd"]          = HasLeaf7 && ((ECX >> 29) & 1);
 
+  Features["uintr"]           = HasLeaf7 && ((EDX >> 5) & 1);
   Features["avx512vp2intersect"] =
       HasLeaf7 && ((EDX >> 8) & 1) && HasAVX512Save;
   Features["serialize"]       = HasLeaf7 && ((EDX >> 14) & 1);
@@ -1445,7 +1506,9 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
   Features["amx-int8"]   = HasLeaf7 && ((EDX >> 25) & 1) && HasAMXSave;
   bool HasLeaf7Subleaf1 =
       MaxLevel >= 7 && !getX86CpuIDAndInfoEx(0x7, 0x1, &EAX, &EBX, &ECX, &EDX);
+  Features["avxvnni"]    = HasLeaf7Subleaf1 && ((EAX >> 4) & 1) && HasAVXSave;
   Features["avx512bf16"] = HasLeaf7Subleaf1 && ((EAX >> 5) & 1) && HasAVX512Save;
+  Features["hreset"]     = HasLeaf7Subleaf1 && ((EAX >> 22) & 1);
 
   bool HasLeafD = MaxLevel >= 0xd &&
                   !getX86CpuIDAndInfoEx(0xd, 0x1, &EAX, &EBX, &ECX, &EDX);
@@ -1459,6 +1522,10 @@ bool sys::getHostCPUFeatures(StringMap<bool> &Features) {
                   !getX86CpuIDAndInfoEx(0x14, 0x0, &EAX, &EBX, &ECX, &EDX);
 
   Features["ptwrite"] = HasLeaf14 && ((EBX >> 4) & 1);
+
+  bool HasLeaf19 =
+      MaxLevel >= 0x19 && !getX86CpuIDAndInfo(0x19, &EAX, &EBX, &ECX, &EDX);
+  Features["widekl"] = HasLeaf7 && HasLeaf19 && ((EBX >> 2) & 1);
 
   return true;
 }

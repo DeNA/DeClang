@@ -3930,8 +3930,8 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
              getpid(), attach_name.c_str());
       const bool ignore_existing = true;
       attach_pid = DNBProcessAttachWait(
-          attach_name.c_str(), m_ctx.LaunchFlavor(), ignore_existing, NULL,
-          1000, err_str, sizeof(err_str), RNBRemoteShouldCancelCallback);
+          &m_ctx, attach_name.c_str(), ignore_existing, NULL, 1000, err_str,
+          sizeof(err_str), RNBRemoteShouldCancelCallback);
 
     } else if (strstr(p, "vAttachOrWait;") == p) {
       p += strlen("vAttachOrWait;");
@@ -3945,8 +3945,8 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
              "'%s'",
              getpid(), attach_name.c_str());
       attach_pid = DNBProcessAttachWait(
-          attach_name.c_str(), m_ctx.LaunchFlavor(), ignore_existing, NULL,
-          1000, err_str, sizeof(err_str), RNBRemoteShouldCancelCallback);
+          &m_ctx, attach_name.c_str(), ignore_existing, NULL, 1000, err_str,
+          sizeof(err_str), RNBRemoteShouldCancelCallback);
     } else if (strstr(p, "vAttachName;") == p) {
       p += strlen("vAttachName;");
       if (!GetProcessNameFrom_vAttach(p, attach_name)) {
@@ -3957,7 +3957,8 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
       DNBLog("[LaunchAttach] START %d vAttachName attach to process name "
              "'%s'",
              getpid(), attach_name.c_str());
-      attach_pid = DNBProcessAttachByName(attach_name.c_str(), NULL, err_str,
+      attach_pid = DNBProcessAttachByName(attach_name.c_str(), NULL,
+                                          Context().GetUnmaskSignals(), err_str,
                                           sizeof(err_str));
 
     } else if (strstr(p, "vAttach;") == p) {
@@ -3972,7 +3973,7 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
         DNBLog("[LaunchAttach] START %d vAttach to pid %d", getpid(),
                pid_attaching_to);
         attach_pid = DNBProcessAttach(pid_attaching_to, &attach_timeout_abstime,
-                                      err_str, sizeof(err_str));
+                                      false, err_str, sizeof(err_str));
       }
     } else {
       return HandlePacket_UNIMPLEMENTED(p);
@@ -4065,8 +4066,8 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
         if (strcmp (err_str, "unable to start the exception thread") == 0) {
           snprintf (err_str, sizeof (err_str) - 1,
                     "Not allowed to attach to process.  Look in the console "
-                    "messages (Console.app), near the debugserver entries "
-                    "when the attached failed.  The subsystem that denied "
+                    "messages (Console.app), near the debugserver entries, "
+                    "when the attach failed.  The subsystem that denied "
                     "the attach permission will likely have logged an "
                     "informative message about why it was denied.");
           err_str[sizeof (err_str) - 1] = '\0';
@@ -4577,7 +4578,8 @@ rnb_err_t RNBRemote::HandlePacket_qSpeedTest(const char *p) {
         __FILE__, __LINE__, p,
         "Didn't find response_size value at right offset");
   else if (*end == ';') {
-    static char g_data[4 * 1024 * 1024 + 16] = "data:";
+    static char g_data[4 * 1024 * 1024 + 16];
+    strcpy(g_data, "data:");
     memset(g_data + 5, 'a', response_size);
     g_data[response_size + 5] = '\0';
     return SendPacket(g_data);

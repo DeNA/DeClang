@@ -21,6 +21,7 @@ namespace mlir {
 
 class AffineCondition;
 class AffineForOp;
+class AffineIfOp;
 class AffineMap;
 class AffineValueMap;
 class IntegerSet;
@@ -96,6 +97,13 @@ public:
       ids.append(idArgs.begin(), idArgs.end());
   }
 
+  /// Return a system with no constraints, i.e., one which is satisfied by all
+  /// points.
+  static FlatAffineConstraints getUniverse(unsigned numDims = 0,
+                                           unsigned numSymbols = 0) {
+    return FlatAffineConstraints(numDims, numSymbols);
+  }
+
   /// Create a flat affine constraint system from an AffineValueMap or a list of
   /// these. The constructed system will only include equalities.
   explicit FlatAffineConstraints(const AffineValueMap &avm);
@@ -151,6 +159,10 @@ public:
   ///
   /// Returns such a point if one exists, or an empty Optional otherwise.
   Optional<SmallVector<int64_t, 8>> findIntegerSample() const;
+
+  /// Returns true if the given point satisfies the constraints, or false
+  /// otherwise.
+  bool containsPoint(ArrayRef<int64_t> point) const;
 
   // Clones this object.
   std::unique_ptr<FlatAffineConstraints> clone() const;
@@ -214,6 +226,15 @@ public:
   /// symbol).
   //  TODO: add support for non-unit strides.
   LogicalResult addAffineForOpDomain(AffineForOp forOp);
+
+  /// Adds constraints imposed by the `affine.if` operation. These constraints
+  /// are collected from the IntegerSet attached to the given `affine.if`
+  /// instance argument (`ifOp`). It is asserted that:
+  /// 1) The IntegerSet of the given `affine.if` instance should not contain
+  /// semi-affine expressions,
+  /// 2) The columns of the constraint system created from `ifOp` should match
+  /// the columns in the current one regarding numbers and values.
+  void addAffineIfOpDomain(AffineIfOp ifOp);
 
   /// Adds a lower or an upper bound for the identifier at the specified
   /// position with constraints being drawn from the specified bound map and
@@ -296,6 +317,9 @@ public:
   /// Returns true if an identifier with the specified Value exists, false
   /// otherwise.
   bool containsId(Value id) const;
+
+  /// Swap the posA^th identifier with the posB^th identifier.
+  void swapId(unsigned posA, unsigned posB);
 
   // Add identifiers of the specified kind - specified positions are relative to
   // the kind of identifier. The coefficient column corresponding to the added
@@ -535,6 +559,13 @@ public:
   /// A more expensive check to detect redundant inequalities thatn
   /// removeTrivialRedundancy.
   void removeRedundantInequalities();
+
+  /// Removes redundant constraints using Simplex. Although the algorithm can
+  /// theoretically take exponential time in the worst case (rare), it is known
+  /// to perform much better in the average case. If V is the number of vertices
+  /// in the polytope and C is the number of constraints, the algorithm takes
+  /// O(VC) time.
+  void removeRedundantConstraints();
 
   // Removes all equalities and inequalities.
   void clearConstraints();

@@ -43,7 +43,7 @@ struct ModHeader {
 };
 
 static std::optional<SourceName> GetSubmoduleParent(const parser::Program &);
-static SymbolVector CollectSymbols(const Scope &);
+static void CollectSymbols(const Scope &, SymbolVector &, SymbolVector &);
 static void PutEntity(llvm::raw_ostream &, const Symbol &);
 static void PutObjectEntity(llvm::raw_ostream &, const Symbol &);
 static void PutProcEntity(llvm::raw_ostream &, const Symbol &);
@@ -177,16 +177,24 @@ std::string ModFileWriter::GetAsString(const Symbol &symbol) {
 }
 
 // Put out the visible symbols from scope.
-void ModFileWriter::PutSymbols(const Scope &scope) {
-  std::string buf;
-  llvm::raw_string_ostream typeBindings{
-      buf}; // stuff after CONTAINS in derived type
-  for (const Symbol &symbol : CollectSymbols(scope)) {
+bool ModFileWriter::PutSymbols(const Scope &scope) {
+  SymbolVector sorted;
+  SymbolVector uses;
+  CollectSymbols(scope, sorted, uses);
+  std::string buf; // stuff after CONTAINS in derived type
+  llvm::raw_string_ostream typeBindings{buf};
+  for (const Symbol &symbol : sorted) {
     PutSymbol(typeBindings, symbol);
+  }
+  for (const Symbol &symbol : uses) {
+    PutUse(symbol);
   }
   if (auto str{typeBindings.str()}; !str.empty()) {
     CHECK(scope.IsDerivedType());
     decls_ << "contains\n" << str;
+    return true;
+  } else {
+    return false;
   }
 }
 
@@ -257,9 +265,6 @@ void ModFileWriter::PutSymbol(
                      decls_ << "::/" << symbol.name() << "/\n";
                    }
                  },
-                 [&](const FinalProcDetails &) {
-                   typeBindings << "final::" << symbol.name() << '\n';
-                 },
                  [](const HostAssocDetails &) {},
                  [](const MiscDetails &) {},
                  [&](const auto &) { PutEntity(decls_, symbol); },
@@ -287,7 +292,17 @@ void ModFileWriter::PutDerivedType(const Symbol &typeSymbol) {
   if (details.sequence()) {
     decls_ << "sequence\n";
   }
-  PutSymbols(typeScope);
+  bool contains{PutSymbols(typeScope)};
+  if (!details.finals().empty()) {
+    const char *sep{contains ? "final::" : "contains\nfinal::"};
+    for (const auto &pair : details.finals()) {
+      decls_ << sep << pair.second->name();
+      sep = ",";
+    }
+    if (*sep == ',') {
+      decls_ << '\n';
+    }
+  }
   decls_ << "end type\n";
 }
 
@@ -304,6 +319,10 @@ void ModFileWriter::PutSubprogram(const Symbol &symbol) {
     bindAttrs.set(Attr::BIND_C, true);
     attrs.set(Attr::BIND_C, false);
   }
+  bool isAbstract{attrs.test(Attr::ABSTRACT)};
+  if (isAbstract) {
+    attrs.set(Attr::ABSTRACT, false);
+  }
   Attrs prefixAttrs{subprogramPrefixAttrs & attrs};
   // emit any non-prefix attributes in an attribute statement
   attrs &= ~subprogramPrefixAttrs;
@@ -316,7 +335,7 @@ void ModFileWriter::PutSubprogram(const Symbol &symbol) {
   bool isInterface{details.isInterface()};
   llvm::raw_ostream &os{isInterface ? decls_ : contains_};
   if (isInterface) {
-    os << "interface\n";
+    os << (isAbstract ? "abstract " : "") << "interface\n";
   }
   PutAttrs(os, prefixAttrs, std::nullopt, ""s, " "s);
   os << (details.isFunction() ? "function " : "subroutine ");
@@ -383,10 +402,13 @@ static llvm::raw_ostream &PutGenericName(
 }
 
 void ModFileWriter::PutGeneric(const Symbol &symbol) {
+  const auto &genericOwner{symbol.owner()};
   auto &details{symbol.get<GenericDetails>()};
   PutGenericName(decls_ << "interface ", symbol) << '\n';
   for (const Symbol &specific : details.specificProcs()) {
-    decls_ << "procedure::" << specific.name() << '\n';
+    if (specific.owner() == genericOwner) {
+      decls_ << "procedure::" << specific.name() << '\n';
+    }
   }
   decls_ << "end interface\n";
   if (symbol.attrs().test(Attr::PRIVATE)) {
@@ -421,8 +443,8 @@ void ModFileWriter::PutUseExtraAttr(
 
 // Collect the symbols of this scope sorted by their original order, not name.
 // Namelists are an exception: they are sorted after other symbols.
-SymbolVector CollectSymbols(const Scope &scope) {
-  SymbolVector sorted;
+void CollectSymbols(
+    const Scope &scope, SymbolVector &sorted, SymbolVector &uses) {
   SymbolVector namelist;
   std::size_t commonSize{scope.commonBlocks().size()};
   auto symbols{scope.GetSymbols()};
@@ -434,14 +456,21 @@ SymbolVector CollectSymbols(const Scope &scope) {
       } else {
         sorted.push_back(symbol);
       }
+      if (const auto *details{symbol->detailsIf<GenericDetails>()}) {
+        uses.insert(uses.end(), details->uses().begin(), details->uses().end());
+      }
     }
   }
+  // Sort most symbols by name: use of Symbol::ReplaceName ensures the source
+  // location of a symbol's name is the first "real" use.
+  std::sort(sorted.begin(), sorted.end(), [](SymbolRef x, SymbolRef y) {
+    return x->name().begin() < y->name().begin();
+  });
   sorted.insert(sorted.end(), namelist.begin(), namelist.end());
   for (const auto &pair : scope.commonBlocks()) {
     sorted.push_back(*pair.second);
   }
   std::sort(sorted.end() - commonSize, sorted.end());
-  return sorted;
 }
 
 void PutEntity(llvm::raw_ostream &os, const Symbol &symbol) {
@@ -751,7 +780,7 @@ Scope *ModFileReader::Read(const SourceName &name, Scope *ancestor) {
       return it->second->scope();
     }
   }
-  parser::Parsing parsing{context_.allSources()};
+  parser::Parsing parsing{context_.allCookedSources()};
   parser::Options options;
   options.isModuleFile = true;
   options.features.Enable(common::LanguageFeature::BackslashEscapes);
@@ -796,7 +825,6 @@ Scope *ModFileReader::Read(const SourceName &name, Scope *ancestor) {
   }
   auto &modSymbol{*it->second};
   modSymbol.set(Symbol::Flag::ModFile);
-  modSymbol.scope()->set_chars(parsing.cooked());
   return modSymbol.scope();
 }
 

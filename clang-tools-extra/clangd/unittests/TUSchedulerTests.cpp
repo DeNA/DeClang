@@ -417,6 +417,38 @@ TEST_F(TUSchedulerTests, Invalidation) {
   EXPECT_EQ(4, Actions.load()) << "All actions should run (some with error)";
 }
 
+// We don't invalidate requests for updates that don't change the file content.
+// These are mostly "refresh this file" events synthesized inside clangd itself.
+// (Usually the AST rebuild is elided after verifying that all inputs are
+// unchanged, but invalidation decisions happen earlier and so independently).
+// See https://github.com/clangd/clangd/issues/620
+TEST_F(TUSchedulerTests, InvalidationUnchanged) {
+  auto Path = testPath("foo.cpp");
+  TUScheduler S(CDB, optsForTest(), captureDiags());
+  std::atomic<int> Actions(0);
+
+  Notification Start;
+  updateWithDiags(S, Path, "a", WantDiagnostics::Yes, [&](std::vector<Diag>) {
+    Start.wait();
+  });
+  S.runWithAST(
+      "invalidatable", Path,
+      [&](llvm::Expected<InputsAndAST> AST) {
+        ++Actions;
+        EXPECT_TRUE(bool(AST))
+            << "Should not invalidate based on an update with same content: "
+            << llvm::toString(AST.takeError());
+      },
+      TUScheduler::InvalidateOnUpdate);
+  updateWithDiags(S, Path, "a", WantDiagnostics::Yes, [&](std::vector<Diag>) {
+    ADD_FAILURE() << "Shouldn't build, identical to previous";
+  });
+  Start.notify();
+  ASSERT_TRUE(S.blockUntilIdle(timeoutSeconds(10)));
+
+  EXPECT_EQ(1, Actions.load()) << "All actions should run";
+}
+
 TEST_F(TUSchedulerTests, ManyUpdates) {
   const int FilesCount = 3;
   const int UpdatesPerFile = 10;
@@ -864,25 +896,28 @@ TEST_F(TUSchedulerTests, NoChangeDiags) {
 }
 
 TEST_F(TUSchedulerTests, Run) {
-  auto Opts = optsForTest();
-  Opts.ContextProvider = bindPath;
-  TUScheduler S(CDB, Opts);
-  std::atomic<int> Counter(0);
-  S.run("add 1", /*Path=*/"", [&] { ++Counter; });
-  S.run("add 2", /*Path=*/"", [&] { Counter += 2; });
-  ASSERT_TRUE(S.blockUntilIdle(timeoutSeconds(10)));
-  EXPECT_EQ(Counter.load(), 3);
+  for (bool Sync : {false, true}) {
+    auto Opts = optsForTest();
+    if (Sync)
+      Opts.AsyncThreadsCount = 0;
+    TUScheduler S(CDB, Opts);
+    std::atomic<int> Counter(0);
+    S.run("add 1", /*Path=*/"", [&] { ++Counter; });
+    S.run("add 2", /*Path=*/"", [&] { Counter += 2; });
+    ASSERT_TRUE(S.blockUntilIdle(timeoutSeconds(10)));
+    EXPECT_EQ(Counter.load(), 3);
 
-  Notification TaskRun;
-  Key<int> TestKey;
-  WithContextValue CtxWithKey(TestKey, 10);
-  const char *Path = "somepath";
-  S.run("props context", Path, [&] {
-    EXPECT_EQ(Context::current().getExisting(TestKey), 10);
-    EXPECT_EQ(Path, boundPath());
-    TaskRun.notify();
-  });
-  TaskRun.wait();
+    Notification TaskRun;
+    Key<int> TestKey;
+    WithContextValue CtxWithKey(TestKey, 10);
+    const char *Path = "somepath";
+    S.run("props context", Path, [&] {
+      EXPECT_EQ(Context::current().getExisting(TestKey), 10);
+      EXPECT_EQ(Path, boundPath());
+      TaskRun.notify();
+    });
+    TaskRun.wait();
+  }
 }
 
 TEST_F(TUSchedulerTests, TUStatus) {
@@ -1007,7 +1042,7 @@ TEST_F(TUSchedulerTests, CommandLineWarnings) {
 
 TEST(DebouncePolicy, Compute) {
   namespace c = std::chrono;
-  std::vector<DebouncePolicy::clock::duration> History = {
+  DebouncePolicy::clock::duration History[] = {
       c::seconds(0),
       c::seconds(5),
       c::seconds(10),
@@ -1018,8 +1053,9 @@ TEST(DebouncePolicy, Compute) {
   Policy.Max = c::seconds(25);
   // Call Policy.compute(History) and return seconds as a float.
   auto Compute = [&](llvm::ArrayRef<DebouncePolicy::clock::duration> History) {
-    using FloatingSeconds = c::duration<float, c::seconds::period>;
-    return static_cast<float>(Policy.compute(History) / FloatingSeconds(1));
+    return c::duration_cast<c::duration<float, c::seconds::period>>(
+               Policy.compute(History))
+        .count();
   };
   EXPECT_NEAR(10, Compute(History), 0.01) << "(upper) median = 10";
   Policy.RebuildRatio = 1.5;

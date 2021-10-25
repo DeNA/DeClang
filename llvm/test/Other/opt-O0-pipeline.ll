@@ -1,6 +1,9 @@
-; RUN: opt -mtriple=x86_64-- -O0 -debug-pass=Structure < %s -o /dev/null 2>&1 | FileCheck %s --check-prefixes=CHECK,%llvmcheckext
+; RUN: opt -enable-new-pm=0 -mtriple=x86_64-- -O0 -debug-pass=Structure < %s -o /dev/null 2>&1 | FileCheck %s --check-prefixes=CHECK,%llvmcheckext
 
 ; REQUIRES: asserts
+
+; Suppress FileCheck --allow-unused-prefixes=false diagnostics.
+; CHECK-NOEXT: {{^}}
 
 ; CHECK-LABEL: Pass Arguments:
 ; CHECK-NEXT: Target Transform Information

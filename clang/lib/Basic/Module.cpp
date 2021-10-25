@@ -37,7 +37,7 @@ using namespace clang;
 Module::Module(StringRef Name, SourceLocation DefinitionLoc, Module *Parent,
                bool IsFramework, bool IsExplicit, unsigned VisibilityID)
     : Name(Name), DefinitionLoc(DefinitionLoc), Parent(Parent),
-      Directory(), Umbrella(), ASTFile(nullptr),
+      Directory(), Umbrella(), ASTFile(None),
       VisibilityID(VisibilityID), IsUnimportable(false),
       HasIncompatibleModuleFile(false), IsAvailable(true),
       IsFromModuleFile(false), IsFramework(IsFramework), IsExplicit(IsExplicit),
@@ -50,7 +50,7 @@ Module::Module(StringRef Name, SourceLocation DefinitionLoc, Module *Parent,
       // conflicts.
       IsSwiftInferImportAsMember(false),
 
-      HasUmbrellaDir(false), NameVisibility(Hidden) {
+      NameVisibility(Hidden) {
   if (Parent) {
     IsAvailable = Parent->isAvailable();
     IsUnimportable = Parent->isUnimportable();
@@ -81,7 +81,7 @@ static bool isPlatformEnvironment(const TargetInfo &Target, StringRef Feature) {
     return true;
 
   auto CmpPlatformEnv = [](StringRef LHS, StringRef RHS) {
-    auto Pos = LHS.find("-");
+    auto Pos = LHS.find('-');
     if (Pos == StringRef::npos)
       return false;
     SmallString<128> NewLHS = LHS.slice(0, Pos);
@@ -179,14 +179,10 @@ bool Module::isAvailable(const LangOptions &LangOpts, const TargetInfo &Target,
 }
 
 bool Module::isSubModuleOf(const Module *Other) const {
-  const Module *This = this;
-  do {
-    if (This == Other)
+  for (auto *Parent = this; Parent; Parent = Parent->Parent) {
+    if (Parent == Other)
       return true;
-
-    This = This->Parent;
-  } while (This);
-
+  }
   return false;
 }
 
@@ -258,7 +254,7 @@ Module::DirectoryName Module::getUmbrellaDir() const {
     return {"", "", U.Entry->getDir()};
 
   return {UmbrellaAsWritten, UmbrellaRelativeToRootModuleDirectory,
-          static_cast<const DirectoryEntry *>(Umbrella)};
+          Umbrella.dyn_cast<const DirectoryEntry *>()};
 }
 
 void Module::addTopHeader(const FileEntry *File) {
@@ -684,7 +680,7 @@ ASTSourceDescriptor::ASTSourceDescriptor(Module &M)
     : Signature(M.Signature), ClangModule(&M) {
   if (M.Directory)
     Path = M.Directory->getName();
-  if (auto *File = M.getASTFile())
+  if (auto File = M.getASTFile())
     ASTFile = File->getName();
 }
 

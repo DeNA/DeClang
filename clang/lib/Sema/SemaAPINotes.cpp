@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/Decl.h"
+#include "clang/Basic/SourceLocation.h"
 #include "clang/Sema/SemaInternal.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/APINotes/APINotesReader.h"
@@ -313,10 +315,14 @@ static void ProcessAPINotes(Sema &S, Decl *D,
   if (!info.SwiftName.empty()) {
     handleAPINotedAttribute<SwiftNameAttr>(S, D, true, metadata,
                                            [&]() -> SwiftNameAttr * {
-      auto &APINoteName = S.getASTContext().Idents.get("SwiftName API Note");
-      
-      if (!S.DiagnoseSwiftName(D, info.SwiftName, D->getLocation(),
-                               &APINoteName, /*IsAsync=*/false)) {
+      AttributeFactory AF{};
+      AttributePool AP{AF};
+      auto &C = S.getASTContext();
+      ParsedAttr *SNA = AP.create(&C.Idents.get("swift_name"), SourceRange(),
+                                  nullptr, SourceLocation(), nullptr, nullptr,
+                                  nullptr, ParsedAttr::AS_GNU);
+
+      if (!S.DiagnoseSwiftName(D, info.SwiftName, D->getLocation(), *SNA, /*IsAsync=*/false)) {
         return nullptr;
       }
 
@@ -660,30 +666,30 @@ static void ProcessAPINotes(Sema &S, TypedefNameDecl *D,
                             const api_notes::TypedefInfo &info,
                             VersionedInfoMetadata metadata) {
   // swift_wrapper
-  using SwiftWrapperKind = api_notes::SwiftWrapperKind;
+  using SwiftWrapperKind = api_notes::SwiftNewTypeKind;
 
   if (auto swiftWrapper = info.SwiftWrapper) {
-    handleAPINotedAttribute<SwiftNewtypeAttr>(S, D,
+    handleAPINotedAttribute<SwiftNewTypeAttr>(S, D,
       *swiftWrapper != SwiftWrapperKind::None, metadata,
       [&] {
-        SwiftNewtypeAttr::NewtypeKind kind;
+        SwiftNewTypeAttr::NewtypeKind kind;
         switch (*swiftWrapper) {
         case SwiftWrapperKind::None:
           llvm_unreachable("Shouldn't build an attribute");
 
         case SwiftWrapperKind::Struct:
-          kind = SwiftNewtypeAttr::NK_Struct;
+          kind = SwiftNewTypeAttr::NK_Struct;
           break;
 
         case SwiftWrapperKind::Enum:
-          kind = SwiftNewtypeAttr::NK_Enum;
+          kind = SwiftNewTypeAttr::NK_Enum;
           break;
         }
         AttributeCommonInfo syntaxInfo{SourceRange(),
-                                       AttributeCommonInfo::AT_SwiftNewtype,
+                                       AttributeCommonInfo::AT_SwiftNewType,
                                        AttributeCommonInfo::AS_GNU,
-                                       SwiftNewtypeAttr::GNU_swift_wrapper};
-        return new (S.Context) SwiftNewtypeAttr(S.Context, syntaxInfo, kind);
+                                       SwiftNewTypeAttr::GNU_swift_wrapper};
+        return new (S.Context) SwiftNewTypeAttr(S.Context, syntaxInfo, kind);
     });
   }
 

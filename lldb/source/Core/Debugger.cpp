@@ -258,6 +258,12 @@ const FormatEntity::Entry *Debugger::GetFrameFormatUnique() const {
   return m_collection_sp->GetPropertyAtIndexAsFormatEntity(nullptr, idx);
 }
 
+uint32_t Debugger::GetStopDisassemblyMaxSize() const {
+  const uint32_t idx = ePropertyStopDisassemblyMaxSize;
+  return m_collection_sp->GetPropertyAtIndexAsUInt64(
+      nullptr, idx, g_debugger_properties[idx].default_uint_value);
+}
+
 bool Debugger::GetNotifyVoid() const {
   const uint32_t idx = ePropertyNotiftVoid;
   return m_collection_sp->GetPropertyAtIndexAsBoolean(
@@ -344,6 +350,12 @@ bool Debugger::SetUseColor(bool b) {
   bool ret = m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, b);
   SetPrompt(GetPrompt());
   return ret;
+}
+
+bool Debugger::GetUseAutosuggestion() const {
+  const uint32_t idx = ePropertyShowAutosuggestion;
+  return m_collection_sp->GetPropertyAtIndexAsBoolean(
+      nullptr, idx, g_debugger_properties[idx].default_uint_value != 0);
 }
 
 bool Debugger::GetUseSourceCache() const {
@@ -666,9 +678,7 @@ Debugger::Debugger(lldb::LogOutputCallback log_callback, void *baton)
       m_event_handler_thread(), m_io_handler_thread(),
       m_sync_broadcaster(nullptr, "lldb.debugger.sync"),
       m_forward_listener_sp(), m_clear_once() {
-  char instance_cstr[256];
-  snprintf(instance_cstr, sizeof(instance_cstr), "debugger_%d", (int)GetID());
-  m_instance_name.SetCString(instance_cstr);
+  m_instance_name.SetString(llvm::formatv("debugger_{0}", GetID()).str());
   if (log_callback)
     m_log_callback_stream_sp =
         std::make_shared<StreamCallback>(log_callback, baton);
@@ -787,7 +797,7 @@ repro::DataRecorder *Debugger::GetInputRecorder() { return m_input_recorder; }
 void Debugger::SetInputFile(FileSP file_sp, repro::DataRecorder *recorder) {
   assert(file_sp && file_sp->IsValid());
   m_input_recorder = recorder;
-  m_input_file_sp = file_sp;
+  m_input_file_sp = std::move(file_sp);
   // Save away the terminal state if that is relevant, so that we can restore
   // it in RestoreInputState.
   SaveInputTerminalState();
@@ -1208,11 +1218,11 @@ bool Debugger::EnableLog(llvm::StringRef channel,
         flags |= File::eOpenOptionAppend;
       else
         flags |= File::eOpenOptionTruncate;
-      auto file = FileSystem::Instance().Open(
+      llvm::Expected<FileUP> file = FileSystem::Instance().Open(
           FileSpec(log_file), flags, lldb::eFilePermissionsFileDefault, false);
       if (!file) {
-        // FIXME: This gets garbled when called from the log command.
-        error_stream << "Unable to open log file: " << log_file;
+        error_stream << "Unable to open log file '" << log_file
+                     << "': " << llvm::toString(file.takeError()) << "\n";
         return false;
       }
 
@@ -1626,14 +1636,11 @@ void Debugger::JoinIOHandlerThread() {
   }
 }
 
-Target *Debugger::GetSelectedOrDummyTarget(bool prefer_dummy) {
-  Target *target = nullptr;
+Target &Debugger::GetSelectedOrDummyTarget(bool prefer_dummy) {
   if (!prefer_dummy) {
-    target = m_target_list.GetSelectedTarget().get();
-    if (target)
-      return target;
+    if (TargetSP target = m_target_list.GetSelectedTarget())
+      return *target;
   }
-
   return GetDummyTarget();
 }
 

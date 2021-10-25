@@ -35,6 +35,9 @@ public:
   /// If given, the name of the target CPU to generate code for.
   std::string CPU;
 
+  /// If given, the name of the target CPU to tune code for.
+  std::string TuneCPU;
+
   /// If given, the unit to use for floating point math.
   std::string FPMath;
 
@@ -71,6 +74,9 @@ public:
   /// \brief If enabled, use 32-bit pointers for accessing const/local/shared
   /// address space.
   bool NVPTXUseShortPointers = false;
+
+  /// \brief If enabled, allow AMDGPU unsafe floating point atomics.
+  bool AllowAMDGPUUnsafeFPAtomics = false;
 
   // The code model to be used as specified by the user. Corresponds to
   // CodeModel::Model enum defined in include/llvm/Support/CodeGen.h, plus

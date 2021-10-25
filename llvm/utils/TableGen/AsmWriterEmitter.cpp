@@ -522,10 +522,8 @@ void AsmWriterEmitter::EmitPrintInstruction(
   }
 
   // Okay, delete instructions with no operand info left.
-  auto I = llvm::remove_if(Instructions,
-                     [](AsmWriterInst &Inst) { return Inst.Operands.empty(); });
-  Instructions.erase(I, Instructions.end());
-
+  llvm::erase_if(Instructions,
+                 [](AsmWriterInst &Inst) { return Inst.Operands.empty(); });
 
   // Because this is a vector, we want to emit from the end.  Reverse all of the
   // elements in the vector.
@@ -1265,13 +1263,10 @@ void AsmWriterEmitter::EmitPrintAliasInstruction(raw_ostream &O) {
       << "    break;\n";
 
     for (unsigned i = 0; i < MCOpPredicates.size(); ++i) {
-      Init *MCOpPred = MCOpPredicates[i]->getValueInit("MCOperandPredicate");
-      if (CodeInit *SI = dyn_cast<CodeInit>(MCOpPred)) {
-        O << "  case " << i + 1 << ": {\n"
-          << SI->getValue() << "\n"
-          << "    }\n";
-      } else
-        llvm_unreachable("Unexpected MCOperandPredicate field!");
+      StringRef MCOpPred = MCOpPredicates[i]->getValueAsString("MCOperandPredicate");
+      O << "  case " << i + 1 << ": {\n"
+        << MCOpPred.data() << "\n"
+        << "    }\n";
     }
     O << "  }\n"
       << "}\n\n";

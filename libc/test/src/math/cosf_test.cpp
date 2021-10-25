@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "include/errno.h"
-#include "include/math.h"
 #include "src/errno/llvmlibc_errno.h"
 #include "src/math/cosf.h"
 #include "test/src/math/sdcomp26094.h"
@@ -18,6 +17,7 @@
 #include "utils/FPUtil/FloatProperties.h"
 #include "utils/MPFRWrapper/MPFRUtils.h"
 #include "utils/UnitTest/Test.h"
+#include <math.h>
 
 #include <stdint.h>
 
@@ -31,11 +31,6 @@ using BitPatterns = __llvm_libc::fputil::BitPatterns<float>;
 using __llvm_libc::testing::sdcomp26094Values;
 
 namespace mpfr = __llvm_libc::testing::mpfr;
-
-// 12 additional bits of precision over the base precision of a |float|
-// value.
-static constexpr mpfr::Tolerance tolerance{mpfr::Tolerance::floatPrecision, 12,
-                                           3 * 0x1000 / 4};
 
 TEST(CosfTest, SpecialNumbers) {
   llvmlibc_errno = 0;
@@ -81,7 +76,7 @@ TEST(CosfTest, InFloatRange) {
     float x = valueFromBits(v);
     if (isnan(x) || isinf(x))
       continue;
-    ASSERT_MPFR_MATCH(mpfr::Operation::Cos, x, __llvm_libc::cosf(x), tolerance);
+    ASSERT_MPFR_MATCH(mpfr::Operation::Cos, x, __llvm_libc::cosf(x), 1.0);
   }
 }
 
@@ -89,12 +84,12 @@ TEST(CosfTest, InFloatRange) {
 TEST(CosfTest, SmallValues) {
   float x = valueFromBits(0x17800000U);
   float result = __llvm_libc::cosf(x);
-  EXPECT_MPFR_MATCH(mpfr::Operation::Cos, x, result, tolerance);
+  EXPECT_MPFR_MATCH(mpfr::Operation::Cos, x, result, 1.0);
   EXPECT_EQ(BitPatterns::one, valueAsBits(result));
 
   x = valueFromBits(0x0040000U);
   result = __llvm_libc::cosf(x);
-  EXPECT_MPFR_MATCH(mpfr::Operation::Cos, x, result, tolerance);
+  EXPECT_MPFR_MATCH(mpfr::Operation::Cos, x, result, 1.0);
   EXPECT_EQ(BitPatterns::one, valueAsBits(result));
 }
 
@@ -103,6 +98,6 @@ TEST(CosfTest, SmallValues) {
 TEST(CosfTest, SDCOMP_26094) {
   for (uint32_t v : sdcomp26094Values) {
     float x = valueFromBits(v);
-    ASSERT_MPFR_MATCH(mpfr::Operation::Cos, x, __llvm_libc::cosf(x), tolerance);
+    ASSERT_MPFR_MATCH(mpfr::Operation::Cos, x, __llvm_libc::cosf(x), 1.0);
   }
 }

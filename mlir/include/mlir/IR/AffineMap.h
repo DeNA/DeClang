@@ -125,6 +125,10 @@ public:
   ArrayRef<AffineExpr> getResults() const;
   AffineExpr getResult(unsigned idx) const;
 
+  /// Extracts the position of the dimensional expression at the given result,
+  /// when the caller knows it is safe to do so.
+  unsigned getDimPosition(unsigned idx) const;
+
   /// Walk all of the AffineExpr's in this mapping. Each node in an expression
   /// tree is visited in postorder.
   void walkExprs(std::function<void(AffineExpr)> callback) const;
@@ -195,6 +199,14 @@ public:
   AffineMap getMinorSubMap(unsigned numResults);
 
   friend ::llvm::hash_code hash_value(AffineMap arg);
+
+  /// Methods supporting C API.
+  const void *getAsOpaquePointer() const {
+    return static_cast<const void *>(map);
+  }
+  static AffineMap getFromOpaquePointer(const void *pointer) {
+    return AffineMap(reinterpret_cast<ImplType *>(const_cast<void *>(pointer)));
+  }
 
 private:
   ImplType *map;
@@ -314,6 +326,9 @@ AffineMap inversePermutation(AffineMap map);
 ///     (i, j, k) -> (i, k, k, j, i, j)
 /// ```
 AffineMap concatAffineMaps(ArrayRef<AffineMap> maps);
+
+AffineMap getProjectedMap(AffineMap map,
+                          ArrayRef<unsigned> projectedDimensions);
 
 inline raw_ostream &operator<<(raw_ostream &os, AffineMap map) {
   map.print(os);

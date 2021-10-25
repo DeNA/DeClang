@@ -22,8 +22,6 @@ class PlatformRemoteAppleWatch : public PlatformRemoteDarwinDevice {
 public:
   PlatformRemoteAppleWatch();
 
-  ~PlatformRemoteAppleWatch() override = default;
-
   // Class Functions
   static lldb::PlatformSP CreateInstance(bool force,
                                          const lldb_private::ArchSpec *arch);
@@ -55,11 +53,6 @@ public:
 protected:
   llvm::StringRef GetDeviceSupportDirectoryName() override;
   llvm::StringRef GetPlatformName() override;
-
-private:
-  PlatformRemoteAppleWatch(const PlatformRemoteAppleWatch &) = delete;
-  const PlatformRemoteAppleWatch &
-  operator=(const PlatformRemoteAppleWatch &) = delete;
 };
 
 #endif // LLDB_SOURCE_PLUGINS_PLATFORM_MACOSX_PLATFORMREMOTEAPPLEWATCH_H

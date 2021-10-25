@@ -326,10 +326,13 @@ void Thread::FrameSelectedCallback(StackFrame *frame) {
   if (!frame)
     return;
 
-  if (frame->HasDebugInformation() && GetProcess()->GetWarningsOptimization()) {
+  if (frame->HasDebugInformation() &&
+      (GetProcess()->GetWarningsOptimization() ||
+       GetProcess()->GetWarningsUnsupportedLanguage())) {
     SymbolContext sc =
         frame->GetSymbolContext(eSymbolContextFunction | eSymbolContextModule);
     GetProcess()->PrintWarningOptimization(sc);
+    GetProcess()->PrintWarningUnsupportedLanguage(sc);
   }
   SymbolContext msc = frame->GetSymbolContext(eSymbolContextModule);
   if (msc.module_sp)
@@ -744,8 +747,6 @@ void Thread::DidResume() { SetResumeSignal(LLDB_INVALID_SIGNAL_NUMBER); }
 void Thread::DidStop() { SetState(eStateStopped); }
 
 bool Thread::ShouldStop(Event *event_ptr) {
-  ThreadPlan *current_plan = GetCurrentPlan();
-
   bool should_stop = true;
 
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
@@ -796,9 +797,6 @@ bool Thread::ShouldStop(Event *event_ptr) {
     LLDB_LOGF(log, "Plan stack initial state:\n%s", s.GetData());
   }
 
-  // The top most plan always gets to do the trace log...
-  current_plan->DoTraceLog();
-
   // First query the stop info's ShouldStopSynchronous.  This handles
   // "synchronous" stop reasons, for example the breakpoint command on internal
   // breakpoints.  If a synchronous stop reason says we should not stop, then
@@ -810,6 +808,16 @@ bool Thread::ShouldStop(Event *event_ptr) {
                    "stop, returning ShouldStop of false.");
     return false;
   }
+
+  // Call this after ShouldStopSynchronous.
+  ThreadPlan *current_plan;
+  if (auto plan = GetProcess()->FindDetachedPlanExplainingStop(*this, event_ptr))
+    current_plan = plan.get();
+  else
+    current_plan = GetCurrentPlan();
+
+  // The top most plan always gets to do the trace log…
+  current_plan->DoTraceLog();
 
   // If we've already been restarted, don't query the plans since the state
   // they would examine is not current.
@@ -838,6 +846,8 @@ bool Thread::ShouldStop(Event *event_ptr) {
       ThreadPlan *plan_ptr = current_plan;
       while ((plan_ptr = GetPreviousPlan(plan_ptr)) != nullptr) {
         if (plan_ptr->PlanExplainsStop(event_ptr)) {
+          LLDB_LOGF(log, "Plan %s explains stop.", plan_ptr->GetName());
+
           should_stop = plan_ptr->ShouldStop(event_ptr);
 
           // plan_ptr explains the stop, next check whether plan_ptr is done,
@@ -869,10 +879,7 @@ bool Thread::ShouldStop(Event *event_ptr) {
   }
 
   if (!done_processing_current_plan) {
-    bool over_ride_stop = current_plan->ShouldAutoContinue(event_ptr);
-
-    LLDB_LOGF(log, "Plan %s explains stop, auto-continue %i.",
-              current_plan->GetName(), over_ride_stop);
+    bool override_stop = false;
 
     // We're starting from the base plan, so just let it decide;
     if (current_plan->IsBasePlan()) {
@@ -893,20 +900,24 @@ bool Thread::ShouldStop(Event *event_ptr) {
           if (should_stop)
             current_plan->WillStop();
 
-          // If a Master Plan wants to stop, and wants to stick on the stack,
-          // we let it. Otherwise, see if the plan's parent wants to stop.
+          if (current_plan->ShouldAutoContinue(event_ptr)) {
+            override_stop = true;
+            LLDB_LOGF(log, "Plan %s auto-continue: true.",
+                      current_plan->GetName());
+          }
 
+          // If a Master Plan wants to stop, we let it. Otherwise, see if the
+          // plan's parent wants to stop.
+
+          PopPlan();
           if (should_stop && current_plan->IsMasterPlan() &&
               !current_plan->OkayToDiscard()) {
-            PopPlan();
             break;
-          } else {
-            PopPlan();
+          }
 
-            current_plan = GetCurrentPlan();
-            if (current_plan == nullptr) {
-              break;
-            }
+          current_plan = GetCurrentPlan();
+          if (current_plan == nullptr) {
+            break;
           }
         } else {
           break;
@@ -914,7 +925,7 @@ bool Thread::ShouldStop(Event *event_ptr) {
       }
     }
 
-    if (over_ride_stop)
+    if (override_stop)
       should_stop = false;
   }
 
@@ -1119,7 +1130,7 @@ void Thread::AutoCompleteThreadPlans(CompletionRequest &request) const {
   // Iterate from the second plan (index: 1) to skip the base plan.
   ThreadPlanSP p;
   uint32_t i = 1;
-  while (p = plans.GetPlanByIndex(i, false)) {
+  while ((p = plans.GetPlanByIndex(i, false))) {
     StreamString strm;
     p->GetDescription(&strm, eDescriptionLevelInitial);
     request.TryCompleteCurrentArg(std::to_string(i), strm.GetString());
@@ -1307,16 +1318,10 @@ ThreadPlanSP Thread::QueueThreadPlanForStepInRange(
     lldb::RunMode stop_other_threads, Status &status,
     LazyBool step_in_avoids_code_without_debug_info,
     LazyBool step_out_avoids_code_without_debug_info) {
-  ThreadPlanSP thread_plan_sp(
-      new ThreadPlanStepInRange(*this, range, addr_context, stop_other_threads,
-                                step_in_avoids_code_without_debug_info,
-                                step_out_avoids_code_without_debug_info));
-  ThreadPlanStepInRange *plan =
-      static_cast<ThreadPlanStepInRange *>(thread_plan_sp.get());
-
-  if (step_in_target)
-    plan->SetStepInTarget(step_in_target);
-
+  ThreadPlanSP thread_plan_sp(new ThreadPlanStepInRange(
+      *this, range, addr_context, step_in_target, stop_other_threads,
+      step_in_avoids_code_without_debug_info,
+      step_out_avoids_code_without_debug_info));
   status = QueueThreadPlan(thread_plan_sp, abort_other_plans);
   return thread_plan_sp;
 }
@@ -1327,16 +1332,13 @@ ThreadPlanSP Thread::QueueThreadPlanForStepInRangeNoShouldStop(
     lldb::RunMode stop_other_threads, Status &status,
     LazyBool step_in_avoids_code_without_debug_info,
     LazyBool step_out_avoids_code_without_debug_info) {
-  ThreadPlanSP thread_plan_sp(
-      new ThreadPlanStepInRange(*this, range, addr_context, stop_other_threads,
-                                step_in_avoids_code_without_debug_info,
-                                step_out_avoids_code_without_debug_info));
+  ThreadPlanSP thread_plan_sp(new ThreadPlanStepInRange(
+      *this, range, addr_context, step_in_target, stop_other_threads,
+      step_in_avoids_code_without_debug_info,
+      step_out_avoids_code_without_debug_info));
+
   ThreadPlanStepInRange *plan =
       static_cast<ThreadPlanStepInRange *>(thread_plan_sp.get());
-
-  if (step_in_target)
-    plan->SetStepInTarget(step_in_target);
-
   plan->ClearShouldStopHereCallbacks();
 
   status = QueueThreadPlan(thread_plan_sp, abort_other_plans);
@@ -1717,7 +1719,7 @@ Thread::GetStackFrameSPForStackFramePtr(StackFrame *stack_frame_ptr) {
   return GetStackFrameList()->GetStackFrameSPForStackFramePtr(stack_frame_ptr);
 }
 
-const char *Thread::StopReasonAsCString(lldb::StopReason reason) {
+std::string Thread::StopReasonAsString(lldb::StopReason reason) {
   switch (reason) {
   case eStopReasonInvalid:
     return "invalid";
@@ -1743,13 +1745,10 @@ const char *Thread::StopReasonAsCString(lldb::StopReason reason) {
     return "instrumentation break";
   }
 
-  static char unknown_state_string[64];
-  snprintf(unknown_state_string, sizeof(unknown_state_string),
-           "StopReason = %i", reason);
-  return unknown_state_string;
+  return "StopReason = " + std::to_string(reason);
 }
 
-const char *Thread::RunModeAsCString(lldb::RunMode mode) {
+std::string Thread::RunModeAsString(lldb::RunMode mode) {
   switch (mode) {
   case eOnlyThisThread:
     return "only this thread";
@@ -1759,10 +1758,7 @@ const char *Thread::RunModeAsCString(lldb::RunMode mode) {
     return "only during stepping";
   }
 
-  static char unknown_state_string[64];
-  snprintf(unknown_state_string, sizeof(unknown_state_string), "RunMode = %i",
-           mode);
-  return unknown_state_string;
+  return "RunMode = " + std::to_string(mode);
 }
 
 size_t Thread::GetStatus(Stream &strm, uint32_t start_frame,

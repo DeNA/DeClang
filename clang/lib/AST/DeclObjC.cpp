@@ -33,6 +33,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <queue>
 #include <utility>
 
 using namespace clang;
@@ -825,7 +826,8 @@ ObjCMethodDecl *ObjCMethodDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
 }
 
 bool ObjCMethodDecl::isDirectMethod() const {
-  return hasAttr<ObjCDirectAttr>();
+  return hasAttr<ObjCDirectAttr>() &&
+         !getASTContext().getLangOpts().ObjCDisableDirectMethodsForTesting;
 }
 
 bool ObjCMethodDecl::isThisDeclarationADesignatedInitializer() const {
@@ -1904,6 +1906,27 @@ ObjCProtocolDecl *ObjCProtocolDecl::CreateDeserialized(ASTContext &C,
   return Result;
 }
 
+bool ObjCProtocolDecl::isNonRuntimeProtocol() const {
+  return hasAttr<ObjCNonRuntimeProtocolAttr>();
+}
+
+void ObjCProtocolDecl::getImpliedProtocols(
+    llvm::DenseSet<const ObjCProtocolDecl *> &IPs) const {
+  std::queue<const ObjCProtocolDecl *> WorkQueue;
+  WorkQueue.push(this);
+
+  while (!WorkQueue.empty()) {
+    const auto *PD = WorkQueue.front();
+    WorkQueue.pop();
+    for (const auto *Parent : PD->protocols()) {
+      const auto *Can = Parent->getCanonicalDecl();
+      auto Result = IPs.insert(Can);
+      if (Result.second)
+        WorkQueue.push(Parent);
+    }
+  }
+}
+
 ObjCProtocolDecl *ObjCProtocolDecl::lookupProtocolNamed(IdentifierInfo *Name) {
   ObjCProtocolDecl *PDecl = this;
 
@@ -2270,6 +2293,11 @@ ObjCPropertyDecl *ObjCPropertyDecl::CreateDeserialized(ASTContext &C,
 QualType ObjCPropertyDecl::getUsageType(QualType objectType) const {
   return DeclType.substObjCMemberType(objectType, getDeclContext(),
                                       ObjCSubstitutionContext::Property);
+}
+
+bool ObjCPropertyDecl::isDirectProperty() const {
+  return (PropertyAttributes & ObjCPropertyAttribute::kind_direct) &&
+         !getASTContext().getLangOpts().ObjCDisableDirectMethodsForTesting;
 }
 
 //===----------------------------------------------------------------------===//

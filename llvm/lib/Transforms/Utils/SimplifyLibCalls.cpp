@@ -20,7 +20,6 @@
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/Analysis/ProfileSummaryInfo.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Analysis/CaptureTracking.h"
@@ -609,9 +608,19 @@ Value *LibCallSimplifier::optimizeStrNCpy(CallInst *CI, IRBuilderBase &B) {
     return Dst;
   }
 
-  // Let strncpy handle the zero padding
-  if (Len > SrcLen + 1)
-    return nullptr;
+  // strncpy(a, "a", 4) - > memcpy(a, "a\0\0\0", 4)
+  if (Len > SrcLen + 1) {
+    if (Len <= 128) {
+      StringRef Str;
+      if (!getConstantStringInfo(Src, Str))
+        return nullptr;
+      std::string SrcStr = Str.str();
+      SrcStr.resize(Len, '\0');
+      Src = B.CreateGlobalString(SrcStr, "str");
+    } else {
+      return nullptr;
+    }
+  }
 
   Type *PT = Callee->getFunctionType()->getParamType(0);
   // strncpy(x, s, c) -> memcpy(align 1 x, align 1 s, c) [s and c are constant]
@@ -684,8 +693,6 @@ Value *LibCallSimplifier::optimizeStringLength(CallInst *CI, IRBuilderBase &B,
                            Offset);
       }
     }
-
-    return nullptr;
   }
 
   // strlen(x?"foo":"bars") --> x ? 3 : 4
@@ -1629,6 +1636,14 @@ Value *LibCallSimplifier::replacePowWithSqrt(CallInst *Pow, IRBuilderBase &B) {
   if (ExpoF->isNegative() && (!Pow->hasApproxFunc() && !Pow->hasAllowReassoc()))
     return nullptr;
 
+  // If we have a pow() library call (accesses memory) and we can't guarantee
+  // that the base is not an infinity, give up:
+  // pow(-Inf, 0.5) is optionally required to have a result of +Inf (not setting
+  // errno), but sqrt(-Inf) is required by various standards to set errno.
+  if (!Pow->doesNotAccessMemory() && !Pow->hasNoInfs() &&
+      !isKnownNeverInfinity(Base, TLI))
+    return nullptr;
+
   Sqrt = getSqrtCall(Base, Attrs, Pow->doesNotAccessMemory(), Mod, B, TLI);
   if (!Sqrt)
     return nullptr;
@@ -1715,7 +1730,8 @@ Value *LibCallSimplifier::optimizePow(CallInst *Pow, IRBuilderBase &B) {
 
   // pow(x, n) -> x * x * x * ...
   const APFloat *ExpoF;
-  if (AllowApprox && match(Expo, m_APFloat(ExpoF))) {
+  if (AllowApprox && match(Expo, m_APFloat(ExpoF)) &&
+      !ExpoF->isExactlyValue(0.5) && !ExpoF->isExactlyValue(-0.5)) {
     // We limit to a max of 7 multiplications, thus the maximum exponent is 32.
     // If the exponent is an integer+0.5 we generate a call to sqrt and an
     // additional fmul.
@@ -1741,6 +1757,8 @@ Value *LibCallSimplifier::optimizePow(CallInst *Pow, IRBuilderBase &B) {
 
         Sqrt = getSqrtCall(Base, Pow->getCalledFunction()->getAttributes(),
                            Pow->doesNotAccessMemory(), M, B, TLI);
+        if (!Sqrt)
+          return nullptr;
       }
 
       // We will memoize intermediate products of the Addition Chain.
@@ -2164,7 +2182,7 @@ Value *LibCallSimplifier::optimizeSinCosPi(CallInst *CI, IRBuilderBase &B) {
     classifyArgUse(U, F, IsFloat, SinCalls, CosCalls, SinCosCalls);
 
   // It's only worthwhile if both sinpi and cospi are actually used.
-  if (SinCosCalls.empty() && (SinCalls.empty() || CosCalls.empty()))
+  if (SinCalls.empty() || CosCalls.empty())
     return nullptr;
 
   Value *Sin, *Cos, *SinCos;
@@ -2190,7 +2208,7 @@ void LibCallSimplifier::classifyArgUse(
     SmallVectorImpl<CallInst *> &SinCosCalls) {
   CallInst *CI = dyn_cast<CallInst>(Val);
 
-  if (!CI)
+  if (!CI || CI->use_empty())
     return;
 
   // Don't consider calls in other functions.
@@ -2485,6 +2503,30 @@ Value *LibCallSimplifier::optimizeSPrintFString(CallInst *CI,
     // sprintf(dest, "%s", str) -> llvm.memcpy(align 1 dest, align 1 str,
     // strlen(str)+1)
     if (!CI->getArgOperand(2)->getType()->isPointerTy())
+      return nullptr;
+
+    if (CI->use_empty())
+      // sprintf(dest, "%s", str) -> strcpy(dest, str)
+      return emitStrCpy(CI->getArgOperand(0), CI->getArgOperand(2), B, TLI);
+
+    uint64_t SrcLen = GetStringLength(CI->getArgOperand(2));
+    if (SrcLen) {
+      B.CreateMemCpy(
+          CI->getArgOperand(0), Align(1), CI->getArgOperand(2), Align(1),
+          ConstantInt::get(DL.getIntPtrType(CI->getContext()), SrcLen));
+      // Returns total number of characters written without null-character.
+      return ConstantInt::get(CI->getType(), SrcLen - 1);
+    } else if (Value *V = emitStpCpy(CI->getArgOperand(0), CI->getArgOperand(2),
+                                     B, TLI)) {
+      // sprintf(dest, "%s", str) -> stpcpy(dest, str) - dest
+      Value *PtrDiff = B.CreatePtrDiff(V, CI->getArgOperand(0));
+      return B.CreateIntCast(PtrDiff, CI->getType(), false);
+    }
+
+    bool OptForSize = CI->getFunction()->hasOptSize() ||
+                      llvm::shouldOptimizeForSize(CI->getParent(), PSI, BFI,
+                                                  PGSOQueryType::IRPass);
+    if (OptForSize)
       return nullptr;
 
     Value *Len = emitStrLen(CI->getArgOperand(2), B, DL, TLI);
@@ -3250,6 +3292,19 @@ Value *FortifiedLibCallSimplifier::optimizeMemSetChk(CallInst *CI,
   return nullptr;
 }
 
+Value *FortifiedLibCallSimplifier::optimizeMemPCpyChk(CallInst *CI,
+                                                      IRBuilderBase &B) {
+  const DataLayout &DL = CI->getModule()->getDataLayout();
+  if (isFortifiedCallFoldable(CI, 3, 2))
+    if (Value *Call = emitMemPCpy(CI->getArgOperand(0), CI->getArgOperand(1),
+                                  CI->getArgOperand(2), B, DL, TLI)) {
+      CallInst *NewCI = cast<CallInst>(Call);
+      NewCI->setAttributes(CI->getAttributes());
+      return NewCI;
+    }
+  return nullptr;
+}
+
 Value *FortifiedLibCallSimplifier::optimizeStrpCpyChk(CallInst *CI,
                                                       IRBuilderBase &B,
                                                       LibFunc Func) {
@@ -3439,6 +3494,8 @@ Value *FortifiedLibCallSimplifier::optimizeCall(CallInst *CI,
   switch (Func) {
   case LibFunc_memcpy_chk:
     return optimizeMemCpyChk(CI, Builder);
+  case LibFunc_mempcpy_chk:
+    return optimizeMemPCpyChk(CI, Builder);
   case LibFunc_memmove_chk:
     return optimizeMemMoveChk(CI, Builder);
   case LibFunc_memset_chk:

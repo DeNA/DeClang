@@ -939,7 +939,8 @@ SparcTargetLowering::LowerCall_32(TargetLowering::CallLoweringInfo &CLI,
   // If the callee is a GlobalAddress node (quite common, every direct call is)
   // turn it into a TargetGlobalAddress node so that legalize doesn't hack it.
   // Likewise ExternalSymbol -> TargetExternalSymbol.
-  unsigned TF = isPositionIndependent() ? SparcMCExpr::VK_Sparc_WPLT30 : 0;
+  unsigned TF = isPositionIndependent() ? SparcMCExpr::VK_Sparc_WPLT30
+                                        : SparcMCExpr::VK_Sparc_WDISP30;
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
     Callee = DAG.getTargetGlobalAddress(G->getGlobal(), dl, MVT::i32, 0, TF);
   else if (ExternalSymbolSDNode *E = dyn_cast<ExternalSymbolSDNode>(Callee))
@@ -1242,7 +1243,8 @@ SparcTargetLowering::LowerCall_64(TargetLowering::CallLoweringInfo &CLI,
   // Likewise ExternalSymbol -> TargetExternalSymbol.
   SDValue Callee = CLI.Callee;
   bool hasReturnsTwice = hasReturnsTwiceAttr(DAG, Callee, CLI.CB);
-  unsigned TF = isPositionIndependent() ? SparcMCExpr::VK_Sparc_WPLT30 : 0;
+  unsigned TF = isPositionIndependent() ? SparcMCExpr::VK_Sparc_WPLT30
+                                        : SparcMCExpr::VK_Sparc_WDISP30;
   if (GlobalAddressSDNode *G = dyn_cast<GlobalAddressSDNode>(Callee))
     Callee = DAG.getTargetGlobalAddress(G->getGlobal(), DL, PtrVT, 0, TF);
   else if (ExternalSymbolSDNode *E = dyn_cast<ExternalSymbolSDNode>(Callee))
@@ -1877,8 +1879,7 @@ void SparcTargetLowering::computeKnownBitsForTargetNode
     Known2 = DAG.computeKnownBits(Op.getOperand(0), Depth + 1);
 
     // Only known if known in both the LHS and RHS.
-    Known.One &= Known2.One;
-    Known.Zero &= Known2.Zero;
+    Known = KnownBits::commonBits(Known, Known2);
     break;
   }
 }
@@ -2139,7 +2140,7 @@ SDValue SparcTargetLowering::LowerF128_LibCallArg(SDValue Chain,
     int FI = MFI.CreateStackObject(16, Align(8), false);
     SDValue FIPtr = DAG.getFrameIndex(FI, getPointerTy(DAG.getDataLayout()));
     Chain = DAG.getStore(Chain, DL, Entry.Node, FIPtr, MachinePointerInfo(),
-                         /* Alignment = */ 8);
+                         Align(8));
 
     Entry.Node = FIPtr;
     Entry.Ty   = PointerType::getUnqual(ArgTy);
@@ -2198,7 +2199,7 @@ SparcTargetLowering::LowerF128Op(SDValue Op, SelectionDAG &DAG,
 
   // Load RetPtr to get the return value.
   return DAG.getLoad(Op.getValueType(), SDLoc(Op), Chain, RetPtr,
-                     MachinePointerInfo(), /* Alignment = */ 8);
+                     MachinePointerInfo(), Align(8));
 }
 
 SDValue SparcTargetLowering::LowerF128Compare(SDValue LHS, SDValue RHS,
@@ -2541,8 +2542,9 @@ static SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) {
                          MachinePointerInfo(SV));
   // Load the actual argument out of the pointer VAList.
   // We can't count on greater alignment than the word size.
-  return DAG.getLoad(VT, DL, InChain, VAList, MachinePointerInfo(),
-                     std::min(PtrVT.getSizeInBits(), VT.getSizeInBits()) / 8);
+  return DAG.getLoad(
+      VT, DL, InChain, VAList, MachinePointerInfo(),
+      std::min(PtrVT.getFixedSizeInBits(), VT.getFixedSizeInBits()) / 8);
 }
 
 static SDValue LowerDYNAMIC_STACKALLOC(SDValue Op, SelectionDAG &DAG,

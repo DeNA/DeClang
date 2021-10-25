@@ -12,10 +12,10 @@
 
 #include "SwiftASTManipulator.h"
 
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "lldb/Expression/ExpressionParser.h"
 #include "lldb/Expression/ExpressionSourceCode.h"
-#include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Log.h"
@@ -203,7 +203,7 @@ extension %s$__lldb_context {
     %s
   }
 }
-%s
+@LLDBDebuggerFunction %s
 func $__lldb_expr(_ $__lldb_arg : UnsafeMutablePointer<Any>) {
   do {
     $__lldb_injected_self.$__lldb_wrapped_expr_%u(
@@ -255,63 +255,51 @@ void SwiftASTManipulatorBase::DoInitialization() {
   if (m_repl)
     return;
 
-  static llvm::StringRef s_func_prefix_str("$__lldb_expr");
+  // First pass: find whether we're dealing with a wrapped function or not.
 
-  // First pass: find whether we're dealing with a wrapped function or not
-
-  class FuncAndExtensionFinder : public swift::ASTWalker {
-  public:
-    swift::FuncDecl *m_function_decl = nullptr; // This is the function in which
-                                                // the expression code is
-                                                // inserted.
-    // It is always marked with the DebuggerFunction attribute.
-    swift::ExtensionDecl *m_extension_decl =
-        nullptr; // This is an optional extension holding the function
-    swift::FuncDecl *m_wrapper_decl = nullptr; // This is an optional wrapper
-                                               // function that calls
-                                               // m_function_decl.
-    llvm::StringRef m_wrapper_func_prefix; // This is the prefix name for the
-                                           // wrapper function.  One tricky bit
-    // is that in the case where there is no wrapper, the m_function_decl
-    // has this name.  That's why we check first for the debugger attribute.
-
-    FuncAndExtensionFinder(llvm::StringRef &wrapped_func_prefix)
-        : m_wrapper_func_prefix(wrapped_func_prefix) {}
+  struct FuncAndExtensionFinder : public swift::ASTWalker {
+    /// This is the toplevel entry function for the expression. It may
+    /// call into \c ext_method_decl or hold the entire expression.
+    swift::FuncDecl *toplevel_decl = nullptr;
+    /// This is optional.
+    swift::FuncDecl *ext_method_decl = nullptr;
+    /// This is an optional extension holding the above function.
+    swift::ExtensionDecl *extension_decl = nullptr;
 
     bool walkToDeclPre(swift::Decl *D) override {
       auto *FD = llvm::dyn_cast<swift::FuncDecl>(D);
+      // Traverse into any non-function-decls.
       if (!FD)
         return true;
 
-      if (FD->getAttrs().hasAttribute<swift::LLDBDebuggerFunctionAttr>()) {
-        m_function_decl = FD;
+      if (!FD->getAttrs().hasAttribute<swift::LLDBDebuggerFunctionAttr>())
+        return false;
 
-        // Now walk back up the containing DeclContexts, and if we find an
-        // extension Decl, that's our extension:
-        for (swift::DeclContext *DC = m_function_decl->getDeclContext(); DC;
-             DC = DC->getParent()) {
-          if (auto *extension_decl = llvm::dyn_cast<swift::ExtensionDecl>(DC)) {
-            m_extension_decl = extension_decl;
-            break;
-          }
+      // Walk up the DeclContext chain, searching for an extension.
+      for (auto *DC = FD->getDeclContext(); DC; DC = DC->getParent()) {
+        if (auto *extension = llvm::dyn_cast<swift::ExtensionDecl>(DC)) {
+          extension_decl = extension;
+          ext_method_decl = FD;
+          return false;
         }
-      } else if (FD->hasName() && FD->getBaseIdentifier().str().startswith(
-                                      m_wrapper_func_prefix)) {
-        m_wrapper_decl = FD;
       }
-
-      // There's nothing buried in a function that we need to find in this
-      // search.
+      // Not in an extenstion,
+      toplevel_decl = FD;
       return false;
     }
   };
 
-  FuncAndExtensionFinder func_finder(s_func_prefix_str);
+  FuncAndExtensionFinder func_finder;
   m_source_file.walk(func_finder);
 
-  m_function_decl = func_finder.m_function_decl;
-  m_wrapper_decl = func_finder.m_wrapper_decl;
-  m_extension_decl = func_finder.m_extension_decl;
+  m_extension_decl = func_finder.extension_decl;
+  if (m_extension_decl) {
+    m_function_decl = func_finder.ext_method_decl;
+    m_wrapper_decl = func_finder.toplevel_decl;
+  } else {
+    m_function_decl = func_finder.toplevel_decl;
+    m_wrapper_decl = nullptr;
+  }
 
   assert(m_function_decl);
 
@@ -419,7 +407,6 @@ swift::Stmt *SwiftASTManipulator::ConvertExpressionToTmpReturnVarAccess(
   std::string name_buffer;
   llvm::raw_string_ostream(name_buffer) << "__lldb_tmp_ret_" << m_tmpname_idx++;
   swift::Identifier name = ast_context.getIdentifier(name_buffer);
-  swift::Identifier equalequal_name = ast_context.getIdentifier("==");
 
   ResultLocationInfo result_loc_info(source_loc);
   result_loc_info.orig_expr = expr;
@@ -429,7 +416,7 @@ swift::Stmt *SwiftASTManipulator::ConvertExpressionToTmpReturnVarAccess(
     new_decl_context = decl_context;
 
   llvm::SmallVector<swift::ASTNode, 3> body;
-  llvm::SmallVector<swift::Expr *, 3> false_body;
+
   const bool is_static = false;
   const auto introducer = swift::VarDecl::Introducer::Let;
   result_loc_info.tmp_var_decl = new (ast_context) swift::VarDecl(
@@ -445,7 +432,7 @@ swift::Stmt *SwiftASTManipulator::ConvertExpressionToTmpReturnVarAccess(
                                           result_loc_info.tmp_var_decl);
 
   const auto static_spelling_kind = swift::StaticSpellingKind::KeywordStatic;
-  result_loc_info.binding_decl = swift::PatternBindingDecl::createImplicit(
+  result_loc_info.binding_decl = swift::PatternBindingDecl::createForDebugger(
       ast_context, static_spelling_kind, var_pattern, expr, new_decl_context);
   result_loc_info.binding_decl->setStatic(false);
 
@@ -457,31 +444,21 @@ swift::Stmt *SwiftASTManipulator::ConvertExpressionToTmpReturnVarAccess(
         new (ast_context) swift::ReturnStmt(source_loc, nullptr);
     body.push_back(result_loc_info.return_stmt);
   }
-  auto *one_expr = new (ast_context)
-      swift::IntegerLiteralExpr(swift::StringRef("1"), source_loc, true);
-  false_body.push_back(one_expr);
-  auto *equalequal_expr = new (ast_context) swift::UnresolvedDeclRefExpr(
-      swift::DeclNameRef(equalequal_name), swift::DeclRefKind::BinaryOperator,
-      swift::DeclNameLoc(source_loc));
-  false_body.push_back(equalequal_expr);
-  auto *zero_expr = new (ast_context)
-      swift::IntegerLiteralExpr(swift::StringRef("0"), source_loc, true);
-  false_body.push_back(zero_expr);
-  auto *zero_equals_one_expr = swift::SequenceExpr::create(
-      ast_context, llvm::ArrayRef<swift::Expr *>(false_body));
 
-  zero_equals_one_expr->setImplicit();
+  swift::SourceLoc brace_end = result_loc_info.orig_expr->getEndLoc();
+  if (brace_end.isInvalid()) {
+    brace_end = source_loc;
+  }
   auto *body_stmt = swift::BraceStmt::create(
-      ast_context, source_loc, llvm::ArrayRef<swift::ASTNode>(body), source_loc,
+      ast_context, source_loc, llvm::ArrayRef<swift::ASTNode>(body), brace_end,
       true);
 
-  // Default construct a label info that contains nothing for the while
+  // Default construct a label info that contains nothing for the 'do'
   // statement
   swift::LabeledStmtInfo label_info;
 
   auto *assign_stmt = new (ast_context)
-      swift::RepeatWhileStmt(label_info, source_loc, zero_equals_one_expr,
-                             source_loc, body_stmt, true);
+      swift::DoStmt(label_info, source_loc, body_stmt, true);
   result_loc_info.wrapper_stmt = assign_stmt;
 
   m_result_info.push_back(result_loc_info);
@@ -914,6 +891,10 @@ bool SwiftASTManipulator::FixupResultAfterTypeChecking(Status &error) {
 
   swift::VarDecl *result_var =
       AddExternalVariable(result_var_name, return_ast_type, metadata_sp);
+  if (!result_var) {
+    error.SetErrorString("Could not add external result variable.");
+    return false;
+  }
 
   result_var->overwriteAccess(swift::AccessLevel::Public);
   result_var->overwriteSetterAccess(swift::AccessLevel::Public);
@@ -957,6 +938,11 @@ bool SwiftASTManipulator::FixupResultAfterTypeChecking(Status &error) {
 
             swift::VarDecl *error_var = AddExternalVariable(
                 error_var_name, error_ast_type, error_metadata_sp);
+
+            if (!error_var) {
+              error.SetErrorString("Could not add external error variable.");
+              return false;
+            }
 
             error_var->overwriteAccess(swift::AccessLevel::Public);
             error_var->overwriteSetterAccess(
@@ -1048,6 +1034,9 @@ bool SwiftASTManipulator::AddExternalVariables(
     swift::Identifier name = variable.m_name;
     swift::Type var_type = GetSwiftType(variable.m_type);
 
+    if (!var_type)
+      return false;
+
     // If the type is an inout or lvalue type (happens if this is an argument)
     // strip that part off:
 
@@ -1136,6 +1125,10 @@ bool SwiftASTManipulator::AddExternalVariables(
       if (!referent_type)
         continue;
 
+      swift::Type swift_referent_type = GetSwiftType(referent_type);
+      if (!swift_referent_type) 
+        continue;
+      
       // One tricky bit here is that this var may be an argument to the function
       // whose context we are
       // emulating, and that argument might be of "inout" type.  We need to
@@ -1145,7 +1138,7 @@ bool SwiftASTManipulator::AddExternalVariables(
       // it is inout or not, so we don't have to do anything more to get this to
       // work.
       swift::Type var_type =
-          GetSwiftType(referent_type)->getWithoutSpecifierType();
+          swift_referent_type->getWithoutSpecifierType();
       if (is_self) {
         // Another tricky bit is that the Metatype types we get have the
         // "Representation" already attached (i.e.
@@ -1333,6 +1326,9 @@ swift::ValueDecl *SwiftASTManipulator::MakeGlobalTypealias(
       swift::TypeAliasDecl(swift::SourceLoc(), swift::SourceLoc(), name,
                            swift::SourceLoc(), nullptr, &m_source_file);
   swift::Type underlying_type = GetSwiftType(type);
+  if (!underlying_type)
+    return nullptr;
+
   type_alias_decl->setUnderlyingType(underlying_type);
   type_alias_decl->markAsDebuggerAlias(true);
   type_alias_decl->setImplicit(true);

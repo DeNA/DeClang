@@ -1,12 +1,8 @@
-# DeClang's fork of Apple llvm-project
-This is DeClang's fork of Apple llvm-project. For more infomation please read:
-[DeClang README.md](https://github.com/DeNA/DeClang/blob/declang-9.0.1/README.md)
-
 # Apple's fork of llvm-project
 
 This is Apple's fork of llvm-project.  For more information on Apple's
 branching scheme, please see
-[apple-docs/AppleBranchingScheme.md](https://github.com/apple/llvm-project/tree/apple/master/apple-docs/AppleBranchingScheme.md).
+[apple-docs/AppleBranchingScheme.md](https://github.com/apple/llvm-project/tree/apple/main/apple-docs/AppleBranchingScheme.md).
 
 The LLVM project's main README follows.
 

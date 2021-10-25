@@ -30,7 +30,9 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrettyStackTrace.h"
+#include "llvm/Support/Program.h"
 #include "llvm/Support/Signals.h"
+#include "llvm/Support/StringSaver.h"
 #include "llvm/Support/raw_ostream.h"
 #include <thread>
 
@@ -39,6 +41,7 @@ using namespace clang::index;
 using namespace llvm;
 
 extern "C" int indextest_core_main(int argc, const char **argv);
+extern "C" int indextest_perform_shell_execution(const char *command_line);
 
 namespace {
 
@@ -94,6 +97,9 @@ DumpModuleImports("dump-imported-module-files",
 
 static cl::opt<bool>
 IncludeLocals("include-locals", cl::desc("Print local symbols"));
+
+static cl::opt<bool> IgnoreMacros("ignore-macros",
+                                  cl::desc("Skip indexing macros"));
 
 static cl::opt<std::string>
 ModuleFilePath("module-file",
@@ -246,7 +252,8 @@ static void dumpModuleFileInputs(serialization::ModuleFile &Mod,
 
 static bool printSourceSymbols(const char *Executable,
                                ArrayRef<const char *> Args,
-                               bool dumpModuleImports, bool indexLocals) {
+                               bool dumpModuleImports, bool indexLocals,
+                               bool ignoreMacros) {
   SmallVector<const char *, 4> ArgsWithProgName;
   ArgsWithProgName.push_back(Executable);
   ArgsWithProgName.append(Args.begin(), Args.end());
@@ -260,6 +267,8 @@ static bool printSourceSymbols(const char *Executable,
   auto DataConsumer = std::make_shared<PrintIndexDataConsumer>(OS);
   IndexingOptions IndexOpts;
   IndexOpts.IndexFunctionLocals = indexLocals;
+  IndexOpts.IndexMacros = !ignoreMacros;
+  IndexOpts.IndexMacrosInPreprocessor = !ignoreMacros;
   std::unique_ptr<FrontendAction> IndexAction =
       createIndexingAction(DataConsumer, IndexOpts);
 
@@ -301,7 +310,7 @@ static bool printSourceSymbolsFromModule(StringRef modulePath,
   std::unique_ptr<ASTUnit> AU = ASTUnit::LoadFromASTFile(
       std::string(modulePath), *pchRdr, ASTUnit::LoadASTOnly, Diags,
       FileSystemOpts, /*UseDebugInfo=*/false,
-      /*OnlyLocalDecls=*/true, None, CaptureDiagsKind::None,
+      /*OnlyLocalDecls=*/true, CaptureDiagsKind::None,
       /*AllowASTWithCompilerErrors=*/true,
       /*UserFilesAreVolatile=*/false);
   if (!AU) {
@@ -931,7 +940,7 @@ int indextest_core_main(int argc, const char **argv) {
     }
     return printSourceSymbols(Executable.c_str(), CompArgs,
                               options::DumpModuleImports,
-                              options::IncludeLocals);
+                              options::IncludeLocals, options::IgnoreMacros);
   }
 
   if (options::Action == ActionType::PrintRecord) {
@@ -1011,4 +1020,22 @@ int indextest_core_main(int argc, const char **argv) {
   }
 
   return 0;
+}
+
+//===----------------------------------------------------------------------===//
+// Utility functions
+//===----------------------------------------------------------------------===//
+
+int indextest_perform_shell_execution(const char *command_line) {
+  BumpPtrAllocator Alloc;
+  llvm::StringSaver Saver(Alloc);
+  SmallVector<const char *, 4> Args;
+  llvm::cl::TokenizeGNUCommandLine(command_line, Saver, Args);
+  auto Program = llvm::sys::findProgramByName(Args[0]);
+  if (std::error_code ec = Program.getError()) {
+    llvm::errs() << "command not found: " << Args[0] << "\n";
+    return ec.value();
+  }
+  SmallVector<StringRef, 8> execArgs(Args.begin(), Args.end());
+  return llvm::sys::ExecuteAndWait(*Program, execArgs);
 }

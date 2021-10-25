@@ -24,6 +24,9 @@
 // CHECK-DAG: [[$MAP13A:#map[0-9]+]] = affine_map<(d0) -> ((d0 + 6) ceildiv 8)>
 // CHECK-DAG: [[$MAP13B:#map[0-9]+]] = affine_map<(d0) -> ((d0 * 4 - 4) floordiv 3)>
 
+// Affine maps for test case: compose_affine_maps_multiple_symbols
+// CHECK-DAG: [[$MAP14:#map[0-9]+]] = affine_map<()[s0, s1] -> (((s1 + s0) * 4) floordiv s0)>
+
 // Affine maps for test case: partial_fold_map
 // CHECK-DAG: [[$MAP15:#map[0-9]+]] = affine_map<()[s0] -> (s0 - 42)>
 
@@ -216,6 +219,15 @@ func @compose_affine_maps_diamond_dependency(%arg0: f32, %arg1: memref<4x4xf32>)
   }
 
   return
+}
+
+// CHECK-LABEL: func @compose_affine_maps_multiple_symbols
+func @compose_affine_maps_multiple_symbols(%arg0: index, %arg1: index) -> index {
+  %a = affine.apply affine_map<(d0)[s0] -> (s0 + d0)> (%arg0)[%arg1]
+  %c = affine.apply affine_map<(d0) -> (d0 * 4)> (%a)
+  %e = affine.apply affine_map<(d0)[s0] -> (d0 floordiv s0)> (%c)[%arg1]
+  // CHECK: [[I0:%[0-9]+]] = affine.apply [[$MAP14]]()[%{{.*}}, %{{.*}}]
+  return %e : index
 }
 
 // CHECK-LABEL: func @arg_used_as_dim_and_symbol
@@ -423,7 +435,7 @@ func @fold_empty_loop() {
 
 // -----
 
-// CHECK-DAG: [[$SET:#set[0-9]+]] = affine_set<(d0, d1)[s0] : (d0 >= 0, -d0 + 1022 >= 0, d1 >= 0, -d1 + s0 - 2 >= 0)>
+// CHECK-DAG: [[$SET:#set[0-9]*]] = affine_set<(d0, d1)[s0] : (d0 >= 0, -d0 + 1022 >= 0, d1 >= 0, -d1 + s0 - 2 >= 0)>
 
 // CHECK-LABEL: func @canonicalize_affine_if
 // CHECK-SAME: [[M:%.*]]: index,
@@ -476,8 +488,6 @@ func @canonicalize_bounds(%M : index, %N : index) {
 // -----
 
 // Compose maps into affine load and store ops.
-
-// CHECK-DAG: #map{{[0-9]+}} = affine_map<(d0) -> (d0 + 1)>
 
 // CHECK-LABEL: @compose_into_affine_load_store
 func @compose_into_affine_load_store(%A : memref<1024xf32>, %u : index) {
@@ -594,13 +604,36 @@ func @rep(%arg0 : index, %arg1 : index) -> index {
 }
 
 // -----
-// CHECK-DAG: #[[lb:.*]] = affine_map<()[s0] -> (s0)>
+
 // CHECK-DAG: #[[ub:.*]] = affine_map<()[s0] -> (s0 + 2)>
 
 func @drop_duplicate_bounds(%N : index) {
   // affine.for %i = max #lb(%arg0) to min #ub(%arg0)
   affine.for %i = max affine_map<(d0) -> (d0, d0)>(%N) to min affine_map<(d0) -> (d0 + 2, d0 + 2)>(%N) {
     "foo"() : () -> ()
+  }
+  return
+}
+
+// -----
+
+// Ensure affine.parallel bounds expressions are canonicalized.
+
+#map3 = affine_map<(d0) -> (d0 * 5)>
+
+// CHECK-LABEL: func @affine_parallel_const_bounds
+func @affine_parallel_const_bounds() {
+  %cst = constant 1.0 : f32
+  %c0 = constant 0 : index
+  %c4 = constant 4 : index
+  %0 = alloc() : memref<4xf32>
+  // CHECK: affine.parallel (%{{.*}}) = (0) to (4)
+  affine.parallel (%i) = (%c0) to (%c0 + %c4) {
+    %1 = affine.apply #map3(%i)
+    // CHECK: affine.parallel (%{{.*}}) = (0) to (%{{.*}} * 5)
+    affine.parallel (%j) = (%c0) to (%1) {
+      affine.store %cst, %0[%j] : memref<4xf32>
+    }
   }
   return
 }

@@ -115,8 +115,23 @@ public:
 
   /// This method substitutes any uses of dimensions and symbols (e.g.
   /// dim#0 with dimReplacements[0]) and returns the modified expression tree.
+  /// This is a dense replacement method: a replacement must be specified for
+  /// every single dim and symbol.
   AffineExpr replaceDimsAndSymbols(ArrayRef<AffineExpr> dimReplacements,
                                    ArrayRef<AffineExpr> symReplacements) const;
+
+  /// Sparse replace method. Replace `expr` by `replacement` and return the
+  /// modified expression tree.
+  AffineExpr replace(AffineExpr expr, AffineExpr replacement) const;
+
+  /// Sparse replace method. If `*this` appears in `map` replaces it by
+  /// `map[*this]` and return the modified expression tree. Otherwise traverse
+  /// `*this` and apply replace with `map` on its subexpressions.
+  AffineExpr replace(const DenseMap<AffineExpr, AffineExpr> &map) const;
+
+  /// Replace symbols[0 .. numDims - 1] by
+  /// symbols[shift .. shift + numDims - 1].
+  AffineExpr shiftSymbols(unsigned numSymbols, unsigned shift) const;
 
   AffineExpr operator+(int64_t v) const;
   AffineExpr operator+(AffineExpr other) const;
@@ -148,6 +163,15 @@ public:
   AffineExpr compose(AffineMap map) const;
 
   friend ::llvm::hash_code hash_value(AffineExpr arg);
+
+  /// Methods supporting C API.
+  const void *getAsOpaquePointer() const {
+    return static_cast<const void *>(expr);
+  }
+  static AffineExpr getFromOpaquePointer(const void *pointer) {
+    return AffineExpr(
+        reinterpret_cast<ImplType *>(const_cast<void *>(pointer)));
+  }
 
 protected:
   ImplType *expr;

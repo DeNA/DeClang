@@ -830,6 +830,10 @@ ClangASTImporter::ASTImporterDelegate::ImportImpl(Decl *From) {
 
   // Check which ASTContext this declaration originally came from.
   DeclOrigin origin = m_master.GetDeclOrigin(From);
+
+  // Prevent infinite recursion when the origin tracking contains a cycle.
+  assert(origin.decl != From && "Origin points to itself?");
+
   // If it originally came from the target ASTContext then we can just
   // pretend that the original is the one we imported. This can happen for
   // example when inspecting a persistent declaration from the scratch
@@ -879,13 +883,14 @@ ClangASTImporter::ASTImporterDelegate::ImportImpl(Decl *From) {
       return dn_or_err.takeError();
     DeclContext *dc = *dc_or_err;
     DeclContext::lookup_result lr = dc->lookup(*dn_or_err);
-    if (lr.size()) {
-      clang::Decl *lookup_found = lr.front();
-      RegisterImportedDecl(From, lookup_found);
-      m_decls_to_ignore.insert(lookup_found);
-      return lookup_found;
-    } else
-      LLDB_LOG(log, "[ClangASTImporter] Complete definition not found");
+    for (clang::Decl *candidate : lr) {
+      if (candidate->getKind() == From->getKind()) {
+        RegisterImportedDecl(From, candidate);
+        m_decls_to_ignore.insert(candidate);
+        return candidate;
+      }
+    }
+    LLDB_LOG(log, "[ClangASTImporter] Complete definition not found");
   }
 
   return ASTImporter::ImportImpl(From);
@@ -1088,22 +1093,23 @@ void ClangASTImporter::ASTImporterDelegate::Imported(clang::Decl *from,
     DeclOrigin origin = from_context_md->getOrigin(from);
 
     if (origin.Valid()) {
-      if (!to_context_md->hasOrigin(to) || user_id != LLDB_INVALID_UID)
-        if (origin.ctx != &to->getASTContext())
+      if (origin.ctx != &to->getASTContext()) {
+        if (!to_context_md->hasOrigin(to) || user_id != LLDB_INVALID_UID)
           to_context_md->setOrigin(to, origin);
 
-      ImporterDelegateSP direct_completer =
-          m_master.GetDelegate(&to->getASTContext(), origin.ctx);
+        ImporterDelegateSP direct_completer =
+            m_master.GetDelegate(&to->getASTContext(), origin.ctx);
 
-      if (direct_completer.get() != this)
-        direct_completer->ASTImporter::Imported(origin.decl, to);
+        if (direct_completer.get() != this)
+          direct_completer->ASTImporter::Imported(origin.decl, to);
 
-      LLDB_LOG(log,
-               "    [ClangASTImporter] Propagated origin "
-               "(Decl*){0}/(ASTContext*){1} from (ASTContext*){2} to "
-               "(ASTContext*){3}",
-               origin.decl, origin.ctx, &from->getASTContext(),
-               &to->getASTContext());
+        LLDB_LOG(log,
+                 "    [ClangASTImporter] Propagated origin "
+                 "(Decl*){0}/(ASTContext*){1} from (ASTContext*){2} to "
+                 "(ASTContext*){3}",
+                 origin.decl, origin.ctx, &from->getASTContext(),
+                 &to->getASTContext());
+      }
     } else {
       if (m_new_decl_listener)
         m_new_decl_listener->NewDeclImported(from, to);

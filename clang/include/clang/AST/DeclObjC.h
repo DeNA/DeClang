@@ -872,9 +872,7 @@ public:
   bool isClassProperty() const {
     return PropertyAttributes & ObjCPropertyAttribute::kind_class;
   }
-  bool isDirectProperty() const {
-    return PropertyAttributes & ObjCPropertyAttribute::kind_direct;
-  }
+  bool isDirectProperty() const;
 
   ObjCPropertyQueryKind getQueryKind() const {
     return isClassProperty() ? ObjCPropertyQueryKind::OBJC_PR_query_class :
@@ -2187,6 +2185,14 @@ public:
     assert(hasDefinition() && "Protocol is not defined");
     data().ReferencedProtocols.set(List, Num, Locs, C);
   }
+
+  /// This is true iff the protocol is tagged with the
+  /// `objc_non_runtime_protocol` attribute.
+  bool isNonRuntimeProtocol() const;
+
+  /// Get the set of all protocols implied by this protocols inheritance
+  /// hierarchy.
+  void getImpliedProtocols(llvm::DenseSet<const ObjCProtocolDecl *> &IPs) const;
 
   ObjCProtocolDecl *lookupProtocolNamed(IdentifierInfo *PName);
 

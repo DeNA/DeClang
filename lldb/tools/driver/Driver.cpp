@@ -732,7 +732,8 @@ void sigcont_handler(int signo) {
 
 void reproducer_handler(void *finalize_cmd) {
   if (SBReproducer::Generate()) {
-    std::system(static_cast<const char *>(finalize_cmd));
+    int result = std::system(static_cast<const char *>(finalize_cmd));
+    (void)result;
     fflush(stdout);
   }
 }
@@ -823,7 +824,12 @@ llvm::Optional<int> InitializeReproducer(llvm::StringRef argv0,
   }
 
   // BEGIN SWIFT
-  bool capture = true; // input_args.hasArg(OPT_capture);
+#ifdef TARGET_OS_IPHONE
+  bool capture = input_args.hasArg(OPT_capture);
+#else
+  bool repl = input_args.hasArg(OPT_repl) || input_args.hasArg(OPT_repl_);
+  bool capture = !repl || input_args.hasArg(OPT_capture);
+#endif
   // END SWIFT
   bool generate_on_exit = input_args.hasArg(OPT_generate_on_exit);
   auto *capture_path = input_args.getLastArg(OPT_capture_path);
@@ -875,10 +881,11 @@ int main(int argc, char const *argv[]) {
 
   // Parse arguments.
   LLDBOptTable T;
-  unsigned MAI;
-  unsigned MAC;
+  unsigned MissingArgIndex;
+  unsigned MissingArgCount;
   ArrayRef<const char *> arg_arr = makeArrayRef(argv + 1, argc - 1);
-  opt::InputArgList input_args = T.ParseArgs(arg_arr, MAI, MAC);
+  opt::InputArgList input_args =
+      T.ParseArgs(arg_arr, MissingArgIndex, MissingArgCount);
   llvm::StringRef argv0 = llvm::sys::path::filename(argv[0]);
 
   if (input_args.hasArg(OPT_help)) {
@@ -886,11 +893,19 @@ int main(int argc, char const *argv[]) {
     return 0;
   }
 
+  // Check for missing argument error.
+  if (MissingArgCount) {
+    WithColor::error() << "argument to '"
+                       << input_args.getArgString(MissingArgIndex)
+                       << "' is missing\n";
+  }
   // Error out on unknown options.
   if (input_args.hasArg(OPT_UNKNOWN)) {
     for (auto *arg : input_args.filtered(OPT_UNKNOWN)) {
       WithColor::error() << "unknown option: " << arg->getSpelling() << '\n';
     }
+  }
+  if (MissingArgCount || input_args.hasArg(OPT_UNKNOWN)) {
     llvm::errs() << "Use '" << argv0
                  << " --help' for a complete list of options.\n";
     return 1;

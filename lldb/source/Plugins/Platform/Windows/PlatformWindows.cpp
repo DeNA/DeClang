@@ -154,12 +154,6 @@ void PlatformWindows::Terminate() {
 /// Default Constructor
 PlatformWindows::PlatformWindows(bool is_host) : RemoteAwarePlatform(is_host) {}
 
-/// Destructor.
-///
-/// The destructor is virtual since this class is designed to be
-/// inherited from by the plug-in instance.
-PlatformWindows::~PlatformWindows() = default;
-
 Status PlatformWindows::ConnectRemote(Args &args) {
   Status error;
   if (IsHost()) {
@@ -347,7 +341,8 @@ ProcessSP PlatformWindows::DebugProcess(ProcessLaunchInfo &launch_info,
     return Attach(attach_info, debugger, target, error);
   } else {
     ProcessSP process_sp = target->CreateProcess(
-        launch_info.GetListener(), launch_info.GetProcessPluginName(), nullptr);
+        launch_info.GetListener(), launch_info.GetProcessPluginName(), nullptr,
+        false);
 
     // We need to launch and attach to the process.
     launch_info.GetFlags().Set(eLaunchFlagDebug);
@@ -385,11 +380,9 @@ lldb::ProcessSP PlatformWindows::Attach(ProcessAttachInfo &attach_info,
   if (!target || error.Fail())
     return process_sp;
 
-  debugger.GetTargetList().SetSelectedTarget(target);
-
   const char *plugin_name = attach_info.GetProcessPluginName();
   process_sp = target->CreateProcess(
-      attach_info.GetListenerForProcess(debugger), plugin_name, nullptr);
+      attach_info.GetListenerForProcess(debugger), plugin_name, nullptr, false);
 
   process_sp->HijackProcessEvents(attach_info.GetHijackListener());
   if (process_sp)

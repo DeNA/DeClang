@@ -87,13 +87,14 @@ public:
   /// operand bundle tags without comparing strings. Keep this in sync with
   /// LLVMContext::LLVMContext().
   enum : unsigned {
-    OB_deopt = 0,         // "deopt"
-    OB_funclet = 1,       // "funclet"
-    OB_gc_transition = 2, // "gc-transition"
-    OB_cfguardtarget = 3, // "cfguardtarget"
-    OB_preallocated = 4,  // "preallocated"
-    OB_gc_live = 5,       // "gc-live"
-    OB_ptrauth = 6,       // "ptrauth"
+    OB_deopt = 0,                  // "deopt"
+    OB_funclet = 1,                // "funclet"
+    OB_gc_transition = 2,          // "gc-transition"
+    OB_cfguardtarget = 3,          // "cfguardtarget"
+    OB_preallocated = 4,           // "preallocated"
+    OB_gc_live = 5,                // "gc-live"
+    OB_ptrauth = 6,                // "ptrauth"
+    OB_clang_arc_attachedcall = 7, // "clang.arc.attachedcall"
   };
 
   /// getMDKindID - Return a unique non-zero ID for the specified metadata kind.
@@ -223,13 +224,23 @@ public:
   void setDiagnosticsHotnessRequested(bool Requested);
 
   /// Return the minimum hotness value a diagnostic would need in order
-  /// to be included in optimization diagnostics. If there is no minimum, this
-  /// returns None.
+  /// to be included in optimization diagnostics.
+  ///
+  /// Three possible return values:
+  /// 0            - threshold is disabled. Everything will be printed out.
+  /// positive int - threshold is set.
+  /// UINT64_MAX   - threshold is not yet set, and needs to be synced from
+  ///                profile summary. Note that in case of missing profile
+  ///                summary, threshold will be kept at "MAX", effectively
+  ///                suppresses all remarks output.
   uint64_t getDiagnosticsHotnessThreshold() const;
 
   /// Set the minimum hotness value a diagnostic needs in order to be
   /// included in optimization diagnostics.
-  void setDiagnosticsHotnessThreshold(uint64_t Threshold);
+  void setDiagnosticsHotnessThreshold(Optional<uint64_t> Threshold);
+
+  /// Return if hotness threshold is requested from PSI.
+  bool isDiagnosticsHotnessThresholdSetFromPSI() const;
 
   /// The "main remark streamer" used by all the specialized remark streamers.
   /// This streamer keeps generic remark metadata in memory throughout the life

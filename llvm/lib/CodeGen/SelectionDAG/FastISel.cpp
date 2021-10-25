@@ -446,7 +446,7 @@ Register FastISel::materializeConstant(const Value *V, MVT VT) {
             getRegForValue(ConstantInt::get(V->getContext(), SIntVal));
         if (IntegerReg)
           Reg = fastEmit_r(IntVT.getSimpleVT(), VT, ISD::SINT_TO_FP, IntegerReg,
-                           /*Kill=*/false);
+                           /*Op0IsKill=*/false);
       }
     }
   } else if (const auto *Op = dyn_cast<Operator>(V)) {
@@ -1517,6 +1517,20 @@ bool FastISel::selectIntrinsicCall(const IntrinsicInst *II) {
     return selectXRayCustomEvent(II);
   case Intrinsic::xray_typedevent:
     return selectXRayTypedEvent(II);
+
+  case Intrinsic::memcpy:
+  case Intrinsic::memcpy_element_unordered_atomic:
+  case Intrinsic::memcpy_inline:
+  case Intrinsic::memmove:
+  case Intrinsic::memmove_element_unordered_atomic:
+  case Intrinsic::memset:
+  case Intrinsic::memset_element_unordered_atomic:
+    // Flush the local value map just like we do for regular calls,
+    // to avoid excessive spills and reloads.
+    // These intrinsics mostly turn into library calls at O0; and
+    // even memcpy_inline should be treated like one for this purpose.
+    flushLocalValueMap();
+    break;
   }
 
   return fastLowerIntrinsicCall(II);
@@ -1791,13 +1805,13 @@ bool FastISel::selectFNeg(const User *I, const Value *In) {
     return false;
 
   Register IntResultReg = fastEmit_ri_(
-      IntVT.getSimpleVT(), ISD::XOR, IntReg, /*IsKill=*/true,
+      IntVT.getSimpleVT(), ISD::XOR, IntReg, /*Op0IsKill=*/true,
       UINT64_C(1) << (VT.getSizeInBits() - 1), IntVT.getSimpleVT());
   if (!IntResultReg)
     return false;
 
   ResultReg = fastEmit_r(IntVT.getSimpleVT(), VT.getSimpleVT(), ISD::BITCAST,
-                         IntResultReg, /*IsKill=*/true);
+                         IntResultReg, /*Op0IsKill=*/true);
   if (!ResultReg)
     return false;
 
@@ -1853,13 +1867,8 @@ bool FastISel::selectOperator(const User *I, unsigned Opcode) {
     return selectBinaryOp(I, ISD::FADD);
   case Instruction::Sub:
     return selectBinaryOp(I, ISD::SUB);
-  case Instruction::FSub: {
-    // FNeg is currently represented in LLVM IR as a special case of FSub.
-    Value *X;
-    if (match(I, m_FNeg(m_Value(X))))
-       return selectFNeg(I, X);
+  case Instruction::FSub:
     return selectBinaryOp(I, ISD::FSUB);
-  }
   case Instruction::Mul:
     return selectBinaryOp(I, ISD::MUL);
   case Instruction::FMul:
@@ -2403,6 +2412,12 @@ bool FastISel::tryToFoldLoad(const LoadInst *LI, const Instruction *FoldInst) {
   // constraints.
   if (LI->isVolatile())
     return false;
+
+  // Swifterror loads are not actually loads.
+  if (auto AI = dyn_cast<AllocaInst>(LI->getPointerOperand())) {
+    if (AI->isSwiftError())
+      return false;
+  }
 
   // Figure out which vreg this is going into.  If there is no assigned vreg yet
   // then there actually was no reference to it.  Perhaps the load is referenced

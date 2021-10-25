@@ -206,8 +206,8 @@ void FormatManager::GetPossibleMatches(
 
       ConstString display_type_name(compiler_type.GetDisplayTypeName(sc));
       if (display_type_name != type_name)
-        entries.push_back({display_type_name, did_strip_ptr,
-                           did_strip_ref, did_strip_typedef});
+        entries.push_back({display_type_name, did_strip_ptr, did_strip_ref,
+                           did_strip_typedef});
 // BEGIN SWIFT
     }
 // END SWIFT
@@ -566,10 +566,6 @@ bool FormatManager::ShouldPrintAsOneLiner(ValueObject &valobj) {
     }
   }
   return true;
-}
-
-ConstString FormatManager::GetValidTypeName(ConstString type) {
-  return ::GetValidTypeName_Impl(type);
 }
 
 ConstString FormatManager::GetTypeForCache(ValueObject &valobj,

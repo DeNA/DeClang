@@ -1,10 +1,18 @@
 import argparse
+import enum
 import os
 import shlex
 import sys
 
 import lit.reports
 import lit.util
+
+
+class TestOrder(enum.Enum):
+    # Older Python versions don't have enum.auto().
+    # Does upstream LLVM not have a build bot with Python 3.5?
+    DEFAULT = 1
+    RANDOM = 2
 
 
 def parse_args():
@@ -23,7 +31,7 @@ def parse_args():
             metavar="N",
             help="Number of workers used for testing",
             type=_positive_int,
-            default=lit.util.detectCPUs())
+            default=lit.util.usable_core_count())
     parser.add_argument("--config-prefix",
             dest="configPrefix",
             metavar="NAME",
@@ -42,7 +50,9 @@ def parse_args():
             help="Suppress no error output",
             action="store_true")
     format_group.add_argument("-s", "--succinct",
-            help="Reduce amount of output",
+            help="Reduce amount of output."
+                 " Additionally, show a progress bar,"
+                 " unless --no-progress-bar is specified.",
             action="store_true")
     format_group.add_argument("-v", "--verbose",
             dest="showOutput",
@@ -107,6 +117,9 @@ def parse_args():
     execution_group.add_argument("--xunit-xml-output",
             type=lit.reports.XunitReport,
             help="Write XUnit-compatible XML test reports to the specified file")
+    execution_group.add_argument("--time-trace-output",
+            type=lit.reports.TimeTraceReport,
+            help="Write Chrome tracing compatible JSON to the specified file")
     execution_group.add_argument("--timeout",
             dest="maxIndividualTestTime",
             help="Maximum time to spend running a single test (in seconds). "
@@ -118,6 +131,12 @@ def parse_args():
     execution_group.add_argument("--allow-empty-runs",
             help="Do not fail the run if all tests are filtered out",
             action="store_true")
+    execution_group.add_argument("--no-indirectly-run-check",
+            dest="indirectlyRunCheck",
+            help="Do not error if a test would not be run if the user had "
+                 "specified the containing directory instead of naming the "
+                 "test directly.",
+            action="store_false")
 
     selection_group = parser.add_argument_group("Test Selection")
     selection_group.add_argument("--max-tests",
@@ -132,8 +151,8 @@ def parse_args():
     selection_group.add_argument("--shuffle",   # TODO(yln): --order=random
             help="Run tests in random order",   # default or 'by-path' (+ isEarlyTest())
             action="store_true")
-    selection_group.add_argument("-i", "--incremental",  # TODO(yln): --order=failing-first
-            help="Run modified and failing tests first (updates mtimes)",
+    selection_group.add_argument("-i", "--incremental",
+            help="Run failed tests first (DEPRECATED: now always enabled)",
             action="store_true")
     selection_group.add_argument("--filter",
             metavar="REGEX",
@@ -176,13 +195,13 @@ def parse_args():
     if opts.echoAllCommands:
         opts.showOutput = True
 
-    # TODO(python3): Could be enum
+    if opts.incremental:
+        print('WARNING: --incremental is deprecated. Failing tests now always run first.')
+
     if opts.shuffle:
-        opts.order = 'random'
-    elif opts.incremental:
-        opts.order = 'failing-first'
+        opts.order = TestOrder.RANDOM
     else:
-        opts.order = 'default'
+        opts.order = TestOrder.DEFAULT
 
     if opts.numShards or opts.runShard:
         if not opts.numShards or not opts.runShard:
@@ -193,7 +212,7 @@ def parse_args():
     else:
         opts.shard = None
 
-    opts.reports = filter(None, [opts.output, opts.xunit_xml_output])
+    opts.reports = filter(None, [opts.output, opts.xunit_xml_output, opts.time_trace_output])
 
     return opts
 
