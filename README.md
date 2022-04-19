@@ -1,118 +1,113 @@
-# Apple's fork of llvm-project
+# DeClang
 
-This is Apple's fork of llvm-project.  For more information on Apple's
-branching scheme, please see
-[apple-docs/AppleBranchingScheme.md](https://github.com/apple/llvm-project/tree/apple/main/apple-docs/AppleBranchingScheme.md).
+<sub>[日本語はこちら](https://github.com/DeNA/DeClang/blob/swift/release/5.5/README_JP.md)</sub>
 
-The LLVM project's main README follows.
+## Introduction
 
-# The LLVM Compiler Infrastructure
+DeClang is an anti-hacking compiler based on LLVM project and extented the OSS project ollvm (https://github.com/obfuscator-llvm/obfuscator). 
 
-This directory and its sub-directories contain source code for LLVM,
-a toolkit for the construction of highly optimized compilers,
-optimizers, and run-time environments.
+We open sourced some of the obfuscation features of DeClang for now. Some other features might be open sourced in the future.
 
-The README briefly describes how to get started with building LLVM.
-For more information on how to contribute to the LLVM project, please
-take a look at the
-[Contributing to LLVM](https://llvm.org/docs/Contributing.html) guide.
+![難読化](https://user-images.githubusercontent.com/1781263/97404801-02c20780-193a-11eb-9a28-1870375e03fe.png "難読化")
 
-## Getting Started with the LLVM System
+DeClang is a compiler based anti-hack solution and has a lot of advantages over packer based solution. For the detailed comparision, please refer to the following document.
+https://www.slideshare.net/dena_tech/declang-clang-dena-techcon-2020
 
-Taken from https://llvm.org/docs/GettingStarted.html.
+## Supported Architecture
 
-### Overview
+Supported host architecture
 
-Welcome to the LLVM project!
+- x64 macOS
+- x64 Linux
+- x64 Windows
 
-The LLVM project has multiple components. The core of the project is
-itself called "LLVM". This contains all of the tools, libraries, and header
-files needed to process intermediate representations and converts it into
-object files.  Tools include an assembler, disassembler, bitcode analyzer, and
-bitcode optimizer.  It also contains basic regression tests.
+Supported target architecture
 
-C-like languages use the [Clang](http://clang.llvm.org/) front end.  This
-component compiles C, C++, Objective-C, and Objective-C++ code into LLVM bitcode
--- and from there into object files, using LLVM.
+- arm / arm64 ELF (Android)
+- arm / arm64 Mach-O (iPhone)
+- x86 / x64 ELF (Linux)
+- x86 / x64 Mach-O (macOS)
 
-Other components include:
-the [libc++ C++ standard library](https://libcxx.llvm.org),
-the [LLD linker](https://lld.llvm.org), and more.
+## Build
 
-### Getting the Source Code and Building LLVM
+```
+$ git clone https://github.com/DeNA/DeClang
+$ cd DeClang/script
+$ bash build.sh
+...
+$ bash build_tools.sh
+...
+$ bash release.sh v1.0.0
+...
+```
+Then you have a Release-v1.0.0 folder in the root directory of DeClang. 
 
-The LLVM Getting Started documentation may be out of date.  The [Clang
-Getting Started](http://clang.llvm.org/get_started.html) page might have more
-accurate information.
+If you are building DeClang on Windows, you have to install MYSYS2 and run
+the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build.
 
-This is an example work-flow and configuration to get and build the LLVM source:
+## Installation & Setup
 
-1. Checkout LLVM (including related sub-projects like Clang):
+- Define DECLANG_HOME environment variable
+  ```
+  export DECLANG_HOME=/path/to/declang_home/
+  ```
 
-     * ``git clone https://github.com/llvm/llvm-project.git``
+- Copy Release folder to $DECLAHG_HOME
+  - If you built DeClang by yourself
+    - Copy Release-v1.0.0 to $DECLANG_HOME/.DeClang. 
+    ```
+    mv Release-v1.0.0 $DECLANG_HOME/.DeClang
+    ```
+  - If you downloaded pre-built binary from Releases page.
+    - Decompress the zip file and copy the Release folder to $DECLANG_HOME/.DeClang.
+    ```
+    mv Release/ $DECLANG_HOME/.DeClang
+    ```
 
-     * Or, on windows, ``git clone --config core.autocrlf=false
-    https://github.com/llvm/llvm-project.git``
+- Setup DeClang for android-ndk:
+  ```
+  bash $DECLANG_HOME/.DeClang/script/ndk_setup.sh {/path/to/ndk_root}
+  ```
+  Recover the original NDK:
+  ```
+  bash $DECLANG_HOME/.DeClang/script/ndk_unset.sh {/path/to/ndk_root}
+  ```
 
-2. Configure and build LLVM and Clang:
 
-     * ``cd llvm-project``
+- Setup DeClang for Xcode:
+  ```
+  bash $DECLANG_HOME/.DeClang/script/xcode_setup.sh -x {/path/to/Xcode.app} -p {/path/to/xcodeproject.xcodeproj}
+  ```
+  Recover the original xcode project file:
+  ```
+  bash $DECLANG_HOME/.DeClang/script/xcode_unset.sh {/path/to/xcodeproject.xcodeproj}
+  ```
 
-     * ``mkdir build``
+- Now you can build your project using your usual build pipeline.
 
-     * ``cd build``
+## Configuration
 
-     * ``cmake -G <generator> [options] ../llvm``
+- Edit config.pre.json in $DECLANG_HOME/.DeClang/ folder:
+  ```
+  vi $DECLANG_HOME/.DeClang/config.pre.json
+  ```
+- Generate config.json from config.pre.json:
+  ```
+  $DECLANG_HOME/.DeClang/gen_config_mac -path $DECLANG_HOME/.DeClang/ -seed {your seed}
+  ```
+  "seed" can be any string. You should change "seed" for each build.
 
-        Some common build system generators are:
+## Unity Support
 
-        * ``Ninja`` --- for generating [Ninja](https://ninja-build.org)
-          build files. Most llvm developers use Ninja.
-        * ``Unix Makefiles`` --- for generating make-compatible parallel makefiles.
-        * ``Visual Studio`` --- for generating Visual Studio projects and
-          solutions.
-        * ``Xcode`` --- for generating Xcode projects.
+If you are building your Unity project using command line then set the DECLANG_HOME in comand line is sufficient.
+But if you are building a Unity project using GUI, you should set the DECLANG_HOME environment variable in your build script:
+```
+System.Environment.SetEnvironmentVariable("DECLANG_HOME", "/path/to/DeClang/");
+```
 
-        Some Common options:
+## Notes
 
-        * ``-DLLVM_ENABLE_PROJECTS='...'`` --- semicolon-separated list of the LLVM
-          sub-projects you'd like to additionally build. Can include any of: clang,
-          clang-tools-extra, libcxx, libcxxabi, libunwind, lldb, compiler-rt, lld,
-          polly, or debuginfo-tests.
+- If you do not set DECLANG_HOME, DeClang will use the default directory `~/.DeClang/`
+- Note that usually DeClang for NDK and DeClang for Xcode might not be compatitable with each other so when you install & setup DeClang 
+for different architecture please make sure you are using the correct DeClang version.
 
-          For example, to build LLVM, Clang, libcxx, and libcxxabi, use
-          ``-DLLVM_ENABLE_PROJECTS="clang;libcxx;libcxxabi"``.
-
-        * ``-DCMAKE_INSTALL_PREFIX=directory`` --- Specify for *directory* the full
-          path name of where you want the LLVM tools and libraries to be installed
-          (default ``/usr/local``).
-
-        * ``-DCMAKE_BUILD_TYPE=type`` --- Valid options for *type* are Debug,
-          Release, RelWithDebInfo, and MinSizeRel. Default is Debug.
-
-        * ``-DLLVM_ENABLE_ASSERTIONS=On`` --- Compile with assertion checks enabled
-          (default is Yes for Debug builds, No for all other build types).
-
-      * ``cmake --build . [-- [options] <target>]`` or your build system specified above
-        directly.
-
-        * The default target (i.e. ``ninja`` or ``make``) will build all of LLVM.
-
-        * The ``check-all`` target (i.e. ``ninja check-all``) will run the
-          regression tests to ensure everything is in working order.
-
-        * CMake will generate targets for each tool and library, and most
-          LLVM sub-projects generate their own ``check-<project>`` target.
-
-        * Running a serial build will be **slow**.  To improve speed, try running a
-          parallel build.  That's done by default in Ninja; for ``make``, use the option
-          ``-j NNN``, where ``NNN`` is the number of parallel jobs, e.g. the number of
-          CPUs you have.
-
-      * For more information see [CMake](https://llvm.org/docs/CMake.html)
-
-Consult the
-[Getting Started with LLVM](https://llvm.org/docs/GettingStarted.html#getting-started-with-llvm)
-page for detailed information on configuring and compiling LLVM. You can visit
-[Directory Layout](https://llvm.org/docs/GettingStarted.html#directory-layout)
-to learn about the layout of the source code tree.
