@@ -1,0 +1,28 @@
+#ifndef ELF_RELOC
+#error "ELF_RELOC must be defined"
+#endif
+
+ELF_RELOC(R_CPU0_NONE,                0)
+ELF_RELOC(R_CPU0_32,                  2)
+ELF_RELOC(R_CPU0_HI16,                5)
+ELF_RELOC(R_CPU0_LO16,                6)
+ELF_RELOC(R_CPU0_GPREL16,             7)
+ELF_RELOC(R_CPU0_LITERAL,             8)
+ELF_RELOC(R_CPU0_GOT16,               9)
+ELF_RELOC(R_CPU0_PC16,               10)
+ELF_RELOC(R_CPU0_CALL16,             11)
+ELF_RELOC(R_CPU0_GPREL32,            12)
+ELF_RELOC(R_CPU0_PC24,               13)
+ELF_RELOC(R_CPU0_GOT_HI16,           22)
+ELF_RELOC(R_CPU0_GOT_LO16,           23)
+ELF_RELOC(R_CPU0_RELGOT,             36)
+ELF_RELOC(R_CPU0_TLS_GD,             42)
+ELF_RELOC(R_CPU0_TLS_LDM,            43)
+ELF_RELOC(R_CPU0_TLS_DTP_HI16,       44)
+ELF_RELOC(R_CPU0_TLS_DTP_LO16,       45)
+ELF_RELOC(R_CPU0_TLS_GOTTPREL,       46)
+ELF_RELOC(R_CPU0_TLS_TPREL32,        47)
+ELF_RELOC(R_CPU0_TLS_TP_HI16,        49)
+ELF_RELOC(R_CPU0_TLS_TP_LO16,        50)
+ELF_RELOC(R_CPU0_GLOB_DAT,           51)
+ELF_RELOC(R_CPU0_JUMP_SLOT,          127)
