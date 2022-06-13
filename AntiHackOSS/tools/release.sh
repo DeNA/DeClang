@@ -10,6 +10,7 @@ pushd $(dirname $0) > /dev/null
 cd ../
 
 rm -rf ./Release/
+rm -rf ./Release-$1/
 mkdir -p ./Release/compiler/bin/
 mkdir -p ./Release/compiler/lib/
 
@@ -39,9 +40,16 @@ popd > /dev/null
 pushd $(dirname $0) > /dev/null
 cd ../
 
-# cp -v tools/config/config.pre.json ./Release/
-cp -v tools/config/gen_config_* ./Release/
-cp -v tools/config/gen_config.sh ./Release/
+mkdir -p ./Release/gen_config/bin/macOS/Intel
+mkdir -p ./Release/gen_config/bin/macOS/AppleSilicon
+mkdir -p ./Release/gen_config/bin/Windows
+mkdir -p ./Release/gen_config/bin/Linux
+
+cp -v tools/config/gen_config_mac_intel ./Release/gen_config/bin/macOS/Intel/gen_config
+cp -v tools/config/gen_config_mac_applesilicon ./Release/gen_config/bin/macOS/AppleSilicon/gen_config
+cp -v tools/config/gen_config_linux ./Release//gen_config/bin/Linux/gen_config.exe
+cp -v tools/config/gen_config_windows.exe ./Release/gen_config/bin/Windows/gen_config
+cp -v tools/config/gen_config.sh ./Release/gen_config
 
 mkdir -p ./Release/script/
 cp -v script/*setup.sh ./Release/script/
