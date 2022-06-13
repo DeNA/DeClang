@@ -132,7 +132,7 @@ bool Flattening::flatten(Function *f, std::string seed) {
   llvm::cryptoutils->get_bytes(scrambling_key, 16);
   // END OF SCRAMBLER
 
-  //FIXME: when llvm vesion >= 9, call LowerSwtichPass will crash
+  //FIXME: when llvm version >= 9, call LowerSwitchPass will crash
 #if LLVM_VERSION_MAJOR < 9
   // Lower switch
   FunctionPass *lower = createLowerSwitchPass();

@@ -1,4 +1,4 @@
-//===- SplitBasicBlock.cpp - SplitBasicBlokc Obfuscation pass--------------===//
+//===- SplitBasicBlock.cpp - SplitBasicBlock Obfuscation pass--------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -94,7 +94,7 @@ bool SplitBasicBlock::runOnFunction(Function &F) {
       if (reFuncName.match(F.getName()) && splittedFuncs.find(F.getName().str()) == splittedFuncs.end() ) {
         splittedFuncs.insert(F.getName().str());
         Function *tmp = &F;
-        (*logFile) << "[Frontend]: Spliting " << F.getName() << " by " << SplitNum << "\n";
+        (*logFile) << "[Frontend]: Splitting " << F.getName() << " by " << SplitNum << "\n";
         split(tmp, SplitNum, seed);
       }
 

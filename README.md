@@ -4,13 +4,13 @@
 
 ## Introduction
 
-DeClang is an anti-hacking compiler based on LLVM project and extented the OSS project ollvm (https://github.com/obfuscator-llvm/obfuscator). 
+DeClang is an anti-hacking compiler based on LLVM project and extended the OSS project ollvm (https://github.com/obfuscator-llvm/obfuscator).
 
 We open sourced some of the obfuscation features of DeClang for now. Some other features might be open sourced in the future.
 
 ![難読化](https://user-images.githubusercontent.com/1781263/97404801-02c20780-193a-11eb-9a28-1870375e03fe.png "難読化")
 
-DeClang is a compiler based anti-hack solution and has a lot of advantages over packer based solution. For the detailed comparision, please refer to the following document.
+DeClang is a compiler based anti-hack solution and has a lot of advantages over packer based solution. For the detailed comparison, please refer to the following document.
 https://www.slideshare.net/dena_tech/declang-clang-dena-techcon-2020
 
 ## Supported Architecture
@@ -99,7 +99,7 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
 
 ## Unity Support
 
-If you are building your Unity project using command line then set the DECLANG_HOME in comand line is sufficient.
+If you are building your Unity project using command line then set the DECLANG_HOME in command line is sufficient.
 But if you are building a Unity project using GUI, you should set the DECLANG_HOME environment variable in your build script:
 ```
 System.Environment.SetEnvironmentVariable("DECLANG_HOME", "/path/to/DeClang/");
