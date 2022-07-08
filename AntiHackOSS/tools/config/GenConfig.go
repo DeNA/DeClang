@@ -32,7 +32,6 @@ type Flatten struct {
   Name string `json:"name"`
   Seed string `json:"seed"`
   SplitLevel int `json:"split_level"`
-  SearchType string `json:"search_type"`
 }
 
 type Config struct {
