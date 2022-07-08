@@ -76,6 +76,12 @@ $ bash release.sh v1.0.0
   ```
   vi $DECLANG_HOME/.DeClang/config.pre.json
   ```
+  | キー | 説明 | 値 |
+  | -- |--| ------------- |
+  | build_seed | 難読化で利用されるシード | string |
+  | overall_obfuscation | コード全体に適用される簡易難読化の強さ | integer 0-100 (default 0) |
+  | flatten[name] | flatten難読化を適用する関数名 | regex string |
+
 - config.pre.jsonからconfig.jsonを生成します。
   ```
   $DECLANG_HOME/.DeClang/gen_config.sh -path $DECLANG_HOME/.DeClang/ -seed {your seed}

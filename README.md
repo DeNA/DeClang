@@ -91,6 +91,12 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
   ```
   vi $DECLANG_HOME/.DeClang/config.pre.json
   ```
+  | key | description | value type |
+  | -- | -- | ------------- |
+  | build_seed | default seed to be used by obfuscation | string |
+  | overall_obfuscation | strength of simple obfuscation for overall code | integer 0-100 (default 0) |
+  | flatten[name] | function name to be flatten-obfuscated | regex string |
+
 - Generate config.json from config.pre.json:
   ```
   $DECLANG_HOME/.DeClang/gen_config.sh -path $DECLANG_HOME/.DeClang/ -seed {your seed}
