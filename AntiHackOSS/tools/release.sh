@@ -51,6 +51,8 @@ cp -v tools/config/gen_config_linux ./Release//gen_config/bin/Linux/gen_config.e
 cp -v tools/config/gen_config_windows.exe ./Release/gen_config/bin/Windows/gen_config
 cp -v tools/config/gen_config.sh ./Release/gen_config
 
+cp -v tools/config/config.pre.json ./Release/config.pre.json
+
 mkdir -p ./Release/script/
 cp -v script/*setup.sh ./Release/script/
 cp -v script/*unset.sh ./Release/script/
