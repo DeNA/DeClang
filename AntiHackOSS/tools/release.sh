@@ -47,9 +47,9 @@ mkdir -p ./Release/gen_config/bin/Linux
 
 cp -v tools/config/gen_config_mac_intel ./Release/gen_config/bin/macOS/Intel/gen_config
 cp -v tools/config/gen_config_mac_applesilicon ./Release/gen_config/bin/macOS/AppleSilicon/gen_config
-cp -v tools/config/gen_config_linux ./Release//gen_config/bin/Linux/gen_config.exe
-cp -v tools/config/gen_config_windows.exe ./Release/gen_config/bin/Windows/gen_config
-cp -v tools/config/gen_config.sh ./Release/gen_config
+cp -v tools/config/gen_config_linux ./Release//gen_config/bin/Linux/gen_config
+cp -v tools/config/gen_config_windows.exe ./Release/gen_config/bin/Windows/gen_config.exe
+cp -v tools/config/gen_config.sh ./Release/gen_config.sh
 
 cp -v tools/config/config.pre.json ./Release/config.pre.json
 

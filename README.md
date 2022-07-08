@@ -93,7 +93,7 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
   ```
 - Generate config.json from config.pre.json:
   ```
-  $DECLANG_HOME/.DeClang/gen_config_mac -path $DECLANG_HOME/.DeClang/ -seed {your seed}
+  $DECLANG_HOME/.DeClang/gen_config.sh -path $DECLANG_HOME/.DeClang/ -seed {your seed}
   ```
   "seed" can be any string. You should change "seed" for each build.
 

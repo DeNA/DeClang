@@ -78,7 +78,7 @@ $ bash release.sh v1.0.0
   ```
 - config.pre.jsonからconfig.jsonを生成します。
   ```
-  $DECLANG_HOME/.DeClang/gen_config_mac -path $DECLANG_HOME/.DeClang/ -seed {your seed}
+  $DECLANG_HOME/.DeClang/gen_config.sh -path $DECLANG_HOME/.DeClang/ -seed {your seed}
   ```
   seedは任意の文字列で、ビルドごとに変えるのが好ましいです。
 - 以上で準備が整ったので、ndk-build等を通して、任意プログラムをコンパイルすればconfig.pre.jsonの設定にしたがって難読化が適用されます。
