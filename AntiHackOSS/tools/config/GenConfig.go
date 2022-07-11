@@ -171,13 +171,14 @@ func main() {
 	jsonOutPath = *pathPtr + "/config.json"
 	config = getConfig(*pathPtr + "/config.pre.json")
 
+	if config.Build_seed == "hello, i am seed" {
+		config.Build_seed = makeRandomString(16)
+	}
+
 	if len(*seedPtr) > 0 {
 		config.Build_seed = *seedPtr
 	}
 
-	if config.Build_seed == "hello, i am seed" {
-		config.Build_seed = makeRandomString(16)
-	}
 	buildSeed := config.Build_seed
 
 	//generate seed for flattening
