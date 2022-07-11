@@ -21,6 +21,7 @@ import (
   "os"
   "log"
   "encoding/json"
+  "crypto/rand"
   "flag"
   "io"
   "bytes"
@@ -40,6 +41,11 @@ type Config struct {
   Enable_obfuscation int `json:"enable_obfuscation"`
   Flattens []Flatten `json:"flatten"`
 }
+
+const (
+	letterBytes   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+	letterIdxMask = 0x3F // 63 0b111111
+)
 
 func GetConfig(path string) Config {
   jsonPath := path
@@ -78,8 +84,6 @@ func CalcHash(data []byte, start uint64, size uint64) uint64{
   }
   return hash
 }
-
-
 
 func (config *Config) UnmarshalJSON(data []byte) error {
   type xConfig Config
@@ -133,6 +137,25 @@ func contains(s []string, e string) bool {
   return false
 }
 
+func makeRandomString(length int) string {
+	buf := make([]byte, length)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err)
+	}
+	for i := 0; i < length; {
+		idx := int(buf[i] & letterIdxMask)
+		if idx < len(letterBytes) {
+			buf[i] = letterBytes[idx]
+			i++
+		} else {
+			if _, err := rand.Read(buf[i:i+1]); err != nil {
+				panic(err)
+			}
+		}
+	}
+	return string(buf)
+}
+
 func main() {
   homeDir := os.Getenv("DECLANG_HOME")
   if len(homeDir) == 0 {
@@ -143,12 +166,6 @@ func main() {
   seedPtr := flag.String("seed", "", "a seed")
   flag.Parse()
 
-  //if len(os.Args) != 1 && len(os.Args) != 2 && len(os.Args) != 3 {
-  //  fmt.Println("usage: gen_config_{linux,mac,windows} [seed] [path_to_config.pre.json]")
-  //  os.Exit(1)
-  //}
-  fmt.Printf("[GenConfig]: Generate config.json\n")
-
   var config Config
   var jsonOutPath string
   jsonOutPath = *pathPtr + "/config.json"
@@ -156,6 +173,10 @@ func main() {
 
   if len(*seedPtr) > 0 {
     config.Build_seed = *seedPtr
+  }
+
+  if config.Build_seed == "hello, i am seed" {
+    config.Build_seed = makeRandomString(16)
   }
   buildSeed := config.Build_seed
 
@@ -180,4 +201,5 @@ func main() {
   defer jsonOutFile.Close()
 
   jsonOutFile.Write(configStr)
+  fmt.Printf("[GenConfig]: Generate config.json\n")
 }
