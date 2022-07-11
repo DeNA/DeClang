@@ -47,7 +47,7 @@ const (
 	letterIdxMask = 0x3F // 63 0b111111
 )
 
-func GetConfig(path string) Config {
+func getConfig(path string) Config {
 	jsonPath := path
 	jsonFile, err := os.Open(jsonPath)
 	if err != nil {
@@ -64,7 +64,7 @@ func GetConfig(path string) Config {
 	return config
 }
 
-func CalcHash(data []byte, start uint64, size uint64) uint64 {
+func calcHash(data []byte, start uint64, size uint64) uint64 {
 	const BLOCK_SIZE uint64 = 4
 	const BASE uint64 = 617365819018153
 	var hash uint64 = 0
@@ -85,7 +85,7 @@ func CalcHash(data []byte, start uint64, size uint64) uint64 {
 	return hash
 }
 
-func (config *Config) UnmarshalJSON(data []byte) error {
+func (config *Config) unmarshalJSON(data []byte) error {
 	type xConfig Config
 	defaultConfig := &xConfig{Overall_obfuscation: 0, Enable_obfuscation: 1}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -97,7 +97,7 @@ func (config *Config) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (flatten *Flatten) UnmarshalJSON(data []byte) error {
+func (flatten *Flatten) unmarshalJSON(data []byte) error {
 	type xFlatten Flatten
 	xf := &xFlatten{Seed: "", SplitLevel: DEFAULT_SPLIT_LEVEL}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -169,7 +169,7 @@ func main() {
 	var config Config
 	var jsonOutPath string
 	jsonOutPath = *pathPtr + "/config.json"
-	config = GetConfig(*pathPtr + "/config.pre.json")
+	config = getConfig(*pathPtr + "/config.pre.json")
 
 	if len(*seedPtr) > 0 {
 		config.Build_seed = *seedPtr
@@ -186,7 +186,7 @@ func main() {
 		seed := config.Flattens[i].Seed
 		if seed == "" {
 			str := []byte(buildSeed + funcName)
-			hash := CalcHash(str, 0, uint64(len(str)))
+			hash := calcHash(str, 0, uint64(len(str)))
 			seed = fmt.Sprintf("%016x%016x", hash, hash)
 			config.Flattens[i].Seed = seed
 		}
