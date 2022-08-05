@@ -96,6 +96,9 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
   | build_seed | default seed to be used by obfuscation | string |
   | overall_obfuscation | strength of simple obfuscation for overall code | integer 0-100 (default 0) |
   | flatten[name] | function name to be flatten-obfuscated | regex string |
+  | flatten[seed] | seed to be used by flatten-obfuscation | 16-digit hexadecimal string |
+  | flatten[split_level] | level to split Basic Block for flatten-obfuscation | integer (default 1)|
+  | enable_obfuscation | enable/disable flatten-obfuscation | integer 0-1 (default 1) |
 
 - Generate config.json from config.pre.json:
   ```
@@ -116,4 +119,6 @@ System.Environment.SetEnvironmentVariable("DECLANG_HOME", "/path/to/DeClang/");
 - If you do not set DECLANG_HOME, DeClang will use the default directory `~/.DeClang/`
 - Note that usually DeClang for NDK and DeClang for Xcode might not be compatitable with each other so when you install & setup DeClang 
 for different architecture please make sure you are using the correct DeClang version.
-
+- When building the Android library using Gradle, run `ndk_setup.sh` according to the `ndkVersion` listed in build.gradle.
+Also, please enable the optimization by mentioning `set(CMAKE_CXX_FLAGS_RELEASE "-O2") ` in the CMakefile.txt file.
+If DeClang does not enable optimization, the process will not be passed to LLVM Pass, which performs obfuscation.
