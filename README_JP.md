@@ -81,6 +81,9 @@ $ bash release.sh v1.0.0
   | build_seed | 難読化で利用されるシード | string |
   | overall_obfuscation | コード全体に適用される簡易難読化の強さ | integer 0-100 (default 0) |
   | flatten[name] | flatten難読化を適用する関数名 | regex string |
+  | flatten[seed] | flatten難読化内部で使用するシード値 | 16-digit hexadecimal string |
+  | flatten[split_level] | flatten難読化の際にBasic Blockを分割するレベル | integer (default 1)|
+  | enable_obfuscation | flatten難読化を有効にするか否か | integer 0-1 (default 1) |
 
 - config.pre.jsonからconfig.jsonを生成します。
   ```
@@ -93,3 +96,7 @@ $ bash release.sh v1.0.0
 ## 注意点
 
 Unity上でビルドするときは、$DECLANG_HOMEは効かないので、デフォルトの~/.DeClang/が使われてしまいます。なのでコマンドラインからDECLANG_HOMEを設定した状態でビルドしてください。
+
+Gradleを用いてAndroidライブラリをビルドするときは、build.gradle内に記載されている`ndkVersion`に応じて、`ndk_setup.sh`を実行してください。
+また、CMakefile.txt内で`set(CMAKE_CXX_FLAGS_RELEASE "-O2") ` を記載し、最適化を有効にしてください。
+DeClangは最適化を有効にしないと、難読化を行うLLVM Passに処理が渡らず、難読化が行われません。
