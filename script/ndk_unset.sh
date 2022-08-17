@@ -15,7 +15,7 @@ if [ "_$OS" = "_Windows_NT" ]; then # MSYS2
 elif uname -r | grep -i microsoft > /dev/null; then # WSL2
   ndk_clang_path=`find "$ndk_path" -type f -name "clang++.exe"`
 else
-  ndk_clang_path=`find "$ndk_path" -type f -name "clang++"`
+  ndk_clang_path=`find "$ndk_path" -name "clang++"`
 fi
 
 darwin_path=`dirname "$ndk_clang_path"`
