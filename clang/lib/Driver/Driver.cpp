@@ -3976,7 +3976,7 @@ void Driver::BuildJobs(Compilation &C) const {
   llvm::PrettyStackTraceString CrashInfo("Building compilation jobs");
 
   Arg *FinalOutput = C.getArgs().getLastArg(options::OPT_o);
-
+  
   // It is an error to provide a -o option if we are making multiple output
   // files. There are exceptions:
   //
@@ -4149,6 +4149,14 @@ void Driver::BuildJobs(Compilation &C) const {
           continue;
       }
 
+
+      //DECLANG CODES BEGIN
+      //ignore -DDECLANG to be warned
+      std::string val = A->getValue();
+      if (val == "DECLANG") {
+        continue;
+      }
+      //DECLANG CODES END 
       // In clang-cl, don't mention unknown arguments here since they have
       // already been warned about.
       if (!IsCLMode() || !A->getOption().matches(options::OPT_UNKNOWN))
