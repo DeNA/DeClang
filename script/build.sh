@@ -56,12 +56,14 @@ else
         -DLLVM_ENABLE_DUMP=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS=clang \
+        -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" \
         -DLLVM_CCACHE_BUILD=${use_ccache}\
           -G "Unix Makefiles" ../llvm
     fi
 
   fi
 
+# -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="AARCH64;X64" \
 
   if [[ "_$OS" = "_Windows_NT" ]]; then
     # TODO Community版以外でも動くようにする
