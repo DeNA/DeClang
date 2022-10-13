@@ -4157,6 +4157,7 @@ void Driver::BuildJobs(Compilation &C) const {
         continue;
       }
       //DECLANG CODES END 
+      
       // In clang-cl, don't mention unknown arguments here since they have
       // already been warned about.
       if (!IsCLMode() || !A->getOption().matches(options::OPT_UNKNOWN))
