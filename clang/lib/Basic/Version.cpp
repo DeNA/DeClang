@@ -86,7 +86,7 @@ std::string getClangFullRepositoryVersion() {
 }
 
 std::string getClangFullVersion() {
-  return getClangToolFullVersion("clang-swift");
+  return getClangToolFullVersion("clang-swift5.5");
 }
 
 std::string getClangToolFullVersion(StringRef ToolName) {
