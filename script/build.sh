@@ -1,5 +1,33 @@
 set -e
 
+POSITIONAL=()
+while [[ $# -gt 0 ]]
+do
+key="$1"
+
+case $key in
+    -a|--arch)
+    build_arch="$2"
+    shift # past argument
+    shift # past value
+    ;;
+    -h|--help)
+    echo "Usage: $0 -a {\"arm64;x86_64\"} " >&2
+    exit
+    shift # past argument
+    ;;
+    *)    # unknown option
+    POSITIONAL+=("$1") # save it in an array for later
+    shift # past argument
+    ;;
+esac
+done
+set -- "${POSITIONAL[@]}" # restore positional parameters
+
+if [[ $build_arch == "" ]]; then
+  build_arch="x86_64"
+fi
+
 pushd $(dirname $0) > /dev/null
 
 cd ../
@@ -55,6 +83,7 @@ else
           -G "Visual Studio 15 2017" ../llvm
 
     else
+      echo "Build for $build_arch"
       cmake \
         -DLLVM_ENABLE_DUMP=ON \
         -DLLVM_INCLUDE_BENCHMARKS=OFF \
@@ -62,12 +91,14 @@ else
         -DLLVM_INCLUDE_TESTS=OFF \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS=clang \
+        -DCMAKE_OSX_ARCHITECTURES="$build_arch" \
         -DLLVM_CCACHE_BUILD=${use_ccache}\
           -G "Unix Makefiles" ../llvm
     fi
 
   fi
 
+# -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="AARCH64;X64" \
 
   if [[ "_$OS" = "_Windows_NT" ]]; then
     # TODO Community版以外でも動くようにする
