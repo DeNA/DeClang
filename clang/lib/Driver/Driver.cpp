@@ -4152,9 +4152,12 @@ void Driver::BuildJobs(Compilation &C) const {
 
       //DECLANG CODES BEGIN
       //ignore -DDECLANG to be warned
-      std::string val = A->getValue();
-      if (val == "DECLANG") {
-        continue;
+      const char* val = A->getValue();
+      if (val != nullptr) {
+        std::string valStr = A->getValue();
+        if (valStr == "DECLANG") {
+          continue;
+        }
       }
       //DECLANG CODES END 
       
