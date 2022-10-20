@@ -90,6 +90,17 @@
 using namespace clang;
 using namespace llvm;
 
+//DECLANG CODES BEGIN
+#include "llvm/Transforms/AntiHack/AntiHack.h"
+static cl::opt<bool>
+FinalizerOpt("no-finalizer", cl::init(false), cl::Hidden,
+    cl::ZeroOrMore, cl::desc("no finalizer option"));
+
+static cl::opt<std::string>
+AntiHackOpt("antihack", cl::init(""), cl::Hidden,
+    cl::ZeroOrMore, cl::desc("antihack pass"));
+//DECLANG CODES END
+
 #define HANDLE_EXTENSION(Ext)                                                  \
   llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
 #include "llvm/Support/Extension.def"
@@ -1483,6 +1494,10 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   default:
     break;
   }
+
+  //DECLANG CODES BEGIN
+  MPM.addPass(AntiHack(AntiHackOpt));
+  //DECLANG CODES END
 
   // Now that we have all of the passes ready, run them.
   PrettyStackTraceString CrashInfo("Optimizer");

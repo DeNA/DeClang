@@ -100,6 +100,12 @@ using namespace clang::driver;
 using namespace clang;
 using namespace llvm::opt;
 
+
+//DECLANG CODES BEGIN
+extern void DeClangExtraProcess(const Compilation &C, const std::string& homeDir, llvm::raw_fd_ostream *logFile);
+//DECLANG CODES END
+
+
 static llvm::Triple getHIPOffloadTargetTriple() {
   static const llvm::Triple T("amdgcn-amd-amdhsa");
   return T;
@@ -1011,6 +1017,24 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
 
   // FIXME: What are we going to do with -V and -b?
 
+  //DECLANG CODES BEGIN
+  //add -DDECLANG
+  std::vector<const char*> modArgs = ArgList.vec();
+  modArgs.push_back("-DDECLANG");
+
+  //std::string noautolink = "-fno-autolink";
+  //for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end(); ++it) {
+  //  if (noautolink == *it) {
+  //    modArgs.erase(it);
+  //    llvm::errs() << "removed no-autolink\n";
+  //  }
+  //}
+
+  ArgList = ArrayRef<const char*>(modArgs);
+
+  //DECLANG CODES END
+
+
   // Arguments specified in command line.
   bool ContainsError;
   CLOptions = std::make_unique<InputArgList>(
@@ -1549,10 +1573,46 @@ int Driver::ExecuteCompilation(
   for (auto &Job : C.getJobs())
     setUpResponseFiles(C, Job);
 
+   //DECLANG CODES BEGIN
+  char* home_dir = getenv("DECLANG_HOME");
+  if (home_dir == nullptr) {
+    home_dir = getenv("HOME");
+  }
+  if (home_dir == nullptr) {
+    home_dir = getenv("USERPROFILE");
+  }
+  if (home_dir == nullptr) {
+    llvm::errs() << "[Linker]: (Warning) Cannot find $DECLANG_HOME, $HOME or %USERPROFILE%\n";
+    llvm::errs().flush();
+    std::exit(EXIT_FAILURE);
+  }
+  std::string homeDir(home_dir);
+  homeDir = llvm::sys::path::convert_to_slash(homeDir);
+
+  //log path
+  std::string logPath = homeDir + "/.DeClang/log.txt";
+  llvm::raw_fd_ostream *logFile;
+  std::error_code EC;
+  logFile = new llvm::raw_fd_ostream(logPath, EC, llvm::sys::fs::OF_Append);
+  if (EC) {
+    llvm::errs() << "[Linker]: Open logFile Failed. Check DECLANG_HOME maybe?: " << EC.message() << " "  << logPath << "\n";
+    llvm::errs().flush();
+  }
+
+  for (Command& cmd : C.getJobs() ) {
+    cmd.Print(*logFile, "\n", /*Quote=*/true);
+  }
+  //DECLANG CODES END
+
+
   C.ExecuteJobs(C.getJobs(), FailingCommands);
 
   // If the command succeeded, we are done.
-  if (FailingCommands.empty())
+  if (FailingCommands.empty()) {
+    //DECLANG CODES BEGIN
+    DeClangExtraProcess(C, homeDir, logFile);
+    //DECLANG CODES END
+  }
     return 0;
 
   // Otherwise, remove result files and print extra information about abnormal
@@ -4218,6 +4278,17 @@ void Driver::BuildJobs(Compilation &C) const {
         if (DuplicateClaimed)
           continue;
       }
+
+      //DECLANG CODES BEGIN
+      //ignore -DDECLANG to be warned
+      const char* val = A->getValue();
+      if (val != nullptr) {
+        std::string valStr = A->getValue();
+        if (valStr == "DECLANG") {
+          continue;
+        }
+      }
+      //DECLANG CODES END
 
       // In clang-cl, don't mention unknown arguments here since they have
       // already been warned about.

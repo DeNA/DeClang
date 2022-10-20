@@ -78,6 +78,8 @@ add_clang_library(clangDriver
   ToolChains/ZOS.cpp
   Types.cpp
   XRayArgs.cpp
+  DeClangExtraProcess.cpp
+
 
   DEPENDS
   ClangDriverOptions
