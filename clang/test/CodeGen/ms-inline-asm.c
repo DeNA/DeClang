@@ -114,7 +114,7 @@ unsigned t10(void) {
 // CHECK: call i32 asm sideeffect inteldialect
 // CHECK-SAME: mov eax, $2
 // CHECK-SAME: mov $0, eax
-// CHECK-SAME: "=*m,={eax},*m,~{eax},~{dirflag},~{fpsr},~{flags}"(i32* %{{.*}}, i32* %{{.*}})
+// CHECK-SAME: "=*m,=&{eax},*m,~{dirflag},~{fpsr},~{flags}"(i32* %{{.*}}, i32* %{{.*}})
 // CHECK: [[RET:%[a-zA-Z0-9]+]] = load i32, i32* [[J]], align 4
 // CHECK: ret i32 [[RET]]
 }
@@ -140,7 +140,7 @@ unsigned t12(void) {
 // CHECK-SAME: mov $0, eax
 // CHECK-SAME: mov eax, $4
 // CHECK-SAME: mov $1, eax
-// CHECK-SAME: "=*m,=*m,={eax},*m,*m,~{eax},~{dirflag},~{fpsr},~{flags}"(i32* %{{.*}}, i32* %{{.*}}, i32* %{{.*}}, i32* %{{.*}})
+// CHECK-SAME: "=*m,=*m,=&{eax},*m,*m,~{dirflag},~{fpsr},~{flags}"(i32* %{{.*}}, i32* %{{.*}}, i32* %{{.*}}, i32* %{{.*}})
 }
 
 void t13() {
@@ -673,17 +673,6 @@ void t46() {
   // CHECK-LABEL: define{{.*}} void @t46
   __asm add eax, -128[eax]
   // CHECK: call void asm sideeffect inteldialect "add eax, [eax + $$-128]", "~{eax},~{flags},~{dirflag},~{fpsr},~{flags}"()
-}
-
-void t47() {
-  // CHECK-LABEL: define{{.*}} void @t47
-  __asm {
-    bndmk bnd0, dword ptr [eax]
-    bndmk bnd1, dword ptr [ebx]
-    bndmk bnd2, dword ptr [ecx]
-    bndmk bnd3, dword ptr [edx]
-  }
-  // CHECK: call void asm sideeffect inteldialect "bndmk bnd0, dword ptr [eax]\0A\09bndmk bnd1, dword ptr [ebx]\0A\09bndmk bnd2, dword ptr [ecx]\0A\09bndmk bnd3, dword ptr [edx]", "~{bnd0},~{bnd1},~{bnd2},~{bnd3},~{dirflag},~{fpsr},~{flags}"()
 }
 
 void dot_operator(){

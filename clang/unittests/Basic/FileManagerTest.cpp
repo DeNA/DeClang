@@ -12,6 +12,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualFileSystem.h"
+#include "llvm/Testing/Support/Error.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -276,9 +277,9 @@ TEST_F(FileManagerTest, getFileReturnsSameFileEntryForAliasedRealFiles) {
 
 TEST_F(FileManagerTest, getFileRefReturnsCorrectNameForDifferentStatPath) {
   // Inject files with the same inode, but where some files have a stat that
-  // gives a different name. This is adding coverage for weird stat behaviour
-  // triggered by the RedirectingFileSystem that FileManager::getFileRef has
-  // special logic for.
+  // gives a different name. This is adding coverage for stat behaviour
+  // triggered by the RedirectingFileSystem for 'use-external-name' that
+  // FileManager::getFileRef has special logic for.
   auto StatCache = std::make_unique<FakeStatCache>();
   StatCache->InjectDirectory("dir", 40);
   StatCache->InjectFile("dir/f1.cpp", 41);
@@ -357,6 +358,15 @@ TEST_F(FileManagerTest, getFileRefEquality) {
   StatCache->InjectFile("dir/f1-also.cpp", 41);
   StatCache->InjectFile("dir/f1-redirect.cpp", 41, "dir/f1.cpp");
   StatCache->InjectFile("dir/f2.cpp", 42);
+  // This may seem contrived, but is easily possible with the VFS. Consider
+  // the following set of overlays:
+  //   - dir/f1-redirect.cpp -> dir/f1.cpp
+  //   - dir/f1-bad-redirect.cpp -> dir/f1-redirect.cpp
+  //   - Underlying FS contains dir/f1.cpp and dir/f1-bad-redirect.cpp
+  //
+  // Looking up dir/f1-redirect.cpp gives dir/f1.cpp and looking up
+  // dir/f1-bad-redirect.cpp gives dir/f1-redirect.cpp.
+  StatCache->InjectFile("dir/f1-bad-redirect.cpp", 43, "dir/f1-redirect.cpp");
   manager.setStatCache(std::move(StatCache));
 
   auto F1 = manager.getFileRef("dir/f1.cpp");
@@ -364,6 +374,7 @@ TEST_F(FileManagerTest, getFileRefEquality) {
   auto F1Also = manager.getFileRef("dir/f1-also.cpp");
   auto F1Redirect = manager.getFileRef("dir/f1-redirect.cpp");
   auto F2 = manager.getFileRef("dir/f2.cpp");
+  auto F1BadRedirect = manager.getFileRef("dir/f1-redirect.cpp");
 
   // Check Expected<FileEntryRef> for error.
   ASSERT_FALSE(!F1);
@@ -400,6 +411,13 @@ TEST_F(FileManagerTest, getFileRefEquality) {
   EXPECT_TRUE(F1->isSameRef(*F1Redirect));
   EXPECT_FALSE(F1->isSameRef(*F1Also));
   EXPECT_FALSE(F1->isSameRef(*F2));
+
+  // It should not be the case that this gives `dir/f1.cpp`, but that's better
+  // than the corruption that would otherwise occur.
+  ASSERT_FALSE(!F1BadRedirect);
+  EXPECT_EQ("dir/f1.cpp", F1BadRedirect->getName());
+  EXPECT_EQ(*F1, *F1BadRedirect);
+  EXPECT_TRUE(F1->isSameRef(*F1BadRedirect));
 }
 
 // getFile() Should return the same entry as getVirtualFile if the file actually
@@ -559,9 +577,10 @@ TEST_F(FileManagerTest, getBypassFile) {
 
   // Calling a second time should not affect the UID or size.
   unsigned VirtualUID = FE.getUID();
-  EXPECT_EQ(
-      &FE,
-      &expectedToOptional(Manager.getFileRef("/tmp/test"))->getFileEntry());
+  llvm::Optional<FileEntryRef> SearchRef;
+  ASSERT_THAT_ERROR(Manager.getFileRef("/tmp/test").moveInto(SearchRef),
+                    Succeeded());
+  EXPECT_EQ(&FE, &SearchRef->getFileEntry());
   EXPECT_EQ(FE.getUID(), VirtualUID);
   EXPECT_EQ(FE.getSize(), 10);
 
@@ -578,9 +597,9 @@ TEST_F(FileManagerTest, getBypassFile) {
   EXPECT_NE(BypassRef->getSize(), FE.getSize());
 
   // The virtual file should still be returned when searching.
-  EXPECT_EQ(
-      &FE,
-      &expectedToOptional(Manager.getFileRef("/tmp/test"))->getFileEntry());
+  ASSERT_THAT_ERROR(Manager.getFileRef("/tmp/test").moveInto(SearchRef),
+                    Succeeded());
+  EXPECT_EQ(&FE, &SearchRef->getFileEntry());
 }
 
 } // anonymous namespace

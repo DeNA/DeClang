@@ -55,6 +55,7 @@
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/thread.h"
 #include <mutex>
 
 #if LLVM_ENABLE_THREADS != 0 && defined(__APPLE__)
@@ -760,10 +761,10 @@ bool CursorVisitor::VisitClassTemplatePartialSpecializationDecl(
 }
 
 bool CursorVisitor::VisitTemplateTypeParmDecl(TemplateTypeParmDecl *D) {
-  if (const auto *TC = D->getTypeConstraint())
-    if (Visit(MakeCXCursor(TC->getImmediatelyDeclaredConstraint(), StmtParent,
-                           TU, RegionOfInterest)))
+  if (const auto *TC = D->getTypeConstraint()) {
+    if (VisitTypeConstraint(*TC))
       return true;
+  }
 
   // Visit the default argument.
   if (D->hasDefaultArgument() && !D->defaultArgumentWasInherited())
@@ -860,6 +861,11 @@ bool CursorVisitor::VisitFunctionDecl(FunctionDecl *ND) {
       return true;
 
     // FIXME: Attributes?
+  }
+
+  if (auto *E = ND->getTrailingRequiresClause()) {
+    if (Visit(E))
+      return true;
   }
 
   if (ND->doesThisDeclarationHaveABody() && !ND->isLateTemplateParsed()) {
@@ -1309,6 +1315,75 @@ bool CursorVisitor::VisitDecompositionDecl(DecompositionDecl *D) {
   return VisitVarDecl(D);
 }
 
+bool CursorVisitor::VisitConceptDecl(ConceptDecl *D) {
+  if (VisitTemplateParameters(D->getTemplateParameters()))
+    return true;
+
+  if (auto *E = D->getConstraintExpr()) {
+    if (Visit(MakeCXCursor(E, D, TU, RegionOfInterest)))
+      return true;
+  }
+  return false;
+}
+
+bool CursorVisitor::VisitTypeConstraint(const TypeConstraint &TC) {
+  if (TC.getNestedNameSpecifierLoc()) {
+    if (VisitNestedNameSpecifierLoc(TC.getNestedNameSpecifierLoc()))
+      return true;
+  }
+  if (TC.getNamedConcept()) {
+    if (Visit(MakeCursorTemplateRef(TC.getNamedConcept(),
+                                    TC.getConceptNameLoc(), TU)))
+      return true;
+  }
+  if (auto Args = TC.getTemplateArgsAsWritten()) {
+    for (const auto &Arg : Args->arguments()) {
+      if (VisitTemplateArgumentLoc(Arg))
+        return true;
+    }
+  }
+  return false;
+}
+
+bool CursorVisitor::VisitConceptRequirement(const concepts::Requirement &R) {
+  using namespace concepts;
+  switch (R.getKind()) {
+  case Requirement::RK_Type: {
+    const TypeRequirement &TR = cast<TypeRequirement>(R);
+    if (!TR.isSubstitutionFailure()) {
+      if (Visit(TR.getType()->getTypeLoc()))
+        return true;
+    }
+    break;
+  }
+  case Requirement::RK_Simple:
+  case Requirement::RK_Compound: {
+    const ExprRequirement &ER = cast<ExprRequirement>(R);
+    if (!ER.isExprSubstitutionFailure()) {
+      if (Visit(ER.getExpr()))
+        return true;
+    }
+    if (ER.getKind() == Requirement::RK_Compound) {
+      const auto &RTR = ER.getReturnTypeRequirement();
+      if (RTR.isTypeConstraint()) {
+        if (const auto *Cons = RTR.getTypeConstraint())
+          VisitTypeConstraint(*Cons);
+      }
+    }
+    break;
+  }
+  case Requirement::RK_Nested: {
+    const NestedRequirement &NR = cast<NestedRequirement>(R);
+    if (!NR.isSubstitutionFailure()) {
+      if (Visit(NR.getConstraintExpr()))
+        return true;
+    }
+    break;
+  }
+  }
+  return false;
+}
+
 bool CursorVisitor::VisitDeclarationNameInfo(DeclarationNameInfo Name) {
   switch (Name.getName().getNameKind()) {
   case clang::DeclarationName::Identifier:
@@ -1435,6 +1510,12 @@ bool CursorVisitor::VisitTemplateParameters(
       return true;
   }
 
+  if (const auto *E = Params->getRequiresClause()) {
+    if (Visit(MakeCXCursor(Params->getRequiresClause(), nullptr, TU,
+                           RegionOfInterest)))
+      return true;
+  }
+
   return false;
 }
 
@@ -1548,6 +1629,8 @@ bool CursorVisitor::VisitBuiltinTypeLoc(BuiltinTypeLoc TL) {
 #include "clang/Basic/AArch64SVEACLETypes.def"
 #define PPC_VECTOR_TYPE(Name, Id, Size) case BuiltinType::Id:
 #include "clang/Basic/PPCTypes.def"
+#define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/RISCVVTypes.def"
 #define BUILTIN_TYPE(Id, SingletonId)
 #define SIGNED_TYPE(Id, SingletonId) case BuiltinType::Id:
 #define UNSIGNED_TYPE(Id, SingletonId) case BuiltinType::Id:
@@ -1594,6 +1677,11 @@ bool CursorVisitor::VisitTagTypeLoc(TagTypeLoc TL) {
 }
 
 bool CursorVisitor::VisitTemplateTypeParmTypeLoc(TemplateTypeParmTypeLoc TL) {
+  if (const auto *TC = TL.getDecl()->getTypeConstraint()) {
+    if (VisitTypeConstraint(*TC))
+      return true;
+  }
+
   return Visit(MakeCursorTypeRef(TL.getDecl(), TL.getNameLoc(), TU));
 }
 
@@ -1863,6 +1951,9 @@ DEF_JOB(DeclRefExprParts, DeclRefExpr, DeclRefExprPartsKind)
 DEF_JOB(OverloadExprParts, OverloadExpr, OverloadExprPartsKind)
 DEF_JOB(SizeOfPackExprParts, SizeOfPackExpr, SizeOfPackExprPartsKind)
 DEF_JOB(LambdaExprParts, LambdaExpr, LambdaExprPartsKind)
+DEF_JOB(ConceptSpecializationExprVisit, ConceptSpecializationExpr,
+        ConceptSpecializationExprVisitKind)
+DEF_JOB(RequiresExprVisit, RequiresExpr, RequiresExprVisitKind)
 DEF_JOB(PostChildrenVisit, void, PostChildrenVisitKind)
 #undef DEF_JOB
 
@@ -1980,7 +2071,8 @@ public:
     return static_cast<const FieldDecl *>(data[0]);
   }
   SourceLocation getLoc() const {
-    return SourceLocation::getFromRawEncoding((unsigned)(uintptr_t)data[1]);
+    return SourceLocation::getFromRawEncoding(
+        (SourceLocation::UIntTy)(uintptr_t)data[1]);
   }
 };
 class EnqueueVisitor : public ConstStmtVisitor<EnqueueVisitor, void> {
@@ -2037,10 +2129,17 @@ public:
   void VisitPseudoObjectExpr(const PseudoObjectExpr *E);
   void VisitOpaqueValueExpr(const OpaqueValueExpr *E);
   void VisitLambdaExpr(const LambdaExpr *E);
+  void VisitConceptSpecializationExpr(const ConceptSpecializationExpr *E);
+  void VisitRequiresExpr(const RequiresExpr *E);
   void VisitOMPExecutableDirective(const OMPExecutableDirective *D);
+  void VisitOMPLoopBasedDirective(const OMPLoopBasedDirective *D);
   void VisitOMPLoopDirective(const OMPLoopDirective *D);
   void VisitOMPParallelDirective(const OMPParallelDirective *D);
   void VisitOMPSimdDirective(const OMPSimdDirective *D);
+  void
+  VisitOMPLoopTransformationDirective(const OMPLoopTransformationDirective *D);
+  void VisitOMPTileDirective(const OMPTileDirective *D);
+  void VisitOMPUnrollDirective(const OMPUnrollDirective *D);
   void VisitOMPForDirective(const OMPForDirective *D);
   void VisitOMPForSimdDirective(const OMPForSimdDirective *D);
   void VisitOMPSectionsDirective(const OMPSectionsDirective *D);
@@ -2214,6 +2313,17 @@ void OMPClauseEnqueue::VisitOMPSimdlenClause(const OMPSimdlenClause *C) {
   Visitor->AddStmt(C->getSimdlen());
 }
 
+void OMPClauseEnqueue::VisitOMPSizesClause(const OMPSizesClause *C) {
+  for (auto E : C->getSizesRefs())
+    Visitor->AddStmt(E);
+}
+
+void OMPClauseEnqueue::VisitOMPFullClause(const OMPFullClause *C) {}
+
+void OMPClauseEnqueue::VisitOMPPartialClause(const OMPPartialClause *C) {
+  Visitor->AddStmt(C->getFactor());
+}
+
 void OMPClauseEnqueue::VisitOMPAllocatorClause(const OMPAllocatorClause *C) {
   Visitor->AddStmt(C->getAllocator());
 }
@@ -2269,7 +2379,31 @@ void OMPClauseEnqueue::VisitOMPSIMDClause(const OMPSIMDClause *) {}
 
 void OMPClauseEnqueue::VisitOMPNogroupClause(const OMPNogroupClause *) {}
 
-void OMPClauseEnqueue::VisitOMPDestroyClause(const OMPDestroyClause *) {}
+void OMPClauseEnqueue::VisitOMPInitClause(const OMPInitClause *C) {
+  VisitOMPClauseList(C);
+}
+
+void OMPClauseEnqueue::VisitOMPUseClause(const OMPUseClause *C) {
+  Visitor->AddStmt(C->getInteropVar());
+}
+
+void OMPClauseEnqueue::VisitOMPDestroyClause(const OMPDestroyClause *C) {
+  if (C->getInteropVar())
+    Visitor->AddStmt(C->getInteropVar());
+}
+
+void OMPClauseEnqueue::VisitOMPNovariantsClause(const OMPNovariantsClause *C) {
+  Visitor->AddStmt(C->getCondition());
+}
+
+void OMPClauseEnqueue::VisitOMPNocontextClause(const OMPNocontextClause *C) {
+  Visitor->AddStmt(C->getCondition());
+}
+
+void OMPClauseEnqueue::VisitOMPFilterClause(const OMPFilterClause *C) {
+  VisitOMPClauseWithPreInit(C);
+  Visitor->AddStmt(C->getThreadID());
+}
 
 void OMPClauseEnqueue::VisitOMPUnifiedAddressClause(
     const OMPUnifiedAddressClause *) {}
@@ -2828,6 +2962,15 @@ void EnqueueVisitor::VisitLambdaExpr(const LambdaExpr *E) {
   AddStmt(E->getBody());
   WL.push_back(LambdaExprParts(E, Parent));
 }
+void EnqueueVisitor::VisitConceptSpecializationExpr(
+    const ConceptSpecializationExpr *E) {
+  WL.push_back(ConceptSpecializationExprVisit(E, Parent));
+}
+void EnqueueVisitor::VisitRequiresExpr(const RequiresExpr *E) {
+  WL.push_back(RequiresExprVisit(E, Parent));
+  for (ParmVarDecl *VD : E->getLocalParameters())
+    AddDecl(VD);
+}
 void EnqueueVisitor::VisitPseudoObjectExpr(const PseudoObjectExpr *E) {
   // Treat the expression like its syntactic form.
   Visit(E->getSyntacticForm());
@@ -2842,8 +2985,13 @@ void EnqueueVisitor::VisitOMPExecutableDirective(
     EnqueueChildren(*I);
 }
 
-void EnqueueVisitor::VisitOMPLoopDirective(const OMPLoopDirective *D) {
+void EnqueueVisitor::VisitOMPLoopBasedDirective(
+    const OMPLoopBasedDirective *D) {
   VisitOMPExecutableDirective(D);
+}
+
+void EnqueueVisitor::VisitOMPLoopDirective(const OMPLoopDirective *D) {
+  VisitOMPLoopBasedDirective(D);
 }
 
 void EnqueueVisitor::VisitOMPParallelDirective(const OMPParallelDirective *D) {
@@ -2852,6 +3000,19 @@ void EnqueueVisitor::VisitOMPParallelDirective(const OMPParallelDirective *D) {
 
 void EnqueueVisitor::VisitOMPSimdDirective(const OMPSimdDirective *D) {
   VisitOMPLoopDirective(D);
+}
+
+void EnqueueVisitor::VisitOMPLoopTransformationDirective(
+    const OMPLoopTransformationDirective *D) {
+  VisitOMPLoopBasedDirective(D);
+}
+
+void EnqueueVisitor::VisitOMPTileDirective(const OMPTileDirective *D) {
+  VisitOMPLoopTransformationDirective(D);
+}
+
+void EnqueueVisitor::VisitOMPUnrollDirective(const OMPUnrollDirective *D) {
+  VisitOMPLoopTransformationDirective(D);
 }
 
 void EnqueueVisitor::VisitOMPForDirective(const OMPForDirective *D) {
@@ -3303,6 +3464,36 @@ bool CursorVisitor::RunVisitorWorkList(VisitorWorkList &WL) {
       break;
     }
 
+    case VisitorJob::ConceptSpecializationExprVisitKind: {
+      const ConceptSpecializationExpr *E =
+          cast<ConceptSpecializationExprVisit>(&LI)->get();
+      if (NestedNameSpecifierLoc QualifierLoc =
+              E->getNestedNameSpecifierLoc()) {
+        if (VisitNestedNameSpecifierLoc(QualifierLoc))
+          return true;
+      }
+
+      if (E->getNamedConcept() &&
+          Visit(MakeCursorTemplateRef(E->getNamedConcept(),
+                                      E->getConceptNameLoc(), TU)))
+        return true;
+
+      if (auto Args = E->getTemplateArgsAsWritten()) {
+        for (const auto &Arg : Args->arguments()) {
+          if (VisitTemplateArgumentLoc(Arg))
+            return true;
+        }
+      }
+      break;
+    }
+
+    case VisitorJob::RequiresExprVisitKind: {
+      const RequiresExpr *E = cast<RequiresExprVisit>(&LI)->get();
+      for (const concepts::Requirement *R : E->getRequirements())
+        VisitConceptRequirement(*R);
+      break;
+    }
+
     case VisitorJob::PostChildrenVisitKind:
       if (PostChildrenVisitor(Parent, ClientData))
         return true;
@@ -3351,10 +3542,8 @@ RefNamePieces buildPieces(unsigned NameFlags, bool IsMemberRefExpr,
     Pieces.push_back(*TemplateArgsLoc);
 
   if (Kind == DeclarationName::CXXOperatorName) {
-    Pieces.push_back(SourceLocation::getFromRawEncoding(
-        NI.getInfo().CXXOperatorName.BeginOpNameLoc));
-    Pieces.push_back(SourceLocation::getFromRawEncoding(
-        NI.getInfo().CXXOperatorName.EndOpNameLoc));
+    Pieces.push_back(NI.getInfo().getCXXOperatorNameBeginLoc());
+    Pieces.push_back(NI.getInfo().getCXXOperatorNameEndLoc());
   }
 
   if (WantSinglePiece) {
@@ -5145,8 +5334,9 @@ CXString clang_getCursorDisplayName(CXCursor C) {
     SmallString<128> Str;
     llvm::raw_svector_ostream OS(Str);
     OS << *ClassSpec;
-    printTemplateArgumentList(OS, ClassSpec->getTemplateArgs().asArray(),
-                              Policy);
+    printTemplateArgumentList(
+        OS, ClassSpec->getTemplateArgs().asArray(), Policy,
+        ClassSpec->getSpecializedTemplate()->getTemplateParameters());
     return cxstring::createDup(OS.str());
   }
 
@@ -5325,6 +5515,10 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("ObjCMessageExpr");
   case CXCursor_BuiltinBitCastExpr:
     return cxstring::createRef("BuiltinBitCastExpr");
+  case CXCursor_ConceptSpecializationExpr:
+    return cxstring::createRef("ConceptSpecializationExpr");
+  case CXCursor_RequiresExpr:
+    return cxstring::createRef("RequiresExpr");
   case CXCursor_UnexposedStmt:
     return cxstring::createRef("UnexposedStmt");
   case CXCursor_DeclStmt:
@@ -5526,10 +5720,18 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("CXXAccessSpecifier");
   case CXCursor_ModuleImportDecl:
     return cxstring::createRef("ModuleImport");
+  case CXCursor_OMPCanonicalLoop:
+    return cxstring::createRef("OMPCanonicalLoop");
+  case CXCursor_OMPMetaDirective:
+    return cxstring::createRef("OMPMetaDirective");
   case CXCursor_OMPParallelDirective:
     return cxstring::createRef("OMPParallelDirective");
   case CXCursor_OMPSimdDirective:
     return cxstring::createRef("OMPSimdDirective");
+  case CXCursor_OMPTileDirective:
+    return cxstring::createRef("OMPTileDirective");
+  case CXCursor_OMPUnrollDirective:
+    return cxstring::createRef("OMPUnrollDirective");
   case CXCursor_OMPForDirective:
     return cxstring::createRef("OMPForDirective");
   case CXCursor_OMPForSimdDirective:
@@ -5635,6 +5837,12 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
         "OMPTargetTeamsDistributeParallelForSimdDirective");
   case CXCursor_OMPTargetTeamsDistributeSimdDirective:
     return cxstring::createRef("OMPTargetTeamsDistributeSimdDirective");
+  case CXCursor_OMPInteropDirective:
+    return cxstring::createRef("OMPInteropDirective");
+  case CXCursor_OMPDispatchDirective:
+    return cxstring::createRef("OMPDispatchDirective");
+  case CXCursor_OMPMaskedDirective:
+    return cxstring::createRef("OMPMaskedDirective");
   case CXCursor_OverloadCandidate:
     return cxstring::createRef("OverloadCandidate");
   case CXCursor_TypeAliasTemplateDecl:
@@ -5651,6 +5859,8 @@ CXString clang_getCursorKindSpelling(enum CXCursorKind Kind) {
     return cxstring::createRef("attribute(warn_unused_result)");
   case CXCursor_AlignedAttr:
     return cxstring::createRef("attribute(aligned)");
+  case CXCursor_ConceptDecl:
+    return cxstring::createRef("ConceptDecl");
   }
 
   llvm_unreachable("Unhandled CXCursorKind");
@@ -6415,6 +6625,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::Concept:
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
+  case Decl::UnresolvedUsingIfExists:
     return C;
 
   // Declaration kinds that don't make any sense here, but are
@@ -6489,7 +6700,8 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   }
 
   case Decl::Using:
-    return MakeCursorOverloadedDeclRef(cast<UsingDecl>(D), D->getLocation(),
+  case Decl::UsingEnum:
+    return MakeCursorOverloadedDeclRef(cast<BaseUsingDecl>(D), D->getLocation(),
                                        TU);
 
   case Decl::UsingShadow:
@@ -6719,10 +6931,10 @@ void clang_enableStackTraces(void) {
 
 void clang_executeOnThread(void (*fn)(void *), void *user_data,
                            unsigned stack_size) {
-  llvm::llvm_execute_on_thread(fn, user_data,
-                               stack_size == 0
-                                   ? clang::DesiredStackSize
-                                   : llvm::Optional<unsigned>(stack_size));
+  llvm::thread Thread(stack_size == 0 ? clang::DesiredStackSize
+                                      : llvm::Optional<unsigned>(stack_size),
+                      fn, user_data);
+  Thread.join();
 }
 
 //===----------------------------------------------------------------------===//
@@ -9010,7 +9222,7 @@ cxindex::checkForMacroInMacroDefinition(const MacroInfo *MI, const Token &Tok,
     return nullptr;
 
   // Check that the identifier is not one of the macro arguments.
-  if (std::find(MI->param_begin(), MI->param_end(), &II) != MI->param_end())
+  if (llvm::is_contained(MI->params(), &II))
     return nullptr;
 
   MacroDirective *InnerMD = PP.getLocalMacroDirectiveHistory(&II);
@@ -9143,16 +9355,3 @@ cxindex::Logger::~Logger() {
     OS << "--------------------------------------------------\n";
   }
 }
-
-#ifdef CLANG_TOOL_EXTRA_BUILD
-// This anchor is used to force the linker to link the clang-tidy plugin.
-extern volatile int ClangTidyPluginAnchorSource;
-static int LLVM_ATTRIBUTE_UNUSED ClangTidyPluginAnchorDestination =
-    ClangTidyPluginAnchorSource;
-
-// This anchor is used to force the linker to link the clang-include-fixer
-// plugin.
-extern volatile int ClangIncludeFixerPluginAnchorSource;
-static int LLVM_ATTRIBUTE_UNUSED ClangIncludeFixerPluginAnchorDestination =
-    ClangIncludeFixerPluginAnchorSource;
-#endif

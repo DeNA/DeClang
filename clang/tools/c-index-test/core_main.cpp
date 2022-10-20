@@ -12,16 +12,17 @@
 #include "clang/DirectoryWatcher/DirectoryWatcher.h"
 #include "clang/AST/Mangle.h"
 #include "clang/Basic/LangOptions.h"
+#include "clang/Basic/PathRemapper.h"
 #include "clang/CodeGen/ObjectFilePCHContainerOperations.h"
 #include "clang/Frontend/ASTUnit.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendAction.h"
-#include "clang/Index/IndexingAction.h"
 #include "clang/Index/IndexDataConsumer.h"
 #include "clang/Index/IndexDataStoreSymbolUtils.h"
 #include "clang/Index/IndexRecordReader.h"
 #include "clang/Index/IndexUnitReader.h"
+#include "clang/Index/IndexingAction.h"
 #include "clang/Index/USRGeneration.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Serialization/ASTReader.h"
@@ -53,6 +54,7 @@ enum class ActionType {
   PrintStoreFormatVersion,
   AggregateAsJSON,
   ScanDeps,
+  ScanDepsByModuleName,
   WatchDir,
 };
 
@@ -75,6 +77,8 @@ Action(cl::desc("Action:"), cl::init(ActionType::None),
                      "aggregate-json", "Aggregate index data in JSON format"),
           clEnumValN(ActionType::ScanDeps, "scan-deps",
                      "Get file dependencies"),
+          clEnumValN(ActionType::ScanDepsByModuleName, "scan-deps-by-mod-name",
+                     "Get file dependencies by module name alone"),
           clEnumValN(ActionType::WatchDir,
                      "watch-dir", "Watch directory for file events")),
        cl::cat(IndexTestCoreCategory));
@@ -85,6 +89,9 @@ OutputFile("o", cl::desc("output file"),
 
 static cl::list<std::string>
 InputFiles(cl::Positional, cl::desc("<filename>..."));
+
+static cl::list<std::string>
+PrefixMap("index-store-prefix-map", cl::desc("<prefix=replacement>..."));
 
 static cl::extrahelp MoreHelp(
   "\nAdd \"-- <compiler arguments>\" at the end to setup the compiler "
@@ -112,6 +119,9 @@ static cl::opt<std::string>
 FilePathAndRange("filepath",
                cl::desc("File path that can optionally include a line range"));
 
+static cl::opt<std::string>
+    ModuleName("module-name", cl::desc("name of the module, of which we are "
+                                       "getting file and module dependencies"));
 }
 } // anonymous namespace
 
@@ -351,7 +361,7 @@ static int printRecord(StringRef Filename, raw_ostream &OS) {
   });
 
   return false;
-};
+}
 
 //===----------------------------------------------------------------------===//
 // Print Store Records
@@ -385,9 +395,10 @@ static bool printStoreRecord(indexstore::IndexStore &Store, StringRef RecName,
   return false;
 }
 
-static int printStoreRecords(StringRef StorePath, raw_ostream &OS) {
+static int printStoreRecords(StringRef StorePath, PathRemapper Remapper,
+                             raw_ostream &OS) {
   std::string Error;
-  indexstore::IndexStore Store(StorePath, Error);
+  indexstore::IndexStore Store(StorePath, Remapper, Error);
   if (!Store) {
     errs() << "error loading store: " << Error << "\n";
     return 1;
@@ -439,9 +450,9 @@ static std::string findRecordNameForFile(indexstore::IndexStore &store,
 
 static int printStoreFileRecord(StringRef storePath, StringRef filePath,
                                 Optional<unsigned> lineStart, unsigned lineCount,
-                                raw_ostream &OS) {
+                                PathRemapper remapper, raw_ostream &OS) {
   std::string error;
-  indexstore::IndexStore store(storePath, error);
+  indexstore::IndexStore store(storePath, remapper, error);
   if (!store) {
     errs() << "error loading store: " << error << "\n";
     return 1;
@@ -475,9 +486,10 @@ static int printStoreFileRecord(StringRef storePath, StringRef filePath,
 // Print Unit
 //===----------------------------------------------------------------------===//
 
-static int printUnit(StringRef Filename, raw_ostream &OS) {
+static int printUnit(StringRef Filename, PathRemapper Remapper,
+                     raw_ostream &OS) {
   std::string Error;
-  auto Reader = IndexUnitReader::createWithFilePath(Filename, Error);
+  auto Reader = IndexUnitReader::createWithFilePath(Filename, Remapper, Error);
   if (!Reader) {
     errs() << Error << '\n';
     return true;
@@ -527,7 +539,7 @@ static int printUnit(StringRef Filename, raw_ostream &OS) {
   OS << "INCLUDE END (" << NumIncludes << ")\n";
 
   return false;
-};
+}
 
 //===----------------------------------------------------------------------===//
 // Print Store Units
@@ -588,9 +600,10 @@ static bool printStoreUnit(indexstore::IndexStore &Store, StringRef UnitName,
   return false;
 }
 
-static int printStoreUnits(StringRef StorePath, raw_ostream &OS) {
+static int printStoreUnits(StringRef StorePath, PathRemapper Remapper,
+                           raw_ostream &OS) {
   std::string Error;
-  indexstore::IndexStore Store(StorePath, Error);
+  indexstore::IndexStore Store(StorePath, Remapper, Error);
   if (!Store) {
     errs() << "error loading store: " << Error << "\n";
     return 1;
@@ -682,9 +695,82 @@ static int scanDeps(ArrayRef<const char *> Args, std::string WorkingDirectory) {
       functionObjectToCCallbackRef<void(CXModuleDependencySet *)>(Callback);
 
   CXFileDependencies *Result =
-      clang_experimental_DependencyScannerWorker_getFileDependencies_v0(
+      clang_experimental_DependencyScannerWorker_getFileDependencies_v1(
           Worker, Args.size(), Args.data(), WorkingDirectory.c_str(),
           CB.Callback, CB.Context, &Error);
+  if (!Result) {
+    llvm::errs() << "error: failed to get dependencies\n";
+    llvm::errs() << clang_getCString(Error) << "\n";
+    clang_disposeString(Error);
+    return 1;
+  }
+  llvm::outs() << "dependencies:\n";
+  llvm::outs() << "  context-hash: " << clang_getCString(Result->ContextHash)
+               << "\n"
+               << "  module-deps:\n";
+  for (const auto &ModuleName : llvm::makeArrayRef(Result->ModuleDeps->Strings,
+                                                   Result->ModuleDeps->Count))
+    llvm::outs() << "    " << clang_getCString(ModuleName) << "\n";
+  llvm::outs() << "  file-deps:\n";
+  for (const auto &FileName :
+       llvm::makeArrayRef(Result->FileDeps->Strings, Result->FileDeps->Count))
+    llvm::outs() << "    " << clang_getCString(FileName) << "\n";
+  llvm::outs() << "  additional-build-args:";
+  for (const auto &Arg :
+       llvm::makeArrayRef(Result->AdditionalArguments->Strings,
+                          Result->AdditionalArguments->Count))
+    llvm::outs() << " " << clang_getCString(Arg);
+  llvm::outs() << "\n";
+
+  clang_experimental_FileDependencies_dispose(Result);
+  clang_experimental_DependencyScannerWorker_dispose_v0(Worker);
+  clang_experimental_DependencyScannerService_dispose_v0(Service);
+  return 0;
+}
+
+static int scanDepsByModuleName(ArrayRef<const char *> Args,
+                                std::string WorkingDirectory,
+                                std::string ModuleName) {
+  CXDependencyScannerService Service =
+      clang_experimental_DependencyScannerService_create_v0(
+          CXDependencyMode_Full);
+  CXDependencyScannerWorker Worker =
+      clang_experimental_DependencyScannerWorker_create_v0(Service);
+  CXString Error;
+
+  auto Callback = [&](CXModuleDependencySet *MDS) {
+    llvm::outs() << "modules:\n";
+    for (const auto &M : llvm::makeArrayRef(MDS->Modules, MDS->Count)) {
+      llvm::outs() << "  module:\n"
+                   << "    name: " << clang_getCString(M.Name) << "\n"
+                   << "    context-hash: " << clang_getCString(M.ContextHash)
+                   << "\n"
+                   << "    module-map-path: "
+                   << clang_getCString(M.ModuleMapPath) << "\n"
+                   << "    module-deps:\n";
+      for (const auto &ModuleName :
+           llvm::makeArrayRef(M.ModuleDeps->Strings, M.ModuleDeps->Count))
+        llvm::outs() << "      " << clang_getCString(ModuleName) << "\n";
+      llvm::outs() << "    file-deps:\n";
+      for (const auto &FileName :
+           llvm::makeArrayRef(M.FileDeps->Strings, M.FileDeps->Count))
+        llvm::outs() << "      " << clang_getCString(FileName) << "\n";
+      llvm::outs() << "    build-args:";
+      for (const auto &Arg : llvm::makeArrayRef(M.BuildArguments->Strings,
+                                                M.BuildArguments->Count))
+        llvm::outs() << " " << clang_getCString(Arg);
+      llvm::outs() << "\n";
+    }
+    clang_experimental_ModuleDependencySet_dispose(MDS);
+  };
+
+  auto CB =
+      functionObjectToCCallbackRef<void(CXModuleDependencySet *)>(Callback);
+
+  CXFileDependencies *Result =
+      clang_experimental_DependencyScannerWorker_getDependenciesByModuleName_v0(
+          Worker, Args.size(), Args.data(), ModuleName.c_str(),
+          WorkingDirectory.c_str(), CB.Callback, CB.Context, &Error);
   if (!Result) {
     llvm::errs() << "error: failed to get dependencies\n";
     llvm::errs() << clang_getCString(Error) << "\n";
@@ -929,6 +1015,18 @@ int indextest_core_main(int argc, const char **argv) {
     return 1;
   }
 
+  PathRemapper PathRemapper;
+  for (const auto &Mapping : options::PrefixMap) {
+    llvm::StringRef MappingRef(Mapping);
+    if (!MappingRef.contains('=')) {
+      errs() << "error: prefix map argument should be of form prefix=value,"
+             << " but got: " << MappingRef << "\n";
+      return 1;
+    }
+    auto Split = MappingRef.split('=');
+    PathRemapper.addMapping(Split.first, Split.second);
+  }
+
   if (options::Action == ActionType::PrintSourceSymbols) {
     if (!options::ModuleFilePath.empty()) {
       return printSourceSymbolsFromModule(options::ModuleFilePath,
@@ -956,7 +1054,8 @@ int indextest_core_main(int argc, const char **argv) {
         errs() << "error: missing index store path\n";
         return 1;
       }
-      return printStoreFileRecord(options::InputFiles[0], filepath, lineStart, lineCount, outs());
+      return printStoreFileRecord(options::InputFiles[0], filepath, lineStart,
+                                  lineCount, PathRemapper, outs());
     }
 
     if (options::InputFiles.empty()) {
@@ -965,7 +1064,7 @@ int indextest_core_main(int argc, const char **argv) {
     }
 
     if (sys::fs::is_directory(options::InputFiles[0]))
-      return printStoreRecords(options::InputFiles[0], outs());
+      return printStoreRecords(options::InputFiles[0], PathRemapper, outs());
     else
       return printRecord(options::InputFiles[0], outs());
   }
@@ -977,9 +1076,9 @@ int indextest_core_main(int argc, const char **argv) {
     }
 
     if (sys::fs::is_directory(options::InputFiles[0]))
-      return printStoreUnits(options::InputFiles[0], outs());
+      return printStoreUnits(options::InputFiles[0], PathRemapper, outs());
     else
-      return printUnit(options::InputFiles[0], outs());
+      return printUnit(options::InputFiles[0], PathRemapper, outs());
   }
 
   if (options::Action == ActionType::PrintStoreFormatVersion) {
@@ -993,14 +1092,14 @@ int indextest_core_main(int argc, const char **argv) {
     }
     StringRef storePath = options::InputFiles[0];
     if (options::OutputFile.empty())
-      return aggregateDataAsJSON(storePath, outs());
+      return aggregateDataAsJSON(storePath, PathRemapper, outs());
     std::error_code EC;
-    raw_fd_ostream OS(options::OutputFile, EC, llvm::sys::fs::F_None);
+    raw_fd_ostream OS(options::OutputFile, EC, llvm::sys::fs::OF_None);
     if (EC) {
       errs() << "failed to open output file: " << EC.message() << '\n';
       return 1;
     }
-    return aggregateDataAsJSON(storePath, OS);
+    return aggregateDataAsJSON(storePath, PathRemapper, OS);
   }
   
   if (options::Action == ActionType::ScanDeps) {
@@ -1009,6 +1108,20 @@ int indextest_core_main(int argc, const char **argv) {
       return 1;
     }
     return scanDeps(CompArgs, options::InputFiles[0]);
+  }
+
+  if (options::Action == ActionType::ScanDepsByModuleName) {
+    // InputFiles should be set to the working directory name.
+    if (options::InputFiles.empty()) {
+      errs() << "error: missing working directory\n";
+      return 1;
+    }
+    if (options::ModuleName.empty()) {
+      errs() << "error: missing module name\n";
+      return 1;
+    }
+    return scanDepsByModuleName(CompArgs, options::InputFiles[0],
+                                options::ModuleName);
   }
 
   if (options::Action == ActionType::WatchDir) {

@@ -270,8 +270,7 @@ void ModuleManager::removeModules(ModuleIterator First, ModuleMap *modMap) {
     I->Imports.remove_if(IsVictim);
     I->ImportedBy.remove_if(IsVictim);
   }
-  Roots.erase(std::remove_if(Roots.begin(), Roots.end(), IsVictim),
-              Roots.end());
+  llvm::erase_if(Roots, IsVictim);
 
   // Remove the modules from the PCH chain.
   for (auto I = First; I != Last; ++I) {
@@ -470,6 +469,14 @@ bool ModuleManager::lookupModuleFile(StringRef FileName, off_t ExpectedSize,
   Optional<FileEntryRef> FileOrErr =
       expectedToOptional(FileMgr.getFileRef(FileName, /*OpenFile=*/true,
                                             /*CacheFailure=*/false));
+#if !defined(__APPLE__)
+  if (FileOrErr) {
+    // On Linux ext4 FileManager's inode caching system does not
+    // provide us correct behaviour for ModuleCache directories.
+    // inode can be reused after PCM delete resulting in cache misleading.
+    FileOrErr = FileMgr.getBypassFile(*FileOrErr);
+  }
+#endif
   if (!FileOrErr)
     return false;
 

@@ -478,7 +478,7 @@ bool mentionsAnyOfConventionalNames(const Expr *E) {
     return llvm::any_of(
         CONVENTIONAL_CONDITIONS,
         [ConditionName](const llvm::StringLiteral &Conventional) {
-          return ConditionName.contains_lower(Conventional);
+          return ConditionName.contains_insensitive(Conventional);
         });
   });
 }
@@ -983,9 +983,9 @@ private:
       return false;
     }
 
-    QualType BlockType = Ty->getAs<BlockPointerType>()->getPointeeType();
+    QualType BlockType = Ty->castAs<BlockPointerType>()->getPointeeType();
     // Completion handlers should have a block type with void return type.
-    return BlockType->getAs<FunctionType>()->getReturnType()->isVoidType();
+    return BlockType->castAs<FunctionType>()->getReturnType()->isVoidType();
   }
 
   /// Return true if the only parameter of the function is conventional.

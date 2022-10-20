@@ -1,9 +1,8 @@
 //===--- SemaAPINotes.cpp - API Notes Handling ----------------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -811,7 +810,8 @@ void Sema::ProcessAPINotes(Decl *D) {
     return;
 
   // Globals.
-  if (D->getDeclContext()->isFileContext()) {
+  if (D->getDeclContext()->isFileContext() ||
+      D->getDeclContext()->isExternCContext()) {
     // Global variables.
     if (auto VD = dyn_cast<VarDecl>(D)) {
       for (auto Reader : APINotes.findAPINotes(D->getLocation())) {
@@ -873,12 +873,11 @@ void Sema::ProcessAPINotes(Decl *D) {
 
       return;
     }
-
-    return;
   }
 
   // Enumerators.
-  if (D->getDeclContext()->getRedeclContext()->isFileContext()) {
+  if (D->getDeclContext()->getRedeclContext()->isFileContext() ||
+      D->getDeclContext()->getRedeclContext()->isExternCContext()) {
     if (auto EnumConstant = dyn_cast<EnumConstantDecl>(D)) {
       for (auto Reader : APINotes.findAPINotes(D->getLocation())) {
         auto Info = Reader->lookupEnumConstant(EnumConstant->getName());

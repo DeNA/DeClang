@@ -42,5 +42,7 @@ void context_okay2_async(CONTEXT void *context, void *selfType, char **selfWitne
 
 void async_context_nonswift(ASYNC_CONTEXT void *context); // OK
 void async_context_bad_type(ASYNC_CONTEXT int context) SWIFTASYNCCALL; // expected-error {{'swift_async_context' parameter must have pointer type; type here is 'int'}}
+void async_context_bad_pos(int context) ASYNC_CONTEXT SWIFTASYNCCALL; // expected-warning {{'swift_async_context' attribute only applies to parameters}}
+void async_context_bad_args(__attribute__((swift_async_context(1))) void *context) SWIFTASYNCCALL; // expected-error {{'swift_async_context' attribute takes no arguments}}
 void async_context_okay(ASYNC_CONTEXT void *context) SWIFTASYNCCALL;
-void async_context_okay2(void *someArg, ASYNC_CONTEXT void *context, void *otherArg) SWIFTASYNCCALL;
+void async_context_okay2(ASYNC_CONTEXT void *context, void *selfType, char **selfWitnessTable) SWIFTASYNCCALL;

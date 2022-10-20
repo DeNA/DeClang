@@ -148,7 +148,7 @@ private:
     /// location of the 'return', 'throw', or 'new' keyword,
     /// respectively. When Kind == EK_Temporary, the location where
     /// the temporary is being created.
-    unsigned Location;
+    SourceLocation Location;
 
     /// Whether the entity being initialized may end up using the
     /// named return value optimization (NRVO).
@@ -174,7 +174,7 @@ private:
     IdentifierInfo *VarID;
 
     /// The source location at which the capture occurs.
-    unsigned Location;
+    SourceLocation Location;
   };
 
   union {
@@ -187,8 +187,8 @@ private:
     ObjCMethodDecl *MethodDecl;
 
     /// When Kind == EK_Parameter, the ParmVarDecl, with the
-    /// low bit indicating whether the parameter is "consumed".
-    uintptr_t Parameter;
+    /// integer indicating whether the parameter is "consumed".
+    llvm::PointerIntPair<ParmVarDecl *, 1> Parameter;
 
     /// When Kind == EK_Temporary or EK_CompoundLiteralInit, the type
     /// source information for the temporary.
@@ -197,9 +197,9 @@ private:
     struct LN LocAndNRVO;
 
     /// When Kind == EK_Base, the base specifier that provides the
-    /// base class. The lower bit specifies whether the base is an inherited
+    /// base class. The integer specifies whether the base is an inherited
     /// virtual base.
-    uintptr_t Base;
+    llvm::PointerIntPair<const CXXBaseSpecifier *, 1> Base;
 
     /// When Kind == EK_ArrayElement, EK_VectorElement, or
     /// EK_ComplexElement, the index of the array or vector element being
@@ -209,7 +209,7 @@ private:
     struct C Capture;
   };
 
-  InitializedEntity() = default;
+  InitializedEntity() {};
 
   /// Create the initialization entity for a variable.
   InitializedEntity(VarDecl *Var, EntityKind EK = EK_Variable)
@@ -221,7 +221,8 @@ private:
   InitializedEntity(EntityKind Kind, SourceLocation Loc, QualType Type,
                     bool NRVO = false)
       : Kind(Kind), Type(Type) {
-    LocAndNRVO.Location = Loc.getRawEncoding();
+    new (&LocAndNRVO) LN;
+    LocAndNRVO.Location = Loc;
     LocAndNRVO.NRVO = NRVO;
   }
 
@@ -238,8 +239,9 @@ private:
   /// Create the initialization entity for a lambda capture.
   InitializedEntity(IdentifierInfo *VarID, QualType FieldType, SourceLocation Loc)
       : Kind(EK_LambdaCapture), Type(FieldType) {
+    new (&Capture) C;
     Capture.VarID = VarID;
-    Capture.Location = Loc.getRawEncoding();
+    Capture.Location = Loc;
   }
 
 public:
@@ -250,15 +252,14 @@ public:
 
   /// Create the initialization entity for a parameter.
   static InitializedEntity InitializeParameter(ASTContext &Context,
-                                               const ParmVarDecl *Parm) {
+                                               ParmVarDecl *Parm) {
     return InitializeParameter(Context, Parm, Parm->getType());
   }
 
   /// Create the initialization entity for a parameter, but use
   /// another type.
-  static InitializedEntity InitializeParameter(ASTContext &Context,
-                                               const ParmVarDecl *Parm,
-                                               QualType Type) {
+  static InitializedEntity
+  InitializeParameter(ASTContext &Context, ParmVarDecl *Parm, QualType Type) {
     bool Consumed = (Context.getLangOpts().ObjCAutoRefCount &&
                      Parm->hasAttr<NSConsumedAttr>());
 
@@ -267,8 +268,7 @@ public:
     Entity.Type =
       Context.getVariableArrayDecayedType(Type.getUnqualifiedType());
     Entity.Parent = nullptr;
-    Entity.Parameter
-      = (static_cast<uintptr_t>(Consumed) | reinterpret_cast<uintptr_t>(Parm));
+    Entity.Parameter = {Parm, Consumed};
     return Entity;
   }
 
@@ -281,7 +281,7 @@ public:
     Entity.Kind = EK_Parameter;
     Entity.Type = Context.getVariableArrayDecayedType(Type);
     Entity.Parent = nullptr;
-    Entity.Parameter = (Consumed);
+    Entity.Parameter = {nullptr, Consumed};
     return Entity;
   }
 
@@ -298,8 +298,8 @@ public:
 
   /// Create the initialization entity for the result of a function.
   static InitializedEntity InitializeResult(SourceLocation ReturnLoc,
-                                            QualType Type, bool NRVO) {
-    return InitializedEntity(EK_Result, ReturnLoc, Type, NRVO);
+                                            QualType Type) {
+    return InitializedEntity(EK_Result, ReturnLoc, Type);
   }
 
   static InitializedEntity InitializeStmtExprResult(SourceLocation ReturnLoc,
@@ -308,20 +308,20 @@ public:
   }
 
   static InitializedEntity InitializeBlock(SourceLocation BlockVarLoc,
-                                           QualType Type, bool NRVO) {
-    return InitializedEntity(EK_BlockElement, BlockVarLoc, Type, NRVO);
+                                           QualType Type) {
+    return InitializedEntity(EK_BlockElement, BlockVarLoc, Type);
   }
 
   static InitializedEntity InitializeLambdaToBlock(SourceLocation BlockVarLoc,
-                                                   QualType Type, bool NRVO) {
+                                                   QualType Type) {
     return InitializedEntity(EK_LambdaToBlockConversionBlockElement,
-                             BlockVarLoc, Type, NRVO);
+                             BlockVarLoc, Type);
   }
 
   /// Create the initialization entity for an exception object.
   static InitializedEntity InitializeException(SourceLocation ThrowLoc,
-                                               QualType Type, bool NRVO) {
-    return InitializedEntity(EK_Exception, ThrowLoc, Type, NRVO);
+                                               QualType Type) {
+    return InitializedEntity(EK_Exception, ThrowLoc, Type);
   }
 
   /// Create the initialization entity for an object allocated via new.
@@ -335,8 +335,15 @@ public:
   }
 
   /// Create the initialization entity for a temporary.
-  static InitializedEntity InitializeTemporary(TypeSourceInfo *TypeInfo) {
-    return InitializeTemporary(TypeInfo, TypeInfo->getType());
+  static InitializedEntity InitializeTemporary(ASTContext &Context,
+                                               TypeSourceInfo *TypeInfo) {
+    QualType Type = TypeInfo->getType();
+    if (Context.getLangOpts().OpenCLCPlusPlus) {
+      assert(!Type.hasAddressSpace() && "Temporary already has address space!");
+      Type = Context.getAddrSpaceQualType(Type, LangAS::opencl_private);
+    }
+
+    return InitializeTemporary(TypeInfo, Type);
   }
 
   /// Create the initialization entity for a temporary.
@@ -464,19 +471,19 @@ public:
   /// parameter.
   bool isParameterConsumed() const {
     assert(isParameterKind() && "Not a parameter");
-    return (Parameter & 1);
+    return Parameter.getInt();
   }
 
   /// Retrieve the base specifier.
   const CXXBaseSpecifier *getBaseSpecifier() const {
     assert(getKind() == EK_Base && "Not a base specifier");
-    return reinterpret_cast<const CXXBaseSpecifier *>(Base & ~0x1);
+    return Base.getPointer();
   }
 
   /// Return whether the base is an inherited virtual base.
   bool isInheritedVirtualBase() const {
     assert(getKind() == EK_Base && "Not a base specifier");
-    return Base & 0x1;
+    return Base.getInt();
   }
 
   /// Determine whether this is an array new with an unknown bound.
@@ -501,14 +508,14 @@ public:
   /// the result of a function call.
   SourceLocation getReturnLoc() const {
     assert(getKind() == EK_Result && "No 'return' location!");
-    return SourceLocation::getFromRawEncoding(LocAndNRVO.Location);
+    return LocAndNRVO.Location;
   }
 
   /// Determine the location of the 'throw' keyword when initializing
   /// an exception object.
   SourceLocation getThrowLoc() const {
     assert(getKind() == EK_Exception && "No 'throw' location!");
-    return SourceLocation::getFromRawEncoding(LocAndNRVO.Location);
+    return LocAndNRVO.Location;
   }
 
   /// If this is an array, vector, or complex number element, get the
@@ -537,7 +544,7 @@ public:
   /// field from a captured variable in a lambda.
   SourceLocation getCaptureLoc() const {
     assert(getKind() == EK_LambdaCapture && "Not a lambda capture!");
-    return SourceLocation::getFromRawEncoding(Capture.Location);
+    return Capture.Location;
   }
 
   void setParameterCFAudited() {
@@ -804,7 +811,7 @@ public:
     SK_ResolveAddressOfOverloadedFunction,
 
     /// Perform a derived-to-base cast, producing an rvalue.
-    SK_CastDerivedToBaseRValue,
+    SK_CastDerivedToBasePRValue,
 
     /// Perform a derived-to-base cast, producing an xvalue.
     SK_CastDerivedToBaseXValue,
@@ -831,8 +838,8 @@ public:
     /// function or via a constructor.
     SK_UserConversion,
 
-    /// Perform a qualification conversion, producing an rvalue.
-    SK_QualificationConversionRValue,
+    /// Perform a qualification conversion, producing a prvalue.
+    SK_QualificationConversionPRValue,
 
     /// Perform a qualification conversion, producing an xvalue.
     SK_QualificationConversionXValue,

@@ -262,7 +262,8 @@ void ModuleMap::resolveHeader(Module *Mod,
         // Record this umbrella header.
         setUmbrellaHeader(Mod, *File, Header.FileName, RelativePathName.str());
     } else {
-      Module::Header H = {Header.FileName, std::string(RelativePathName.str()), *File};
+      Module::Header H = {Header.FileName, std::string(RelativePathName.str()),
+                          *File};
       if (Header.Kind == Module::HK_Excluded)
         excludeHeader(Mod, H);
       else
@@ -337,7 +338,7 @@ static StringRef sanitizeFilenameAsIdentifier(StringRef Name,
   if (Name.empty())
     return Name;
 
-  if (!isValidIdentifier(Name)) {
+  if (!isValidAsciiIdentifier(Name)) {
     // If we don't already have something with the form of an identifier,
     // create a buffer with the sanitized name.
     Buffer.clear();
@@ -345,7 +346,7 @@ static StringRef sanitizeFilenameAsIdentifier(StringRef Name,
       Buffer.push_back('_');
     Buffer.reserve(Buffer.size() + Name.size());
     for (unsigned I = 0, N = Name.size(); I != N; ++I) {
-      if (isIdentifierBody(Name[I]))
+      if (isAsciiIdentifierContinue(Name[I]))
         Buffer.push_back(Name[I]);
       else
         Buffer.push_back('_');
@@ -997,9 +998,8 @@ Module *ModuleMap::inferFrameworkModule(const DirectoryEntry *FrameworkDir,
           // We're allowed to infer for this directory, but make sure it's okay
           // to infer this particular module.
           StringRef Name = llvm::sys::path::stem(FrameworkDirName);
-          canInfer = std::find(inferred->second.ExcludedModules.begin(),
-                               inferred->second.ExcludedModules.end(),
-                               Name) == inferred->second.ExcludedModules.end();
+          canInfer =
+              !llvm::is_contained(inferred->second.ExcludedModules, Name);
 
           Attrs.IsSystem |= inferred->second.Attrs.IsSystem;
           Attrs.IsExternC |= inferred->second.Attrs.IsExternC;
@@ -1048,9 +1048,8 @@ Module *ModuleMap::inferFrameworkModule(const DirectoryEntry *FrameworkDir,
   Result->Directory = FrameworkDir;
 
   // Chop off the first framework bit, as that is implied.
-  StringRef RelativePath =
-      UmbrellaName.str().substr(
-          Result->getTopLevelModule()->Directory->getName().size());
+  StringRef RelativePath = UmbrellaName.str().substr(
+      Result->getTopLevelModule()->Directory->getName().size());
   RelativePath = llvm::sys::path::relative_path(RelativePath);
 
   // umbrella header "umbrella-header-name"
@@ -1133,9 +1132,9 @@ Module *ModuleMap::createShadowedModule(StringRef Name, bool IsFramework,
   return Result;
 }
 
-void ModuleMap::setUmbrellaHeader(Module *Mod, const FileEntry *UmbrellaHeader,
-                                  Twine NameAsWritten,
-                                  Twine PathRelativeToRootModuleDirectory) {
+void ModuleMap::setUmbrellaHeader(
+    Module *Mod, const FileEntry *UmbrellaHeader, const Twine &NameAsWritten,
+    const Twine &PathRelativeToRootModuleDirectory) {
   Headers[UmbrellaHeader].push_back(KnownHeader(Mod, NormalHeader));
   Mod->Umbrella = UmbrellaHeader;
   Mod->UmbrellaAsWritten = NameAsWritten.str();
@@ -1149,8 +1148,8 @@ void ModuleMap::setUmbrellaHeader(Module *Mod, const FileEntry *UmbrellaHeader,
 }
 
 void ModuleMap::setUmbrellaDir(Module *Mod, const DirectoryEntry *UmbrellaDir,
-                               Twine NameAsWritten,
-                               Twine PathRelativeToRootModuleDirectory) {
+                               const Twine &NameAsWritten,
+                               const Twine &PathRelativeToRootModuleDirectory) {
   Mod->Umbrella = UmbrellaDir;
   Mod->UmbrellaAsWritten = NameAsWritten.str();
   Mod->UmbrellaRelativeToRootModuleDirectory =
@@ -1227,9 +1226,8 @@ void ModuleMap::addHeader(Module *Mod, Module::Header Header,
   // FIXME: Should we diagnose if a header is listed twice in the
   // same module definition?
   auto &HeaderList = Headers[Header.Entry];
-  for (auto H : HeaderList)
-    if (H == KH)
-      return;
+  if (llvm::is_contained(HeaderList, KH))
+    return;
 
   HeaderList.push_back(KH);
   Mod->Headers[headerRoleToKind(Role)].push_back(Header);
@@ -1387,7 +1385,7 @@ namespace clang {
       RSquare
     } Kind;
 
-    unsigned Location;
+    SourceLocation::UIntTy Location;
     unsigned StringLength;
     union {
       // If Kind != IntegerLiteral.
@@ -2186,7 +2184,7 @@ void ModuleMapParser::parseExternModuleDecl() {
   }
   if (auto File = SourceMgr.getFileManager().getFile(FileNameRef))
     Map.parseModuleMapFile(
-        *File, /*IsSystem=*/false,
+        *File, IsSystem,
         Map.HeaderInfo.getHeaderSearchOpts().ModuleMapFileHomeIsCwd
             ? Directory
             : (*File)->getDir(),

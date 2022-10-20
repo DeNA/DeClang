@@ -146,6 +146,11 @@ public:
     DataConsumer.importedModule(D);
     return true;
   }
+
+  bool VisitConceptDecl(const ConceptDecl *D) {
+    DataConsumer.handleConcept(D);
+    return true;
+  }
 };
 
 CXSymbolRole getSymbolRole(SymbolRoleSet Role) {
@@ -881,6 +886,12 @@ bool CXIndexDataConsumer::handleTypeAliasTemplate(const TypeAliasTemplateDecl *D
   return handleDecl(D, D->getLocation(), getCursor(D), DInfo);
 }
 
+bool CXIndexDataConsumer::handleConcept(const ConceptDecl *D) {
+  DeclInfo DInfo(/*isRedeclaration=*/!D->isCanonicalDecl(),
+                 /*isDefinition=*/true, /*isContainer=*/false);
+  return handleDecl(D, D->getLocation(), getCursor(D), DInfo);
+}
+
 bool CXIndexDataConsumer::handleReference(const NamedDecl *D, SourceLocation Loc,
                                       CXCursor Cursor,
                                       const NamedDecl *Parent,
@@ -1287,6 +1298,8 @@ static CXIdxEntityKind getEntityKindFromSymbolKind(SymbolKind K, SymbolLanguage 
   case SymbolKind::Destructor: return CXIdxEntity_CXXDestructor;
   case SymbolKind::ConversionFunction: return CXIdxEntity_CXXConversionFunction;
   case SymbolKind::Parameter: return CXIdxEntity_Variable;
+  case SymbolKind::Concept:
+    return CXIdxEntity_CXXConcept;
   }
   llvm_unreachable("invalid symbol kind");
 }

@@ -31,6 +31,15 @@ namespace clang {
   /// Define the kind of constexpr specifier.
   enum class ConstexprSpecKind { Unspecified, Constexpr, Consteval, Constinit };
 
+  /// In an if statement, this denotes whether the the statement is
+  /// a constexpr or consteval if statement.
+  enum class IfStatementKind : unsigned {
+    Ordinary,
+    Constexpr,
+    ConstevalNonNegated,
+    ConstevalNegated
+  };
+
   /// Specifies the width of a type, e.g., short, long, or long long.
   enum class TypeSpecifierWidth { Unspecified, Short, Long, LongLong };
 
@@ -59,6 +68,7 @@ namespace clang {
     TST_float,
     TST_double,
     TST_float128,
+    TST_ibm128,
     TST_bool,         // _Bool
     TST_decimal32,    // _Decimal32
     TST_decimal64,    // _Decimal64
@@ -105,9 +115,9 @@ namespace clang {
   /// The categorization of expression values, currently following the
   /// C++11 scheme.
   enum ExprValueKind {
-    /// An r-value expression (a pr-value in the C++11 taxonomy)
+    /// A pr-value expression (in the C++11 taxonomy)
     /// produces a temporary value.
-    VK_RValue,
+    VK_PRValue,
 
     /// An l-value expression is a reference to an object with
     /// independent storage.

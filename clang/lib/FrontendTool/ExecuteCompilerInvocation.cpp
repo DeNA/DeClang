@@ -15,6 +15,7 @@
 #include "clang/CodeGen/CodeGenAction.h"
 #include "clang/Config/config.h"
 #include "clang/Driver/Options.h"
+#include "clang/ExtractAPI/FrontendActions.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendActions.h"
@@ -58,6 +59,8 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
   case EmitLLVMOnly:           return std::make_unique<EmitLLVMOnlyAction>();
   case EmitCodeGenOnly:        return std::make_unique<EmitCodeGenOnlyAction>();
   case EmitObj:                return std::make_unique<EmitObjAction>();
+  case ExtractAPI:
+    return std::make_unique<ExtractAPIAction>();
   case FixIt:                  return std::make_unique<FixItAction>();
   case GenerateModule:
     return std::make_unique<GenerateModuleFromModuleMapAction>();
@@ -80,7 +83,7 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
       if (Plugin.getName() == CI.getFrontendOpts().ActionName) {
         std::unique_ptr<PluginASTAction> P(Plugin.instantiate());
         if ((P->getActionType() != PluginASTAction::ReplaceAction &&
-             P->getActionType() != PluginASTAction::Cmdline) ||
+             P->getActionType() != PluginASTAction::CmdlineAfterMainAction) ||
             !P->ParseArgs(
                 CI,
                 CI.getFrontendOpts().PluginArgs[std::string(Plugin.getName())]))
@@ -177,6 +180,7 @@ CreateFrontendAction(CompilerInstance &CI) {
 #endif
 
   if (!FEOpts.IndexStorePath.empty()) {
+    CI.getCodeGenOpts().ClearASTBeforeBackend = false;
     Act = index::createIndexDataRecordingAction(FEOpts, std::move(Act));
     CI.setGenModuleActionWrapper(&index::createIndexDataRecordingAction);
   }
@@ -193,7 +197,7 @@ CreateFrontendAction(CompilerInstance &CI) {
 bool ExecuteCompilerInvocation(CompilerInstance *Clang) {
   // Honor -help.
   if (Clang->getFrontendOpts().ShowHelp) {
-    driver::getDriverOptTable().PrintHelp(
+    driver::getDriverOptTable().printHelp(
         llvm::outs(), "clang -cc1 [options] file...",
         "LLVM 'Clang' Compiler: http://clang.llvm.org",
         /*Include=*/driver::options::CC1Option,
@@ -209,24 +213,7 @@ bool ExecuteCompilerInvocation(CompilerInstance *Clang) {
     return true;
   }
 
-  // Load any requested plugins.
-  for (const std::string &Path : Clang->getFrontendOpts().Plugins) {
-    std::string Error;
-    if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(Path.c_str(), &Error))
-      Clang->getDiagnostics().Report(diag::err_fe_unable_to_load_plugin)
-        << Path << Error;
-  }
-
-  // Check if any of the loaded plugins replaces the main AST action
-  for (const FrontendPluginRegistry::entry &Plugin :
-       FrontendPluginRegistry::entries()) {
-    std::unique_ptr<PluginASTAction> P(Plugin.instantiate());
-    if (P->getActionType() == PluginASTAction::ReplaceAction) {
-      Clang->getFrontendOpts().ProgramAction = clang::frontend::PluginAction;
-      Clang->getFrontendOpts().ActionName = Plugin.getName().str();
-      break;
-    }
-  }
+  Clang->LoadRequestedPlugins();
 
   // Honor -mllvm.
   //

@@ -212,8 +212,6 @@ struct Class {};
 struct ClassB : Class {};
 struct Class2 {};
 using FnTy = void(int);
-using FnTy2 = long(int);
-using FnTy3 = void(int) noexcept;
 using MemFnTy = void (Class::*)() const;
 using MemDataTy = long(Class::*);
 
@@ -230,11 +228,6 @@ void test_nullptr(int *x, FnTy *fp, MemFnTy memp, MemDataTy memdp) {
 void test_memptr(MemFnTy mf, MemDataTy md) {
   (void)(mf <=> mf); // expected-error {{invalid operands}} expected-warning {{self-comparison}}
   (void)(md <=> md); // expected-error {{invalid operands}} expected-warning {{self-comparison}}
-}
-
-void test_compatible_pointer(FnTy *f1, FnTy2 *f2, FnTy3 *f3) {
-  (void)(f1 <=> f2); // expected-error {{distinct pointer types}}
-  (void)(f1 <=> f3); // expected-error {{invalid operands}}
 }
 
 // Test that variable narrowing is deferred for value dependent expressions
@@ -358,7 +351,7 @@ void test_array_conv() {
   int arr[5];
   int *ap = arr + 2;
   int arr2[3];
-  (void)(arr <=> arr); // expected-error {{invalid operands to binary expression ('int [5]' and 'int [5]')}}
+  (void)(arr <=> arr); // expected-error {{invalid operands to binary expression ('int[5]' and 'int[5]')}}
   (void)(+arr <=> arr);
 }
 

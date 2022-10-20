@@ -1,13 +1,13 @@
 //===--- IndexDataStore.cpp - Index data store info -----------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "clang/Index/IndexDataStore.h"
+#include "clang/Basic/PathRemapper.h"
 #include "clang/DirectoryWatcher/DirectoryWatcher.h"
 #include "../lib/Index/IndexDataStoreUtils.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -41,16 +41,20 @@ public:
 
 class IndexDataStoreImpl {
   std::string FilePath;
+  PathRemapper Remapper;
   std::shared_ptr<UnitEventHandlerData> TheUnitEventHandlerData;
   std::unique_ptr<DirectoryWatcher> DirWatcher;
 
 public:
-  explicit IndexDataStoreImpl(StringRef indexStorePath)
-    : FilePath(indexStorePath) {
+  explicit IndexDataStoreImpl(StringRef indexStorePath, PathRemapper remapper)
+    : FilePath(indexStorePath), Remapper(remapper) {
     TheUnitEventHandlerData = std::make_shared<UnitEventHandlerData>();
   }
 
   StringRef getFilePath() const { return FilePath; }
+  const PathRemapper &getPathRemapper() const {
+    return Remapper;
+  }
   bool foreachUnitName(bool sorted,
                        llvm::function_ref<bool(StringRef unitName)> receiver);
   void setUnitEventHandler(IndexDataStore::UnitEventHandler Handler);
@@ -181,7 +185,8 @@ void IndexDataStoreImpl::purgeStaleData() {
 
 
 std::unique_ptr<IndexDataStore>
-IndexDataStore::create(StringRef IndexStorePath, std::string &Error) {
+IndexDataStore::create(StringRef IndexStorePath, const PathRemapper &Remapper,
+                       std::string &Error) {
   if (!sys::fs::exists(IndexStorePath)) {
     raw_string_ostream OS(Error);
     OS << "index store path does not exist: " << IndexStorePath;
@@ -189,7 +194,7 @@ IndexDataStore::create(StringRef IndexStorePath, std::string &Error) {
   }
 
   return std::unique_ptr<IndexDataStore>(
-    new IndexDataStore(new IndexDataStoreImpl(IndexStorePath)));
+    new IndexDataStore(new IndexDataStoreImpl(IndexStorePath, Remapper)));
 }
 
 #define IMPL static_cast<IndexDataStoreImpl*>(Impl)
@@ -200,6 +205,10 @@ IndexDataStore::~IndexDataStore() {
 
 StringRef IndexDataStore::getFilePath() const {
   return IMPL->getFilePath();
+}
+
+const PathRemapper & IndexDataStore::getPathRemapper() const {
+  return IMPL->getPathRemapper();
 }
 
 bool IndexDataStore::foreachUnitName(bool sorted,

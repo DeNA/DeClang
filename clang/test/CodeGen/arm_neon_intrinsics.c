@@ -5,6 +5,8 @@
 // RUN:  -disable-O0-optnone -emit-llvm -o - %s \
 // RUN:  | opt -S -mem2reg | FileCheck %s
 
+// REQUIRES: aarch64-registered-target || arm-registered-target
+
 #include <arm_neon.h>
 
 // CHECK-LABEL: @test_vaba_s8(
@@ -1776,6 +1778,31 @@ int32x2_t test_vcls_s32(int32x2_t a) {
   return vcls_s32(a);
 }
 
+// CHECK-LABEL: @test_vcls_u8(
+// CHECK:   [[VCLS_V_I:%.*]] = call <8 x i8> @llvm.arm.neon.vcls.v8i8(<8 x i8> %a)
+// CHECK:   ret <8 x i8> [[VCLS_V_I]]
+int8x8_t test_vcls_u8(uint8x8_t a) {
+  return vcls_u8(a);
+}
+
+// CHECK-LABEL: @test_vcls_u16(
+// CHECK:   [[TMP0:%.*]] = bitcast <4 x i16> %a to <8 x i8>
+// CHECK:   [[VCLS_V1_I:%.*]] = call <4 x i16> @llvm.arm.neon.vcls.v4i16(<4 x i16> %a)
+// CHECK:   [[VCLS_V2_I:%.*]] = bitcast <4 x i16> [[VCLS_V1_I]] to <8 x i8>
+// CHECK:   ret <4 x i16> [[VCLS_V1_I]]
+int16x4_t test_vcls_u16(uint16x4_t a) {
+  return vcls_u16(a);
+}
+
+// CHECK-LABEL: @test_vcls_u32(
+// CHECK:   [[TMP0:%.*]] = bitcast <2 x i32> %a to <8 x i8>
+// CHECK:   [[VCLS_V1_I:%.*]] = call <2 x i32> @llvm.arm.neon.vcls.v2i32(<2 x i32> %a)
+// CHECK:   [[VCLS_V2_I:%.*]] = bitcast <2 x i32> [[VCLS_V1_I]] to <8 x i8>
+// CHECK:   ret <2 x i32> [[VCLS_V1_I]]
+int32x2_t test_vcls_u32(uint32x2_t a) {
+  return vcls_u32(a);
+}
+
 // CHECK-LABEL: @test_vclsq_s8(
 // CHECK:   [[VCLSQ_V_I:%.*]] = call <16 x i8> @llvm.arm.neon.vcls.v16i8(<16 x i8> %a)
 // CHECK:   ret <16 x i8> [[VCLSQ_V_I]]
@@ -1799,6 +1826,31 @@ int16x8_t test_vclsq_s16(int16x8_t a) {
 // CHECK:   ret <4 x i32> [[VCLSQ_V1_I]]
 int32x4_t test_vclsq_s32(int32x4_t a) {
   return vclsq_s32(a);
+}
+
+// CHECK-LABEL: @test_vclsq_u8(
+// CHECK:   [[VCLSQ_V_I:%.*]] = call <16 x i8> @llvm.arm.neon.vcls.v16i8(<16 x i8> %a)
+// CHECK:   ret <16 x i8> [[VCLSQ_V_I]]
+int8x16_t test_vclsq_u8(uint8x16_t a) {
+  return vclsq_u8(a);
+}
+
+// CHECK-LABEL: @test_vclsq_u16(
+// CHECK:   [[TMP0:%.*]] = bitcast <8 x i16> %a to <16 x i8>
+// CHECK:   [[VCLSQ_V1_I:%.*]] = call <8 x i16> @llvm.arm.neon.vcls.v8i16(<8 x i16> %a)
+// CHECK:   [[VCLSQ_V2_I:%.*]] = bitcast <8 x i16> [[VCLSQ_V1_I]] to <16 x i8>
+// CHECK:   ret <8 x i16> [[VCLSQ_V1_I]]
+int16x8_t test_vclsq_u16(uint16x8_t a) {
+  return vclsq_u16(a);
+}
+
+// CHECK-LABEL: @test_vclsq_u32(
+// CHECK:   [[TMP0:%.*]] = bitcast <4 x i32> %a to <16 x i8>
+// CHECK:   [[VCLSQ_V1_I:%.*]] = call <4 x i32> @llvm.arm.neon.vcls.v4i32(<4 x i32> %a)
+// CHECK:   [[VCLSQ_V2_I:%.*]] = bitcast <4 x i32> [[VCLSQ_V1_I]] to <16 x i8>
+// CHECK:   ret <4 x i32> [[VCLSQ_V1_I]]
+int32x4_t test_vclsq_u32(uint32x4_t a) {
+  return vclsq_u32(a);
 }
 
 // CHECK-LABEL: @test_vclt_s8(

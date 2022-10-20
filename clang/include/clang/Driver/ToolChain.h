@@ -113,6 +113,13 @@ public:
     RM_Disabled,
   };
 
+  struct BitCodeLibraryInfo {
+    std::string Path;
+    bool ShouldInternalize;
+    BitCodeLibraryInfo(StringRef Path, bool ShouldInternalize = true)
+        : Path(Path), ShouldInternalize(ShouldInternalize) {}
+  };
+
   enum FileType { FT_Object, FT_Static, FT_Shared };
 
 private:
@@ -166,6 +173,10 @@ private:
     EffectiveTriple = std::move(ET);
   }
 
+  mutable llvm::Optional<CXXStdlibType> cxxStdlibType;
+  mutable llvm::Optional<RuntimeLibType> runtimeLibType;
+  mutable llvm::Optional<UnwindLibType> unwindLibType;
+
 protected:
   MultilibSet Multilibs;
   Multilib SelectedMultilib;
@@ -179,6 +190,11 @@ protected:
   virtual Tool *buildLinker() const;
   virtual Tool *buildStaticLibTool() const;
   virtual Tool *getTool(Action::ActionClass AC) const;
+
+  virtual std::string buildCompilerRTBasename(const llvm::opt::ArgList &Args,
+                                              StringRef Component,
+                                              FileType Type,
+                                              bool AddArch) const;
 
   /// \name Utilities for implementing subclasses.
   ///@{
@@ -332,10 +348,7 @@ public:
   /// is LLD. If it's set, it can be assumed that the linker is LLD built
   /// at the same revision as clang, and clang can make assumptions about
   /// LLD's supported flags, error output, etc.
-  /// If LinkerIsLLDDarwinNew is non-nullptr, it's set if the linker is
-  /// the new version in lld/MachO.
-  std::string GetLinkerPath(bool *LinkerIsLLD = nullptr,
-                            bool *LinkerIsLLDDarwinNew = nullptr) const;
+  std::string GetLinkerPath(bool *LinkerIsLLD = nullptr) const;
 
   /// Returns the linker path for emitting a static library.
   std::string GetStaticLibToolPath() const;
@@ -370,6 +383,10 @@ public:
 
   /// Check if the toolchain should use the integrated assembler.
   virtual bool useIntegratedAs() const;
+
+  /// Check if the toolchain should use AsmParser to parse inlineAsm when
+  /// integrated assembler is not default.
+  virtual bool parseInlineAsmUsingAsmParser() const { return false; }
 
   /// IsMathErrnoDefault - Does this tool chain use -fmath-errno by default.
   virtual bool IsMathErrnoDefault() const { return true; }
@@ -428,16 +445,15 @@ public:
   getCompilerRTArgString(const llvm::opt::ArgList &Args, StringRef Component,
                          FileType Type = ToolChain::FT_Static) const;
 
-  virtual std::string
-  getCompilerRTBasename(const llvm::opt::ArgList &Args, StringRef Component,
-                        FileType Type = ToolChain::FT_Static,
-                        bool AddArch = true) const;
+  std::string getCompilerRTBasename(const llvm::opt::ArgList &Args,
+                                    StringRef Component,
+                                    FileType Type = ToolChain::FT_Static) const;
 
   // Returns target specific runtime path if it exists.
-  virtual Optional<std::string> getRuntimePath() const;
+  virtual std::string getRuntimePath() const;
 
-  // Returns target specific C++ library path if it exists.
-  virtual Optional<std::string> getCXXStdlibPath() const;
+  // Returns target specific standard library path if it exists.
+  virtual std::string getStdlibPath() const;
 
   // Returns <ResourceDir>/lib/<OSName>/<arch>.  This is used by runtimes (such
   // as OpenMP) to find arch-specific libraries.
@@ -455,6 +471,12 @@ public:
   /// IsUnwindTablesDefault - Does this tool chain use -funwind-tables
   /// by default.
   virtual bool IsUnwindTablesDefault(const llvm::opt::ArgList &Args) const;
+
+  /// Test whether this toolchain supports outline atomics by default.
+  virtual bool
+  IsAArch64OutlineAtomicsDefault(const llvm::opt::ArgList &Args) const {
+    return false;
+  }
 
   /// Test whether this toolchain defaults to PIC.
   virtual bool isPICDefault() const = 0;
@@ -486,6 +508,9 @@ public:
   /// compile unit information.
   virtual bool UseDwarfDebugFlags() const { return false; }
 
+  /// Add an additional -fdebug-prefix-map entry.
+  virtual std::string GetGlobalDebugPathRemapping() const { return {}; }
+  
   // Return the DWARF version to emit, in the absence of arguments
   // to the contrary.
   virtual unsigned GetDefaultDwarfVersion() const { return 4; }
@@ -527,6 +552,12 @@ public:
 
   /// isThreadModelSupported() - Does this target support a thread model?
   virtual bool isThreadModelSupported(const StringRef Model) const;
+
+  virtual std::string getMultiarchTriple(const Driver &D,
+                                         const llvm::Triple &TargetTriple,
+                                         StringRef SysRoot) const {
+    return TargetTriple.str();
+  }
 
   /// ComputeLLVMTriple - Return the LLVM target triple to use, after taking
   /// command line arguments into account.
@@ -588,6 +619,9 @@ public:
   // GetUnwindLibType - Determine the unwind library type to use with the
   // given compilation arguments.
   virtual UnwindLibType GetUnwindLibType(const llvm::opt::ArgList &Args) const;
+
+  // Detect the highest available version of libc++ in include path.
+  virtual std::string detectLibcxxVersion(StringRef IncludePath) const;
 
   /// AddClangCXXStdlibIncludeArgs - Add the clang -cc1 level arguments to set
   /// the include paths to use for the given C++ standard library type.
@@ -652,6 +686,10 @@ public:
   /// On Windows, returns the MSVC compatibility version.
   virtual VersionTuple computeMSVCVersion(const Driver *D,
                                           const llvm::opt::ArgList &Args) const;
+
+  /// Get paths of HIP device libraries.
+  virtual llvm::SmallVector<BitCodeLibraryInfo, 12>
+  getHIPDeviceLibs(const llvm::opt::ArgList &Args) const;
 
   /// Return sanitizers which are available in this toolchain.
   virtual SanitizerMask getSupportedSanitizers() const;

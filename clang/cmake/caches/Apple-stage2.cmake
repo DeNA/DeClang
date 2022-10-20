@@ -56,6 +56,7 @@ set(LLVM_TOOLCHAIN_TOOLS
   llvm-objdump
   llvm-nm
   llvm-size
+  llvm-cxxfilt
   llvm-config
   CACHE STRING "")
 
@@ -75,6 +76,7 @@ set(LLVM_DISTRIBUTION_COMPONENTS
   clang-resource-headers
   cxx-headers
   Remarks
+  clang-features-file
   ${LLVM_TOOLCHAIN_TOOLS}
   ${LLVM_TOOLCHAIN_UTILITIES}
   CACHE STRING "")

@@ -1,9 +1,8 @@
 //===--- IndexRecordWriter.cpp - Index record serialization ---------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -128,7 +127,7 @@ static void writeDecls(BitstreamWriter &Stream, ArrayRef<DeclInfo> Decls,
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 5)); // Kind
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 5)); // SubKind
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 5)); // Language
-  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, SymbolPropertyBitNum)); // Properties
+  Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 9)); // Properties
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, SymbolRoleBitNum)); // Roles
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, SymbolRoleBitNum)); // Related Roles
   Abbrev->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6)); // Length of name in block
@@ -250,7 +249,7 @@ IndexRecordWriter::beginRecord(StringRef Filename, hash_code RecordHash,
   {
     llvm::raw_string_ostream RN(RecordName);
     RN << path::filename(Filename);
-    RN << "-" << APInt(64, RecordHash).toString(36, /*Signed=*/false);
+    RN << "-" << toString(APInt(64, RecordHash), 36, /*Signed=*/false);
   }
   SmallString<256> RecordPath = RecordsPath.str();
   appendInteriorRecordPath(RecordName, RecordPath);

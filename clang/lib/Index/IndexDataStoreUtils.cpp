@@ -1,9 +1,8 @@
 //===--- IndexDataStoreUtils.cpp - Functions/constants for the data store -===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -154,6 +153,8 @@ SymbolSubKind index::getSymbolSubKind(indexstore_symbol_subkind_t K) {
       return SymbolSubKind::UsingTypename;
   case INDEXSTORE_SYMBOL_SUBKIND_USINGVALUE:
       return SymbolSubKind::UsingValue;
+  case INDEXSTORE_SYMBOL_SUBKIND_USINGENUM:
+      return SymbolSubKind::UsingEnum;
   case INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORWILLSET:
     return SymbolSubKind::SwiftAccessorWillSet;
   case INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORDIDSET:
@@ -227,6 +228,8 @@ SymbolPropertySet index::getSymbolProperties(uint64_t Props) {
     SymbolProperties |= (SymbolPropertySet)SymbolProperty::Local;
   if (Props & INDEXSTORE_SYMBOL_PROPERTY_PROTOCOL_INTERFACE)
     SymbolProperties |= (SymbolPropertySet)SymbolProperty::ProtocolInterface;
+  if (Props & INDEXSTORE_SYMBOL_PROPERTY_SWIFT_ASYNC)
+    SymbolProperties |= (SymbolPropertySet)SymbolProperty::SwiftAsync;
 
   return SymbolProperties;
 }
@@ -376,6 +379,8 @@ indexstore_symbol_subkind_t index::getIndexStoreSubKind(SymbolSubKind K) {
     return INDEXSTORE_SYMBOL_SUBKIND_USINGTYPENAME;
   case SymbolSubKind::UsingValue:
     return INDEXSTORE_SYMBOL_SUBKIND_USINGVALUE;
+  case SymbolSubKind::UsingEnum:
+    return INDEXSTORE_SYMBOL_SUBKIND_USINGENUM;
   case SymbolSubKind::SwiftAccessorWillSet:
     return INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORWILLSET;
   case SymbolSubKind::SwiftAccessorDidSet:
@@ -458,6 +463,9 @@ indexstore_symbol_property_t index::getIndexStoreProperties(SymbolPropertySet Pr
       break;
     case SymbolProperty::ProtocolInterface:
       storeProp |= INDEXSTORE_SYMBOL_PROPERTY_PROTOCOL_INTERFACE;
+      break;
+    case SymbolProperty::SwiftAsync:
+      storeProp |= INDEXSTORE_SYMBOL_PROPERTY_SWIFT_ASYNC;
       break;
     }
   });

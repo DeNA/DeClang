@@ -660,14 +660,14 @@ public:
   /// Sets the umbrella header of the given module to the given
   /// header.
   void setUmbrellaHeader(Module *Mod, const FileEntry *UmbrellaHeader,
-                         Twine NameAsWritten,
-                         Twine PathRelativeToRootModuleDirectory);
+                         const Twine &NameAsWritten,
+                         const Twine &PathRelativeToRootModuleDirectory);
 
   /// Sets the umbrella directory of the given module to the given
   /// directory.
   void setUmbrellaDir(Module *Mod, const DirectoryEntry *UmbrellaDir,
-                      Twine NameAsWritten,
-                      Twine PathRelativeToRootModuleDirectory);
+                      const Twine &NameAsWritten,
+                      const Twine &PathRelativeToRootModuleDirectory);
 
   /// Adds this header to the given module.
   /// \param Role The role of the header wrt the module.
@@ -709,6 +709,9 @@ public:
 
   module_iterator module_begin() const { return Modules.begin(); }
   module_iterator module_end()   const { return Modules.end(); }
+  llvm::iterator_range<module_iterator> modules() const {
+    return {module_begin(), module_end()};
+  }
 
   /// Cache a module load.  M might be nullptr.
   void cacheModuleLoad(const IdentifierInfo &II, Module *M) {

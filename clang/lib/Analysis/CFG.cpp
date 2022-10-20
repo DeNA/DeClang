@@ -542,6 +542,7 @@ private:
   // Visitors to walk an AST and construct the CFG.
   CFGBlock *VisitInitListExpr(InitListExpr *ILE, AddStmtChoice asc);
   CFGBlock *VisitAddrLabelExpr(AddrLabelExpr *A, AddStmtChoice asc);
+  CFGBlock *VisitAttributedStmt(AttributedStmt *A, AddStmtChoice asc);
   CFGBlock *VisitBinaryOperator(BinaryOperator *B, AddStmtChoice asc);
   CFGBlock *VisitBreakStmt(BreakStmt *B);
   CFGBlock *VisitCallExpr(CallExpr *C, AddStmtChoice asc);
@@ -1456,6 +1457,13 @@ void CFGBuilder::findConstructionContexts(
     // TODO: Handle other cases. For now, fail to find construction contexts.
     break;
   }
+  case Stmt::ParenExprClass: {
+    // If expression is placed into parenthesis we should propagate the parent
+    // construction context to subexpressions.
+    auto *PE = cast<ParenExpr>(Child);
+    findConstructionContexts(Layer, PE->getSubExpr());
+    break;
+  }
   default:
     break;
   }
@@ -1791,16 +1799,11 @@ void CFGBuilder::addLifetimeEnds(LocalScope::const_iterator B,
   autoCreateBlock();
   // object with trivial destructor end their lifetime last (when storage
   // duration ends)
-  for (SmallVectorImpl<VarDecl *>::reverse_iterator I = DeclsTrivial.rbegin(),
-                                                    E = DeclsTrivial.rend();
-       I != E; ++I)
-    appendLifetimeEnds(Block, *I, S);
+  for (VarDecl *VD : llvm::reverse(DeclsTrivial))
+    appendLifetimeEnds(Block, VD, S);
 
-  for (SmallVectorImpl<VarDecl *>::reverse_iterator
-           I = DeclsNonTrivial.rbegin(),
-           E = DeclsNonTrivial.rend();
-       I != E; ++I)
-    appendLifetimeEnds(Block, *I, S);
+  for (VarDecl *VD : llvm::reverse(DeclsNonTrivial))
+    appendLifetimeEnds(Block, VD, S);
 }
 
 /// Add to current block markers for ending scopes.
@@ -1813,9 +1816,8 @@ void CFGBuilder::addScopesEnd(LocalScope::const_iterator B,
 
   autoCreateBlock();
 
-  for (auto I = DeclsWithEndedScope.rbegin(), E = DeclsWithEndedScope.rend();
-       I != E; ++I)
-    appendScopeEnd(Block, *I, S);
+  for (VarDecl *VD : llvm::reverse(DeclsWithEndedScope))
+    appendScopeEnd(Block, VD, S);
 
   return;
 }
@@ -1840,24 +1842,22 @@ void CFGBuilder::addAutomaticObjDtors(LocalScope::const_iterator B,
   for (LocalScope::const_iterator I = B; I != E; ++I)
     Decls.push_back(*I);
 
-  for (SmallVectorImpl<VarDecl*>::reverse_iterator I = Decls.rbegin(),
-                                                   E = Decls.rend();
-       I != E; ++I) {
-    if (hasTrivialDestructor(*I)) {
+  for (VarDecl *VD : llvm::reverse(Decls)) {
+    if (hasTrivialDestructor(VD)) {
       // If AddScopes is enabled and *I is a first variable in a scope, add a
       // ScopeEnd marker in a Block.
-      if (BuildOpts.AddScopes && DeclsWithEndedScope.count(*I)) {
+      if (BuildOpts.AddScopes && DeclsWithEndedScope.count(VD)) {
         autoCreateBlock();
-        appendScopeEnd(Block, *I, S);
+        appendScopeEnd(Block, VD, S);
       }
       continue;
     }
     // If this destructor is marked as a no-return destructor, we need to
     // create a new block for the destructor which does not have as a successor
     // anything built thus far: control won't flow out of this block.
-    QualType Ty = (*I)->getType();
+    QualType Ty = VD->getType();
     if (Ty->isReferenceType()) {
-      Ty = getReferenceInitTemporaryType((*I)->getInit());
+      Ty = getReferenceInitTemporaryType(VD->getInit());
     }
     Ty = Context->getBaseElementType(Ty);
 
@@ -1867,9 +1867,9 @@ void CFGBuilder::addAutomaticObjDtors(LocalScope::const_iterator B,
       autoCreateBlock();
 
     // Add ScopeEnd just after automatic obj destructor.
-    if (BuildOpts.AddScopes && DeclsWithEndedScope.count(*I))
-      appendScopeEnd(Block, *I, S);
-    appendAutomaticObjDtor(Block, *I, S);
+    if (BuildOpts.AddScopes && DeclsWithEndedScope.count(VD))
+      appendScopeEnd(Block, VD, S);
+    appendAutomaticObjDtor(Block, VD, S);
   }
 }
 
@@ -2142,6 +2142,9 @@ CFGBlock *CFGBuilder::Visit(Stmt * S, AddStmtChoice asc,
     case Stmt::InitListExprClass:
       return VisitInitListExpr(cast<InitListExpr>(S), asc);
 
+    case Stmt::AttributedStmtClass:
+      return VisitAttributedStmt(cast<AttributedStmt>(S), asc);
+
     case Stmt::AddrLabelExprClass:
       return VisitAddrLabelExpr(cast<AddrLabelExpr>(S), asc);
 
@@ -2391,8 +2394,32 @@ CFGBlock *CFGBuilder::VisitAddrLabelExpr(AddrLabelExpr *A,
   return Block;
 }
 
-CFGBlock *CFGBuilder::VisitUnaryOperator(UnaryOperator *U,
-           AddStmtChoice asc) {
+static bool isFallthroughStatement(const AttributedStmt *A) {
+  bool isFallthrough = hasSpecificAttr<FallThroughAttr>(A->getAttrs());
+  assert((!isFallthrough || isa<NullStmt>(A->getSubStmt())) &&
+         "expected fallthrough not to have children");
+  return isFallthrough;
+}
+
+CFGBlock *CFGBuilder::VisitAttributedStmt(AttributedStmt *A,
+                                          AddStmtChoice asc) {
+  // AttributedStmts for [[likely]] can have arbitrary statements as children,
+  // and the current visitation order here would add the AttributedStmts
+  // for [[likely]] after the child nodes, which is undesirable: For example,
+  // if the child contains an unconditional return, the [[likely]] would be
+  // considered unreachable.
+  // So only add the AttributedStmt for FallThrough, which has CFG effects and
+  // also no children, and omit the others. None of the other current StmtAttrs
+  // have semantic meaning for the CFG.
+  if (isFallthroughStatement(A) && asc.alwaysAdd(*this, A)) {
+    autoCreateBlock();
+    appendStmt(Block, A);
+  }
+
+  return VisitChildren(A);
+}
+
+CFGBlock *CFGBuilder::VisitUnaryOperator(UnaryOperator *U, AddStmtChoice asc) {
   if (asc.alwaysAdd(*this, U)) {
     autoCreateBlock();
     appendStmt(Block, U);
@@ -2704,7 +2731,8 @@ CFGBlock *CFGBuilder::VisitChooseExpr(ChooseExpr *C,
   return addStmt(C->getCond());
 }
 
-CFGBlock *CFGBuilder::VisitCompoundStmt(CompoundStmt *C, bool ExternallyDestructed) {
+CFGBlock *CFGBuilder::VisitCompoundStmt(CompoundStmt *C,
+                                        bool ExternallyDestructed) {
   LocalScope::const_iterator scopeBeginPos = ScopePos;
   addLocalScopeForStmt(C);
 
@@ -2716,11 +2744,10 @@ CFGBlock *CFGBuilder::VisitCompoundStmt(CompoundStmt *C, bool ExternallyDestruct
 
   CFGBlock *LastBlock = Block;
 
-  for (CompoundStmt::reverse_body_iterator I=C->body_rbegin(), E=C->body_rend();
-       I != E; ++I ) {
+  for (Stmt *S : llvm::reverse(C->body())) {
     // If we hit a segment of code just containing ';' (NullStmts), we can
     // get a null block back.  In such cases, just use the LastBlock
-    CFGBlock *newBlock = Visit(*I, AddStmtChoice::AlwaysAdd,
+    CFGBlock *newBlock = Visit(S, AddStmtChoice::AlwaysAdd,
                                ExternallyDestructed);
 
     if (newBlock)
@@ -3040,7 +3067,7 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
   // control-flow transfer of '&&' or '||' go directly into the then/else
   // blocks directly.
   BinaryOperator *Cond =
-      I->getConditionVariable()
+      (I->isConsteval() || I->getConditionVariable())
           ? nullptr
           : dyn_cast<BinaryOperator>(I->getCond()->IgnoreParens());
   CFGBlock *LastBlock;
@@ -3054,7 +3081,9 @@ CFGBlock *CFGBuilder::VisitIfStmt(IfStmt *I) {
     Block->setTerminator(I);
 
     // See if this is a known constant.
-    const TryResult &KnownVal = tryEvaluateBool(I->getCond());
+    TryResult KnownVal;
+    if (!I->isConsteval())
+      KnownVal = tryEvaluateBool(I->getCond());
 
     // Add the successors.  If we know that specific branches are
     // unreachable, inform addSuccessor() of that knowledge.
@@ -3115,9 +3144,9 @@ CFGBlock *CFGBuilder::VisitReturnStmt(Stmt *S) {
     if (Expr *O = RS->getRetValue())
       return Visit(O, AddStmtChoice::AlwaysAdd, /*ExternallyDestructed=*/true);
     return Block;
-  } else { // co_return
-    return VisitChildren(S);
   }
+  // co_return
+  return VisitChildren(S);
 }
 
 CFGBlock *CFGBuilder::VisitSEHExceptStmt(SEHExceptStmt *ES) {
@@ -4475,8 +4504,14 @@ CFGBlock *CFGBuilder::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
     // Add implicit scope and dtors for loop variable.
     addLocalScopeAndDtors(S->getLoopVarStmt());
 
+    // If body is not a compound statement create implicit scope
+    // and add destructors.
+    if (!isa<CompoundStmt>(S->getBody()))
+      addLocalScopeAndDtors(S->getBody());
+
     // Populate a new block to contain the loop body and loop variable.
     addStmt(S->getBody());
+
     if (badCFG)
       return nullptr;
     CFGBlock *LoopVarStmtBlock = addStmt(S->getLoopVarStmt());
@@ -5869,7 +5904,7 @@ static bool isImmediateSinkBlock(const CFGBlock *Blk) {
   // at least for now, but once we have better support for exceptions,
   // we'd need to carefully handle the case when the throw is being
   // immediately caught.
-  if (std::any_of(Blk->begin(), Blk->end(), [](const CFGElement &Elm) {
+  if (llvm::any_of(*Blk, [](const CFGElement &Elm) {
         if (Optional<CFGStmt> StmtElm = Elm.getAs<CFGStmt>())
           if (isa<CXXThrowExpr>(StmtElm->getStmt()))
             return true;

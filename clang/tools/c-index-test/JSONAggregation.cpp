@@ -1,14 +1,14 @@
 //===--- JSONAggregation.cpp - Index data aggregation in JSON format ------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include "JSONAggregation.h"
 #include "indexstore/IndexStoreCXX.h"
+#include "clang/Basic/PathRemapper.h"
 #include "clang/Frontend/Utils.h"
 #include "clang/Index/IndexDataStoreSymbolUtils.h"
 #include "llvm/ADT/StringMap.h"
@@ -383,9 +383,10 @@ void Aggregator::dumpJSON(raw_ostream &OS) {
 }
 
 
-bool index::aggregateDataAsJSON(StringRef StorePath, raw_ostream &OS) {
+bool index::aggregateDataAsJSON(StringRef StorePath,
+                                const PathRemapper &Remapper, raw_ostream &OS) {
   std::string error;
-  auto dataStore = IndexStore(StorePath, error);
+  auto dataStore = IndexStore(StorePath, Remapper, error);
   if (!dataStore) {
     errs() << "error opening store path '" << StorePath << "': " << error << '\n';
     return true;

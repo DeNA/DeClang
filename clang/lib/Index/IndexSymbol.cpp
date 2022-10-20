@@ -329,6 +329,11 @@ SymbolInfo index::getSymbolInfo(const Decl *D) {
       Info.Kind = SymbolKind::Using;
       Info.Lang = SymbolLanguage::CXX;
       break;
+    case Decl::UsingEnum:
+      Info.Kind = SymbolKind::Using;
+      Info.Lang = SymbolLanguage::CXX;
+      Info.SubKind = SymbolSubKind::UsingEnum;
+      break;
     case Decl::Binding:
       Info.Kind = SymbolKind::Variable;
       Info.Lang = SymbolLanguage::CXX;
@@ -365,6 +370,9 @@ SymbolInfo index::getSymbolInfo(const Decl *D) {
       break;
     case Decl::NonTypeTemplateParm:
       Info.Kind = SymbolKind::NonTypeTemplateParm;
+      break;
+    case Decl::Concept:
+      Info.Kind = SymbolKind::Concept;
       break;
     // Other decls get the 'unknown' kind.
     default:
@@ -530,6 +538,8 @@ StringRef index::getSymbolKindString(SymbolKind K) {
   case SymbolKind::TemplateTypeParm: return "template-type-param";
   case SymbolKind::TemplateTemplateParm: return "template-template-param";
   case SymbolKind::NonTypeTemplateParm: return "non-type-template-param";
+  case SymbolKind::Concept:
+    return "concept";
   }
   llvm_unreachable("invalid symbol kind");
 }
@@ -543,6 +553,7 @@ StringRef index::getSymbolSubKindString(SymbolSubKind K) {
   case SymbolSubKind::AccessorSetter: return "acc-set";
   case SymbolSubKind::UsingTypename: return "using-typename";
   case SymbolSubKind::UsingValue: return "using-value";
+  case SymbolSubKind::UsingEnum: return "using-enum";
   case SymbolSubKind::SwiftAccessorWillSet: return "acc-willset";
   case SymbolSubKind::SwiftAccessorDidSet: return "acc-didset";
   case SymbolSubKind::SwiftAccessorAddressor: return "acc-addr";
@@ -588,6 +599,7 @@ void index::applyForEachSymbolProperty(SymbolPropertySet Props,
   APPLY_FOR_PROPERTY(GKInspectable);
   APPLY_FOR_PROPERTY(Local);
   APPLY_FOR_PROPERTY(ProtocolInterface);
+  APPLY_FOR_PROPERTY(SwiftAsync);
 
 #undef APPLY_FOR_PROPERTY
 }
@@ -609,6 +621,7 @@ void index::printSymbolProperties(SymbolPropertySet Props, raw_ostream &OS) {
     case SymbolProperty::GKInspectable: OS << "GKI"; break;
     case SymbolProperty::Local: OS << "local"; break;
     case SymbolProperty::ProtocolInterface: OS << "protocol"; break;
+    case SymbolProperty::SwiftAsync: OS << "swift_async"; break;
     }
   });
 }

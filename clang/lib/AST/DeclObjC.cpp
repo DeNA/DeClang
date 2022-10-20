@@ -603,10 +603,6 @@ void ObjCInterfaceDecl::allocateDefinitionData() {
   assert(!hasDefinition() && "ObjC class already has a definition");
   Data.setPointer(new (getASTContext()) DefinitionData());
   Data.getPointer()->Definition = this;
-
-  // Make the type point at the definition, now that we have one.
-  if (TypeForDecl)
-    cast<ObjCInterfaceType>(TypeForDecl)->Decl = this;
 }
 
 void ObjCInterfaceDecl::startDefinition() {
@@ -852,6 +848,14 @@ bool ObjCMethodDecl::isDesignatedInitializerForTheInterface(
     return false;
   if (const ObjCInterfaceDecl *ID = getClassInterface())
     return ID->isDesignatedInitializer(getSelector(), InitMethod);
+  return false;
+}
+
+bool ObjCMethodDecl::hasParamDestroyedInCallee() const {
+  for (auto param : parameters()) {
+    if (param->isDestroyedInCallee())
+      return true;
+  }
   return false;
 }
 
@@ -1458,9 +1462,7 @@ SourceRange ObjCTypeParamDecl::getSourceRange() const {
 ObjCTypeParamList::ObjCTypeParamList(SourceLocation lAngleLoc,
                                      ArrayRef<ObjCTypeParamDecl *> typeParams,
                                      SourceLocation rAngleLoc)
-    : NumParams(typeParams.size()) {
-  Brackets.Begin = lAngleLoc.getRawEncoding();
-  Brackets.End = rAngleLoc.getRawEncoding();
+    : Brackets(lAngleLoc, rAngleLoc), NumParams(typeParams.size()) {
   std::copy(typeParams.begin(), typeParams.end(), begin());
 }
 
@@ -1629,6 +1631,11 @@ ObjCIvarDecl *ObjCInterfaceDecl::all_declared_ivar_begin() {
 
   ObjCIvarDecl *curIvar = nullptr;
   if (!data().IvarList) {
+    // Force ivar deserialization upfront, before building IvarList.
+    (void)ivar_empty();
+    for (const auto *Ext : known_extensions()) {
+      (void)Ext->ivar_empty();
+    }
     if (!ivar_empty()) {
       ObjCInterfaceDecl::ivar_iterator I = ivar_begin(), E = ivar_end();
       data().IvarList = *I; ++I;
@@ -1820,8 +1827,8 @@ ObjCIvarDecl *ObjCIvarDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
                                   ObjCIvarDecl::None, nullptr, false);
 }
 
-const ObjCInterfaceDecl *ObjCIvarDecl::getContainingInterface() const {
-  const auto *DC = cast<ObjCContainerDecl>(getDeclContext());
+ObjCInterfaceDecl *ObjCIvarDecl::getContainingInterface() {
+  auto *DC = cast<ObjCContainerDecl>(getDeclContext());
 
   switch (DC->getKind()) {
   default:
@@ -1831,7 +1838,7 @@ const ObjCInterfaceDecl *ObjCIvarDecl::getContainingInterface() const {
 
     // Ivars can only appear in class extension categories.
   case ObjCCategory: {
-    const auto *CD = cast<ObjCCategoryDecl>(DC);
+    auto *CD = cast<ObjCCategoryDecl>(DC);
     assert(CD->IsClassExtension() && "invalid container for ivar!");
     return CD->getClassInterface();
   }

@@ -1,9 +1,8 @@
 //===--- IndexUnitReader.h - Index unit deserialization -------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -11,6 +10,7 @@
 #define LLVM_CLANG_INDEX_INDEXUNITREADER_H
 
 #include "clang/Basic/LLVM.h"
+#include "clang/Basic/PathRemapper.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Chrono.h"
@@ -30,9 +30,10 @@ public:
 
   static std::unique_ptr<IndexUnitReader>
     createWithUnitFilename(StringRef UnitFilename, StringRef StorePath,
-                           std::string &Error);
+                           const PathRemapper &Remapper, std::string &Error);
   static std::unique_ptr<IndexUnitReader>
-    createWithFilePath(StringRef FilePath, std::string &Error);
+    createWithFilePath(StringRef FilePath, const PathRemapper &Remapper,
+                       std::string &Error);
 
   static Optional<llvm::sys::TimePoint<>>
     getModificationTimeForUnit(StringRef UnitFilename, StringRef StorePath,

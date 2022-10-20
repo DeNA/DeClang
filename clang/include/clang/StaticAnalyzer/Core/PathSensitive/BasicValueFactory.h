@@ -52,6 +52,8 @@ public:
   iterator begin() const { return L.begin(); }
   iterator end() const { return L.end(); }
 
+  QualType getType() const { return T; }
+
   static void Profile(llvm::FoldingSetNodeID& ID, QualType T,
                       llvm::ImmutableList<SVal> L);
 
@@ -264,9 +266,9 @@ public:
     return CXXBaseListFactory.add(CBS, L);
   }
 
-  const PointerToMemberData *accumCXXBase(
-      llvm::iterator_range<CastExpr::path_const_iterator> PathRange,
-      const nonloc::PointerToMember &PTM);
+  const PointerToMemberData *
+  accumCXXBase(llvm::iterator_range<CastExpr::path_const_iterator> PathRange,
+               const nonloc::PointerToMember &PTM, const clang::CastKind &kind);
 
   const llvm::APSInt* evalAPSInt(BinaryOperator::Opcode Op,
                                      const llvm::APSInt& V1,

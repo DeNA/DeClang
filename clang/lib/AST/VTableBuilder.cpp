@@ -487,7 +487,7 @@ static bool HasSameVirtualSignature(const CXXMethodDecl *LHS,
 bool VCallOffsetMap::MethodsCanShareVCallOffset(const CXXMethodDecl *LHS,
                                                 const CXXMethodDecl *RHS) {
   assert(VTableContextBase::hasVtableSlot(LHS) && "LHS must be virtual!");
-  assert(VTableContextBase::hasVtableSlot(RHS) && "LHS must be virtual!");
+  assert(VTableContextBase::hasVtableSlot(RHS) && "RHS must be virtual!");
 
   // A destructor can share a vcall offset with another destructor.
   if (isa<CXXDestructorDecl>(LHS))
@@ -1070,7 +1070,7 @@ void ItaniumVTableBuilder::AddThunk(const CXXMethodDecl *MD,
   SmallVectorImpl<ThunkInfo> &ThunksVector = Thunks[MD];
 
   // Check if we have this thunk already.
-  if (llvm::find(ThunksVector, Thunk) != ThunksVector.end())
+  if (llvm::is_contained(ThunksVector, Thunk))
     return;
 
   ThunksVector.push_back(Thunk);
@@ -1445,8 +1445,7 @@ FindNearestOverriddenMethod(const CXXMethodDecl *MD,
   OverriddenMethodsSetTy OverriddenMethods;
   ComputeAllOverriddenMethods(MD, OverriddenMethods);
 
-  for (const CXXRecordDecl *PrimaryBase :
-       llvm::make_range(Bases.rbegin(), Bases.rend())) {
+  for (const CXXRecordDecl *PrimaryBase : llvm::reverse(Bases)) {
     // Now check the overridden methods.
     for (const CXXMethodDecl *OverriddenMD : OverriddenMethods) {
       // We found our overridden method.
@@ -2586,7 +2585,7 @@ private:
     SmallVector<ThunkInfo, 1> &ThunksVector = Thunks[MD];
 
     // Check if we have this thunk already.
-    if (llvm::find(ThunksVector, Thunk) != ThunksVector.end())
+    if (llvm::is_contained(ThunksVector, Thunk))
       return;
 
     ThunksVector.push_back(Thunk);
@@ -3186,8 +3185,7 @@ void VFTableBuilder::AddMethods(BaseSubobject Base, unsigned BaseDepth,
 }
 
 static void PrintBasePath(const VPtrInfo::BasePath &Path, raw_ostream &Out) {
-  for (const CXXRecordDecl *Elem :
-       llvm::make_range(Path.rbegin(), Path.rend())) {
+  for (const CXXRecordDecl *Elem : llvm::reverse(Path)) {
     Out << "'";
     Elem->printQualifiedName(Out);
     Out << "' in ";

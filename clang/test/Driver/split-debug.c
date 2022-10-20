@@ -7,9 +7,9 @@
 /// -gsplit-dwarf=split is equivalent to -gsplit-dwarf.
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf=split -g %s 2>&1 | FileCheck %s --check-prefixes=NOINLINE,SPLIT
 
-// INLINE-NOT: "-fno-split-dwarf-inlining"
-// NOINLINE:   "-fno-split-dwarf-inlining"
-// SPLIT:      "-debug-info-kind=limited"
+// INLINE:     "-fsplit-dwarf-inlining"
+// NOINLINE-NOT: "-fsplit-dwarf-inlining"
+// SPLIT:      "-debug-info-kind=constructor"
 // SPLIT-SAME: "-ggnu-pubnames"
 // SPLIT-SAME: "-split-dwarf-file" "split-debug.dwo" "-split-dwarf-output" "split-debug.dwo"
 
@@ -24,19 +24,28 @@
 /// -gsplit-dwarf is a no-op if no -g is specified.
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf %s 2>&1 | FileCheck %s --check-prefix=G0
 
+/// ... unless -fthinlto-index= is specified.
+// RUN: echo > %t.bc
+// RUN: %clang -### -c -target x86_64 -fthinlto-index=dummy -gsplit-dwarf %t.bc 2>&1 | FileCheck %s --check-prefix=IR
+// RUN: %clang -### -c -target x86_64 -gsplit-dwarf -x ir %t.bc 2>&1 | FileCheck %s --check-prefix=IR
+
+// IR-NOT:  "-debug-info-kind=
+// IR:      "-ggnu-pubnames"
+// IR-SAME: "-split-dwarf-file" "{{.*}}.dwo" "-split-dwarf-output" "{{.*}}.dwo"
+
 /// -gno-split-dwarf disables debug fission.
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf -g -gno-split-dwarf %s 2>&1 | FileCheck %s --check-prefix=NOSPLIT
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf=single -g -gno-split-dwarf %s 2>&1 | FileCheck %s --check-prefix=NOSPLIT
 // RUN: %clang -### -c -target x86_64 -gno-split-dwarf -g -gsplit-dwarf %s 2>&1 | FileCheck %s --check-prefixes=NOINLINE,SPLIT
 
-// NOSPLIT:     "-debug-info-kind=limited"
+// NOSPLIT:     "-debug-info-kind=constructor"
 // NOSPLIT-NOT: "-ggnu-pubnames"
 // NOSPLIT-NOT: "-split-dwarf
 
 /// Test -gsplit-dwarf=single.
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf=single -g %s 2>&1 | FileCheck %s --check-prefix=SINGLE
 
-// SINGLE: "-debug-info-kind=limited"
+// SINGLE: "-debug-info-kind=constructor"
 // SINGLE: "-split-dwarf-file" "split-debug.o"
 // SINGLE-NOT: "-split-dwarf-output"
 
@@ -53,7 +62,7 @@
 
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf=split -g -gno-pubnames %s 2>&1 | FileCheck %s --check-prefixes=NOPUBNAMES
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf=split -g -gno-gnu-pubnames %s 2>&1 | FileCheck %s --check-prefixes=NOPUBNAMES
-// NOPUBNAMES:      "-debug-info-kind=limited"
+// NOPUBNAMES:      "-debug-info-kind=constructor"
 // NOPUBNAMES-NOT:  "-ggnu-pubnames"
 // NOPUBNAMES-SAME: "-split-dwarf-file" "split-debug.dwo" "-split-dwarf-output" "split-debug.dwo"
 

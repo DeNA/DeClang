@@ -159,9 +159,9 @@ Parser::ParseExpressionWithLeadingExtension(SourceLocation ExtLoc) {
 /// Parse an expr that doesn't include (top-level) commas.
 ExprResult Parser::ParseAssignmentExpression(TypeCastState isTypeCast) {
   if (Tok.is(tok::code_completion)) {
+    cutOffParsing();
     Actions.CodeCompleteExpression(getCurScope(),
                                    PreferredType.get(Tok.getLocation()));
-    cutOffParsing();
     return ExprError();
   }
 
@@ -1176,9 +1176,9 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
       ConsumeToken();
 
       if (Tok.is(tok::code_completion) && &II != Ident_super) {
+        cutOffParsing();
         Actions.CodeCompleteObjCClassPropertyRefExpr(
             getCurScope(), II, ILoc, ExprStatementTokLoc == ILoc);
-        cutOffParsing();
         return ExprError();
       }
       // Allow either an identifier or the keyword 'class' (in C++).
@@ -1489,6 +1489,9 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw_this:
     Res = ParseCXXThis();
     break;
+  case tok::kw___builtin_sycl_unique_stable_name:
+    Res = ParseSYCLUniqueStableNameExpression();
+    break;
 
   case tok::annot_typename:
     if (isStartOfObjCClassMessageMissingOpenBracket()) {
@@ -1538,6 +1541,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw___bf16:
   case tok::kw__Float16:
   case tok::kw___float128:
+  case tok::kw___ibm128:
   case tok::kw_void:
   case tok::kw_typename:
   case tok::kw_typeof:
@@ -1747,9 +1751,9 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
     Res = ParseBlockLiteralExpression();
     break;
   case tok::code_completion: {
+    cutOffParsing();
     Actions.CodeCompleteExpression(getCurScope(),
                                    PreferredType.get(Tok.getLocation()));
-    cutOffParsing();
     return ExprError();
   }
   case tok::l_square:
@@ -1830,7 +1834,9 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   // These can be followed by postfix-expr pieces.
   PreferredType = SavedType;
   Res = ParsePostfixExpressionSuffix(Res);
-  if (getLangOpts().OpenCL)
+  if (getLangOpts().OpenCL &&
+      !getActions().getOpenCLOptions().isAvailableOption(
+          "__cl_clang_function_pointers", getLangOpts()))
     if (Expr *PostfixExpr = Res.get()) {
       QualType Ty = PostfixExpr->getType();
       if (!Ty.isNull() && Ty->isFunctionType()) {
@@ -1877,9 +1883,9 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
       if (InMessageExpression)
         return LHS;
 
+      cutOffParsing();
       Actions.CodeCompletePostfixExpression(
           getCurScope(), LHS, PreferredType.get(Tok.getLocation()));
-      cutOffParsing();
       return ExprError();
 
     case tok::identifier:
@@ -2161,12 +2167,12 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
           CorrectedBase = Base;
 
         // Code completion for a member access expression.
+        cutOffParsing();
         Actions.CodeCompleteMemberReferenceExpr(
             getCurScope(), Base, CorrectedBase, OpLoc, OpKind == tok::arrow,
             Base && ExprStatementTokLoc == Base->getBeginLoc(),
             PreferredType.get(Tok.getLocation()));
 
-        cutOffParsing();
         return ExprError();
       }
 
@@ -2345,6 +2351,33 @@ Parser::ParseExprAfterUnaryExprOrTypeTrait(const Token &OpTok,
   return Operand;
 }
 
+/// Parse a __builtin_sycl_unique_stable_name expression.  Accepts a type-id as
+/// a parameter.
+ExprResult Parser::ParseSYCLUniqueStableNameExpression() {
+  assert(Tok.is(tok::kw___builtin_sycl_unique_stable_name) &&
+         "Not __builtin_sycl_unique_stable_name");
+
+  SourceLocation OpLoc = ConsumeToken();
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+
+  // __builtin_sycl_unique_stable_name expressions are always parenthesized.
+  if (T.expectAndConsume(diag::err_expected_lparen_after,
+                         "__builtin_sycl_unique_stable_name"))
+    return ExprError();
+
+  TypeResult Ty = ParseTypeName();
+
+  if (Ty.isInvalid()) {
+    T.skipToEnd();
+    return ExprError();
+  }
+
+  if (T.consumeClose())
+    return ExprError();
+
+  return Actions.ActOnSYCLUniqueStableNameExpr(OpLoc, T.getOpenLocation(),
+                                               T.getCloseLocation(), Ty.get());
+}
 
 /// Parse a sizeof or alignof expression.
 ///
@@ -2799,10 +2832,10 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
   CastTy = nullptr;
 
   if (Tok.is(tok::code_completion)) {
+    cutOffParsing();
     Actions.CodeCompleteExpression(
         getCurScope(), PreferredType.get(Tok.getLocation()),
         /*IsParenthesized=*/ExprType >= CompoundLiteral);
-    cutOffParsing();
     return ExprError();
   }
 
@@ -3433,8 +3466,9 @@ Parser::ParseSimpleExpressionList(SmallVectorImpl<Expr*> &Exprs,
 /// \endverbatim
 void Parser::ParseBlockId(SourceLocation CaretLoc) {
   if (Tok.is(tok::code_completion)) {
+    cutOffParsing();
     Actions.CodeCompleteOrdinaryName(getCurScope(), Sema::PCC_Type);
-    return cutOffParsing();
+    return;
   }
 
   // Parse the specifier-qualifier-list piece.
@@ -3619,8 +3653,8 @@ Optional<AvailabilitySpec> Parser::ParseAvailabilitySpec() {
   } else {
     // Parse the platform name.
     if (Tok.is(tok::code_completion)) {
-      Actions.CodeCompleteAvailabilityPlatformName();
       cutOffParsing();
+      Actions.CodeCompleteAvailabilityPlatformName();
       return None;
     }
     if (Tok.isNot(tok::identifier)) {

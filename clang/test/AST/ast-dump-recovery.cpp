@@ -250,7 +250,7 @@ using Escape = decltype([] { return undef(); }());
 // CHECK-NEXT: `-RecoveryExpr {{.*}} '<dependent type>' contains-errors lvalue
 // CHECK-NEXT:   `-InitListExpr
 // CHECK-NEXT:     `-DesignatedInitExpr {{.*}} 'void'
-// CHECK-NEXT:       `-CXXNullPtrLiteralExpr {{.*}} 'nullptr_t'
+// CHECK-NEXT:       `-CXXNullPtrLiteralExpr {{.*}} 'std::nullptr_t'
 struct {
   int& abc;
 } NoCrashOnInvalidInitList = {
@@ -297,13 +297,57 @@ void InvalidCondition() {
   invalid() ? 1 : 2;
 }
 
-void abcc();
-void TypoCorrection() {
-  // RecoveryExpr is always dependent-type in this case in order to suppress
-  // following diagnostics.
-  // CHECK:      RecoveryExpr {{.*}} '<dependent type>'
-  // CHECK-NEXT: `-CallExpr {{.*}} 'void'
-  // CHECK-NEXT:   `-ImplicitCastExpr
-  // CHECK-NEXT:     `-DeclRefExpr {{.*}} 'abcc'
-  abc();
+void CtorInitializer() {
+  struct S{int m};
+  class MemberInit {
+    int x, y, z;
+    S s;
+    MemberInit() : x(invalid), y(invalid, invalid), z(invalid()), s(1,2) {}
+    // CHECK:      CXXConstructorDecl {{.*}} MemberInit 'void ()'
+    // CHECK-NEXT: |-CXXCtorInitializer Field {{.*}} 'x' 'int'
+    // CHECK-NEXT: | `-ParenListExpr
+    // CHECK-NEXT: |   `-RecoveryExpr {{.*}} '<dependent type>'
+    // CHECK-NEXT: |-CXXCtorInitializer Field {{.*}} 'y' 'int'
+    // CHECK-NEXT: | `-ParenListExpr
+    // CHECK-NEXT: |   |-RecoveryExpr {{.*}} '<dependent type>'
+    // CHECK-NEXT: |   `-RecoveryExpr {{.*}} '<dependent type>'
+    // CHECK-NEXT: |-CXXCtorInitializer Field {{.*}} 'z' 'int'
+    // CHECK-NEXT: | `-ParenListExpr
+    // CHECK-NEXT: |   `-RecoveryExpr {{.*}} '<dependent type>'
+    // CHECK-NEXT: |     `-UnresolvedLookupExpr {{.*}} '<overloaded function type>'
+    // CHECK-NEXT: |-CXXCtorInitializer Field {{.*}} 's' 'S'
+    // CHECK-NEXT: | `-RecoveryExpr {{.*}} 'S' contains-errors
+    // CHECK-NEXT: |   |-IntegerLiteral {{.*}} 1
+    // CHECK-NEXT: |   `-IntegerLiteral {{.*}} 2
+  };
+  class BaseInit : S {
+    BaseInit(float) : S("no match") {}
+    // CHECK:      CXXConstructorDecl {{.*}} BaseInit 'void (float)'
+    // CHECK-NEXT: |-ParmVarDecl
+    // CHECK-NEXT: |-CXXCtorInitializer 'S'
+    // CHECK-NEXT: | `-RecoveryExpr {{.*}} 'S'
+    // CHECK-NEXT: |   `-StringLiteral
+
+    BaseInit(double) : S(invalid) {}
+    // CHECK:      CXXConstructorDecl {{.*}} BaseInit 'void (double)'
+    // CHECK-NEXT: |-ParmVarDecl
+    // CHECK-NEXT: |-CXXCtorInitializer 'S'
+    // CHECK-NEXT: | `-ParenListExpr
+    // CHECK-NEXT: |   `-RecoveryExpr {{.*}} '<dependent type>'
+  };
+  class DelegatingInit {
+    DelegatingInit(float) : DelegatingInit("no match") {}
+    // CHECK:      CXXConstructorDecl {{.*}} DelegatingInit 'void (float)'
+    // CHECK-NEXT: |-ParmVarDecl
+    // CHECK-NEXT: |-CXXCtorInitializer 'DelegatingInit'
+    // CHECK-NEXT: | `-RecoveryExpr {{.*}} 'DelegatingInit'
+    // CHECK-NEXT: |   `-StringLiteral
+
+    DelegatingInit(double) : DelegatingInit(invalid) {}
+    // CHECK:      CXXConstructorDecl {{.*}} DelegatingInit 'void (double)'
+    // CHECK-NEXT: |-ParmVarDecl
+    // CHECK-NEXT: |-CXXCtorInitializer 'DelegatingInit'
+    // CHECK-NEXT: | `-ParenListExpr
+    // CHECK-NEXT: |   `-RecoveryExpr {{.*}} '<dependent type>'
+  };
 }

@@ -14,6 +14,7 @@
 // RUN: 2>&1 | FileCheck %s
 
 // check code object alignment in dumped llvm-mc input
+// CHECK: .protected __hip_fatbin
 // CHECK: .p2align 12
 
 // emit objects for host side path
@@ -21,6 +22,7 @@
 // CHECK-SAME: "-aux-triple" "amdgcn-amd-amdhsa"
 // CHECK-SAME: "-emit-obj"
 // CHECK-SAME: {{.*}} "-main-file-name" "a.cu"
+// CHECK-SAME: "-fgpu-rdc"
 // CHECK-SAME: {{.*}} "-o" [[A_OBJ_HOST:".*o"]] "-x" "hip"
 // CHECK-SAME: {{.*}} [[A_SRC:".*a.cu"]]
 
@@ -28,29 +30,32 @@
 // CHECK-SAME: "-aux-triple" "amdgcn-amd-amdhsa"
 // CHECK-SAME: "-emit-obj"
 // CHECK-SAME: {{.*}} "-main-file-name" "b.hip"
+// CHECK-SAME: "-fgpu-rdc"
 // CHECK-SAME: {{.*}} "-o" [[B_OBJ_HOST:".*o"]] "-x" "hip"
 // CHECK-SAME: {{.*}} [[B_SRC:".*b.hip"]]
 
 // generate image for device side path on gfx803
-// CHECK: [[CLANG]] "-cc1" "-mllvm" "--amdhsa-code-object-version={{[0-9]+}}" "-triple" "amdgcn-amd-amdhsa"
+// CHECK: [[CLANG]] "-cc1" "-triple" "amdgcn-amd-amdhsa"
 // CHECK-SAME: "-aux-triple" "x86_64-unknown-linux-gnu"
 // CHECK-SAME: "-emit-llvm-bc"
 // CHECK-SAME: {{.*}} "-main-file-name" "a.cu"
-// CHECK-SAME: "-fcuda-is-device" "-fgpu-rdc" "-fcuda-allow-variadic-functions" "-fvisibility" "hidden"
+// CHECK-SAME: "-fcuda-is-device" "-fcuda-allow-variadic-functions" "-fvisibility" "hidden"
 // CHECK-SAME: "-fapply-global-visibility-to-externs"
 // CHECK-SAME: "{{.*}}lib1.bc" "{{.*}}lib2.bc"
 // CHECK-SAME: "-target-cpu" "gfx803"
+// CHECK-SAME: "-fgpu-rdc"
 // CHECK-SAME: {{.*}} "-o" [[A_BC1:".*bc"]] "-x" "hip"
 // CHECK-SAME: {{.*}} [[A_SRC]]
 
-// CHECK: [[CLANG]] "-cc1" "-mllvm" "--amdhsa-code-object-version={{[0-9]+}}" "-triple" "amdgcn-amd-amdhsa"
+// CHECK: [[CLANG]] "-cc1" "-triple" "amdgcn-amd-amdhsa"
 // CHECK-SAME: "-aux-triple" "x86_64-unknown-linux-gnu"
 // CHECK-SAME: "-emit-llvm-bc"
 // CHECK-SAME: {{.*}} "-main-file-name" "b.hip"
-// CHECK-SAME: "-fcuda-is-device" "-fgpu-rdc" "-fcuda-allow-variadic-functions" "-fvisibility" "hidden"
+// CHECK-SAME: "-fcuda-is-device" "-fcuda-allow-variadic-functions" "-fvisibility" "hidden"
 // CHECK-SAME: "-fapply-global-visibility-to-externs"
 // CHECK-SAME: "{{.*}}lib1.bc" "{{.*}}lib2.bc"
 // CHECK-SAME: "-target-cpu" "gfx803"
+// CHECK-SAME: "-fgpu-rdc"
 // CHECK-SAME: {{.*}} "-o" [[B_BC1:".*bc"]] "-x" "hip"
 // CHECK-SAME: {{.*}} [[B_SRC]]
 
@@ -62,23 +67,24 @@
 // CHECK-SAME: "-o" "[[IMG_DEV1:.*.out]]" [[A_BC1]] [[B_BC1]]
 
 // generate image for device side path on gfx900
-// CHECK: [[CLANG]] "-cc1" "-mllvm" "--amdhsa-code-object-version={{[0-9]+}}" "-triple" "amdgcn-amd-amdhsa"
+// CHECK: [[CLANG]] "-cc1" "-triple" "amdgcn-amd-amdhsa"
 // CHECK-SAME: "-aux-triple" "x86_64-unknown-linux-gnu"
 // CHECK-SAME: "-emit-llvm-bc"
 // CHECK-SAME: {{.*}} "-main-file-name" "a.cu"
-// CHECK-SAME: "-fcuda-is-device" "-fgpu-rdc"
+// CHECK-SAME: "-fcuda-is-device"
 // CHECK-SAME: "{{.*}}lib1.bc" "{{.*}}lib2.bc"
 // CHECK-SAME: "-target-cpu" "gfx900"
 // CHECK-SAME: {{.*}} "-o" [[A_BC2:".*bc"]] "-x" "hip"
 // CHECK-SAME: {{.*}} [[A_SRC]]
 
-// CHECK: [[CLANG]] "-cc1" "-mllvm" "--amdhsa-code-object-version={{[0-9]+}}" "-triple" "amdgcn-amd-amdhsa"
+// CHECK: [[CLANG]] "-cc1" "-triple" "amdgcn-amd-amdhsa"
 // CHECK-SAME: "-aux-triple" "x86_64-unknown-linux-gnu"
 // CHECK-SAME: "-emit-llvm-bc"
 // CHECK-SAME: {{.*}} "-main-file-name" "b.hip"
-// CHECK-SAME: "-fcuda-is-device" "-fgpu-rdc"
+// CHECK-SAME: "-fcuda-is-device"
 // CHECK-SAME: "{{.*}}lib1.bc" "{{.*}}lib2.bc"
 // CHECK-SAME: "-target-cpu" "gfx900"
+// CHECK-SAME: "-fgpu-rdc"
 // CHECK-SAME: {{.*}} "-o" [[B_BC2:".*bc"]] "-x" "hip"
 // CHECK-SAME: {{.*}} [[B_SRC]]
 
@@ -92,7 +98,7 @@
 // combine images generated into hip fat binary object
 // CHECK: [[BUNDLER:".*clang-offload-bundler"]] "-type=o"
 // CHECK-SAME: "-bundle-align=4096"
-// CHECK-SAME: "-targets={{.*}},hip-amdgcn-amd-amdhsa--gfx803,hip-amdgcn-amd-amdhsa--gfx900"
+// CHECK-SAME: "-targets={{.*}},hipv4-amdgcn-amd-amdhsa--gfx803,hipv4-amdgcn-amd-amdhsa--gfx900"
 // CHECK-SAME: "-inputs={{.*}},[[IMG_DEV1]],[[IMG_DEV2]]" "-outputs=[[BUNDLE:.*hipfb]]"
 
 // CHECK: [[MC:".*llvm-mc.*"]] "-o" [[OBJBUNDLE:".*o"]] "{{.*}}.mcin" "--filetype=obj"

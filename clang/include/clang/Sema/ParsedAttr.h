@@ -39,6 +39,7 @@ class IdentifierInfo;
 class LangOptions;
 class ParsedAttr;
 class Sema;
+class Stmt;
 class TargetInfo;
 
 struct ParsedAttrInfo {
@@ -66,6 +67,8 @@ struct ParsedAttrInfo {
     const char *NormalizedFullName;
   };
   ArrayRef<Spelling> Spellings;
+  // The names of the known arguments of this attribute.
+  ArrayRef<const char *> ArgNames;
 
   ParsedAttrInfo(AttributeCommonInfo::Kind AttrKind =
                      AttributeCommonInfo::NoSemaHandlerAttribute)
@@ -80,11 +83,20 @@ struct ParsedAttrInfo {
                                     const Decl *D) const {
     return true;
   }
-  /// Check if this attribute is allowed by the language we are compiling, and
-  /// issue a diagnostic if not.
-  virtual bool diagLangOpts(Sema &S, const ParsedAttr &Attr) const {
+  /// Check if this attribute appertains to St, and issue a diagnostic if not.
+  virtual bool diagAppertainsToStmt(Sema &S, const ParsedAttr &Attr,
+                                    const Stmt *St) const {
     return true;
   }
+  /// Check if the given attribute is mutually exclusive with other attributes
+  /// already applied to the given declaration.
+  virtual bool diagMutualExclusion(Sema &S, const ParsedAttr &A,
+                                   const Decl *D) const {
+    return true;
+  }
+  /// Check if this attribute is allowed by the language we are compiling.
+  virtual bool acceptsLangOpts(const LangOptions &LO) const { return true; }
+
   /// Check if this attribute is allowed when compiling for the given target.
   virtual bool existsInTarget(const TargetInfo &Target) const {
     return true;
@@ -113,6 +125,7 @@ struct ParsedAttrInfo {
   }
 
   static const ParsedAttrInfo &get(const AttributeCommonInfo &A);
+  static ArrayRef<const ParsedAttrInfo *> getAllBuiltin();
 };
 
 typedef llvm::Registry<ParsedAttrInfo> ParsedAttrInfoRegistry;
@@ -573,6 +586,16 @@ public:
     return MacroExpansionLoc;
   }
 
+  /// Check if the attribute has exactly as many args as Num. May output an
+  /// error. Returns false if a diagnostic is produced.
+  bool checkExactlyNumArgs(class Sema &S, unsigned Num) const;
+  /// Check if the attribute has at least as many args as Num. May output an
+  /// error. Returns false if a diagnostic is produced.
+  bool checkAtLeastNumArgs(class Sema &S, unsigned Num) const;
+  /// Check if the attribute has at most as many args as Num. May output an
+  /// error. Returns false if a diagnostic is produced.
+  bool checkAtMostNumArgs(class Sema &S, unsigned Num) const;
+
   bool isTargetSpecificAttr() const;
   bool isTypeAttr() const;
   bool isStmtAttr() const;
@@ -582,6 +605,14 @@ public:
   unsigned getMaxArgs() const;
   bool hasVariadicArg() const;
   bool diagnoseAppertainsTo(class Sema &S, const Decl *D) const;
+  bool diagnoseAppertainsTo(class Sema &S, const Stmt *St) const;
+  bool diagnoseMutualExclusion(class Sema &S, const Decl *D) const;
+  // This function stub exists for parity with the declaration checking code so
+  // that checkCommonAttributeFeatures() can work generically on declarations
+  // or statements.
+  bool diagnoseMutualExclusion(class Sema &S, const Stmt *St) const {
+    return true;
+  }
   bool appliesToDecl(const Decl *D, attr::SubjectMatchRule MatchRule) const;
   void getMatchRules(const LangOptions &LangOpts,
                      SmallVectorImpl<std::pair<attr::SubjectMatchRule, bool>>
@@ -598,8 +629,8 @@ public:
   /// a Spelling enumeration, the value UINT_MAX is returned.
   unsigned getSemanticSpelling() const;
 
-  /// If this is an OpenCL addr space attribute returns its representation
-  /// in LangAS, otherwise returns default addr space.
+  /// If this is an OpenCL address space attribute, returns its representation
+  /// in LangAS, otherwise returns default address space.
   LangAS asOpenCLLangAS() const {
     switch (getParsedKind()) {
     case ParsedAttr::AT_OpenCLConstantAddressSpace:
@@ -616,6 +647,26 @@ public:
       return LangAS::opencl_private;
     case ParsedAttr::AT_OpenCLGenericAddressSpace:
       return LangAS::opencl_generic;
+    default:
+      return LangAS::Default;
+    }
+  }
+
+  /// If this is an OpenCL address space attribute, returns its SYCL
+  /// representation in LangAS, otherwise returns default address space.
+  LangAS asSYCLLangAS() const {
+    switch (getKind()) {
+    case ParsedAttr::AT_OpenCLGlobalAddressSpace:
+      return LangAS::sycl_global;
+    case ParsedAttr::AT_OpenCLGlobalDeviceAddressSpace:
+      return LangAS::sycl_global_device;
+    case ParsedAttr::AT_OpenCLGlobalHostAddressSpace:
+      return LangAS::sycl_global_host;
+    case ParsedAttr::AT_OpenCLLocalAddressSpace:
+      return LangAS::sycl_local;
+    case ParsedAttr::AT_OpenCLPrivateAddressSpace:
+      return LangAS::sycl_private;
+    case ParsedAttr::AT_OpenCLGenericAddressSpace:
     default:
       return LangAS::Default;
     }
@@ -1017,6 +1068,27 @@ private:
   mutable AttributePool pool;
 };
 
+struct ParsedAttributesWithRange : ParsedAttributes {
+  ParsedAttributesWithRange(AttributeFactory &factory)
+      : ParsedAttributes(factory) {}
+
+  void clear() {
+    ParsedAttributes::clear();
+    Range = SourceRange();
+  }
+
+  SourceRange Range;
+};
+struct ParsedAttributesViewWithRange : ParsedAttributesView {
+  ParsedAttributesViewWithRange() : ParsedAttributesView() {}
+  void clearListOnly() {
+    ParsedAttributesView::clearListOnly();
+    Range = SourceRange();
+  }
+
+  SourceRange Range;
+};
+
 /// These constants match the enumerated choices of
 /// err_attribute_argument_n_type and err_attribute_argument_type.
 enum AttributeArgumentNType {
@@ -1047,14 +1119,14 @@ enum AttributeDeclKind {
 
 inline const StreamingDiagnostic &operator<<(const StreamingDiagnostic &DB,
                                              const ParsedAttr &At) {
-  DB.AddTaggedVal(reinterpret_cast<intptr_t>(At.getAttrName()),
+  DB.AddTaggedVal(reinterpret_cast<uint64_t>(At.getAttrName()),
                   DiagnosticsEngine::ak_identifierinfo);
   return DB;
 }
 
 inline const StreamingDiagnostic &operator<<(const StreamingDiagnostic &DB,
                                              const ParsedAttr *At) {
-  DB.AddTaggedVal(reinterpret_cast<intptr_t>(At->getAttrName()),
+  DB.AddTaggedVal(reinterpret_cast<uint64_t>(At->getAttrName()),
                   DiagnosticsEngine::ak_identifierinfo);
   return DB;
 }
@@ -1069,7 +1141,7 @@ template <typename ACI,
               std::is_same<ACI, AttributeCommonInfo>::value, int> = 0>
 inline const StreamingDiagnostic &operator<<(const StreamingDiagnostic &DB,
                                            const ACI &CI) {
-  DB.AddTaggedVal(reinterpret_cast<intptr_t>(CI.getAttrName()),
+  DB.AddTaggedVal(reinterpret_cast<uint64_t>(CI.getAttrName()),
                   DiagnosticsEngine::ak_identifierinfo);
   return DB;
 }
@@ -1079,7 +1151,7 @@ template <typename ACI,
               std::is_same<ACI, AttributeCommonInfo>::value, int> = 0>
 inline const StreamingDiagnostic &operator<<(const StreamingDiagnostic &DB,
                                            const ACI* CI) {
-  DB.AddTaggedVal(reinterpret_cast<intptr_t>(CI->getAttrName()),
+  DB.AddTaggedVal(reinterpret_cast<uint64_t>(CI->getAttrName()),
                   DiagnosticsEngine::ak_identifierinfo);
   return DB;
 }

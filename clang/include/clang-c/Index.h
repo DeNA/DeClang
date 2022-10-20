@@ -2189,7 +2189,17 @@ enum CXCursorKind {
    */
   CXCursor_CXXAddrspaceCastExpr = 152,
 
-  CXCursor_LastExpr = CXCursor_CXXAddrspaceCastExpr,
+  /**
+   * Expression that references a C++20 concept.
+   */
+  CXCursor_ConceptSpecializationExpr = 153,
+
+  /**
+   * Expression that references a C++20 concept.
+   */
+  CXCursor_RequiresExpr = 154,
+
+  CXCursor_LastExpr = CXCursor_RequiresExpr,
 
   /* Statements */
   CXCursor_FirstStmt = 200,
@@ -2568,7 +2578,35 @@ enum CXCursorKind {
    */
   CXCursor_OMPScanDirective = 287,
 
-  CXCursor_LastStmt = CXCursor_OMPScanDirective,
+  /** OpenMP tile directive.
+   */
+  CXCursor_OMPTileDirective = 288,
+
+  /** OpenMP canonical loop.
+   */
+  CXCursor_OMPCanonicalLoop = 289,
+
+  /** OpenMP interop directive.
+   */
+  CXCursor_OMPInteropDirective = 290,
+
+  /** OpenMP dispatch directive.
+   */
+  CXCursor_OMPDispatchDirective = 291,
+
+  /** OpenMP masked directive.
+   */
+  CXCursor_OMPMaskedDirective = 292,
+
+  /** OpenMP unroll directive.
+   */
+  CXCursor_OMPUnrollDirective = 293,
+
+  /** OpenMP metadirective directive.
+   */
+  CXCursor_OMPMetaDirective = 294,
+
+  CXCursor_LastStmt = CXCursor_OMPMetaDirective,
 
   /**
    * Cursor that represents the translation unit itself.
@@ -2652,8 +2690,13 @@ enum CXCursorKind {
    * a friend declaration.
    */
   CXCursor_FriendDecl = 603,
+  /**
+   * a concept declaration.
+   */
+  CXCursor_ConceptDecl = 604,
+
   CXCursor_FirstExtraDecl = CXCursor_ModuleImportDecl,
-  CXCursor_LastExtraDecl = CXCursor_FriendDecl,
+  CXCursor_LastExtraDecl = CXCursor_ConceptDecl,
 
   /**
    * A code completion overload candidate.
@@ -3274,8 +3317,9 @@ enum CXTypeKind {
   CXType_UAccum = 37,
   CXType_ULongAccum = 38,
   CXType_BFloat16 = 39,
+  CXType_Ibm128 = 40,
   CXType_FirstBuiltin = CXType_Void,
-  CXType_LastBuiltin = CXType_BFloat16,
+  CXType_LastBuiltin = CXType_Ibm128,
 
   CXType_Complex = 100,
   CXType_Pointer = 101,
@@ -6268,7 +6312,8 @@ typedef enum {
   CXIdxEntity_CXXDestructor = 23,
   CXIdxEntity_CXXConversionFunction = 24,
   CXIdxEntity_CXXTypeAlias = 25,
-  CXIdxEntity_CXXInterface = 26
+  CXIdxEntity_CXXInterface = 26,
+  CXIdxEntity_CXXConcept = 27
 
 } CXIdxEntityKind;
 

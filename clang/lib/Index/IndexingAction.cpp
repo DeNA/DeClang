@@ -11,6 +11,7 @@
 #include "FileIndexRecord.h"
 #include "IndexDataStoreUtils.h"
 #include "IndexingContext.h"
+#include "clang/Basic/PathRemapper.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendAction.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
@@ -78,6 +79,25 @@ public:
   void Ifndef(SourceLocation Loc, const Token &MacroNameTok,
               const MacroDefinition &MD) override {
     if (!MD.getMacroInfo()) // Ignore nonexistent macro.
+      return;
+    IndexCtx->handleMacroReference(*MacroNameTok.getIdentifierInfo(),
+                                   MacroNameTok.getLocation(),
+                                   *MD.getMacroInfo());
+  }
+
+  using PPCallbacks::Elifdef;
+  using PPCallbacks::Elifndef;
+  void Elifdef(SourceLocation Loc, const Token &MacroNameTok,
+               const MacroDefinition &MD) override {
+    if (!MD.getMacroInfo()) // Ignore non-existent macro.
+      return;
+    IndexCtx->handleMacroReference(*MacroNameTok.getIdentifierInfo(),
+                                   MacroNameTok.getLocation(),
+                                   *MD.getMacroInfo());
+  }
+  void Elifndef(SourceLocation Loc, const Token &MacroNameTok,
+                const MacroDefinition &MD) override {
+    if (!MD.getMacroInfo()) // Ignore non-existent macro.
       return;
     IndexCtx->handleMacroReference(*MacroNameTok.getIdentifierInfo(),
                                    MacroNameTok.getLocation(),
@@ -520,8 +540,8 @@ public:
           [&](serialization::ModuleFile &Mod) -> bool {
             bool isSystemMod = false;
             if (Mod.isModule()) {
-              if (auto *M =
-                      HS.lookupModule(Mod.ModuleName, /*AllowSearch=*/false))
+              if (auto *M = HS.lookupModule(Mod.ModuleName, SourceLocation(),
+                                            /*AllowSearch=*/false))
                 isSystemMod = M->IsSystem;
             }
             if (!isSystemMod || needSystemDependencies())
@@ -672,6 +692,10 @@ protected:
     return std::make_unique<MultiplexConsumer>(std::move(Consumers));
   }
 
+  void EndSourceFile() override {
+    FrontendAction::EndSourceFile();
+  }
+
   void EndSourceFileAction() override {
     // Invoke wrapped action's method.
     WrapperFrontendAction::EndSourceFileAction();
@@ -750,7 +774,7 @@ void IndexRecordActionBase::finish(CompilerInstance &CI) {
     RootFile = SM.getFileEntryForID(SM.getMainFileID());
   }
   if (isModuleGeneration) {
-    UnitMod = HS.lookupModule(CI.getLangOpts().CurrentModule,
+    UnitMod = HS.lookupModule(CI.getLangOpts().CurrentModule, SourceLocation(),
                               /*AllowSearch=*/false);
   }
 
@@ -805,11 +829,18 @@ static void writeUnitData(const CompilerInstance &CI,
         return Mod;
     return nullptr;
   };
+  PathRemapper Remapper;
+  auto &PrefixMap = CI.getCodeGenOpts().DebugPrefixMap;
+  // We need to add in reverse order since the `DebugPrefixMap` currently sorts
+  // ascending instead of descending, but we want `foo/subpath/` to come before
+  // `foo/`.
+  for (auto It = PrefixMap.rbegin(); It != PrefixMap.rend(); ++It)
+    Remapper.addMapping(It->first, It->second);
 
   IndexUnitWriter UnitWriter(
       CI.getFileManager(), DataPath, "clang", getClangVersion(), OutputFile,
       ModuleName, RootFile, IsSystemUnit, IsModuleUnit, IsDebugCompilation,
-      CI.getTargetOpts().Triple, SysrootPath, getModuleInfo);
+      CI.getTargetOpts().Triple, SysrootPath, Remapper, getModuleInfo);
 
   DepProvider.visitFileDependencies(
       CI, [&](const FileEntry *FE, bool isSystemFile) {
@@ -819,11 +850,15 @@ static void writeUnitData(const CompilerInstance &CI,
       [&](const FileEntry *Source, unsigned Line, const FileEntry *Target) {
         UnitWriter.addInclude(Source, Line, Target);
       });
+  bool IndexPcms = IndexOpts.IndexPcms;
+  bool WithoutUnitName = !IndexPcms;
   DepProvider.visitModuleImports(CI, [&](serialization::ModuleFile &Mod,
                                          bool isSystemMod) {
-    Module *UnitMod = HS.lookupModule(Mod.ModuleName, /*AllowSearch=*/false);
-    UnitWriter.addASTFileDependency(Mod.File, isSystemMod, UnitMod);
-    if (Mod.isModule()) {
+    Module *UnitMod = HS.lookupModule(Mod.ModuleName, Mod.ImportLoc,
+                                      /*AllowSearch=*/false);
+    UnitWriter.addASTFileDependency(Mod.File, isSystemMod, UnitMod,
+                                    WithoutUnitName);
+    if (Mod.isModule() && IndexPcms) {
       produceIndexDataForModuleFile(Mod, CI, IndexOpts, RecordOpts, UnitWriter);
     }
   });
@@ -904,7 +939,8 @@ public:
     HeaderSearch &HS = CI.getPreprocessor().getHeaderSearchInfo();
     for (auto *Mod : ModFile.Imports) {
       bool isSystemMod = false;
-      if (auto *M = HS.lookupModule(Mod->ModuleName, /*AllowSearch=*/false))
+      if (auto *M = HS.lookupModule(Mod->ModuleName, Mod->ImportLoc,
+                                    /*AllowSearch=*/false))
         isSystemMod = M->IsSystem;
       if (!isSystemMod || RecordOpts.RecordSystemDependencies)
         visitor(*Mod, isSystemMod);
@@ -922,7 +958,8 @@ static void indexModule(serialization::ModuleFile &Mod,
 
   StringRef SysrootPath = CI.getHeaderSearchOpts().Sysroot;
   HeaderSearch &HS = CI.getPreprocessor().getHeaderSearchInfo();
-  Module *UnitMod = HS.lookupModule(Mod.ModuleName, /*AllowSearch=*/false);
+  Module *UnitMod =
+      HS.lookupModule(Mod.ModuleName, Mod.ImportLoc, /*AllowSearch=*/false);
 
   IndexDataRecorder Recorder;
   IndexingContext IndexCtx(IndexOpts, Recorder);
@@ -993,6 +1030,7 @@ getIndexOptionsFromFrontendOptions(const FrontendOptions &FEOpts) {
   }
   IndexOpts.IndexMacros = !FEOpts.IndexIgnoreMacros;
   IndexOpts.IndexMacrosInPreprocessor = !FEOpts.IndexIgnoreMacros;
+  IndexOpts.IndexPcms = !FEOpts.IndexIgnorePcms;
   RecordOpts.RecordSymbolCodeGenName = FEOpts.IndexRecordCodegenName;
   return {IndexOpts, RecordOpts};
 }

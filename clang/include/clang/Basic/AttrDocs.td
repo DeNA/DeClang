@@ -22,7 +22,7 @@
 // Windows (from within the clang\docs directory):
 //   make.bat html
 // Non-Windows (from within the clang\docs directory):
-//   make -f Makefile.sphinx html
+//   sphinx-build -b html _build/html
 
 def GlobalDocumentation {
   code Intro =[{..
@@ -55,6 +55,55 @@ The ``section`` attribute allows you to specify a specific section a
 global variable or function should be in after translation.
   }];
   let Heading = "section, __declspec(allocate)";
+}
+
+def UsedDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+This attribute, when attached to a function or variable definition, indicates
+that there may be references to the entity which are not apparent in the source
+code.  For example, it may be referenced from inline ``asm``, or it may be
+found through a dynamic symbol or section lookup.
+
+The compiler must emit the definition even if it appears to be unused, and it
+must not apply optimizations which depend on fully understanding how the entity
+is used.
+
+Whether this attribute has any effect on the linker depends on the target and
+the linker. Most linkers support the feature of section garbage collection
+(``--gc-sections``), also known as "dead stripping" (``ld64 -dead_strip``) or
+discarding unreferenced sections (``link.exe /OPT:REF``). On COFF and Mach-O
+targets (Windows and Apple platforms), the `used` attribute prevents symbols
+from being removed by linker section GC. On ELF targets, it has no effect on its
+own, and the linker may remove the definition if it is not otherwise referenced.
+This linker GC can be avoided by also adding the ``retain`` attribute.  Note
+that ``retain`` requires special support from the linker; see that attribute's
+documentation for further information.
+  }];
+}
+
+def RetainDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+This attribute, when attached to a function or variable definition, prevents
+section garbage collection in the linker. It does not prevent other discard
+mechanisms, such as archive member selection, and COMDAT group resolution.
+
+If the compiler does not emit the definition, e.g. because it was not used in
+the translation unit or the compiler was able to eliminate all of the uses,
+this attribute has no effect.  This attribute is typically combined with the
+``used`` attribute to force the definition to be emitted and preserved into the
+final linked image.
+
+This attribute is only necessary on ELF targets; other targets prevent section
+garbage collection by the linker when using the ``used`` attribute alone.
+Using the attributes together should result in consistent behavior across
+targets.
+
+This attribute requires the linker to support the ``SHF_GNU_RETAIN`` extension.
+This support is available in GNU ``ld`` and ``gold`` as of binutils 2.36, as
+well as in ``ld.lld`` 13.
+  }];
 }
 
 def InitPriorityDocs : Documentation {
@@ -391,6 +440,32 @@ over the tradeoff between code size and debug information precision.
 ``nomerge`` attribute can also be used as function attribute to prevent all 
 calls to the specified function from merging. It has no effect on indirect 
 calls.
+  }];
+}
+
+def MustTailDocs : Documentation {
+  let Category = DocCatStmt;
+  let Content = [{
+If a ``return`` statement is marked ``musttail``, this indicates that the
+compiler must generate a tail call for the program to be correct, even when
+optimizations are disabled. This guarantees that the call will not cause
+unbounded stack growth if it is part of a recursive cycle in the call graph.
+
+If the callee is a virtual function that is implemented by a thunk, there is
+no guarantee in general that the thunk tail-calls the implementation of the
+virtual function, so such a call in a recursive cycle can still result in
+unbounded stack growth.
+
+``clang::musttail`` can only be applied to a ``return`` statement whose value
+is the result of a function call (even functions returning void must use
+``return``, although no value is returned). The target function must have the
+same number of arguments as the caller. The types of the return value and all
+arguments must be similar according to C++ rules (differing only in cv
+qualifiers or array size), including the implicit "this" argument, if any.
+Any variables in scope, including all arguments to the function and the
+return value must be trivially destructible. The calling convention of the
+caller and callee must match, and they must not be variadic functions or have
+old style K&R C function declarations.
   }];
 }
 
@@ -1048,8 +1123,18 @@ def NoDebugDocs : Documentation {
   let Category = DocCatVariable;
   let Content = [{
 The ``nodebug`` attribute allows you to suppress debugging information for a
-function or method, or for a variable that is not a parameter or a non-static
-data member.
+function or method, for a variable that is not a parameter or a non-static
+data member, or for a typedef or using declaration.
+  }];
+}
+
+def StandaloneDebugDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The ``standalone_debug`` attribute causes debug info to be emitted for a record
+type regardless of the debug info optimizations that are enabled with
+-fno-standalone-debug. This attribute only has an effect when debug info
+optimizations are enabled (e.g. with -fno-standalone-debug), and is C++-only.
   }];
 }
 
@@ -2085,6 +2170,17 @@ preserving struct or union member access debuginfo indices of this
 struct or union, similar to clang ``__builtin_preserve_access_index()``.
   }];
 }
+def BTFDeclTagDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+Clang supports the ``__attribute__((btf_decl_tag("ARGUMENT")))`` attribute for
+all targets. This attribute may be attached to a struct/union, struct/union
+field, function, function parameter, variable or typedef declaration. If -g is
+specified, the ``ARGUMENT`` info will be preserved in IR and be emitted to
+dwarf. For BPF targets, the ``ARGUMENT`` info will be emitted to .BTF ELF
+section too.
+  }];
+}
 
 def MipsInterruptDocs : Documentation {
   let Category = DocCatFunction;
@@ -2633,20 +2729,48 @@ This attribute accepts a single parameter that must be one of the following:
   }];
 }
 
+def NoProfileInstrumentFunctionDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+Use the ``no_profile_instrument_function`` attribute on a function declaration
+to denote that the compiler should not instrument the function with
+profile-related instrumentation, such as via the
+``-fprofile-generate`` / ``-fprofile-instr-generate`` /
+``-fcs-profile-generate`` / ``-fprofile-arcs`` flags.
+}];
+}
+
 def NoSanitizeDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
 Use the ``no_sanitize`` attribute on a function or a global variable
 declaration to specify that a particular instrumentation or set of
-instrumentations should not be applied. The attribute takes a list of
-string literals, which have the same meaning as values accepted by the
-``-fno-sanitize=`` flag. For example,
-``__attribute__((no_sanitize("address", "thread")))`` specifies that
-AddressSanitizer and ThreadSanitizer should not be applied to the
-function or variable.
+instrumentations should not be applied.
+
+The attribute takes a list of string literals with the following accepted
+values:
+* all values accepted by ``-fno-sanitize=``;
+* ``coverage``, to disable SanitizerCoverage instrumentation.
+
+For example, ``__attribute__((no_sanitize("address", "thread")))`` specifies
+that AddressSanitizer and ThreadSanitizer should not be applied to the function
+or variable. Using ``__attribute__((no_sanitize("coverage")))`` specifies that
+SanitizerCoverage should not be applied to the function.
 
 See :ref:`Controlling Code Generation <controlling-code-generation>` for a
 full list of supported sanitizer flags.
+  }];
+}
+
+def DisableSanitizerInstrumentationDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+Use the ``disable_sanitizer_instrumentation`` attribute on a function,
+Objective-C method, or global variable, to specify that no sanitizer
+instrumentation should be applied.
+
+This is not the same as ``__attribute__((no_sanitize(...)))``, which depending
+on the tool may still insert instrumentation to prevent false positive reports.
   }];
 }
 
@@ -3126,16 +3250,55 @@ It is only supported when using the Microsoft C++ ABI.
 def LifetimeBoundDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
-The ``lifetimebound`` attribute indicates that a resource owned by
-a function parameter or implicit object parameter
-is retained by the return value of the annotated function
-(or, for a parameter of a constructor, in the value of the constructed object).
-It is only supported in C++.
+The ``lifetimebound`` attribute on a function parameter or implicit object
+parameter indicates that objects that are referred to by that parameter may
+also be referred to by the return value of the annotated function (or, for a
+parameter of a constructor, by the value of the constructed object). It is only
+supported in C++.
 
-This attribute provides an experimental implementation of the facility
-described in the C++ committee paper `P0936R0 <http://wg21.link/p0936r0>`_,
-and is subject to change as the design of the corresponding functionality
-changes.
+By default, a reference is considered to refer to its referenced object, a
+pointer is considered to refer to its pointee, a ``std::initializer_list<T>``
+is considered to refer to its underlying array, and aggregates (arrays and
+simple ``struct``\s) are considered to refer to all objects that their
+transitive subobjects refer to.
+
+Clang warns if it is able to detect that an object or reference refers to
+another object with a shorter lifetime. For example, Clang will warn if a
+function returns a reference to a local variable, or if a reference is bound to
+a temporary object whose lifetime is not extended. By using the
+``lifetimebound`` attribute, this determination can be extended to look through
+user-declared functions. For example:
+
+.. code-block:: c++
+
+    // Returns m[key] if key is present, or default_value if not.
+    template<typename T, typename U>
+    const U &get_or_default(const std::map<T, U> &m [[clang::lifetimebound]],
+                            const T &key, /* note, not lifetimebound */
+                            const U &default_value [[clang::lifetimebound]]);
+
+    std::map<std::string, std::string> m;
+    // warning: temporary "bar"s that might be bound to local reference 'val'
+    // will be destroyed at the end of the full-expression
+    const std::string &val = get_or_default(m, "foo"s, "bar"s);
+
+    // No warning in this case.
+    std::string def_val = "bar"s;
+    const std::string &val = get_or_default(m, "foo"s, def_val);
+
+The attribute can be applied to the implicit ``this`` parameter of a member
+function by writing the attribute after the function type:
+
+.. code-block:: c++
+
+    struct string {
+      // The returned pointer should not outlive ``*this``.
+      const char *data() const [[clang::lifetimebound]];
+    };
+
+This attribute is inspired by the C++ committee paper `P0936R0
+<http://wg21.link/p0936r0>`_, but does not affect whether temporary objects
+have their lifetimes extended.
   }];
 }
 
@@ -3278,7 +3441,9 @@ def UnrollHintDocs : Documentation {
   let Content = [{
 Loop unrolling optimization hints can be specified with ``#pragma unroll`` and
 ``#pragma nounroll``. The pragma is placed immediately before a for, while,
-do-while, or c++11 range-based for loop.
+do-while, or c++11 range-based for loop. GCC's loop unrolling hints
+``#pragma GCC unroll`` and ``#pragma GCC nounroll`` are also supported and have
+identical semantics to ``#pragma unroll`` and ``#pragma nounroll``.
 
 Specifying ``#pragma unroll`` without a parameter directs the loop unroller to
 attempt to fully unroll the loop if the trip count is known at compile time and
@@ -3742,6 +3907,16 @@ parameter is undefined behavior, which the optimizer may take advantage of to,
 e.g., remove null checks. The ``_Nonnull`` type qualifier indicates that a
 pointer cannot be null in a more general manner (because it is part of the type
 system) and does not imply undefined behavior, making it more widely applicable.
+  }];
+}
+
+def RestrictDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "malloc";
+  let Content = [{
+The ``malloc`` attribute indicates that the function acts like a system memory
+allocation function, returning a pointer to allocated storage disjoint from the
+storage for any other object accessible to the caller.
   }];
 }
 
@@ -4216,9 +4391,8 @@ def NotTailCalledDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
 The ``not_tail_called`` attribute prevents tail-call optimization on statically
-bound calls. It has no effect on indirect calls. Virtual functions, objective-c
-methods, and functions marked as ``always_inline`` cannot be marked as
-``not_tail_called``.
+bound calls. Objective-c methods, and functions marked as ``always_inline``
+cannot be marked as ``not_tail_called``.
 
 For example, it prevents tail-call optimization in the following case:
 
@@ -4244,28 +4418,25 @@ However, it doesn't prevent tail-call optimization in this case:
       return (*fn)(a);
     }
 
-Marking virtual functions as ``not_tail_called`` is an error:
+Generally, marking an overriding virtual function as ``not_tail_called`` is
+not useful, because this attribute is a property of the static type. Calls
+made through a pointer or reference to the base class type will respect
+the ``not_tail_called`` attribute of the base class's member function,
+regardless of the runtime destination of the call:
 
   .. code-block:: c++
 
-    class Base {
-    public:
-      // not_tail_called on a virtual function is an error.
-      [[clang::not_tail_called]] virtual int foo1();
-
-      virtual int foo2();
-
-      // Non-virtual functions can be marked ``not_tail_called``.
-      [[clang::not_tail_called]] int foo3();
+    struct Foo { virtual void f(); };
+    struct Bar : Foo {
+      [[clang::not_tail_called]] void f() override;
     };
-
-    class Derived1 : public Base {
-    public:
-      int foo1() override;
-
-      // not_tail_called on a virtual function is an error.
-      [[clang::not_tail_called]] int foo2() override;
-    };
+    void callera(Bar& bar) {
+      Foo& foo = bar;
+      // not_tail_called has no effect on here, even though the
+      // underlying method is f from Bar.
+      foo.f();
+      bar.f(); // No tail-call optimization on here.
+    }
   }];
 }
 
@@ -4561,11 +4732,14 @@ provided it declares the right formal arguments.
 
 In most respects, this is similar to the ``swiftcall`` attribute, except for
 the following:
+
 - A parameter may be marked ``swift_async_context``, ``swift_context``
   or ``swift_indirect_result`` (with the same restrictions on parameter
   ordering as ``swiftcall``) but the parameter attribute
   ``swift_error_result`` is not permitted.
+
 - A ``swiftasynccall`` function must have return type ``void``.
+
 - Within a ``swiftasynccall`` function, a call to a ``swiftasynccall``
   function that is the immediate operand of a ``return`` statement is
   guaranteed to be performed as a tail call. This syntax is allowed even
@@ -4766,6 +4940,26 @@ the old mangled name and the new code will use the new mangled name with tags.
   }];
 }
 
+def BuiltinAliasDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "clang::builtin_alias, clang_builtin_alias";
+  let Content = [{
+This attribute is used in the implementation of the C intrinsics.
+It allows the C intrinsic functions to be declared using the names defined
+in target builtins, and still be recognized as clang builtins equivalent to the
+underlying name. For example, ``riscv_vector.h`` declares the function ``vadd``
+with ``__attribute__((clang_builtin_alias(__builtin_rvv_vadd_vv_i8m1)))``.
+This ensures that both functions are recognized as that clang builtin,
+and in the latter case, the choice of which builtin to identify the
+function as can be deferred until after overload resolution.
+
+This attribute can only be used to set up the aliases for certain ARM/RISC-V
+C intrinsic functions; it is intended for use only inside ``arm_*.h`` and
+``riscv_*.h`` and is not a general mechanism for declaring arbitrary aliases
+for clang builtin functions.
+  }];
+}
+
 def PreferredNameDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{
@@ -4954,6 +5148,9 @@ def PatchableFunctionEntryDocs : Documentation {
 before the function entry and N-M NOPs after the function entry. This attribute
 takes precedence over the command line option ``-fpatchable-function-entry=N,M``.
 ``M`` defaults to 0 if omitted.
+
+This attribute is only supported on
+aarch64/aarch64-be/riscv32/riscv64/i386/x86-64 targets.
 }];
 }
 
@@ -5659,6 +5856,17 @@ unbind runtime APIs.
   }];
 }
 
+def HIPManagedAttrDocs : Documentation {
+  let Category = DocCatDecl;
+  let Content = [{
+The ``__managed__`` attribute can be applied to a global variable declaration in HIP.
+A managed variable is emitted as an undefined global symbol in the device binary and is
+registered by ``__hipRegisterManagedVariable`` in init functions. The HIP runtime allocates
+managed memory and uses it to define the symbol when loading the device binary.
+A managed variable can be accessed in both device and host code.
+  }];
+}
+
 def LifetimeOwnerDocs : Documentation {
   let Category = DocCatDecl;
   let Content = [{
@@ -5746,6 +5954,10 @@ This attribute can only be used to set up the aliases for certain Arm
 intrinsic functions; it is intended for use only inside ``arm_*.h``
 and is not a general mechanism for declaring arbitrary aliases for
 clang builtin functions.
+
+In order to avoid duplicating the attribute definitions for similar
+purpose for other architecture, there is a general form for the
+attribute `clang_builtin_alias`.
   }];
 }
 
@@ -5786,6 +5998,31 @@ once.
   }];
 }
 
+def UsingIfExistsDocs : Documentation {
+  let Category = DocCatDecl;
+  let Content = [{
+The ``using_if_exists`` attribute applies to a using-declaration. It allows
+programmers to import a declaration that potentially does not exist, instead
+deferring any errors to the point of use. For instance:
+
+.. code-block:: c++
+
+  namespace empty_namespace {};
+  __attribute__((using_if_exists))
+  using empty_namespace::does_not_exist; // no error!
+
+  does_not_exist x; // error: use of unresolved 'using_if_exists'
+
+The C++ spelling of the attribte (`[[clang::using_if_exists]]`) is also
+supported as a clang extension, since ISO C++ doesn't support attributes in this
+position. If the entity referred to by the using-declaration is found by name
+lookup, the attribute has no effect. This attribute is useful for libraries
+(primarily, libc++) that wish to redeclare a set of declarations in another
+namespace, when the availability of those declarations is difficult or
+impossible to detect at compile time with the preprocessor.
+  }];
+}
+
 def HandleDocs : DocumentationCategory<"Handle Attributes"> {
   let Content = [{
 Handles are a way to identify resources like files, sockets, and processes.
@@ -5804,19 +6041,21 @@ def AcquireHandleDocs : Documentation {
 If this annotation is on a function or a function type it is assumed to return
 a new handle. In case this annotation is on an output parameter,
 the function is assumed to fill the corresponding argument with a new
-handle.
+handle. The attribute requires a string literal argument which used to
+identify the handle with later uses of ``use_handle`` or
+``release_handle``.
 
 .. code-block:: c++
 
   // Output arguments from Zircon.
   zx_status_t zx_socket_create(uint32_t options,
-                               zx_handle_t __attribute__((acquire_handle)) * out0,
-                               zx_handle_t* out1 [[clang::acquire_handle]]);
+                               zx_handle_t __attribute__((acquire_handle("zircon"))) * out0,
+                               zx_handle_t* out1 [[clang::acquire_handle("zircon")]]);
 
 
   // Returned handle.
-  [[clang::acquire_handle]] int open(const char *path, int oflag, ... );
-  int open(const char *path, int oflag, ... ) __attribute__((acquire_handle));
+  [[clang::acquire_handle("tag")]] int open(const char *path, int oflag, ... );
+  int open(const char *path, int oflag, ... ) __attribute__((acquire_handle("tag")));
   }];
 }
 
@@ -5824,12 +6063,13 @@ def UseHandleDocs : Documentation {
   let Category = HandleDocs;
   let Content = [{
 A function taking a handle by value might close the handle. If a function
-parameter is annotated with ``use_handle`` it is assumed to not to change
+parameter is annotated with ``use_handle(tag)`` it is assumed to not to change
 the state of the handle. It is also assumed to require an open handle to work with.
+The attribute requires a string literal argument to identify the handle being used.
 
 .. code-block:: c++
 
-  zx_status_t zx_port_wait(zx_handle_t handle [[clang::use_handle]],
+  zx_status_t zx_port_wait(zx_handle_t handle [[clang::use_handle("zircon")]],
                            zx_time_t deadline,
                            zx_port_packet_t* packet);
   }];
@@ -5838,12 +6078,13 @@ the state of the handle. It is also assumed to require an open handle to work wi
 def ReleaseHandleDocs : Documentation {
   let Category = HandleDocs;
   let Content = [{
-If a function parameter is annotated with ``release_handle`` it is assumed to
-close the handle. It is also assumed to require an open handle to work with.
+If a function parameter is annotated with ``release_handle(tag)`` it is assumed to
+close the handle. It is also assumed to require an open handle to work with. The
+attribute requires a string literal argument to identify the handle being released.
 
 .. code-block:: c++
 
-  zx_status_t zx_handle_close(zx_handle_t handle [[clang::release_handle]]);
+  zx_status_t zx_handle_close(zx_handle_t handle [[clang::release_handle("tag")]]);
   }];
 }
 
@@ -5988,5 +6229,31 @@ def EnforceTCBLeafDocs : Documentation {
   continue to check the functions called from within the leaf function.
 
   - ``enforce_tcb_leaf(Name)`` indicates that this function is a part of the TCB named ``Name``
+  }];
+}
+
+def ErrorAttrDocs : Documentation {
+  let Category = DocCatFunction;
+  let Heading = "error, warning";
+  let Content = [{
+The ``error`` and ``warning`` function attributes can be used to specify a
+custom diagnostic to be emitted when a call to such a function is not
+eliminated via optimizations. This can be used to create compile time
+assertions that depend on optimizations, while providing diagnostics
+pointing to precise locations of the call site in the source.
+
+.. code-block:: c++
+
+  __attribute__((warning("oh no"))) void dontcall();
+  void foo() {
+    if (someCompileTimeAssertionThatsTrue)
+      dontcall(); // Warning
+
+    dontcall(); // Warning
+
+    if (someCompileTimeAssertionThatsFalse)
+      dontcall(); // No Warning
+    sizeof(dontcall()); // No Warning
+  }
   }];
 }

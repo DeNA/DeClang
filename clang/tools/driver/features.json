@@ -8,6 +8,9 @@
     },
     {
       "name": "allow-pcm-with-compiler-errors"
+    },
+    {
+      "name": "vfs-redirecting-with"
     }
   ]
 }

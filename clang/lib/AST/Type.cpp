@@ -821,6 +821,13 @@ QualType ObjCObjectType::stripObjCKindOfTypeAndQuals(
                                /*isKindOf=*/false);
 }
 
+ObjCInterfaceDecl *ObjCInterfaceType::getDecl() const {
+  ObjCInterfaceDecl *Canon = Decl->getCanonicalDecl();
+  if (ObjCInterfaceDecl *Def = Canon->getDefinition())
+    return Def;
+  return Canon;
+}
+
 const ObjCObjectPointerType *ObjCObjectPointerType::stripObjCKindOfTypeAndQuals(
                                const ASTContext &ctx) const {
   if (!isKindOfType() && qual_empty())
@@ -1796,6 +1803,9 @@ namespace {
     }
 
     // Only these types can contain the desired 'auto' type.
+    Type *VisitSubstTemplateTypeParmType(const SubstTemplateTypeParmType *T) {
+      return Visit(T->getReplacementType());
+    }
 
     Type *VisitElaboratedType(const ElaboratedType *T) {
       return Visit(T->getNamedType());
@@ -2089,7 +2099,7 @@ bool Type::hasUnsignedIntegerRepresentation() const {
 bool Type::isFloatingType() const {
   if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType))
     return BT->getKind() >= BuiltinType::Half &&
-           BT->getKind() <= BuiltinType::Float128;
+           BT->getKind() <= BuiltinType::Ibm128;
   if (const auto *CT = dyn_cast<ComplexType>(CanonicalType))
     return CT->getElementType()->isFloatingType();
   return false;
@@ -2111,7 +2121,7 @@ bool Type::isRealFloatingType() const {
 bool Type::isRealType() const {
   if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType))
     return BT->getKind() >= BuiltinType::Bool &&
-           BT->getKind() <= BuiltinType::Float128;
+           BT->getKind() <= BuiltinType::Ibm128;
   if (const auto *ET = dyn_cast<EnumType>(CanonicalType))
       return ET->getDecl()->isComplete() && !ET->getDecl()->isScoped();
   return isExtIntType();
@@ -2120,7 +2130,7 @@ bool Type::isRealType() const {
 bool Type::isArithmeticType() const {
   if (const auto *BT = dyn_cast<BuiltinType>(CanonicalType))
     return BT->getKind() >= BuiltinType::Bool &&
-           BT->getKind() <= BuiltinType::Float128 &&
+           BT->getKind() <= BuiltinType::Ibm128 &&
            BT->getKind() != BuiltinType::BFloat16;
   if (const auto *ET = dyn_cast<EnumType>(CanonicalType))
     // GCC allows forward declaration of enum types (forbid by C99 6.7.2.3p2).
@@ -2224,10 +2234,11 @@ bool Type::isIncompleteType(NamedDecl **Def) const {
     return !Rec->isCompleteDefinition();
   }
   case ConstantArray:
+  case VariableArray:
     // An array is incomplete if its element type is incomplete
     // (C++ [dcl.array]p1).
-    // We don't handle variable arrays (they're not allowed in C++) or
-    // dependent-sized arrays (dependent types are never treated as incomplete).
+    // We don't handle dependent-sized arrays (dependent types are never treated
+    // as incomplete).
     return cast<ArrayType>(CanonicalType)->getElementType()
              ->isIncompleteType(Def);
   case IncompleteArray:
@@ -2275,6 +2286,8 @@ bool Type::isSizelessBuiltinType() const {
       // SVE Types
 #define SVE_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"
+#define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/RISCVVTypes.def"
       return true;
     default:
       return false;
@@ -2435,6 +2448,10 @@ bool QualType::isTriviallyCopyableType(const ASTContext &Context) const {
     return Context.getBaseElementType(*this).isTriviallyCopyableType(Context);
 
   if (hasNonTrivialObjCLifetime())
+    return false;
+
+  PrimitiveCopyKind PCK = isNonTrivialToPrimitiveCopy();
+  if (PCK != PCK_Trivial && PCK != PCK_VolatileTrivial)
     return false;
 
   // C++11 [basic.types]p9 - See Core 2094
@@ -2776,7 +2793,6 @@ bool Type::isSpecifierType() const {
   case DependentTemplateSpecialization:
   case ObjCInterface:
   case ObjCObject:
-  case ObjCObjectPointer: // FIXME: object pointers aren't really specifiers
     return true;
   default:
     return false;
@@ -3021,6 +3037,8 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
     return "_Float16";
   case Float128:
     return "__float128";
+  case Ibm128:
+    return "__ibm128";
   case WChar_S:
   case WChar_U:
     return Policy.MSWChar ? "__wchar_t" : "wchar_t";
@@ -3031,7 +3049,7 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
   case Char32:
     return "char32_t";
   case NullPtr:
-    return "nullptr_t";
+    return "std::nullptr_t";
   case Overload:
     return "<overloaded function type>";
   case BoundMember:
@@ -3086,6 +3104,10 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
   case Id: \
     return #Name;
 #include "clang/Basic/PPCTypes.def"
+#define RVV_TYPE(Name, Id, SingletonId)                                        \
+  case Id:                                                                     \
+    return Name;
+#include "clang/Basic/RISCVVTypes.def"
   }
 
   llvm_unreachable("Invalid builtin type.");
@@ -3492,7 +3514,7 @@ bool RecordType::hasConstFields() const {
         return true;
       FieldTy = FieldTy.getCanonicalType();
       if (const auto *FieldRecTy = FieldTy->getAs<RecordType>()) {
-        if (llvm::find(RecordTypeList, FieldRecTy) == RecordTypeList.end())
+        if (!llvm::is_contained(RecordTypeList, FieldRecTy))
           RecordTypeList.push_back(FieldRecTy);
       }
     }
@@ -3744,8 +3766,8 @@ public:
 
   friend CachedProperties merge(CachedProperties L, CachedProperties R) {
     Linkage MergedLinkage = minLinkage(L.L, R.L);
-    return CachedProperties(MergedLinkage,
-                         L.hasLocalOrUnnamedType() | R.hasLocalOrUnnamedType());
+    return CachedProperties(MergedLinkage, L.hasLocalOrUnnamedType() ||
+                                               R.hasLocalOrUnnamedType());
   }
 };
 
@@ -4110,6 +4132,8 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
 #define PPC_VECTOR_TYPE(Name, Id, Size) \
     case BuiltinType::Id:
 #include "clang/Basic/PPCTypes.def"
+#define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/RISCVVTypes.def"
     case BuiltinType::BuiltinFn:
     case BuiltinType::NullPtr:
     case BuiltinType::IncompleteMatrixIdx:
@@ -4387,8 +4411,8 @@ AutoType::AutoType(QualType DeducedAsType, AutoTypeKeyword Keyword,
   if (TypeConstraintConcept) {
     TemplateArgument *ArgBuffer = getArgBuffer();
     for (const TemplateArgument &Arg : TypeConstraintArgs) {
-      addDependence(toTypeDependence(
-          Arg.getDependence() & TemplateArgumentDependence::UnexpandedPack));
+      addDependence(
+          toSyntacticDependence(toTypeDependence(Arg.getDependence())));
 
       new (ArgBuffer++) TemplateArgument(Arg);
     }

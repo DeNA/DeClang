@@ -228,6 +228,34 @@ public:
     return true;
   }
 
+  std::string getLambdaString(const CXXRecordDecl *Lambda) override {
+    assert(Lambda->isLambda() && "RD must be a lambda!");
+    std::string Name("<lambda_");
+
+    Decl *LambdaContextDecl = Lambda->getLambdaContextDecl();
+    unsigned LambdaManglingNumber = Lambda->getLambdaManglingNumber();
+    unsigned LambdaId;
+    const ParmVarDecl *Parm = dyn_cast_or_null<ParmVarDecl>(LambdaContextDecl);
+    const FunctionDecl *Func =
+        Parm ? dyn_cast<FunctionDecl>(Parm->getDeclContext()) : nullptr;
+
+    if (Func) {
+      unsigned DefaultArgNo =
+          Func->getNumParams() - Parm->getFunctionScopeIndex();
+      Name += llvm::utostr(DefaultArgNo);
+      Name += "_";
+    }
+
+    if (LambdaManglingNumber)
+      LambdaId = LambdaManglingNumber;
+    else
+      LambdaId = getLambdaIdForDebugInfo(Lambda);
+
+    Name += llvm::utostr(LambdaId);
+    Name += ">";
+    return Name;
+  }
+
   unsigned getLambdaId(const CXXRecordDecl *RD) {
     assert(RD->isLambda() && "RD must be a lambda!");
     assert(!RD->isExternallyVisible() && "RD must not be visible!");
@@ -236,6 +264,19 @@ public:
     std::pair<llvm::DenseMap<const CXXRecordDecl *, unsigned>::iterator, bool>
         Result = LambdaIds.insert(std::make_pair(RD, LambdaIds.size()));
     return Result.first->second;
+  }
+
+  unsigned getLambdaIdForDebugInfo(const CXXRecordDecl *RD) {
+    assert(RD->isLambda() && "RD must be a lambda!");
+    assert(!RD->isExternallyVisible() && "RD must not be visible!");
+    assert(RD->getLambdaManglingNumber() == 0 &&
+           "RD must not have a mangling number!");
+    llvm::DenseMap<const CXXRecordDecl *, unsigned>::iterator Result =
+        LambdaIds.find(RD);
+    // The lambda should exist, but return 0 in case it doesn't.
+    if (Result == LambdaIds.end())
+      return 0;
+    return Result->second;
   }
 
   /// Return a character sequence that is (somewhat) unique to the TU suitable
@@ -2398,6 +2439,8 @@ void MicrosoftCXXNameMangler::mangleType(const BuiltinType *T, Qualifiers,
 #define PPC_VECTOR_TYPE(Name, Id, Size) \
   case BuiltinType::Id:
 #include "clang/Basic/PPCTypes.def"
+#define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/RISCVVTypes.def"
   case BuiltinType::ShortAccum:
   case BuiltinType::Accum:
   case BuiltinType::LongAccum:
@@ -2423,6 +2466,7 @@ void MicrosoftCXXNameMangler::mangleType(const BuiltinType *T, Qualifiers,
   case BuiltinType::SatUFract:
   case BuiltinType::SatULongFract:
   case BuiltinType::BFloat16:
+  case BuiltinType::Ibm128:
   case BuiltinType::Float128: {
     DiagnosticsEngine &Diags = Context.getDiags();
     unsigned DiagID = Diags.getCustomDiagID(
@@ -2684,6 +2728,9 @@ void MicrosoftCXXNameMangler::mangleCallingConvention(CallingConv CC) {
   //                      ::= I # __fastcall
   //                      ::= J # __export __fastcall
   //                      ::= Q # __vectorcall
+  //                      ::= S # __attribute__((__swiftcall__)) // Clang-only
+  //                      ::= T # __attribute__((__swiftasynccall__))
+  //                            // Clang-only
   //                      ::= w # __regcall
   // The 'export' calling conventions are from a bygone era
   // (*cough*Win16*cough*) when functions were declared for export with
@@ -2778,8 +2825,8 @@ void MicrosoftCXXNameMangler::mangleArtificialTagType(
   // Always start with the unqualified name.
   mangleSourceName(UnqualifiedName);
 
-  for (auto I = NestedNames.rbegin(), E = NestedNames.rend(); I != E; ++I)
-    mangleSourceName(*I);
+  for (StringRef N : llvm::reverse(NestedNames))
+    mangleSourceName(N);
 
   // Terminate the whole name with an '@'.
   Out << '@';
@@ -3556,7 +3603,7 @@ void MicrosoftMangleContextImpl::mangleCXXCatchableType(
   // FIXME: It is known that the Ctor is present in 2013, and in 2017.7
   // (_MSC_VER 1914) and newer, and that it's omitted in 2015 and 2017.4
   // (_MSC_VER 1911), but it's unknown when exactly it reappeared (1914?
-  // Or 1912, 1913 aleady?).
+  // Or 1912, 1913 already?).
   bool OmitCopyCtor = getASTContext().getLangOpts().isCompatibleWithMSVC(
                           LangOptions::MSVC2015) &&
                       !getASTContext().getLangOpts().isCompatibleWithMSVC(
@@ -3633,7 +3680,7 @@ void MicrosoftMangleContextImpl::mangleCXXRTTICompleteObjectLocator(
   assert(VFTableMangling.startswith("??_7") ||
          VFTableMangling.startswith("??_S"));
 
-  Out << "??_R4" << StringRef(VFTableMangling).drop_front(4);
+  Out << "??_R4" << VFTableMangling.str().drop_front(4);
 }
 
 void MicrosoftMangleContextImpl::mangleSEHFilterExpression(
@@ -3837,7 +3884,7 @@ void MicrosoftMangleContextImpl::mangleStringLiteral(const StringLiteral *SL,
     // - ?[A-Z]: The range from \xc1 to \xda.
     // - ?[0-9]: The set of [,/\:. \n\t'-].
     // - ?$XX: A fallback which maps nibbles.
-    if (isIdentifierBody(Byte, /*AllowDollar=*/true)) {
+    if (isAsciiIdentifierContinue(Byte, /*AllowDollar=*/true)) {
       Mangler.getStream() << Byte;
     } else if (isLetter(Byte & 0x7f)) {
       Mangler.getStream() << '?' << static_cast<char>(Byte & 0x7f);

@@ -36,6 +36,7 @@
 #include "clang/AST/Type.h"
 #include "clang/AST/UnresolvedSet.h"
 #include "clang/Basic/AttrKinds.h"
+#include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/ExceptionSpecificationType.h"
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LLVM.h"
@@ -328,10 +329,11 @@ namespace clang {
     void VisitTypedefDecl(TypedefDecl *TD);
     void VisitTypeAliasDecl(TypeAliasDecl *TD);
     void VisitUnresolvedUsingTypenameDecl(UnresolvedUsingTypenameDecl *D);
+    void VisitUnresolvedUsingIfExistsDecl(UnresolvedUsingIfExistsDecl *D);
     RedeclarableResult VisitTagDecl(TagDecl *TD);
     void VisitEnumDecl(EnumDecl *ED);
     RedeclarableResult VisitRecordDeclImpl(RecordDecl *RD);
-    void VisitRecordDecl(RecordDecl *RD) { VisitRecordDeclImpl(RD); }
+    void VisitRecordDecl(RecordDecl *RD);
     RedeclarableResult VisitCXXRecordDeclImpl(CXXRecordDecl *D);
     void VisitCXXRecordDecl(CXXRecordDecl *D) { VisitCXXRecordDeclImpl(D); }
     RedeclarableResult VisitClassTemplateSpecializationDeclImpl(
@@ -389,6 +391,7 @@ namespace clang {
     void VisitTemplateTemplateParmDecl(TemplateTemplateParmDecl *D);
     void VisitTypeAliasTemplateDecl(TypeAliasTemplateDecl *D);
     void VisitUsingDecl(UsingDecl *D);
+    void VisitUsingEnumDecl(UsingEnumDecl *D);
     void VisitUsingPackDecl(UsingPackDecl *D);
     void VisitUsingShadowDecl(UsingShadowDecl *D);
     void VisitConstructorUsingShadowDecl(ConstructorUsingShadowDecl *D);
@@ -771,7 +774,7 @@ void ASTDeclReader::VisitEnumDecl(EnumDecl *ED) {
     }
     if (OldDef) {
       Reader.MergedDeclContexts.insert(std::make_pair(ED, OldDef));
-      ED->setCompleteDefinition(false);
+      ED->demoteThisDefinitionToDeclaration();
       Reader.mergeDefinitionVisibility(OldDef, ED);
       if (OldDef->getODRHash() != ED->getODRHash())
         Reader.PendingEnumOdrMergeFailures[OldDef].push_back(ED);
@@ -804,6 +807,34 @@ ASTDeclReader::VisitRecordDeclImpl(RecordDecl *RD) {
   RD->setParamDestroyedInCallee(Record.readInt());
   RD->setArgPassingRestrictions((RecordDecl::ArgPassingKind)Record.readInt());
   return Redecl;
+}
+
+void ASTDeclReader::VisitRecordDecl(RecordDecl *RD) {
+  VisitRecordDeclImpl(RD);
+
+  // Maintain the invariant of a redeclaration chain containing only
+  // a single definition.
+  if (RD->isCompleteDefinition()) {
+    RecordDecl *Canon = static_cast<RecordDecl *>(RD->getCanonicalDecl());
+    RecordDecl *&OldDef = Reader.RecordDefinitions[Canon];
+    if (!OldDef) {
+      // This is the first time we've seen an imported definition. Look for a
+      // local definition before deciding that we are the first definition.
+      for (auto *D : merged_redecls(Canon)) {
+        if (!D->isFromASTFile() && D->isCompleteDefinition()) {
+          OldDef = D;
+          break;
+        }
+      }
+    }
+    if (OldDef) {
+      Reader.MergedDeclContexts.insert(std::make_pair(RD, OldDef));
+      RD->demoteThisDefinitionToDeclaration();
+      Reader.mergeDefinitionVisibility(OldDef, RD);
+    } else {
+      OldDef = RD;
+    }
+  }
 }
 
 void ASTDeclReader::VisitValueDecl(ValueDecl *VD) {
@@ -1147,6 +1178,13 @@ void ASTDeclReader::ReadObjCDefinitionData(
 
 void ASTDeclReader::MergeDefinitionData(ObjCInterfaceDecl *D,
          struct ObjCInterfaceDecl::DefinitionData &&NewDD) {
+  struct ObjCInterfaceDecl::DefinitionData &DD = D->data();
+  if (DD.Definition != NewDD.Definition) {
+    Reader.MergedDeclContexts.insert(
+        std::make_pair(NewDD.Definition, DD.Definition));
+    Reader.mergeDefinitionVisibility(DD.Definition, NewDD.Definition);
+  }
+
   // FIXME: odr checking?
 }
 
@@ -1194,6 +1232,39 @@ void ASTDeclReader::VisitObjCIvarDecl(ObjCIvarDecl *IVD) {
   IVD->setNextIvar(nullptr);
   bool synth = Record.readInt();
   IVD->setSynthesize(synth);
+
+  // Check ivar redeclaration.
+  if (IVD->isInvalidDecl())
+    return;
+  // Don't check ObjCInterfaceDecl as interfaces are named and mismatches can be
+  // detected in VisitObjCInterfaceDecl. Here we are looking for redeclarations
+  // in extensions.
+  if (isa<ObjCInterfaceDecl>(IVD->getDeclContext()))
+    return;
+  ObjCInterfaceDecl *CanonIntf =
+      IVD->getContainingInterface()->getCanonicalDecl();
+  IdentifierInfo *II = IVD->getIdentifier();
+  ObjCIvarDecl *PrevIvar = CanonIntf->lookupInstanceVariable(II);
+  if (PrevIvar && PrevIvar != IVD) {
+    auto *ParentExt = dyn_cast<ObjCCategoryDecl>(IVD->getDeclContext());
+    auto *PrevParentExt =
+        dyn_cast<ObjCCategoryDecl>(PrevIvar->getDeclContext());
+    if (ParentExt && PrevParentExt) {
+      // Postpone diagnostic as we should merge identical extensions from
+      // different modules.
+      Reader
+          .PendingObjCExtensionIvarRedeclarations[std::make_pair(ParentExt,
+                                                                 PrevParentExt)]
+          .push_back(std::make_pair(IVD, PrevIvar));
+    } else if (ParentExt || PrevParentExt) {
+      // Duplicate ivars in extension + implementation are never compatible.
+      // Compatibility of implementation + implementation should be handled in
+      // VisitObjCImplementationDecl.
+      Reader.Diag(IVD->getLocation(), diag::err_duplicate_ivar_declaration)
+          << II;
+      Reader.Diag(PrevIvar->getLocation(), diag::note_previous_definition);
+    }
+  }
 }
 
 void ASTDeclReader::ReadObjCDefinitionData(
@@ -1213,6 +1284,13 @@ void ASTDeclReader::ReadObjCDefinitionData(
 
 void ASTDeclReader::MergeDefinitionData(ObjCProtocolDecl *D,
          struct ObjCProtocolDecl::DefinitionData &&NewDD) {
+  struct ObjCProtocolDecl::DefinitionData &DD = D->data();
+  if (DD.Definition != NewDD.Definition) {
+    Reader.MergedDeclContexts.insert(
+        std::make_pair(NewDD.Definition, DD.Definition));
+    Reader.mergeDefinitionVisibility(DD.Definition, NewDD.Definition);
+  }
+
   // FIXME: odr checking?
 }
 
@@ -1653,6 +1731,17 @@ void ASTDeclReader::VisitUsingDecl(UsingDecl *D) {
   mergeMergeable(D);
 }
 
+void ASTDeclReader::VisitUsingEnumDecl(UsingEnumDecl *D) {
+  VisitNamedDecl(D);
+  D->setUsingLoc(readSourceLocation());
+  D->setEnumLoc(readSourceLocation());
+  D->Enum = readDeclAs<EnumDecl>();
+  D->FirstUsingShadow.setPointer(readDeclAs<UsingShadowDecl>());
+  if (auto *Pattern = readDeclAs<UsingEnumDecl>())
+    Reader.getContext().setInstantiatedFromUsingEnumDecl(D, Pattern);
+  mergeMergeable(D);
+}
+
 void ASTDeclReader::VisitUsingPackDecl(UsingPackDecl *D) {
   VisitNamedDecl(D);
   D->InstantiatedFrom = readDeclAs<NamedDecl>();
@@ -1709,6 +1798,11 @@ void ASTDeclReader::VisitUnresolvedUsingTypenameDecl(
   mergeMergeable(D);
 }
 
+void ASTDeclReader::VisitUnresolvedUsingIfExistsDecl(
+    UnresolvedUsingIfExistsDecl *D) {
+  VisitNamedDecl(D);
+}
+
 void ASTDeclReader::ReadCXXDefinitionData(
     struct CXXRecordDecl::DefinitionData &Data, const CXXRecordDecl *D) {
   #define FIELD(Name, Width, Merge) \
@@ -1720,7 +1814,7 @@ void ASTDeclReader::ReadCXXDefinitionData(
   Data.HasODRHash = true;
 
   if (Record.readInt()) {
-    Reader.DefinitionSource[D] = 
+    Reader.DefinitionSource[D] =
         Loc.F->Kind == ModuleKind::MK_MainFile ||
         Reader.getContext().getLangOpts().BuildingPCHWithObjectFile;
   }
@@ -1750,6 +1844,7 @@ void ASTDeclReader::ReadCXXDefinitionData(
     Lambda.NumExplicitCaptures = Record.readInt();
     Lambda.HasKnownInternalLinkage = Record.readInt();
     Lambda.ManglingNumber = Record.readInt();
+    D->setDeviceLambdaManglingNumber(Record.readInt());
     Lambda.ContextDecl = readDeclID();
     Lambda.Captures = (Capture *)Reader.getContext().Allocate(
         sizeof(Capture) * Lambda.NumCaptures);
@@ -1955,6 +2050,7 @@ ASTDeclReader::VisitCXXRecordDeclImpl(CXXRecordDecl *D) {
 
 void ASTDeclReader::VisitCXXDeductionGuideDecl(CXXDeductionGuideDecl *D) {
   D->setExplicitSpecifier(Record.readExplicitSpec());
+  D->Ctor = readDeclAs<CXXConstructorDecl>();
   VisitFunctionDecl(D);
   D->setIsCopyDeductionCandidate(Record.readInt());
 }
@@ -2627,7 +2723,7 @@ static bool allowODRLikeMergeInC(NamedDecl *ND) {
   if (!ND)
     return false;
   // TODO: implement merge for other necessary decls.
-  if (isa<EnumConstantDecl>(ND))
+  if (isa<EnumConstantDecl, FieldDecl, IndirectFieldDecl>(ND))
     return true;
   return false;
 }
@@ -3051,7 +3147,7 @@ static bool hasSameOverloadableAttrs(const FunctionDecl *A,
   return true;
 }
 
-/// Determine whether the two declarations refer to the same entity.pr
+/// Determine whether the two declarations refer to the same entity.
 static bool isSameEntity(NamedDecl *X, NamedDecl *Y) {
   assert(X->getDeclName() == Y->getDeclName() && "Declaration name mismatch!");
 
@@ -3245,10 +3341,19 @@ static bool isSameEntity(NamedDecl *X, NamedDecl *Y) {
     return isSameQualifier(UX->getQualifier(), UY->getQualifier()) &&
            UX->isAccessDeclaration() == UY->isAccessDeclaration();
   }
-  if (const auto *UX = dyn_cast<UnresolvedUsingTypenameDecl>(X))
+  if (const auto *UX = dyn_cast<UnresolvedUsingTypenameDecl>(X)) {
     return isSameQualifier(
         UX->getQualifier(),
         cast<UnresolvedUsingTypenameDecl>(Y)->getQualifier());
+  }
+
+  // Using-pack declarations are only created by instantiation, and match if
+  // they're instantiated from matching UnresolvedUsing...Decls.
+  if (const auto *UX = dyn_cast<UsingPackDecl>(X)) {
+    return declaresSameEntity(
+        UX->getInstantiatedFromUsingDecl(),
+        cast<UsingPackDecl>(Y)->getInstantiatedFromUsingDecl());
+  }
 
   // Namespace alias definitions with the same target match.
   if (const auto *NAX = dyn_cast<NamespaceAliasDecl>(X)) {
@@ -3290,9 +3395,15 @@ DeclContext *ASTDeclReader::getPrimaryContextForMerging(ASTReader &Reader,
     return DD->Definition;
   }
 
+  if (auto *RD = dyn_cast<RecordDecl>(DC))
+    return RD->getDefinition();
+
   if (auto *ED = dyn_cast<EnumDecl>(DC))
     return ED->getASTContext().getLangOpts().CPlusPlus? ED->getDefinition()
                                                       : nullptr;
+
+  if (auto *OID = dyn_cast<ObjCInterfaceDecl>(DC))
+    return OID->getDefinition();
 
   // We can see the TU here only if we have no Sema object. In that case,
   // there's no TU scope to look in, so using the DC alone is sufficient.
@@ -3361,6 +3472,8 @@ ASTDeclReader::getPrimaryDCForAnonymousDecl(DeclContext *LexicalDC) {
   if (auto *RD = dyn_cast<CXXRecordDecl>(LexicalDC)) {
     auto *DD = RD->getCanonicalDecl()->DefinitionData;
     return DD ? DD->Definition : nullptr;
+  } else if (auto *OID = dyn_cast<ObjCInterfaceDecl>(LexicalDC)) {
+    return OID->getCanonicalDecl()->getDefinition();
   }
 
   // For anything else, walk its merged redeclarations looking for a definition.
@@ -3373,6 +3486,9 @@ ASTDeclReader::getPrimaryDCForAnonymousDecl(DeclContext *LexicalDC) {
     if (auto *MD = dyn_cast<ObjCMethodDecl>(D))
       if (MD->isThisDeclarationADefinition())
         return MD;
+    if (auto *RD = dyn_cast<RecordDecl>(D))
+      if (RD->isThisDeclarationADefinition())
+        return RD;
   }
 
   // No merged definition yet.
@@ -3545,6 +3661,13 @@ void ASTDeclReader::mergeInheritableAttributes(ASTReader &Reader, Decl *D,
 
   if (IA && !D->hasAttr<MSInheritanceAttr>()) {
     NewAttr = cast<InheritableAttr>(IA->clone(Context));
+    NewAttr->setInherited(true);
+    D->addAttr(NewAttr);
+  }
+
+  const auto *AA = Previous->getAttr<AvailabilityAttr>();
+  if (AA && !D->hasAttr<AvailabilityAttr>()) {
+    NewAttr = AA->clone(Context);
     NewAttr->setInherited(true);
     D->addAttr(NewAttr);
   }
@@ -3792,7 +3915,7 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
   Expected<unsigned> MaybeDeclCode = Record.readRecord(DeclsCursor, Code);
   if (!MaybeDeclCode)
     llvm::report_fatal_error(
-        "ASTReader::readDeclRecord failed reading decl code: " +
+        Twine("ASTReader::readDeclRecord failed reading decl code: ") +
         toString(MaybeDeclCode.takeError()));
   switch ((DeclCode)MaybeDeclCode.get()) {
   case DECL_CONTEXT_LEXICAL:
@@ -3840,6 +3963,9 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
   case DECL_USING_SHADOW:
     D = UsingShadowDecl::CreateDeserialized(Context, ID);
     break;
+  case DECL_USING_ENUM:
+    D = UsingEnumDecl::CreateDeserialized(Context, ID);
+    break;
   case DECL_CONSTRUCTOR_USING_SHADOW:
     D = ConstructorUsingShadowDecl::CreateDeserialized(Context, ID);
     break;
@@ -3851,6 +3977,9 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
     break;
   case DECL_UNRESOLVED_USING_TYPENAME:
     D = UnresolvedUsingTypenameDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_UNRESOLVED_USING_IF_EXISTS:
+    D = UnresolvedUsingIfExistsDecl::CreateDeserialized(Context, ID);
     break;
   case DECL_CXX_RECORD:
     D = CXXRecordDecl::CreateDeserialized(Context, ID);
@@ -4171,12 +4300,12 @@ void ASTReader::loadDeclUpdateRecords(PendingUpdateRecord &Record) {
       if (llvm::Error JumpFailed = Cursor.JumpToBit(Offset))
         // FIXME don't do a fatal error.
         llvm::report_fatal_error(
-            "ASTReader::loadDeclUpdateRecords failed jumping: " +
+            Twine("ASTReader::loadDeclUpdateRecords failed jumping: ") +
             toString(std::move(JumpFailed)));
       Expected<unsigned> MaybeCode = Cursor.ReadCode();
       if (!MaybeCode)
         llvm::report_fatal_error(
-            "ASTReader::loadDeclUpdateRecords failed reading code: " +
+            Twine("ASTReader::loadDeclUpdateRecords failed reading code: ") +
             toString(MaybeCode.takeError()));
       unsigned Code = MaybeCode.get();
       ASTRecordReader Record(*this, *F);
@@ -4185,7 +4314,7 @@ void ASTReader::loadDeclUpdateRecords(PendingUpdateRecord &Record) {
                "Expected DECL_UPDATES record!");
       else
         llvm::report_fatal_error(
-            "ASTReader::loadDeclUpdateRecords failed reading rec code: " +
+            Twine("ASTReader::loadDeclUpdateRecords failed reading rec code: ") +
             toString(MaybeCode.takeError()));
 
       ASTDeclReader Reader(*this, Record, RecordLocation(F, Offset), ID,
@@ -4252,14 +4381,14 @@ void ASTReader::loadPendingDeclChain(Decl *FirstLocal, uint64_t LocalOffset) {
   SavedStreamPosition SavedPosition(Cursor);
   if (llvm::Error JumpFailed = Cursor.JumpToBit(LocalOffset))
     llvm::report_fatal_error(
-        "ASTReader::loadPendingDeclChain failed jumping: " +
+        Twine("ASTReader::loadPendingDeclChain failed jumping: ") +
         toString(std::move(JumpFailed)));
 
   RecordData Record;
   Expected<unsigned> MaybeCode = Cursor.ReadCode();
   if (!MaybeCode)
     llvm::report_fatal_error(
-        "ASTReader::loadPendingDeclChain failed reading code: " +
+        Twine("ASTReader::loadPendingDeclChain failed reading code: ") +
         toString(MaybeCode.takeError()));
   unsigned Code = MaybeCode.get();
   if (Expected<unsigned> MaybeRecCode = Cursor.readRecord(Code, Record))
@@ -4267,7 +4396,7 @@ void ASTReader::loadPendingDeclChain(Decl *FirstLocal, uint64_t LocalOffset) {
            "expected LOCAL_REDECLARATIONS record!");
   else
     llvm::report_fatal_error(
-        "ASTReader::loadPendingDeclChain failed reading rec code: " +
+        Twine("ASTReader::loadPendingDeclChain failed reading rec code: ") +
         toString(MaybeCode.takeError()));
 
   // FIXME: We have several different dispatches on decl kind here; maybe
