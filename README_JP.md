@@ -70,6 +70,15 @@ $ bash release.sh v1.0.0
   bash $DECLANG_HOME/.DeClang/script/ndk_unset.sh {/path/to/ndk_root}
   ```
 
+- UnityのWebGLビルドの標準コンパイラとしてDeClangを利用したい場合には、次のコマンドを実行します。
+  ```
+  bash $DECLANG_HOME/.DeClang/script/webgl_setup.sh {/path/to/unity_webgl_support}
+  ```
+  設定をDeClangから標準のコンパイラに戻したい場合は次のようにします。
+  ```
+  bash $DECLANG_HOME/.DeClang/script/webgl_unset.sh {/path/to/unity_webgl_support}
+  ```
+
 ## 使い方
 
 - $DECLANG_HOME/.DeClang配下のconfig.pre.jsonを編集します。
