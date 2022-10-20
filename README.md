@@ -83,6 +83,16 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
   bash $DECLANG_HOME/.DeClang/script/xcode_unset.sh {/path/to/xcodeproject.xcodeproj}
   ```
 
+
+- Setup DeClang for WebGL Build of Unity:
+  ```
+  bash $DECLANG_HOME/.DeClang/script/webgl_setup.sh {/path/to/unity_webgl_support}
+  ```
+  Recover the original WebGLSupport directory:
+  ```
+  bash $DECLANG_HOME/.DeClang/script/webgl_unset.sh {/path/to/unity_webgl_support}
+  ```
+
 - Now you can build your project using your usual build pipeline.
 
 ## Configuration
