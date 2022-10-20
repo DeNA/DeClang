@@ -65,6 +65,10 @@ struct SwiftASTContextTester : public SwiftASTContext {
     SwiftASTContextTester() : SwiftASTContext() {}
   #endif
 
+  TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() override {
+    return m_typeref_typesystem;
+  }
+
   static std::string GetResourceDir(llvm::StringRef platform_sdk_path,
                                     std::string swift_dir,
                                     std::string swift_stdlib_os_dir,
@@ -79,6 +83,7 @@ struct SwiftASTContextTester : public SwiftASTContext {
                                          const llvm::Triple &host) {
     return SwiftASTContext::GetSwiftStdlibOSDir(target, host);
   }
+  TypeSystemSwiftTypeRef m_typeref_typesystem;
 };
 
 TEST_F(TestSwiftASTContext, ResourceDir) {
@@ -195,7 +200,7 @@ TEST_F(TestSwiftASTContext, IsNonTriviallyManagedReferenceType) {
 #ifndef NDEBUG
   // The mock constructor is only available in asserts mode.
   SwiftASTContext::NonTriviallyManagedReferenceStrategy strategy;
-  SwiftASTContext context;
+  SwiftASTContextTester context;
   CompilerType t(&context, nullptr);
   EXPECT_FALSE(SwiftASTContext::IsNonTriviallyManagedReferenceType(t, strategy,
                                                                    nullptr));
@@ -220,17 +225,125 @@ TEST_F(TestSwiftASTContext, SwiftFriendlyTriple) {
             llvm::Triple("aarch64-unknown-linux-gnu"));
 }
 
+TEST_F(TestSwiftASTContext, ApplyWorkingDir) {
+  std::string abs_working_dir = "/abs/dir";
+  std::string rel_working_dir = "rel/dir";
+
+  // non-include option should not apply working dir
+  llvm::SmallString<128> non_include_flag("-non-include-flag");
+  SwiftASTContext::ApplyWorkingDir(non_include_flag, abs_working_dir);
+  EXPECT_EQ(non_include_flag, llvm::SmallString<128>("-non-include-flag"));
+
+  // absolute paths should not apply working dir
+  llvm::SmallString<128> abs_path("/abs/path");
+  SwiftASTContext::ApplyWorkingDir(abs_path, abs_working_dir);
+  EXPECT_EQ(abs_path, llvm::SmallString<128>("/abs/path"));
+
+  llvm::SmallString<128> single_arg_abs_path(
+      "-fmodule-map-file=/module/map/path");
+  SwiftASTContext::ApplyWorkingDir(single_arg_abs_path, abs_working_dir);
+  EXPECT_EQ(single_arg_abs_path,
+            llvm::SmallString<128>("-fmodule-map-file=/module/map/path"));
+
+  // relative paths apply working dir
+  llvm::SmallString<128> rel_path("rel/path");
+  SwiftASTContext::ApplyWorkingDir(rel_path, abs_working_dir);
+  EXPECT_EQ(rel_path, llvm::SmallString<128>("/abs/dir/rel/path"));
+
+  rel_path = llvm::SmallString<128>("rel/path");
+  SwiftASTContext::ApplyWorkingDir(rel_path, rel_working_dir);
+  EXPECT_EQ(rel_path, llvm::SmallString<128>("rel/dir/rel/path"));
+
+  // single arg include option applies working dir
+  llvm::SmallString<128> single_arg_rel_path(
+      "-fmodule-map-file=module.modulemap");
+  SwiftASTContext::ApplyWorkingDir(single_arg_rel_path, abs_working_dir);
+  EXPECT_EQ(
+      single_arg_rel_path,
+      llvm::SmallString<128>("-fmodule-map-file=/abs/dir/module.modulemap"));
+
+  single_arg_rel_path =
+      llvm::SmallString<128>("-fmodule-map-file=module.modulemap");
+  SwiftASTContext::ApplyWorkingDir(single_arg_rel_path, rel_working_dir);
+  EXPECT_EQ(
+      single_arg_rel_path,
+      llvm::SmallString<128>("-fmodule-map-file=rel/dir/module.modulemap"));
+
+  // fmodule-file needs to handle different cases:
+  //  -fmodule-file=path/to/pcm
+  //  -fmodule-file=name=path/to/pcm
+  llvm::SmallString<128> module_file_abs_path(
+      "-fmodule-file=/some/dir/module.pcm");
+  SwiftASTContext::ApplyWorkingDir(module_file_abs_path, abs_working_dir);
+  EXPECT_EQ(module_file_abs_path,
+            llvm::SmallString<128>("-fmodule-file=/some/dir/module.pcm"));
+
+  llvm::SmallString<128> module_file_rel_path(
+      "-fmodule-file=relpath/module.pcm");
+  SwiftASTContext::ApplyWorkingDir(module_file_rel_path, abs_working_dir);
+  EXPECT_EQ(
+      module_file_rel_path,
+      llvm::SmallString<128>("-fmodule-file=/abs/dir/relpath/module.pcm"));
+
+  llvm::SmallString<128> module_file_with_name_abs_path(
+      "-fmodule-file=modulename=/some/dir/module.pcm");
+  SwiftASTContext::ApplyWorkingDir(module_file_with_name_abs_path,
+                                   abs_working_dir);
+  EXPECT_EQ(
+      module_file_with_name_abs_path,
+      llvm::SmallString<128>("-fmodule-file=modulename=/some/dir/module.pcm"));
+
+  llvm::SmallString<128> module_file_with_name_rel_path(
+      "-fmodule-file=modulename=relpath/module.pcm");
+  SwiftASTContext::ApplyWorkingDir(module_file_with_name_rel_path,
+                                   abs_working_dir);
+  EXPECT_EQ(module_file_with_name_rel_path,
+            llvm::SmallString<128>(
+                "-fmodule-file=modulename=/abs/dir/relpath/module.pcm"));
+}
+
 namespace {
-  const std::vector<std::string> duplicated_flags = {
-    "-DMACRO1", "-D", "MACRO1", "-UMACRO2", "-U", "MACRO2",
-    "-I/path1", "-I", "/path1", "-F/path2", "-F", "/path2",
-    "-fmodule-map-file=/path3", "-fmodule-map-file=/path3",
-    "-F/path2", "-F", "/path2", "-I/path1", "-I", "/path1",
-    "-UMACRO2", "-U", "MACRO2", "-DMACRO1", "-D", "MACRO1",
-  };
-  const std::vector<std::string> uniqued_flags = {
-    "-DMACRO1", "-UMACRO2", "-I/path1", "-F/path2", "-fmodule-map-file=/path3"
-  };
+const std::vector<std::string> duplicated_flags = {
+    "-DMACRO1",
+    "-D",
+    "MACRO1",
+    "-UMACRO2",
+    "-U",
+    "MACRO2",
+    "-I/path1",
+    "-I",
+    "/path1",
+    "-F/path2",
+    "-F",
+    "/path2",
+    "-fmodule-map-file=/path3",
+    "-fmodule-map-file=/path3",
+    "-F/path2",
+    "-F",
+    "/path2",
+    "-I/path1",
+    "-I",
+    "/path1",
+    "-UMACRO2",
+    "-U",
+    "MACRO2",
+    "-DMACRO1",
+    "-D",
+    "MACRO1",
+    "-fmodule-file=/path/to/pcm",
+    "-fmodule-file=/path/to/pcm",
+    "-fmodule-file=modulename=/path/to/pcm",
+    "-fmodule-file=modulename=/path/to/pcm",
+};
+const std::vector<std::string> uniqued_flags = {
+    "-DMACRO1",
+    "-UMACRO2",
+    "-I/path1",
+    "-F/path2",
+    "-fmodule-map-file=/path3",
+    "-fmodule-file=/path/to/pcm",
+    "-fmodule-file=modulename=/path/to/pcm",
+};
 } // namespace
 
 TEST(ClangArgs, UniquingCollisionWithExistingFlags) {

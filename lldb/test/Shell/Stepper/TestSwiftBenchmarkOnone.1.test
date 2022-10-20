@@ -1,5 +1,4 @@
 # REQUIRES: swift_Benchmark_Onone
-# REQUIRES: rdar75336700
 #
 # The test has regressed, tracked by: rdar://73760364
 # The regression only appears when compiling with -disable-copy-propagation.

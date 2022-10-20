@@ -8,8 +8,8 @@
 
 // CHECK-LABEL: func @normalize_parallel()
 func @normalize_parallel() {
-  %cst = constant 1.0 : f32
-  %0 = alloc() : memref<2x4xf32>
+  %cst = arith.constant 1.0 : f32
+  %0 = memref.alloc() : memref<2x4xf32>
   // CHECK: affine.parallel (%[[i0:.*]], %[[j0:.*]]) = (0, 0) to (4, 2)
   affine.parallel (%i, %j) = (0, 1) to (10, 5) step (3, 2) {
     // CHECK: %[[i1:.*]] = affine.apply [[$MAP0]](%[[i0]])
@@ -76,8 +76,8 @@ func @simple_loop_nest(){
 
 // CHECK-LABEL: func @loop_with_unknown_upper_bound
 // CHECK-SAME: (%[[ARG0:.*]]: memref<?x?xf32>, %[[ARG1:.*]]: index)
-// CHECK-NEXT:  %{{.*}} = constant 0 : index
-// CHECK-NEXT:  %[[DIM:.*]] = dim %arg0, %c0 : memref<?x?xf32>
+// CHECK-NEXT:  %{{.*}} = arith.constant 0 : index
+// CHECK-NEXT:  %[[DIM:.*]] = memref.dim %arg0, %c0 : memref<?x?xf32>
 // CHECK-NEXT:   affine.for %[[I:.*]] = 0 to [[$UB00]]()[%[[DIM]]] {
 // CHECK-NEXT:     %[[IIV:.*]] = affine.apply [[$IV00]](%[[I]])
 // CHECK-NEXT:     affine.for %[[II:.*]] = 0 to [[$UB11]]()[%[[ARG1]]] {
@@ -88,8 +88,8 @@ func @simple_loop_nest(){
 // CHECK-NEXT:   return
 // CHECK-NEXT: }
 func @loop_with_unknown_upper_bound(%arg0: memref<?x?xf32>, %arg1: index) {
-  %c0 = constant 0 : index
-  %0 = dim %arg0, %c0 : memref<?x?xf32>
+  %c0 = arith.constant 0 : index
+  %0 = memref.dim %arg0, %c0 : memref<?x?xf32>
   affine.for %i0 = 2 to %0 step 32 {
     affine.for %i1 = 0 to %arg1 step 2 {
       "test.foo"(%i0, %i1) : (index, index) -> ()
@@ -107,8 +107,8 @@ func @loop_with_unknown_upper_bound(%arg0: memref<?x?xf32>, %arg1: index) {
 
 // CHECK-LABEL: func @loop_with_multiple_upper_bounds
 // CHECK-SAME: (%[[ARG0:.*]]: memref<?x?xf32>, %[[ARG1:.*]]: index)
-// CHECK-NEXT:  %{{.*}} = constant 0 : index
-// CHECK-NEXT:  %[[DIM:.*]] = dim %arg0, %c0 : memref<?x?xf32>
+// CHECK-NEXT:  %{{.*}} = arith.constant 0 : index
+// CHECK-NEXT:  %[[DIM:.*]] = memref.dim %arg0, %c0 : memref<?x?xf32>
 // CHECK-NEXT:   affine.for %[[I:.*]] = 0 to [[$OUTERUB]]()[%[[DIM]]] {
 // CHECK-NEXT:     %[[IIV:.*]] = affine.apply [[$OUTERIV]](%[[I]])
 // CHECK-NEXT:     affine.for %[[II:.*]] = 0 to min [[$INNERUB]](%[[ARG1]]) {
@@ -119,8 +119,8 @@ func @loop_with_unknown_upper_bound(%arg0: memref<?x?xf32>, %arg1: index) {
 // CHECK-NEXT:   return
 // CHECK-NEXT: }
 func @loop_with_multiple_upper_bounds(%arg0: memref<?x?xf32>, %arg1 : index) {
-  %c0 = constant 0 : index
-  %0 = dim %arg0, %c0 : memref<?x?xf32>
+  %c0 = arith.constant 0 : index
+  %0 = memref.dim %arg0, %c0 : memref<?x?xf32>
   affine.for %i0 = 2 to %0 step 32{
     affine.for %i1 = 2 to min affine_map<(d0)[] -> (d0, 512)>(%arg1) {
       "test.foo"(%i0, %i1) : (index, index) -> ()
@@ -138,11 +138,11 @@ func @loop_with_multiple_upper_bounds(%arg0: memref<?x?xf32>, %arg1 : index) {
 
 // CHECK-LABEL: func @tiled_matmul
 // CHECK-SAME: (%[[ARG0:.*]]: memref<1024x1024xf32>, %[[ARG1:.*]]: memref<1024x1024xf32>, %[[ARG2:.*]]: memref<1024x1024xf32>)
-// CHECK-NEXT:    %{{.*}} = constant 0 : index
-// CHECK-NEXT:    %{{.*}} = constant 1 : index
-// CHECK-NEXT:    %[[DIM0:.*]] = dim %[[ARG0]], %{{.*}}
-// CHECK-NEXT:    %[[DIM1:.*]] = dim %[[ARG1]], %{{.*}}
-// CHECK-NEXT:    %[[DIM2:.*]] = dim %[[ARG0]], %{{.*}}
+// CHECK-NEXT:    %{{.*}} = arith.constant 0 : index
+// CHECK-NEXT:    %{{.*}} = arith.constant 1 : index
+// CHECK-NEXT:    %[[DIM0:.*]] = memref.dim %[[ARG0]], %{{.*}}
+// CHECK-NEXT:    %[[DIM1:.*]] = memref.dim %[[ARG1]], %{{.*}}
+// CHECK-NEXT:    %[[DIM2:.*]] = memref.dim %[[ARG0]], %{{.*}}
 // CHECK-NEXT:    affine.for %[[I:.*]] = 0 to [[$INTERUB]]()[%[[DIM0]]] {
 // CHECK-NEXT:      %[[IIV:.*]] = affine.apply [[$INTERIV]](%[[I]])
 // CHECK-NEXT:      affine.for %[[J:.*]] = 0 to [[$INTERUB]]()[%[[DIM1]]] {
@@ -158,8 +158,8 @@ func @loop_with_multiple_upper_bounds(%arg0: memref<?x?xf32>, %arg1 : index) {
 // CHECK-NEXT:                %{{.*}} = affine.load %[[ARG0]][%[[IIIV]], %[[KKIV]]] : memref<1024x1024xf32>
 // CHECK-NEXT:                %{{.*}} = affine.load %[[ARG1]][%[[KKIV]], %[[JJIV]]] : memref<1024x1024xf32>
 // CHECK-NEXT:                %{{.*}} = affine.load %[[ARG2]][%[[IIIV]], %[[JJIV]]] : memref<1024x1024xf32>
-// CHECK-NEXT:                %{{.*}} = mulf %9, %10 : f32
-// CHECK-NEXT:                %{{.*}} = addf %11, %12 : f32
+// CHECK-NEXT:                %{{.*}} = arith.mulf %9, %10 : f32
+// CHECK-NEXT:                %{{.*}} = arith.addf %11, %12 : f32
 // CHECK-NEXT:                affine.store %{{.*}}, %[[ARG2]][%6, %7] : memref<1024x1024xf32>
 // CHECK-NEXT:              }
 // CHECK-NEXT:            }
@@ -176,11 +176,11 @@ func @loop_with_multiple_upper_bounds(%arg0: memref<?x?xf32>, %arg1 : index) {
 #map4 = affine_map<()[s0] -> (s0)>
 
 func @tiled_matmul(%0: memref<1024x1024xf32>, %1: memref<1024x1024xf32>, %2: memref<1024x1024xf32>) {
-  %c0 = constant 0 : index
-  %c1 = constant 1 : index
-  %3 = dim %0, %c0 : memref<1024x1024xf32>
-  %4 = dim %1, %c1 : memref<1024x1024xf32>
-  %5 = dim %0, %c1 : memref<1024x1024xf32>
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %3 = memref.dim %0, %c0 : memref<1024x1024xf32>
+  %4 = memref.dim %1, %c1 : memref<1024x1024xf32>
+  %5 = memref.dim %0, %c1 : memref<1024x1024xf32>
   affine.for %arg0 = 0 to %3 step 32 {
     affine.for %arg1 = 0 to %4 step 32 {
       affine.for %arg2 = 0 to %5 step 32 {
@@ -190,8 +190,8 @@ func @tiled_matmul(%0: memref<1024x1024xf32>, %1: memref<1024x1024xf32>, %2: mem
               %6 = affine.load %0[%arg3, %arg5] : memref<1024x1024xf32>
               %7 = affine.load %1[%arg5, %arg4] : memref<1024x1024xf32>
               %8 = affine.load %2[%arg3, %arg4] : memref<1024x1024xf32>
-              %9 = mulf %6, %7 : f32
-              %10 = addf %8, %9 : f32
+              %9 = arith.mulf %6, %7 : f32
+              %10 = arith.addf %8, %9 : f32
               affine.store %10, %2[%arg3, %arg4] : memref<1024x1024xf32>
             }
           }

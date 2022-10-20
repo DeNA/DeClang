@@ -38,10 +38,6 @@
 
 using namespace llvm;
 
-namespace llvm {
-extern char &MIRCanonicalizerID;
-} // namespace llvm
-
 #define DEBUG_TYPE "mir-canonicalizer"
 
 static cl::opt<unsigned>
@@ -85,9 +81,7 @@ static std::vector<MachineBasicBlock *> GetRPOList(MachineFunction &MF) {
     return {};
   ReversePostOrderTraversal<MachineBasicBlock *> RPOT(&*MF.begin());
   std::vector<MachineBasicBlock *> RPOList;
-  for (auto MBB : RPOT) {
-    RPOList.push_back(MBB);
-  }
+  append_range(RPOList, RPOT);
 
   return RPOList;
 }
@@ -275,9 +269,9 @@ static bool rescheduleCanonically(unsigned &PseudoIdempotentInstCount,
   // Sort the defs for users of multiple defs lexographically.
   for (const auto &E : MultiUserLookup) {
 
-    auto UseI =
-        std::find_if(MBB->instr_begin(), MBB->instr_end(),
-                     [&](MachineInstr &MI) -> bool { return &MI == E.second; });
+    auto UseI = llvm::find_if(MBB->instrs(), [&](MachineInstr &MI) -> bool {
+      return &MI == E.second;
+    });
 
     if (UseI == MBB->instr_end())
       continue;

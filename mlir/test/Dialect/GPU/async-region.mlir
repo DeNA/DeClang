@@ -125,4 +125,68 @@ module attributes {gpu.container_module} {
     // CHECK: return %[[x]] : index
     return %x : index
   }
+
+  // CHECK-LABEL:func @async_execute_no_use(%{{.*}}: index)
+  func @async_execute_no_use(%sz : index) {
+    // CHECK: async.execute {
+    %a0 = async.execute {
+      // CHECK: %[[t:.*]] = gpu.launch_func async
+      gpu.launch_func @kernels::@kernel
+          blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz)
+      // CHECK: gpu.wait [%[[t]]]
+      async.yield
+    }
+    return
+  }
+
+  // CHECK-LABEL:func @async_execute_fork(%{{.*}}: index)
+  func @async_execute_fork(%sz : index) {
+    // CHECK: %[[a0:.*]], %[[f0:.*]]:2 = async.execute
+    // CHECK-SAME: -> (!async.value<!gpu.async.token>, !async.value<!gpu.async.token>)
+    %a0 = async.execute {
+      // CHECK: %[[t:.*]] = gpu.launch_func async
+      gpu.launch_func @kernels::@kernel
+          blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz)
+      // CHECK-NOT: gpu.wait
+      // CHECK: async.yield %[[t]], %[[t]] : !gpu.async.token, !gpu.async.token
+      async.yield
+    }
+    // CHECK: async.execute [%[[a0]]] (%[[f0]]#0 as {{.*}}: !async.value<!gpu.async.token>)
+    %a1 = async.execute [%a0] {
+      // CHECK: %[[t:.*]] = gpu.launch_func async
+      gpu.launch_func @kernels::@kernel
+          blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz)
+      // CHECK: gpu.wait [%[[t]]]
+      async.yield
+    }
+    // CHECK: async.execute [%[[a0]]] (%[[f0]]#1 as {{.*}}: !async.value<!gpu.async.token>)
+    %a2 = async.execute [%a0] {
+      // CHECK: %[[t:.*]] = gpu.launch_func async
+      gpu.launch_func @kernels::@kernel
+          blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz)
+      // CHECK: gpu.wait [%[[t]]]
+      async.yield
+    }
+    return
+  }
+
+  // CHECK-LABEL:func @existing_tokens()
+  func @existing_tokens() {
+    // CHECK: %[[t0:.*]] = gpu.wait async
+    // CHECK-NOT: [{{.*}}]
+    %t0 = gpu.wait async
+    // CHECK: %[[t1:.*]] = gpu.wait async [%[[t0]], %[[t0]]]
+    %t1 = gpu.wait async [%t0]
+    // CHECK: %[[m:.*]], %[[t2:.*]] = gpu.alloc async [%[[t1]], %[[t0]]] ()
+    %0 = gpu.alloc [%t0] () : memref<7xf32>
+    // CHECK: %[[t3:.*]] = gpu.dealloc async [%[[t2]]] %[[m]]
+    %t2 = gpu.dealloc async %0 : memref<7xf32>
+    // CHECK: gpu.wait [%[[t3]]]
+    gpu.wait
+    // CHECK: gpu.wait
+    // CHECK-NOT: async
+    // CHECK-NOT: [{{.*}}]
+    gpu.wait
+    return
+  }
 }

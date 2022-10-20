@@ -24,11 +24,12 @@
 
 #include <thread>
 #include <chrono>
+
+#include "test_macros.h"
+
 #if TEST_STD_VER >= 20
 # include <memory>
 #endif
-
-#include "test_macros.h"
 
 template <class A, bool Integral>
 struct test_atomic
@@ -117,7 +118,9 @@ int main(int, char**)
 #endif
     test<char16_t>           ();
     test<char32_t>           ();
+#ifndef TEST_HAS_NO_WIDE_CHARACTERS
     test<wchar_t>            ();
+#endif
 
     test<int_least8_t>   ();
     test<uint_least8_t>  ();

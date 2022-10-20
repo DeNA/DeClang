@@ -39,11 +39,11 @@ static llvm::Expected<Scalar> Evaluate(llvm::ArrayRef<uint8_t> expr,
     return status.ToError();
 
   switch (result.GetValueType()) {
-  case Value::eValueTypeScalar:
+  case Value::ValueType::Scalar:
     return result.GetScalar();
-  case Value::eValueTypeLoadAddress:
+  case Value::ValueType::LoadAddress:
     return LLDB_INVALID_ADDRESS;
-  case Value::eValueTypeHostAddress: {
+  case Value::ValueType::HostAddress: {
     // Convert small buffers to scalars to simplify the tests.
     DataBufferHeap &buf = result.GetBuffer();
     if (buf.GetByteSize() <= 8) {
@@ -309,15 +309,14 @@ TEST_F(DWARFExpressionMockProcessTest, DW_OP_deref) {
 
   struct MockProcess : Process {
     using Process::Process;
-    ConstString GetPluginName() override { return ConstString("mock process"); }
-    uint32_t GetPluginVersion() override { return 0; }
+    llvm::StringRef GetPluginName() override { return "mock process"; }
     bool CanDebug(lldb::TargetSP target,
                   bool plugin_specified_by_name) override {
       return false;
     };
     Status DoDestroy() override { return {}; }
     void RefreshStateAfterStop() override {}
-    bool UpdateThreadList(ThreadList &old_thread_list,
+    bool DoUpdateThreadList(ThreadList &old_thread_list,
                             ThreadList &new_thread_list) override {
       return false;
     };

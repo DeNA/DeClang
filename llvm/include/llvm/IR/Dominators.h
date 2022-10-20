@@ -165,6 +165,9 @@ class DominatorTree : public DominatorTreeBase<BasicBlock, false> {
   // Ensure base-class overloads are visible.
   using Base::dominates;
 
+  /// Return true if the (end of the) basic block BB dominates the use U.
+  bool dominates(const BasicBlock *BB, const Use &U) const;
+
   /// Return true if value Def dominates use U, in the sense that Def is
   /// available at U, and could be substituted as the used value without
   /// violating the SSA dominance requirement.
@@ -273,6 +276,12 @@ public:
 struct DominatorTreeVerifierPass : PassInfoMixin<DominatorTreeVerifierPass> {
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
 };
+
+/// Enables verification of dominator trees.
+///
+/// This check is expensive and is disabled by default.  `-verify-dom-info`
+/// allows selectively enabling the check without needing to recompile.
+extern bool VerifyDomInfo;
 
 /// Legacy analysis pass which computes a \c DominatorTree.
 class DominatorTreeWrapperPass : public FunctionPass {

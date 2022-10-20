@@ -72,8 +72,7 @@ Status RemoteAwarePlatform::ResolveExecutable(
   } else {
     if (m_remote_platform_sp) {
       return GetCachedExecutable(resolved_module_spec, exe_module_sp,
-                                 module_search_paths_ptr,
-                                 *m_remote_platform_sp);
+                                 module_search_paths_ptr);
     }
 
     // We may connect to a process and use the provided executable (Don't use
@@ -132,9 +131,11 @@ Status RemoteAwarePlatform::ResolveExecutable(
       // architectures that we should be using (in the correct order) and see
       // if we can find a match that way
       StreamString arch_names;
-      for (uint32_t idx = 0; GetSupportedArchitectureAtIndex(
-               idx, resolved_module_spec.GetArchitecture());
-           ++idx) {
+      llvm::ListSeparator LS;
+      ArchSpec process_host_arch;
+      for (const ArchSpec &arch :
+           GetSupportedArchitectures(process_host_arch)) {
+        resolved_module_spec.GetArchitecture() = arch;
         error = ModuleList::GetSharedModule(resolved_module_spec, exe_module_sp,
                                             module_search_paths_ptr, nullptr, nullptr);
         // Did we find an executable using one of the
@@ -145,19 +146,16 @@ Status RemoteAwarePlatform::ResolveExecutable(
             error.SetErrorToGenericError();
         }
 
-        if (idx > 0)
-          arch_names.PutCString(", ");
-        arch_names.PutCString(
-            resolved_module_spec.GetArchitecture().GetArchitectureName());
+        arch_names << LS << arch.GetArchitectureName();
       }
 
       if (error.Fail() || !exe_module_sp) {
         if (FileSystem::Instance().Readable(
                 resolved_module_spec.GetFileSpec())) {
-          error.SetErrorStringWithFormat(
-              "'%s' doesn't contain any '%s' platform architectures: %s",
-              resolved_module_spec.GetFileSpec().GetPath().c_str(),
-              GetPluginName().GetCString(), arch_names.GetData());
+          error.SetErrorStringWithFormatv(
+              "'{0}' doesn't contain any '{1}' platform architectures: {2}",
+              resolved_module_spec.GetFileSpec(), GetPluginName(),
+              arch_names.GetData());
         } else {
           error.SetErrorStringWithFormat(
               "'%s' is not readable",
@@ -332,11 +330,10 @@ bool RemoteAwarePlatform::GetRemoteOSVersion() {
   return false;
 }
 
-bool RemoteAwarePlatform::GetRemoteOSBuildString(std::string &s) {
+llvm::Optional<std::string> RemoteAwarePlatform::GetRemoteOSBuildString() {
   if (m_remote_platform_sp)
-    return m_remote_platform_sp->GetRemoteOSBuildString(s);
-  s.clear();
-  return false;
+    return m_remote_platform_sp->GetRemoteOSBuildString();
+  return llvm::None;
 }
 
 bool RemoteAwarePlatform::GetRemoteOSKernelDescription(std::string &s) {
@@ -436,4 +433,11 @@ Status RemoteAwarePlatform::KillProcess(const lldb::pid_t pid) {
   if (m_remote_platform_sp)
     return m_remote_platform_sp->KillProcess(pid);
   return Status("the platform is not currently connected");
+}
+
+size_t RemoteAwarePlatform::ConnectToWaitingProcesses(Debugger &debugger,
+                                                Status &error) {
+  if (m_remote_platform_sp)
+    return m_remote_platform_sp->ConnectToWaitingProcesses(debugger, error);
+  return Platform::ConnectToWaitingProcesses(debugger, error);
 }

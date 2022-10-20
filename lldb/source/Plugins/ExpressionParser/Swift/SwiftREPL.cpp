@@ -82,8 +82,8 @@ lldb::REPLSP SwiftREPL::CreateInstanceFromTarget(Status &err, Target &target,
   }
 
   // Check that we can get a type system, or we aren't going anywhere:
-  auto type_system_or_err =
-      target.GetScratchTypeSystemForLanguage(eLanguageTypeSwift, true, repl_options);
+  auto type_system_or_err = target.GetScratchTypeSystemForLanguage(
+      eLanguageTypeSwift, true, repl_options ? repl_options : "");
   if (!type_system_or_err) {
     llvm::consumeError(type_system_or_err.takeError());
     err.SetErrorString("Could not construct an expression "
@@ -146,6 +146,10 @@ lldb::REPLSP SwiftREPL::CreateInstanceFromDebugger(Status &err,
     return nullptr;
   }
 
+  // The Swift REPL can't deal with poisoning the scratch context
+  // in SwiftASTContext::ModulesDidLoad().
+  target_sp->SetUseAllCompilerFlags(false);
+
   // Limit the breakpoint to our executable module
   ModuleSP exe_module_sp(target_sp->GetExecutableModule());
   if (!exe_module_sp) {
@@ -195,6 +199,7 @@ lldb::REPLSP SwiftREPL::CreateInstanceFromDebugger(Status &err,
     launch_info.SetExecutableFile(exe_module_sp->GetPlatformFileSpec(), true);
   }
 
+  launch_info.GetEnvironment() = target_sp->GetTargetEnvironment();
   debugger.SetAsyncExecution(false);
   err = target_sp->Launch(launch_info, nullptr);
   debugger.SetAsyncExecution(true);
@@ -250,8 +255,8 @@ lldb::REPLSP SwiftREPL::CreateInstanceFromDebugger(Status &err,
   // Check that we can get a type system, or we aren't
   // going anywhere.  Remember to pass in the repl_options
   // in case they set up framework paths we need, etc.
-  auto type_system_or_err =
-      target_sp->GetScratchTypeSystemForLanguage(eLanguageTypeSwift, true, repl_options);
+  auto type_system_or_err = target_sp->GetScratchTypeSystemForLanguage(
+      eLanguageTypeSwift, true, repl_options ? repl_options : "");
   if (!type_system_or_err) {
     llvm::consumeError(type_system_or_err.takeError());
     err.SetErrorString("Could not construct an expression "
@@ -262,9 +267,11 @@ lldb::REPLSP SwiftREPL::CreateInstanceFromDebugger(Status &err,
   // Disable the cleanup, since we have a valid repl session now.
   cleanup.release();
 
-  std::string swift_full_version(swift::version::getSwiftFullVersion());
-  printf("Welcome to %s.\nType :help for assistance.\n",
-         swift_full_version.c_str());
+  if (isatty(STDIN_FILENO)) {
+    std::string swift_full_version(swift::version::getSwiftFullVersion());
+    printf("Welcome to %s.\nType :help for assistance.\n",
+           swift_full_version.c_str());
+  }
 
   return repl_sp;
 }
@@ -549,15 +556,19 @@ void SwiftREPL::CompleteCode(const std::string &current_code,
   //----------------------------------------------------------------------
   Status error;
   if (!m_swift_ast) {
-    auto type_system_or_err = m_target.GetScratchTypeSystemForLanguage(eLanguageTypeSwift);
+    auto type_system_or_err =
+        m_target.GetScratchTypeSystemForLanguage(eLanguageTypeSwift);
     if (!type_system_or_err) {
       llvm::consumeError(type_system_or_err.takeError());
       return;
     }
 
+    auto *swift_ts =
+        llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
+            &*type_system_or_err);
     auto *target_swift_ast =
         llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
-            &*type_system_or_err);
+            swift_ts->GetSwiftASTContext());
     m_swift_ast = target_swift_ast;
   }
   SwiftASTContextForExpressions *swift_ast = m_swift_ast;
@@ -569,8 +580,7 @@ void SwiftREPL::CompleteCode(const std::string &current_code,
     completion_module_info.path.push_back(ConstString("repl"));
     swift::ModuleDecl *repl_module = nullptr;
     if (m_completion_module_initialized)
-      repl_module =
-        swift_ast->GetModule(completion_module_info, error);
+      repl_module = swift_ast->GetModule(completion_module_info, error);
     if (repl_module == nullptr) {
       swift::ImplicitImportInfo importInfo;
       importInfo.StdlibKind = swift::ImplicitStdlibKind::Stdlib;

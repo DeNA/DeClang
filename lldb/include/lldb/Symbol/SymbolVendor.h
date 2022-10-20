@@ -45,13 +45,10 @@ public:
   virtual void SectionFileAddressesChanged();
 
   // PluginInterface protocol
-  ConstString GetPluginName() override;
-
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override { return "vendor-default"; }
 
   virtual std::vector<lldb::DataBufferSP>
   GetASTData(lldb::LanguageType language);
-
 protected:
   std::unique_ptr<SymbolFile> m_sym_file_up; // A single symbol file. Subclasses
                                              // can add more of these if needed.

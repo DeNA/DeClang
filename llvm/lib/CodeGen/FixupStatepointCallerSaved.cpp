@@ -1,9 +1,8 @@
 //===-- FixupStatepointCallerSaved.cpp - Fixup caller saved registers  ----===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -301,7 +300,7 @@ public:
   void sortRegisters(SmallVectorImpl<Register> &Regs) {
     if (!FixupSCSExtendSlotSize)
       return;
-    llvm::sort(Regs.begin(), Regs.end(), [&](Register &A, Register &B) {
+    llvm::sort(Regs, [&](Register &A, Register &B) {
       return getRegisterSize(TRI, A) > getRegisterSize(TRI, B);
     });
   }
@@ -380,7 +379,9 @@ public:
                   EndIdx = MI.getNumOperands();
          Idx < EndIdx; ++Idx) {
       MachineOperand &MO = MI.getOperand(Idx);
-      if (!MO.isReg() || MO.isImplicit())
+      // Leave `undef` operands as is, StackMaps will rewrite them
+      // into a constant.
+      if (!MO.isReg() || MO.isImplicit() || MO.isUndef())
         continue;
       Register Reg = MO.getReg();
       assert(Reg.isPhysical() && "Only physical regs are expected");
@@ -434,7 +435,7 @@ public:
 
     // To insert reload at the end of MBB, insert it before last instruction
     // and then swap them.
-    assert(MBB->begin() != MBB->end() && "Empty block");
+    assert(!MBB->empty() && "Empty block");
     --It;
     TII.loadRegFromStackSlot(*MBB, It, Reg, FI, RC, &TRI);
     MachineInstr *Reload = It->getPrevNode();
@@ -482,6 +483,16 @@ public:
       MachineOperand &DefMO = MI.getOperand(I);
       assert(DefMO.isReg() && DefMO.isDef() && "Expected Reg Def operand");
       Register Reg = DefMO.getReg();
+      assert(DefMO.isTied() && "Def is expected to be tied");
+      // We skipped undef uses and did not spill them, so we should not
+      // proceed with defs here.
+      if (MI.getOperand(MI.findTiedOperandIdx(I)).isUndef()) {
+        if (AllowGCPtrInCSR) {
+          NewIndices.push_back(NewMI->getNumOperands());
+          MIB.addReg(Reg, RegState::Define);
+        }
+        continue;
+      }
       if (!AllowGCPtrInCSR) {
         assert(is_contained(RegsToSpill, Reg));
         RegsToReload.push_back(Reg);

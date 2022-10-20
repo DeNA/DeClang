@@ -16,6 +16,7 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/PseudoProbe.h"
 #include "llvm/ProfileData/SampleProfReader.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
@@ -29,12 +30,19 @@
 using namespace llvm;
 using namespace sampleprof;
 
+static cl::opt<uint64_t> ProfileSymbolListCutOff(
+    "profile-symbol-list-cutoff", cl::Hidden, cl::init(-1), cl::ZeroOrMore,
+    cl::desc("Cutoff value about how many symbols in profile symbol list "
+             "will be used. This is very useful for performance debugging"));
+
 namespace llvm {
 namespace sampleprof {
 SampleProfileFormat FunctionSamples::Format;
 bool FunctionSamples::ProfileIsProbeBased = false;
 bool FunctionSamples::ProfileIsCS = false;
-bool FunctionSamples::UseMD5;
+bool FunctionSamples::UseMD5 = false;
+bool FunctionSamples::HasUniqSuffix = true;
+bool FunctionSamples::ProfileIsFS = false;
 } // namespace sampleprof
 } // namespace llvm
 
@@ -104,6 +112,18 @@ raw_ostream &llvm::sampleprof::operator<<(raw_ostream &OS,
                                           const LineLocation &Loc) {
   Loc.print(OS);
   return OS;
+}
+
+/// Merge the samples in \p Other into this record.
+/// Optionally scale sample counts by \p Weight.
+sampleprof_error SampleRecord::merge(const SampleRecord &Other,
+                                     uint64_t Weight) {
+  sampleprof_error Result;
+  Result = addSamples(Other.getSamples(), Weight);
+  for (const auto &I : Other.getCallTargets()) {
+    MergeResult(Result, addCalledTarget(I.first(), I.second, Weight));
+  }
+  return Result;
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -178,6 +198,21 @@ raw_ostream &llvm::sampleprof::operator<<(raw_ostream &OS,
   return OS;
 }
 
+void sampleprof::sortFuncProfiles(
+    const SampleProfileMap &ProfileMap,
+    std::vector<NameFunctionSamples> &SortedProfiles) {
+  for (const auto &I : ProfileMap) {
+    assert(I.first == I.second.getContext() && "Inconsistent profile map");
+    SortedProfiles.push_back(std::make_pair(I.second.getContext(), &I.second));
+  }
+  llvm::stable_sort(SortedProfiles, [](const NameFunctionSamples &A,
+                                       const NameFunctionSamples &B) {
+    if (A.second->getTotalSamples() == B.second->getTotalSamples())
+      return A.first < B.first;
+    return A.second->getTotalSamples() > B.second->getTotalSamples();
+  });
+}
+
 unsigned FunctionSamples::getOffset(const DILocation *DIL) {
   return (DIL->getLine() - DIL->getScope()->getSubprogram()->getLine()) &
       0xffff;
@@ -204,9 +239,15 @@ const FunctionSamples *FunctionSamples::findFunctionSamples(
 
   const DILocation *PrevDIL = DIL;
   for (DIL = DIL->getInlinedAt(); DIL; DIL = DIL->getInlinedAt()) {
-    S.push_back(std::make_pair(
-        LineLocation(getOffset(DIL), DIL->getBaseDiscriminator()),
-        PrevDIL->getScope()->getSubprogram()->getLinkageName()));
+    unsigned Discriminator;
+    if (ProfileIsFS)
+      Discriminator = DIL->getDiscriminator();
+    else
+      Discriminator = DIL->getBaseDiscriminator();
+
+    S.push_back(
+        std::make_pair(LineLocation(getOffset(DIL), Discriminator),
+                       PrevDIL->getScope()->getSubprogram()->getLinkageName()));
     PrevDIL = DIL;
   }
   if (S.size() == 0)
@@ -219,7 +260,7 @@ const FunctionSamples *FunctionSamples::findFunctionSamples(
 }
 
 void FunctionSamples::findAllNames(DenseSet<StringRef> &NameSet) const {
-  NameSet.insert(Name);
+  NameSet.insert(getName());
   for (const auto &BS : BodySamples)
     for (const auto &TS : BS.second.getCallTargets())
       NameSet.insert(TS.getKey());
@@ -235,6 +276,8 @@ void FunctionSamples::findAllNames(DenseSet<StringRef> &NameSet) const {
 const FunctionSamples *FunctionSamples::findFunctionSamplesAt(
     const LineLocation &Loc, StringRef CalleeName,
     SampleProfileReaderItaniumRemapper *Remapper) const {
+  CalleeName = getCanonicalFnName(CalleeName);
+
   std::string CalleeGUID;
   CalleeName = getRepInFormat(CalleeName, UseMD5, CalleeGUID);
 
@@ -274,21 +317,112 @@ std::error_code ProfileSymbolList::read(const uint8_t *Data,
                                         uint64_t ListSize) {
   const char *ListStart = reinterpret_cast<const char *>(Data);
   uint64_t Size = 0;
-  while (Size < ListSize) {
+  uint64_t StrNum = 0;
+  while (Size < ListSize && StrNum < ProfileSymbolListCutOff) {
     StringRef Str(ListStart + Size);
     add(Str);
     Size += Str.size() + 1;
+    StrNum++;
   }
-  if (Size != ListSize)
+  if (Size != ListSize && StrNum != ProfileSymbolListCutOff)
     return sampleprof_error::malformed;
   return sampleprof_error::success;
+}
+
+void SampleContextTrimmer::trimAndMergeColdContextProfiles(
+    uint64_t ColdCountThreshold, bool TrimColdContext, bool MergeColdContext,
+    uint32_t ColdContextFrameLength) {
+  if (!TrimColdContext && !MergeColdContext)
+    return;
+
+  // Nothing to merge if sample threshold is zero
+  if (ColdCountThreshold == 0)
+    return;
+
+  // Filter the cold profiles from ProfileMap and move them into a tmp
+  // container
+  std::vector<std::pair<SampleContext, const FunctionSamples *>> ColdProfiles;
+  for (const auto &I : ProfileMap) {
+    const FunctionSamples &FunctionProfile = I.second;
+    if (FunctionProfile.getTotalSamples() >= ColdCountThreshold)
+      continue;
+    ColdProfiles.emplace_back(I.first, &I.second);
+  }
+
+  // Remove the cold profile from ProfileMap and merge them into
+  // MergedProfileMap by the last K frames of context
+  SampleProfileMap MergedProfileMap;
+  for (const auto &I : ColdProfiles) {
+    if (MergeColdContext) {
+      auto MergedContext = I.second->getContext().getContextFrames();
+      if (ColdContextFrameLength < MergedContext.size())
+        MergedContext = MergedContext.take_back(ColdContextFrameLength);
+      auto Ret = MergedProfileMap.emplace(MergedContext, FunctionSamples());
+      FunctionSamples &MergedProfile = Ret.first->second;
+      MergedProfile.merge(*I.second);
+    }
+    ProfileMap.erase(I.first);
+  }
+
+  // Move the merged profiles into ProfileMap;
+  for (const auto &I : MergedProfileMap) {
+    // Filter the cold merged profile
+    if (TrimColdContext && I.second.getTotalSamples() < ColdCountThreshold &&
+        ProfileMap.find(I.first) == ProfileMap.end())
+      continue;
+    // Merge the profile if the original profile exists, otherwise just insert
+    // as a new profile
+    auto Ret = ProfileMap.emplace(I.first, FunctionSamples());
+    if (Ret.second) {
+      SampleContext FContext(Ret.first->first, RawContext);
+      FunctionSamples &FProfile = Ret.first->second;
+      FProfile.setContext(FContext);
+    }
+    FunctionSamples &OrigProfile = Ret.first->second;
+    OrigProfile.merge(I.second);
+  }
+}
+
+void SampleContextTrimmer::canonicalizeContextProfiles() {
+  std::vector<SampleContext> ProfilesToBeRemoved;
+  SampleProfileMap ProfilesToBeAdded;
+  for (auto &I : ProfileMap) {
+    FunctionSamples &FProfile = I.second;
+    SampleContext &Context = FProfile.getContext();
+    if (I.first == Context)
+      continue;
+
+    // Use the context string from FunctionSamples to update the keys of
+    // ProfileMap. They can get out of sync after context profile promotion
+    // through pre-inliner.
+    // Duplicate the function profile for later insertion to avoid a conflict
+    // caused by a context both to be add and to be removed. This could happen
+    // when a context is promoted to another context which is also promoted to
+    // the third context. For example, given an original context A @ B @ C that
+    // is promoted to B @ C and the original context B @ C which is promoted to
+    // just C, adding B @ C to the profile map while removing same context (but
+    // with different profiles) from the map can cause a conflict if they are
+    // not handled in a right order. This can be solved by just caching the
+    // profiles to be added.
+    auto Ret = ProfilesToBeAdded.emplace(Context, FProfile);
+    (void)Ret;
+    assert(Ret.second && "Context conflict during canonicalization");
+    ProfilesToBeRemoved.push_back(I.first);
+  }
+
+  for (auto &I : ProfilesToBeRemoved) {
+    ProfileMap.erase(I);
+  }
+
+  for (auto &I : ProfilesToBeAdded) {
+    ProfileMap.emplace(I.first, I.second);
+  }
 }
 
 std::error_code ProfileSymbolList::write(raw_ostream &OS) {
   // Sort the symbols before output. If doing compression.
   // It will make the compression much more effective.
-  std::vector<StringRef> SortedList;
-  SortedList.insert(SortedList.begin(), Syms.begin(), Syms.end());
+  std::vector<StringRef> SortedList(Syms.begin(), Syms.end());
   llvm::sort(SortedList);
 
   std::string OutputString;
@@ -303,8 +437,7 @@ std::error_code ProfileSymbolList::write(raw_ostream &OS) {
 
 void ProfileSymbolList::dump(raw_ostream &OS) const {
   OS << "======== Dump profile symbol list ========\n";
-  std::vector<StringRef> SortedList;
-  SortedList.insert(SortedList.begin(), Syms.begin(), Syms.end());
+  std::vector<StringRef> SortedList(Syms.begin(), Syms.end());
   llvm::sort(SortedList);
 
   for (auto &Sym : SortedList)

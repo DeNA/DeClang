@@ -106,6 +106,15 @@ void TracePC::PrintModuleInfo() {
   }
   if (size_t NumExtraCounters = ExtraCountersEnd() - ExtraCountersBegin())
     Printf("INFO: %zd Extra Counters\n", NumExtraCounters);
+
+  size_t MaxFeatures = CollectFeatures([](uint32_t) {});
+  if (MaxFeatures > std::numeric_limits<uint32_t>::max())
+    Printf("WARNING: The coverage PC tables may produce up to %zu features.\n"
+           "This exceeds the maximum 32-bit value. Some features may be\n"
+           "ignored, and fuzzing may become less precise. If possible,\n"
+           "consider refactoring the fuzzer into several smaller fuzzers\n"
+           "linked against only a portion of the current target.\n",
+           MaxFeatures);
 }
 
 ATTRIBUTE_NO_SANITIZE_ALL
@@ -148,7 +157,7 @@ ALWAYS_INLINE uintptr_t TracePC::GetNextInstructionPc(uintptr_t PC) {
 }
 
 void TracePC::UpdateObservedPCs() {
-  Vector<uintptr_t> CoveredFuncs;
+  std::vector<uintptr_t> CoveredFuncs;
   auto ObservePC = [&](const PCTableEntry *TE) {
     if (ObservedPCs.insert(TE).second && DoPrintNewPCs) {
       PrintPC("\tNEW_PC: %p %F %L", "\tNEW_PC: %p",
@@ -291,8 +300,8 @@ void TracePC::PrintCoverage(bool PrintAllCounters) {
       FunctionStr = FunctionStr.substr(3);
     std::string LineStr = DescribePC("%l", VisualizePC);
     size_t NumEdges = Last - First;
-    Vector<uintptr_t> UncoveredPCs;
-    Vector<uintptr_t> CoveredPCs;
+    std::vector<uintptr_t> UncoveredPCs;
+    std::vector<uintptr_t> CoveredPCs;
     for (auto TE = First; TE < Last; TE++)
       if (!ObservedPCs.count(TE))
         UncoveredPCs.push_back(TE->PC);
@@ -356,7 +365,7 @@ void TracePC::AddValueForMemcmp(void *caller_pc, const void *s1, const void *s2,
   uint8_t HammingDistance = 0;
   for (; I < Len; I++) {
     if (B1[I] != B2[I] || (StopAtZero && B1[I] == 0)) {
-      HammingDistance = Popcountll(B1[I] ^ B2[I]);
+      HammingDistance = static_cast<uint8_t>(Popcountll(B1[I] ^ B2[I]));
       break;
     }
   }
@@ -389,7 +398,7 @@ static size_t InternalStrnlen(const char *S, size_t MaxLen) {
 }
 
 // Finds min of (strlen(S1), strlen(S2)).
-// Needed bacause one of these strings may actually be non-zero terminated.
+// Needed because one of these strings may actually be non-zero terminated.
 static size_t InternalStrnlen2(const char *S1, const char *S2) {
   size_t Len = 0;
   for (; S1[Len] && S2[Len]; Len++)  {}

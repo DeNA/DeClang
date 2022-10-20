@@ -102,6 +102,8 @@ public:
 
   void finalize();
   template <class ELFT> void writeTo(uint8_t *buf);
+  // Check that the addends for dynamic relocations were written correctly.
+  void checkDynRelAddends(const uint8_t *bufStart);
   template <class ELFT> void maybeCompress();
 
   void sort(llvm::function_ref<int(InputSectionBase *s)> order);
@@ -134,12 +136,6 @@ struct Out {
   static OutputSection *initArray;
   static OutputSection *finiArray;
 };
-
-} // namespace elf
-} // namespace lld
-
-namespace lld {
-namespace elf {
 
 uint64_t getHeaderSize();
 

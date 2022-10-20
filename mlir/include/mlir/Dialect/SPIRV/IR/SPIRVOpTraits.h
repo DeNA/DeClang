@@ -23,6 +23,15 @@ namespace spirv {
 template <typename ConcreteType>
 class UnsignedOp : public TraitBase<ConcreteType, UnsignedOp> {};
 
+template <typename ConcreteType>
+class SignedOp : public TraitBase<ConcreteType, SignedOp> {};
+
+/// A trait to mark ops that can be enclosed/wrapped in a
+/// `SpecConstantOperation` op.
+template <typename ConcreteType>
+class UsableInSpecConstantOp
+    : public TraitBase<ConcreteType, UsableInSpecConstantOp> {};
+
 } // namespace spirv
 } // namespace OpTrait
 } // namespace mlir

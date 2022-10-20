@@ -124,10 +124,38 @@ struct VeryLong
     int z_2;
 };
 
+struct QuiteNested {
+  struct One {
+    struct Two {
+      struct Three {
+        struct Four {
+          struct Five {
+            struct Six {
+              struct Seven {
+                int leaf = 41;
+              };
+              Seven seven;
+            };
+            Six six;
+          };
+          Five five;
+        };
+        Four four;
+      };
+      Three three;
+    };
+    Two two;
+  };
+  One one;
+};
+
 int main (int argc, const char * argv[])
 {
     
     int iAmInt = 9;
+    const int constInt = 42;
+    volatile int volatileInt = 43;
+    const volatile int constVolatileInt = 44;
     
     i_am_cool cool_boy(1,0.5,3);
     i_am_cooler cooler_boy(1,2,0.1,0.2,'A','B');
@@ -161,5 +189,7 @@ int main (int argc, const char * argv[])
     
     VeryLong a_long_guy;
     
+    QuiteNested quite_nested;
+
     return 0; // Set break point at this line.
 }

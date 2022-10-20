@@ -57,8 +57,6 @@ public:
   uint64_t GetMaxBacktraceDepth() const;
 };
 
-typedef std::shared_ptr<ThreadProperties> ThreadPropertiesSP;
-
 class Thread : public std::enable_shared_from_this<Thread>,
                public ThreadProperties,
                public UserID,
@@ -149,7 +147,7 @@ public:
 
   static void SettingsTerminate();
 
-  static const ThreadPropertiesSP &GetGlobalProperties();
+  static ThreadProperties &GetGlobalProperties();
 
   lldb::ProcessSP GetProcess() const { return m_process_wp.lock(); }
 
@@ -615,7 +613,7 @@ public:
   /// \return
   ///     A shared pointer to the newly queued thread plan, or nullptr if the
   ///     plan could not be queued.
-  virtual lldb::ThreadPlanSP QueueFundamentalPlan(bool abort_other_plans);
+  lldb::ThreadPlanSP QueueBasePlan(bool abort_other_plans);
 
   /// Queues the plan used to step one instruction from the current PC of \a
   /// thread.
@@ -788,10 +786,10 @@ public:
   /// \param[in] stop_other_threads
   ///    \b true if we will stop other threads while we single step this one.
   ///
-  /// \param[in] stop_vote
+  /// \param[in] report_stop_vote
   ///    See standard meanings for the stop & run votes in ThreadPlan.h.
   ///
-  /// \param[in] run_vote
+  /// \param[in] report_run_vote
   ///    See standard meanings for the stop & run votes in ThreadPlan.h.
   ///
   /// \param[out] status
@@ -807,7 +805,7 @@ public:
   ///     plan could not be queued.
   virtual lldb::ThreadPlanSP QueueThreadPlanForStepOut(
       bool abort_other_plans, SymbolContext *addr_context, bool first_insn,
-      bool stop_other_threads, Vote stop_vote, Vote run_vote,
+      bool stop_other_threads, Vote report_stop_vote, Vote report_run_vote,
       uint32_t frame_idx, Status &status,
       LazyBool step_out_avoids_code_without_debug_info = eLazyBoolCalculate);
 
@@ -837,10 +835,10 @@ public:
   /// \param[in] stop_other_threads
   ///    \b true if we will stop other threads while we single step this one.
   ///
-  /// \param[in] stop_vote
+  /// \param[in] report_stop_vote
   ///    See standard meanings for the stop & run votes in ThreadPlan.h.
   ///
-  /// \param[in] run_vote
+  /// \param[in] report_run_vote
   ///    See standard meanings for the stop & run votes in ThreadPlan.h.
   ///
   /// \param[in] frame_idx
@@ -871,7 +869,7 @@ public:
   ///     plan could not be queued.
   virtual lldb::ThreadPlanSP QueueThreadPlanForStepOutNoShouldStop(
       bool abort_other_plans, SymbolContext *addr_context, bool first_insn,
-      bool stop_other_threads, Vote stop_vote, Vote run_vote,
+      bool stop_other_threads, Vote report_stop_vote, Vote report_run_vote,
       uint32_t frame_idx, Status &status, bool continue_to_next_branch = false);
 
   /// Gets the plan used to step through the code that steps from a function
@@ -1061,12 +1059,7 @@ public:
   virtual bool
   RestoreRegisterStateFromCheckpoint(ThreadStateCheckpoint &saved_state);
 
-  virtual bool
-  RestoreThreadStateFromCheckpoint(ThreadStateCheckpoint &saved_state);
-
-  void EnableTracer(bool value, bool single_step);
-
-  void SetTracer(lldb::ThreadPlanTracerSP &tracer_sp);
+  void RestoreThreadStateFromCheckpoint(ThreadStateCheckpoint &saved_state);
 
   // Get the thread index ID. The index ID that is guaranteed to not be re-used
   // by a process. They start at 1 and increase with each new thread. This
@@ -1261,7 +1254,7 @@ protected:
                                          // the stop info was checked against
                                          // the stop info override
   const uint32_t m_index_id; ///< A unique 1 based index assigned to each thread
-                             ///for easy UI/command line access.
+                             /// for easy UI/command line access.
   lldb::RegisterContextSP m_reg_context_sp; ///< The register context for this
                                             ///thread's current register state.
   lldb::StateType m_state;                  ///< The state of our process.

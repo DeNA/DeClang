@@ -308,7 +308,8 @@ void __sanitizer::BufferedStackTrace::UnwindImpl(
   if (!t || !StackTrace::WillUseFastUnwind(request_fast)) {
     // Block reports from our interceptors during _Unwind_Backtrace.
     SymbolizerScope sym_scope;
-    return Unwind(max_depth, pc, bp, context, 0, 0, false);
+    return Unwind(max_depth, pc, bp, context, t ? t->stack_top() : 0,
+                  t ? t->stack_bottom() : 0, false);
   }
   if (StackTrace::WillUseFastUnwind(request_fast))
     Unwind(max_depth, pc, bp, nullptr, t->stack_top(), t->stack_bottom(), true);
@@ -410,12 +411,9 @@ static void MsanOnDeadlySignal(int signo, void *siginfo, void *context) {
   HandleDeadlySignal(siginfo, context, GetTid(), &OnStackUnwind, nullptr);
 }
 
-static void MsanCheckFailed(const char *file, int line, const char *cond,
-                            u64 v1, u64 v2) {
-  Report("MemorySanitizer CHECK failed: %s:%d \"%s\" (0x%zx, 0x%zx)\n", file,
-         line, cond, (uptr)v1, (uptr)v2);
-  PRINT_CURRENT_STACK_CHECK();
-  Die();
+static void CheckUnwind() {
+  GET_FATAL_STACK_TRACE_PC_BP(StackTrace::GetCurrentPc(), GET_CURRENT_FRAME());
+  stack.Print();
 }
 
 void __msan_init() {
@@ -430,7 +428,7 @@ void __msan_init() {
   InitializeFlags();
 
   // Install tool-specific callbacks in sanitizer_common.
-  SetCheckFailedCallback(MsanCheckFailed);
+  SetCheckUnwindCallback(CheckUnwind);
 
   __sanitizer_set_report_path(common_flags()->log_path);
 
@@ -517,6 +515,7 @@ void __msan_dump_shadow(const void *x, uptr size) {
   }
 
   unsigned char *s = (unsigned char*)MEM_TO_SHADOW(x);
+  Printf("%p[%p]  ", s, x);
   for (uptr i = 0; i < size; i++)
     Printf("%x%x ", s[i] >> 4, s[i] & 0xf);
   Printf("\n");
@@ -606,7 +605,7 @@ void __msan_set_alloca_origin4(void *a, uptr size, char *descr, uptr pc) {
     id = Origin::CreateStackOrigin(idx).raw_id();
     *id_ptr = id;
     if (print)
-      Printf("First time: idx=%d id=%d %s %p \n", idx, id, descr + 4, pc);
+      Printf("First time: idx=%d id=%d %s 0x%zx \n", idx, id, descr + 4, pc);
   }
   if (print)
     Printf("__msan_set_alloca_origin: descr=%s id=%x\n", descr + 4, id);

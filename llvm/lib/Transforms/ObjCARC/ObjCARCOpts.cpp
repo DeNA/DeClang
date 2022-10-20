@@ -2159,7 +2159,7 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
         Value *Arg = Call->getArgOperand(0);
         Value *EarlierArg = EarlierCall->getArgOperand(0);
         switch (PA.getAA()->alias(Arg, EarlierArg)) {
-        case MustAlias:
+        case AliasResult::MustAlias:
           Changed = true;
           // If the load has a builtin retain, insert a plain retain for it.
           if (Class == ARCInstKind::LoadWeakRetained) {
@@ -2171,10 +2171,10 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
           Call->replaceAllUsesWith(EarlierCall);
           Call->eraseFromParent();
           goto clobbered;
-        case MayAlias:
-        case PartialAlias:
+        case AliasResult::MayAlias:
+        case AliasResult::PartialAlias:
           goto clobbered;
-        case NoAlias:
+        case AliasResult::NoAlias:
           break;
         }
         break;
@@ -2188,7 +2188,7 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
         Value *Arg = Call->getArgOperand(0);
         Value *EarlierArg = EarlierCall->getArgOperand(0);
         switch (PA.getAA()->alias(Arg, EarlierArg)) {
-        case MustAlias:
+        case AliasResult::MustAlias:
           Changed = true;
           // If the load has a builtin retain, insert a plain retain for it.
           if (Class == ARCInstKind::LoadWeakRetained) {
@@ -2200,10 +2200,10 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
           Call->replaceAllUsesWith(EarlierCall->getArgOperand(1));
           Call->eraseFromParent();
           goto clobbered;
-        case MayAlias:
-        case PartialAlias:
+        case AliasResult::MayAlias:
+        case AliasResult::PartialAlias:
           goto clobbered;
-        case NoAlias:
+        case AliasResult::NoAlias:
           break;
         }
         break;
@@ -2229,13 +2229,12 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
 
   // Then, for each destroyWeak with an alloca operand, check to see if
   // the alloca and all its users can be zapped.
-  for (inst_iterator I = inst_begin(&F), E = inst_end(&F); I != E; ) {
-    Instruction *Inst = &*I++;
-    ARCInstKind Class = GetBasicARCInstKind(Inst);
+  for (Instruction &Inst : llvm::make_early_inc_range(instructions(F))) {
+    ARCInstKind Class = GetBasicARCInstKind(&Inst);
     if (Class != ARCInstKind::DestroyWeak)
       continue;
 
-    CallInst *Call = cast<CallInst>(Inst);
+    CallInst *Call = cast<CallInst>(&Inst);
     Value *Arg = Call->getArgOperand(0);
     if (AllocaInst *Alloca = dyn_cast<AllocaInst>(Arg)) {
       for (User *U : Alloca->users()) {
@@ -2250,8 +2249,8 @@ void ObjCARCOpt::OptimizeWeakCalls(Function &F) {
         }
       }
       Changed = true;
-      for (auto UI = Alloca->user_begin(), UE = Alloca->user_end(); UI != UE;) {
-        CallInst *UserInst = cast<CallInst>(*UI++);
+      for (User *U : llvm::make_early_inc_range(Alloca->users())) {
+        CallInst *UserInst = cast<CallInst>(U);
         switch (GetBasicARCInstKind(UserInst)) {
         case ARCInstKind::InitWeak:
         case ARCInstKind::StoreWeak:
@@ -2462,7 +2461,7 @@ bool ObjCARCOpt::run(Function &F, AAResults &AA) {
     return false;
 
   Changed = CFGChanged = false;
-  BundledRetainClaimRVs BRV(EP, false);
+  BundledRetainClaimRVs BRV(false, objcarc::getRVInstMarker(*F.getParent()));
   BundledInsts = &BRV;
 
   LLVM_DEBUG(dbgs() << "<<< ObjCARCOpt: Visiting Function: " << F.getName()

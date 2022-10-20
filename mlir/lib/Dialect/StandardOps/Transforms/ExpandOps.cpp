@@ -13,9 +13,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "PassDetail.h"
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arithmetic/Transforms/Passes.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/StandardOps/Transforms/Passes.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/TypeUtilities.h"
 
 using namespace mlir;
 
@@ -31,7 +35,7 @@ namespace {
 ///
 /// %x = std.generic_atomic_rmw %F[%i] : memref<10xf32> {
 /// ^bb0(%current: f32):
-///   %cmp = cmpf "ogt", %current, %fval : f32
+///   %cmp = arith.cmpf "ogt", %current, %fval : f32
 ///   %new_value = select %cmp, %current, %fval : f32
 ///   atomic_yield %new_value : f32
 /// }
@@ -41,27 +45,27 @@ public:
 
   LogicalResult matchAndRewrite(AtomicRMWOp op,
                                 PatternRewriter &rewriter) const final {
-    CmpFPredicate predicate;
-    switch (op.kind()) {
+    arith::CmpFPredicate predicate;
+    switch (op.getKind()) {
     case AtomicRMWKind::maxf:
-      predicate = CmpFPredicate::OGT;
+      predicate = arith::CmpFPredicate::OGT;
       break;
     case AtomicRMWKind::minf:
-      predicate = CmpFPredicate::OLT;
+      predicate = arith::CmpFPredicate::OLT;
       break;
     default:
       return failure();
     }
 
     auto loc = op.getLoc();
-    auto genericOp =
-        rewriter.create<GenericAtomicRMWOp>(loc, op.memref(), op.indices());
+    auto genericOp = rewriter.create<GenericAtomicRMWOp>(loc, op.getMemref(),
+                                                         op.getIndices());
     OpBuilder bodyBuilder =
         OpBuilder::atBlockEnd(genericOp.getBody(), rewriter.getListener());
 
     Value lhs = genericOp.getCurrentValue();
-    Value rhs = op.value();
-    Value cmp = bodyBuilder.create<CmpFOp>(loc, predicate, lhs, rhs);
+    Value rhs = op.getValue();
+    Value cmp = bodyBuilder.create<arith::CmpFOp>(loc, predicate, lhs, rhs);
     Value select = bodyBuilder.create<SelectOp>(loc, cmp, lhs, rhs);
     bodyBuilder.create<AtomicYieldOp>(loc, select);
 
@@ -70,141 +74,91 @@ public:
   }
 };
 
-/// Converts `memref_reshape` that has a target shape of a statically-known
-/// size to `memref_reinterpret_cast`.
-struct MemRefReshapeOpConverter : public OpRewritePattern<MemRefReshapeOp> {
+/// Converts `memref.reshape` that has a target shape of a statically-known
+/// size to `memref.reinterpret_cast`.
+struct MemRefReshapeOpConverter : public OpRewritePattern<memref::ReshapeOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(MemRefReshapeOp op,
+  LogicalResult matchAndRewrite(memref::ReshapeOp op,
                                 PatternRewriter &rewriter) const final {
     auto shapeType = op.shape().getType().cast<MemRefType>();
     if (!shapeType.hasStaticShape())
       return failure();
 
     int64_t rank = shapeType.cast<MemRefType>().getDimSize(0);
-    SmallVector<Value, 4> sizes, strides;
+    SmallVector<OpFoldResult, 4> sizes, strides;
     sizes.resize(rank);
     strides.resize(rank);
 
     Location loc = op.getLoc();
-    Value stride = rewriter.create<ConstantIndexOp>(loc, 1);
+    Value stride = rewriter.create<arith::ConstantIndexOp>(loc, 1);
     for (int i = rank - 1; i >= 0; --i) {
-      Value index = rewriter.create<ConstantIndexOp>(loc, i);
-      Value size = rewriter.create<LoadOp>(loc, op.shape(), index);
-      if (!size.getType().isa<IndexType>())
-        size = rewriter.create<IndexCastOp>(loc, size, rewriter.getIndexType());
-      sizes[i] = size;
+      Value size;
+      // Load dynamic sizes from the shape input, use constants for static dims.
+      if (op.getType().isDynamicDim(i)) {
+        Value index = rewriter.create<arith::ConstantIndexOp>(loc, i);
+        size = rewriter.create<memref::LoadOp>(loc, op.shape(), index);
+        if (!size.getType().isa<IndexType>())
+          size = rewriter.create<arith::IndexCastOp>(loc, size,
+                                                     rewriter.getIndexType());
+        sizes[i] = size;
+      } else {
+        sizes[i] = rewriter.getIndexAttr(op.getType().getDimSize(i));
+        size =
+            rewriter.create<arith::ConstantOp>(loc, sizes[i].get<Attribute>());
+      }
       strides[i] = stride;
       if (i > 0)
-        stride = rewriter.create<MulIOp>(loc, stride, size);
+        stride = rewriter.create<arith::MulIOp>(loc, stride, size);
     }
-    SmallVector<int64_t, 2> staticSizes(rank, ShapedType::kDynamicSize);
-    SmallVector<int64_t, 2> staticStrides(rank,
-                                          ShapedType::kDynamicStrideOrOffset);
-    rewriter.replaceOpWithNewOp<MemRefReinterpretCastOp>(
-        op, op.getType(), op.source(), /*staticOffset = */ 0, staticSizes,
-        staticStrides, /*offset=*/llvm::None, sizes, strides);
+    rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
+        op, op.getType(), op.source(), /*offset=*/rewriter.getIndexAttr(0),
+        sizes, strides);
     return success();
   }
 };
 
-/// Expands SignedCeilDivIOP (n, m) into
-///   1) x = (m > 0) ? -1 : 1
-///   2) (n*m>0) ? ((n+x) / m) + 1 : - (-n / m)
-struct SignedCeilDivIOpConverter : public OpRewritePattern<SignedCeilDivIOp> {
+template <typename OpTy, arith::CmpFPredicate pred>
+struct MaxMinFOpConverter : public OpRewritePattern<OpTy> {
 public:
-  using OpRewritePattern::OpRewritePattern;
-  LogicalResult matchAndRewrite(SignedCeilDivIOp op,
+  using OpRewritePattern<OpTy>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(OpTy op,
                                 PatternRewriter &rewriter) const final {
+    Value lhs = op.getLhs();
+    Value rhs = op.getRhs();
+
     Location loc = op.getLoc();
-    SignedCeilDivIOp signedCeilDivIOp = cast<SignedCeilDivIOp>(op);
-    Type type = signedCeilDivIOp.getType();
-    Value a = signedCeilDivIOp.lhs();
-    Value b = signedCeilDivIOp.rhs();
-    Value plusOne =
-        rewriter.create<ConstantOp>(loc, rewriter.getIntegerAttr(type, 1));
-    Value zero =
-        rewriter.create<ConstantOp>(loc, rewriter.getIntegerAttr(type, 0));
-    Value minusOne =
-        rewriter.create<ConstantOp>(loc, rewriter.getIntegerAttr(type, -1));
-    // Compute x = (b>0) ? -1 : 1.
-    Value compare = rewriter.create<CmpIOp>(loc, CmpIPredicate::sgt, b, zero);
-    Value x = rewriter.create<SelectOp>(loc, compare, minusOne, plusOne);
-    // Compute positive res: 1 + ((x+a)/b).
-    Value xPlusA = rewriter.create<AddIOp>(loc, x, a);
-    Value xPlusADivB = rewriter.create<SignedDivIOp>(loc, xPlusA, b);
-    Value posRes = rewriter.create<AddIOp>(loc, plusOne, xPlusADivB);
-    // Compute negative res: - ((-a)/b).
-    Value minusA = rewriter.create<SubIOp>(loc, zero, a);
-    Value minusADivB = rewriter.create<SignedDivIOp>(loc, minusA, b);
-    Value negRes = rewriter.create<SubIOp>(loc, zero, minusADivB);
-    // Result is (a*b>0) ? pos result : neg result.
-    // Note, we want to avoid using a*b because of possible overflow.
-    // The case that matters are a>0, a==0, a<0, b>0 and b<0. We do
-    // not particuliarly care if a*b<0 is true or false when b is zero
-    // as this will result in an illegal divide. So `a*b<0` can be reformulated
-    // as `(a<0 && b<0) || (a>0 && b>0)' or `(a<0 && b<0) || (a>0 && b>=0)'.
-    // We pick the first expression here.
-    Value aNeg = rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, a, zero);
-    Value aPos = rewriter.create<CmpIOp>(loc, CmpIPredicate::sgt, a, zero);
-    Value bNeg = rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, b, zero);
-    Value bPos = rewriter.create<CmpIOp>(loc, CmpIPredicate::sgt, b, zero);
-    Value firstTerm = rewriter.create<AndOp>(loc, aNeg, bNeg);
-    Value secondTerm = rewriter.create<AndOp>(loc, aPos, bPos);
-    Value compareRes = rewriter.create<OrOp>(loc, firstTerm, secondTerm);
-    Value res = rewriter.create<SelectOp>(loc, compareRes, posRes, negRes);
-    // Perform substitution and return success.
-    rewriter.replaceOp(op, {res});
+    Value cmp = rewriter.create<arith::CmpFOp>(loc, pred, lhs, rhs);
+    Value select = rewriter.create<SelectOp>(loc, cmp, lhs, rhs);
+
+    auto floatType = getElementTypeOrSelf(lhs.getType()).cast<FloatType>();
+    Value isNaN = rewriter.create<arith::CmpFOp>(loc, arith::CmpFPredicate::UNO,
+                                                 lhs, rhs);
+
+    Value nan = rewriter.create<arith::ConstantFloatOp>(
+        loc, APFloat::getQNaN(floatType.getFloatSemantics()), floatType);
+    if (VectorType vectorType = lhs.getType().dyn_cast<VectorType>())
+      nan = rewriter.create<SplatOp>(loc, vectorType, nan);
+
+    rewriter.replaceOpWithNewOp<SelectOp>(op, isNaN, nan, select);
     return success();
   }
 };
 
-/// Expands SignedFloorDivIOP (n, m) into
-///   1)  x = (m<0) ? 1 : -1
-///   2)  return (n*m<0) ? - ((-n+x) / m) -1 : n / m
-struct SignedFloorDivIOpConverter : public OpRewritePattern<SignedFloorDivIOp> {
+template <typename OpTy, arith::CmpIPredicate pred>
+struct MaxMinIOpConverter : public OpRewritePattern<OpTy> {
 public:
-  using OpRewritePattern::OpRewritePattern;
-  LogicalResult matchAndRewrite(SignedFloorDivIOp op,
+  using OpRewritePattern<OpTy>::OpRewritePattern;
+  LogicalResult matchAndRewrite(OpTy op,
                                 PatternRewriter &rewriter) const final {
+    Value lhs = op.getLhs();
+    Value rhs = op.getRhs();
+
     Location loc = op.getLoc();
-    SignedFloorDivIOp signedFloorDivIOp = cast<SignedFloorDivIOp>(op);
-    Type type = signedFloorDivIOp.getType();
-    Value a = signedFloorDivIOp.lhs();
-    Value b = signedFloorDivIOp.rhs();
-    Value plusOne =
-        rewriter.create<ConstantOp>(loc, rewriter.getIntegerAttr(type, 1));
-    Value zero =
-        rewriter.create<ConstantOp>(loc, rewriter.getIntegerAttr(type, 0));
-    Value minusOne =
-        rewriter.create<ConstantOp>(loc, rewriter.getIntegerAttr(type, -1));
-    // Compute x = (b<0) ? 1 : -1.
-    Value compare = rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, b, zero);
-    Value x = rewriter.create<SelectOp>(loc, compare, plusOne, minusOne);
-    // Compute negative res: -1 - ((x-a)/b).
-    Value xMinusA = rewriter.create<SubIOp>(loc, x, a);
-    Value xMinusADivB = rewriter.create<SignedDivIOp>(loc, xMinusA, b);
-    Value negRes = rewriter.create<SubIOp>(loc, minusOne, xMinusADivB);
-    // Compute positive res: a/b.
-    Value posRes = rewriter.create<SignedDivIOp>(loc, a, b);
-    // Result is (a*b<0) ? negative result : positive result.
-    // Note, we want to avoid using a*b because of possible overflow.
-    // The case that matters are a>0, a==0, a<0, b>0 and b<0. We do
-    // not particuliarly care if a*b<0 is true or false when b is zero
-    // as this will result in an illegal divide. So `a*b<0` can be reformulated
-    // as `(a>0 && b<0) || (a>0 && b<0)' or `(a>0 && b<0) || (a>0 && b<=0)'.
-    // We pick the first expression here.
-    Value aNeg = rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, a, zero);
-    Value aPos = rewriter.create<CmpIOp>(loc, CmpIPredicate::sgt, a, zero);
-    Value bNeg = rewriter.create<CmpIOp>(loc, CmpIPredicate::slt, b, zero);
-    Value bPos = rewriter.create<CmpIOp>(loc, CmpIPredicate::sgt, b, zero);
-    Value firstTerm = rewriter.create<AndOp>(loc, aNeg, bPos);
-    Value secondTerm = rewriter.create<AndOp>(loc, aPos, bNeg);
-    Value compareRes = rewriter.create<OrOp>(loc, firstTerm, secondTerm);
-    Value res = rewriter.create<SelectOp>(loc, compareRes, negRes, posRes);
-    // Perform substitution and return success.
-    rewriter.replaceOp(op, {res});
+    Value cmp = rewriter.create<arith::CmpIOp>(loc, pred, lhs, rhs);
+    rewriter.replaceOpWithNewOp<SelectOp>(op, cmp, lhs, rhs);
     return success();
   }
 };
@@ -213,21 +167,32 @@ struct StdExpandOpsPass : public StdExpandOpsBase<StdExpandOpsPass> {
   void runOnFunction() override {
     MLIRContext &ctx = getContext();
 
-    OwningRewritePatternList patterns;
-    populateStdExpandOpsPatterns(&ctx, patterns);
+    RewritePatternSet patterns(&ctx);
+    populateStdExpandOpsPatterns(patterns);
+    arith::populateArithmeticExpandOpsPatterns(patterns);
 
     ConversionTarget target(getContext());
 
-    target.addLegalDialect<StandardOpsDialect>();
+    target.addLegalDialect<arith::ArithmeticDialect, memref::MemRefDialect,
+                           StandardOpsDialect>();
+    target.addIllegalOp<arith::CeilDivSIOp, arith::FloorDivSIOp>();
     target.addDynamicallyLegalOp<AtomicRMWOp>([](AtomicRMWOp op) {
-      return op.kind() != AtomicRMWKind::maxf &&
-             op.kind() != AtomicRMWKind::minf;
+      return op.getKind() != AtomicRMWKind::maxf &&
+             op.getKind() != AtomicRMWKind::minf;
     });
-    target.addDynamicallyLegalOp<MemRefReshapeOp>([](MemRefReshapeOp op) {
+    target.addDynamicallyLegalOp<memref::ReshapeOp>([](memref::ReshapeOp op) {
       return !op.shape().getType().cast<MemRefType>().hasStaticShape();
     });
-    target.addIllegalOp<SignedCeilDivIOp>();
-    target.addIllegalOp<SignedFloorDivIOp>();
+    // clang-format off
+    target.addIllegalOp<
+      MaxFOp,
+      MaxSIOp,
+      MaxUIOp,
+      MinFOp,
+      MinSIOp,
+      MinUIOp
+    >();
+    // clang-format on
     if (failed(
             applyPartialConversion(getFunction(), target, std::move(patterns))))
       signalPassFailure();
@@ -236,11 +201,19 @@ struct StdExpandOpsPass : public StdExpandOpsBase<StdExpandOpsPass> {
 
 } // namespace
 
-void mlir::populateStdExpandOpsPatterns(MLIRContext *context,
-                                        OwningRewritePatternList &patterns) {
-  patterns.insert<AtomicRMWOpConverter, MemRefReshapeOpConverter,
-                  SignedCeilDivIOpConverter, SignedFloorDivIOpConverter>(
-      context);
+void mlir::populateStdExpandOpsPatterns(RewritePatternSet &patterns) {
+  // clang-format off
+  patterns.add<
+    AtomicRMWOpConverter,
+    MaxMinFOpConverter<MaxFOp, arith::CmpFPredicate::OGT>,
+    MaxMinFOpConverter<MinFOp, arith::CmpFPredicate::OLT>,
+    MaxMinIOpConverter<MaxSIOp, arith::CmpIPredicate::sgt>,
+    MaxMinIOpConverter<MaxUIOp, arith::CmpIPredicate::ugt>,
+    MaxMinIOpConverter<MinSIOp, arith::CmpIPredicate::slt>,
+    MaxMinIOpConverter<MinUIOp, arith::CmpIPredicate::ult>,
+    MemRefReshapeOpConverter
+  >(patterns.getContext());
+  // clang-format on
 }
 
 std::unique_ptr<Pass> mlir::createStdExpandOpsPass() {

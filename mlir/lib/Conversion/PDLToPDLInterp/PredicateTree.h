@@ -15,7 +15,7 @@
 #define MLIR_LIB_CONVERSION_PDLTOPDLINTERP_PREDICATETREE_H_
 
 #include "Predicate.h"
-#include "mlir/Dialect/PDL/IR/PDL.h"
+#include "mlir/Dialect/PDL/IR/PDLOps.h"
 #include "llvm/ADT/MapVector.h"
 
 namespace mlir {
@@ -189,6 +189,12 @@ struct SwitchNode : public MatcherNode {
   /// nodes.
   using ChildMapT = llvm::MapVector<Qualifier *, std::unique_ptr<MatcherNode>>;
   ChildMapT &getChildren() { return children; }
+
+  /// Returns the child at the given index.
+  std::pair<Qualifier *, std::unique_ptr<MatcherNode>> &getChild(unsigned i) {
+    assert(i < children.size() && "invalid child index");
+    return *std::next(children.begin(), i);
+  }
 
 private:
   /// Switch predicate "answers" select the child. Answers that are not found

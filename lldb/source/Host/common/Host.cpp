@@ -7,9 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 // C includes
-#include <errno.h>
-#include <limits.h>
-#include <stdlib.h>
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <sys/types.h>
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -56,8 +56,8 @@
 #include "lldb/Host/ProcessLauncher.h"
 #include "lldb/Host/ThreadLauncher.h"
 #include "lldb/Host/posix/ConnectionFileDescriptorPosix.h"
-#include "lldb/Utility/DataBufferLLVM.h"
 #include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Predicate.h"
 #include "lldb/Utility/ReproducerProvider.h"
@@ -163,7 +163,7 @@ static bool CheckForMonitorCancellation() {
 }
 
 static thread_result_t MonitorChildProcessThreadFunction(void *arg) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS));
+  Log *log = GetLog(LLDBLog::Process);
   const char *function = __FUNCTION__;
   LLDB_LOGF(log, "%s (arg = %p) thread starting...", function, arg);
 
@@ -191,8 +191,8 @@ static thread_result_t MonitorChildProcessThreadFunction(void *arg) {
   ::sigaction(SIGUSR1, &sigUsr1Action, nullptr);
 #endif // __linux__
 
-  while (1) {
-    log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS);
+  while (true) {
+    log = GetLog(LLDBLog::Process);
     LLDB_LOGF(log, "%s ::waitpid (pid = %" PRIi32 ", &status, options = %i)...",
               function, pid, options);
 
@@ -243,7 +243,7 @@ static thread_result_t MonitorChildProcessThreadFunction(void *arg) {
         ScopedPThreadCancelDisabler pthread_cancel_disabler;
 #endif
 
-        log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS);
+        log = GetLog(LLDBLog::Process);
         LLDB_LOGF(log,
                   "%s ::waitpid (pid = %" PRIi32
                   ", &status, options = %i) => pid = %" PRIi32
@@ -277,7 +277,7 @@ static thread_result_t MonitorChildProcessThreadFunction(void *arg) {
     }
   }
 
-  log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS);
+  log = GetLog(LLDBLog::Process);
   LLDB_LOGF(log, "%s (arg = %p) thread exiting...", __FUNCTION__, arg);
 
   return nullptr;
@@ -301,7 +301,7 @@ void Host::SystemLog(SystemLogType type, const char *format, ...) {
     va_end(args);
   }
 
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_HOST));
+  Log *log = GetLog(LLDBLog::Host);
   if (log && log->GetVerbose()) {
     // Log to log channel. This allows testcases to grep for log output.
     va_list args;
@@ -442,14 +442,12 @@ bool Host::FindProcessThreads(const lldb::pid_t pid, TidMap &tids_to_attach) {
 #endif
 
 struct ShellInfo {
-  ShellInfo()
-      : process_reaped(false), pid(LLDB_INVALID_PROCESS_ID), signo(-1),
-        status(-1) {}
+  ShellInfo() : process_reaped(false) {}
 
   lldb_private::Predicate<bool> process_reaped;
-  lldb::pid_t pid;
-  int signo;
-  int status;
+  lldb::pid_t pid = LLDB_INVALID_PROCESS_ID;
+  int signo = -1;
+  int status = -1;
 };
 
 static bool
@@ -597,11 +595,13 @@ Status Host::RunShellCommand(llvm::StringRef shell_path, const Args &args,
             error.SetErrorStringWithFormat(
                 "shell command output is too large to fit into a std::string");
           } else {
-            auto Buffer =
-                FileSystem::Instance().CreateDataBuffer(output_file_spec);
+            WritableDataBufferSP Buffer =
+                FileSystem::Instance().CreateWritableDataBuffer(
+                    output_file_spec);
             if (error.Success())
-              command_output_ptr->assign(Buffer->GetChars(),
-                                         Buffer->GetByteSize());
+              command_output_ptr->assign(
+                  reinterpret_cast<char *>(Buffer->GetBytes()),
+                  Buffer->GetByteSize());
           }
         }
       }
@@ -646,6 +646,7 @@ bool Host::OpenFileInExternalEditor(const FileSpec &file_spec,
   return false;
 }
 
+bool Host::IsInteractiveGraphicSession() { return false; }
 #endif
 
 std::unique_ptr<Connection> Host::CreateDefaultConnection(llvm::StringRef url) {

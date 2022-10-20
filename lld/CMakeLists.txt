@@ -27,7 +27,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 
   list(GET LLVM_CONFIG_OUTPUT 0 OBJ_ROOT)
   list(GET LLVM_CONFIG_OUTPUT 1 MAIN_INCLUDE_DIR)
-  list(GET LLVM_CONFIG_OUTPUT 2 LLVM_CMAKE_PATH)
+  list(GET LLVM_CONFIG_OUTPUT 2 LLVM_CMAKE_DIR)
   list(GET LLVM_CONFIG_OUTPUT 3 MAIN_SRC_DIR)
 
   set(LLVM_OBJ_ROOT ${OBJ_ROOT} CACHE PATH "path to LLVM build tree")
@@ -35,13 +35,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(LLVM_MAIN_SRC_DIR ${MAIN_SRC_DIR} CACHE PATH "Path to LLVM source tree")
 
   file(TO_CMAKE_PATH ${LLVM_OBJ_ROOT} LLVM_BINARY_DIR)
+  file(TO_CMAKE_PATH ${LLVM_CMAKE_DIR} LLVM_CMAKE_DIR)
 
-  if(NOT EXISTS "${LLVM_CMAKE_PATH}/LLVMConfig.cmake")
+  if(NOT EXISTS "${LLVM_CMAKE_DIR}/LLVMConfig.cmake")
     message(FATAL_ERROR "LLVMConfig.cmake not found")
   endif()
-  include("${LLVM_CMAKE_PATH}/LLVMConfig.cmake")
+  include("${LLVM_CMAKE_DIR}/LLVMConfig.cmake")
 
-  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_PATH}")
+  list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
 
   set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
   include_directories("${LLVM_BINARY_DIR}/include" ${LLVM_INCLUDE_DIRS})
@@ -54,10 +55,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   include(AddLLVM)
   include(TableGen)
   include(HandleLLVMOptions)
+  include(GetErrcMessages)
   include(CheckAtomic)
 
   if(LLVM_INCLUDE_TESTS)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
+      COMPONENTS Interpreter)
 
     # Check prebuilt llvm/utils.
     if(EXISTS ${LLVM_TOOLS_BINARY_DIR}/FileCheck${CMAKE_EXECUTABLE_SUFFIX}
@@ -97,6 +100,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
       endif()
       set(LLVM_LIT_ARGS "${LIT_ARGS_DEFAULT}" CACHE STRING "Default options for lit")
 
+      get_errc_messages(LLVM_LIT_ERRC_MESSAGES)
+
       # On Win32 hosts, provide an option to specify the path to the GnuWin32 tools.
       if(WIN32 AND NOT CYGWIN)
         set(LLVM_LIT_TOOLS_DIR "" CACHE PATH "Path to GnuWin32 tools")
@@ -104,6 +109,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     else()
       set(LLVM_INCLUDE_TESTS OFF)
     endif()
+  endif()
+
+  if(LLVM_HAVE_LIBXAR)
+    set(XAR_LIB xar)
   endif()
 endif()
 
@@ -186,12 +195,10 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
 endif()
 
 add_subdirectory(Common)
-add_subdirectory(lib)
 add_subdirectory(tools/lld)
 
 if (LLVM_INCLUDE_TESTS)
   add_subdirectory(test)
-  add_subdirectory(unittests)
 endif()
 
 add_subdirectory(docs)

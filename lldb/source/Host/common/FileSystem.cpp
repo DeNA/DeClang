@@ -8,6 +8,7 @@
 
 #include "lldb/Host/FileSystem.h"
 
+#include "lldb/Utility/DataBufferLLVM.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/TildeExpressionResolver.h"
 
@@ -19,11 +20,11 @@
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Threading.h"
 
-#include <errno.h>
+#include <cerrno>
+#include <climits>
+#include <cstdarg>
+#include <cstdio>
 #include <fcntl.h>
-#include <limits.h>
-#include <stdarg.h>
-#include <stdio.h>
 
 #ifdef _WIN32
 #include "lldb/Host/windows/windows.h"
@@ -293,35 +294,55 @@ void FileSystem::Resolve(FileSpec &file_spec) {
   file_spec.SetIsResolved(true);
 }
 
-std::shared_ptr<DataBufferLLVM>
-FileSystem::CreateDataBuffer(const llvm::Twine &path, uint64_t size,
-                             uint64_t offset) {
-  Collect(path);
-
-  const bool is_volatile = !IsLocal(path);
-  const ErrorOr<std::string> external_path = GetExternalPath(path);
-
-  if (!external_path)
-    return nullptr;
-
-  std::unique_ptr<llvm::WritableMemoryBuffer> buffer;
+template <typename T>
+static std::unique_ptr<T> GetMemoryBuffer(const llvm::Twine &path,
+                                          uint64_t size, uint64_t offset,
+                                          bool is_volatile) {
+  std::unique_ptr<T> buffer;
   if (size == 0) {
-    auto buffer_or_error =
-        llvm::WritableMemoryBuffer::getFile(*external_path, -1, is_volatile);
+    auto buffer_or_error = T::getFile(path, is_volatile);
     if (!buffer_or_error)
       return nullptr;
     buffer = std::move(*buffer_or_error);
   } else {
-    auto buffer_or_error = llvm::WritableMemoryBuffer::getFileSlice(
-        *external_path, size, offset, is_volatile);
+    auto buffer_or_error = T::getFileSlice(path, size, offset, is_volatile);
     if (!buffer_or_error)
       return nullptr;
     buffer = std::move(*buffer_or_error);
   }
+  return buffer;
+}
+
+std::shared_ptr<WritableDataBuffer>
+FileSystem::CreateWritableDataBuffer(const llvm::Twine &path, uint64_t size,
+                                     uint64_t offset) {
+  const bool is_volatile = !IsLocal(path);
+  auto buffer = GetMemoryBuffer<llvm::WritableMemoryBuffer>(path, size, offset,
+                                                            is_volatile);
+  if (!buffer)
+    return {};
+  return std::shared_ptr<WritableDataBufferLLVM>(
+      new WritableDataBufferLLVM(std::move(buffer)));
+}
+
+std::shared_ptr<DataBuffer>
+FileSystem::CreateDataBuffer(const llvm::Twine &path, uint64_t size,
+                             uint64_t offset) {
+  const bool is_volatile = !IsLocal(path);
+  auto buffer =
+      GetMemoryBuffer<llvm::MemoryBuffer>(path, size, offset, is_volatile);
+  if (!buffer)
+    return {};
   return std::shared_ptr<DataBufferLLVM>(new DataBufferLLVM(std::move(buffer)));
 }
 
-std::shared_ptr<DataBufferLLVM>
+std::shared_ptr<WritableDataBuffer>
+FileSystem::CreateWritableDataBuffer(const FileSpec &file_spec, uint64_t size,
+                                     uint64_t offset) {
+  return CreateWritableDataBuffer(file_spec.GetPath(), size, offset);
+}
+
+std::shared_ptr<DataBuffer>
 FileSystem::CreateDataBuffer(const FileSpec &file_spec, uint64_t size,
                              uint64_t offset) {
   return CreateDataBuffer(file_spec.GetPath(), size, offset);
@@ -381,13 +402,13 @@ static int OpenWithFS(const FileSystem &fs, const char *path, int flags,
   return const_cast<FileSystem &>(fs).Open(path, flags, mode);
 }
 
-static int GetOpenFlags(uint32_t options) {
-  const bool read = options & File::eOpenOptionRead;
-  const bool write = options & File::eOpenOptionWrite;
-
+static int GetOpenFlags(File::OpenOptions options) {
   int open_flags = 0;
-  if (write) {
-    if (read)
+  File::OpenOptions rw =
+      options & (File::eOpenOptionReadOnly | File::eOpenOptionWriteOnly |
+                 File::eOpenOptionReadWrite);
+  if (rw == File::eOpenOptionWriteOnly || rw == File::eOpenOptionReadWrite) {
+    if (rw == File::eOpenOptionReadWrite)
       open_flags |= O_RDWR;
     else
       open_flags |= O_WRONLY;
@@ -403,7 +424,7 @@ static int GetOpenFlags(uint32_t options) {
 
     if (options & File::eOpenOptionCanCreateNewOnly)
       open_flags |= O_CREAT | O_EXCL;
-  } else if (read) {
+  } else if (rw == File::eOpenOptionReadOnly) {
     open_flags |= O_RDONLY;
 
 #ifndef _WIN32

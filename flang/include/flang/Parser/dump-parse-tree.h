@@ -65,7 +65,7 @@ public:
   NODE(parser, AccBlockDirective)
   NODE(parser, AccClause)
 #define GEN_FLANG_DUMP_PARSE_TREE_CLAUSES
-#include "llvm/Frontend/OpenACC/ACC.cpp.inc"
+#include "llvm/Frontend/OpenACC/ACC.inc"
   NODE(parser, AccBindClause)
   NODE(parser, AccDefaultClause)
   static std::string GetNodeName(const llvm::acc::DefaultValue &x) {
@@ -793,7 +793,7 @@ protected:
   template <typename T> std::string AsFortran(const T &x) {
     std::string buf;
     llvm::raw_string_ostream ss{buf};
-    if constexpr (std::is_same_v<T, Expr>) {
+    if constexpr (HasTypedExpr<T>::value) {
       if (asFortran_ && x.typedExpr) {
         asFortran_->expr(ss, *x.typedExpr);
       }

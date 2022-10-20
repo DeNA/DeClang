@@ -85,9 +85,9 @@ public:
   lldb_private::DynamicLoader *GetDynamicLoader() override;
 
   // PluginInterface protocol
-  lldb_private::ConstString GetPluginName() override;
-
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override {
+    return GetPluginNameStatic().GetStringRef();
+  }
 
   // Process Control
   lldb_private::Status WillResume() override;
@@ -158,8 +158,8 @@ protected:
 
   void Clear();
 
-  bool UpdateThreadList(lldb_private::ThreadList &old_thread_list,
-                        lldb_private::ThreadList &new_thread_list) override;
+  bool DoUpdateThreadList(lldb_private::ThreadList &old_thread_list,
+                          lldb_private::ThreadList &new_thread_list) override;
 
   enum {
     eBroadcastBitAsyncContinue = (1 << 0),
@@ -172,7 +172,7 @@ protected:
   CommunicationKDP m_comm;
   lldb_private::Broadcaster m_async_broadcaster;
   lldb_private::HostThread m_async_thread;
-  lldb_private::ConstString m_dyld_plugin_name;
+  llvm::StringRef m_dyld_plugin_name;
   lldb::addr_t m_kernel_load_addr;
   lldb::CommandObjectSP m_command_sp;
   lldb::ThreadWP m_kernel_thread_wp;

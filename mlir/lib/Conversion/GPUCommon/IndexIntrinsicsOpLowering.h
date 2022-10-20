@@ -8,7 +8,7 @@
 #ifndef MLIR_CONVERSION_GPUCOMMON_INDEXINTRINSICSOPLOWERING_H_
 #define MLIR_CONVERSION_GPUCOMMON_INDEXINTRINSICSOPLOWERING_H_
 
-#include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVM.h"
+#include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Dialect/GPU/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -41,23 +41,20 @@ public:
 
   // Convert the kernel arguments to an LLVM type, preserve the rest.
   LogicalResult
-  matchAndRewrite(Op op, ArrayRef<Value> operands,
+  matchAndRewrite(Op op, typename Op::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op->getLoc();
     MLIRContext *context = rewriter.getContext();
     Value newOp;
     switch (dimensionToIndex(op)) {
     case X:
-      newOp =
-          rewriter.create<XOp>(loc, LLVM::LLVMIntegerType::get(context, 32));
+      newOp = rewriter.create<XOp>(loc, IntegerType::get(context, 32));
       break;
     case Y:
-      newOp =
-          rewriter.create<YOp>(loc, LLVM::LLVMIntegerType::get(context, 32));
+      newOp = rewriter.create<YOp>(loc, IntegerType::get(context, 32));
       break;
     case Z:
-      newOp =
-          rewriter.create<ZOp>(loc, LLVM::LLVMIntegerType::get(context, 32));
+      newOp = rewriter.create<ZOp>(loc, IntegerType::get(context, 32));
       break;
     default:
       return failure();
@@ -65,10 +62,10 @@ public:
 
     if (indexBitwidth > 32) {
       newOp = rewriter.create<LLVM::SExtOp>(
-          loc, LLVM::LLVMIntegerType::get(context, indexBitwidth), newOp);
+          loc, IntegerType::get(context, indexBitwidth), newOp);
     } else if (indexBitwidth < 32) {
       newOp = rewriter.create<LLVM::TruncOp>(
-          loc, LLVM::LLVMIntegerType::get(context, indexBitwidth), newOp);
+          loc, IntegerType::get(context, indexBitwidth), newOp);
     }
 
     rewriter.replaceOp(op, {newOp});

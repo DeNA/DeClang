@@ -1,9 +1,0 @@
-{
-    "build_seed":"hello, i am seed",
-    "flatten":
-    [
-        {
-            "name": ".*main.*"
-        }
-    ]
-}

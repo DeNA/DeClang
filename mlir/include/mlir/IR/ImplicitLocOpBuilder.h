@@ -22,20 +22,11 @@ namespace mlir {
 /// as OpBuilder.
 class ImplicitLocOpBuilder : public mlir::OpBuilder {
 public:
-  /// Create an ImplicitLocOpBuilder using the insertion point and listener from
-  /// an existing OpBuilder.
-  ImplicitLocOpBuilder(Location loc, const OpBuilder &builder)
-      : OpBuilder(builder), curLoc(loc) {}
-
   /// OpBuilder has a bunch of convenience constructors - we support them all
   /// with the additional Location.
-  template <typename T>
-  ImplicitLocOpBuilder(Location loc, T &&operand, Listener *listener = nullptr)
-      : OpBuilder(std::forward<T>(operand), listener), curLoc(loc) {}
-
-  ImplicitLocOpBuilder(Location loc, Block *block, Block::iterator insertPoint,
-                       Listener *listener = nullptr)
-      : OpBuilder(block, insertPoint, listener), curLoc(loc) {}
+  template <typename... T>
+  ImplicitLocOpBuilder(Location loc, T &&...operands)
+      : OpBuilder(std::forward<T>(operands)...), curLoc(loc) {}
 
   /// Create a builder and set the insertion point to before the first operation
   /// in the block but still inside the block.
@@ -72,7 +63,7 @@ public:
   /// Create an operation of specific op type at the current insertion point and
   /// location.
   template <typename OpTy, typename... Args>
-  OpTy create(Args &&... args) {
+  OpTy create(Args &&...args) {
     return OpBuilder::create<OpTy>(curLoc, std::forward<Args>(args)...);
   }
 
@@ -80,7 +71,7 @@ public:
   /// and immediately try to fold it. This functions populates 'results' with
   /// the results after folding the operation.
   template <typename OpTy, typename... Args>
-  void createOrFold(llvm::SmallVectorImpl<Value> &results, Args &&... args) {
+  void createOrFold(llvm::SmallVectorImpl<Value> &results, Args &&...args) {
     OpBuilder::createOrFold<OpTy>(results, curLoc, std::forward<Args>(args)...);
   }
 
@@ -88,7 +79,7 @@ public:
   template <typename OpTy, typename... Args>
   typename std::enable_if<OpTy::template hasTrait<mlir::OpTrait::OneResult>(),
                           Value>::type
-  createOrFold(Args &&... args) {
+  createOrFold(Args &&...args) {
     return OpBuilder::createOrFold<OpTy>(curLoc, std::forward<Args>(args)...);
   }
 
@@ -96,7 +87,7 @@ public:
   template <typename OpTy, typename... Args>
   typename std::enable_if<OpTy::template hasTrait<mlir::OpTrait::ZeroResult>(),
                           OpTy>::type
-  createOrFold(Args &&... args) {
+  createOrFold(Args &&...args) {
     return OpBuilder::createOrFold<OpTy>(curLoc, std::forward<Args>(args)...);
   }
 

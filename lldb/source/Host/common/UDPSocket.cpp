@@ -9,6 +9,7 @@
 #include "lldb/Host/common/UDPSocket.h"
 
 #include "lldb/Host/Config.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 
 #if LLDB_ENABLE_POSIX
@@ -21,13 +22,10 @@
 using namespace lldb;
 using namespace lldb_private;
 
-namespace {
-
-const int kDomain = AF_INET;
-const int kType = SOCK_DGRAM;
+static const int kDomain = AF_INET;
+static const int kType = SOCK_DGRAM;
 
 static const char *g_not_supported_error = "Not supported";
-}
 
 UDPSocket::UDPSocket(NativeSocket socket) : Socket(ProtocolUdp, true, true) {
   m_socket = socket;
@@ -57,15 +55,16 @@ llvm::Expected<std::unique_ptr<UDPSocket>>
 UDPSocket::Connect(llvm::StringRef name, bool child_processes_inherit) {
   std::unique_ptr<UDPSocket> socket;
 
-  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_CONNECTION));
+  Log *log = GetLog(LLDBLog::Connection);
   LLDB_LOG(log, "host/port = {0}", name);
 
   Status error;
   std::string host_str;
   std::string port_str;
-  int32_t port = INT32_MIN;
-  if (!DecodeHostAndPort(name, host_str, port_str, port, &error))
-    return error.ToError();
+  uint16_t port;
+  if (llvm::Error decode_error =
+          DecodeHostAndPort(name, host_str, port_str, port))
+    return std::move(decode_error);
 
   // At this point we have setup the receive port, now we need to setup the UDP
   // send socket

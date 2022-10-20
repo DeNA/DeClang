@@ -479,7 +479,7 @@ static void X86SelectAddress(const MachineInstr &I,
          "unsupported type.");
 
   if (I.getOpcode() == TargetOpcode::G_PTR_ADD) {
-    if (auto COff = getConstantVRegSExtVal(I.getOperand(2).getReg(), MRI)) {
+    if (auto COff = getIConstantVRegSExtVal(I.getOperand(2).getReg(), MRI)) {
       int64_t Imm = *COff;
       if (isInt<32>(Imm)) { // Check for displacement overflow.
         AM.Disp = static_cast<int32_t>(Imm);
@@ -1065,7 +1065,7 @@ bool X86InstructionSelector::selectUadde(MachineInstr &I,
       return false;
 
     Opcode = X86::ADC32rr;
-  } else if (auto val = getConstantVRegVal(CarryInReg, MRI)) {
+  } else if (auto val = getIConstantVRegVal(CarryInReg, MRI)) {
     // carry is constant, support only 0.
     if (*val != 0)
       return false;
@@ -1559,10 +1559,9 @@ bool X86InstructionSelector::selectDivRem(MachineInstr &I,
        }},                                                 // i64
   };
 
-  auto OpEntryIt = std::find_if(std::begin(OpTable), std::end(OpTable),
-                                [RegTy](const DivRemEntry &El) {
-                                  return El.SizeInBits == RegTy.getSizeInBits();
-                                });
+  auto OpEntryIt = llvm::find_if(OpTable, [RegTy](const DivRemEntry &El) {
+    return El.SizeInBits == RegTy.getSizeInBits();
+  });
   if (OpEntryIt == std::end(OpTable))
     return false;
 

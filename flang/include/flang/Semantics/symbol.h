@@ -15,6 +15,7 @@
 #include "flang/Common/reference.h"
 #include "llvm/ADT/DenseMapInfo.h"
 #include <array>
+#include <functional>
 #include <list>
 #include <optional>
 #include <set>
@@ -59,16 +60,27 @@ public:
 private:
 };
 
-class SubprogramDetails {
+class WithBindName {
+public:
+  const std::string *bindName() const {
+    return bindName_ ? &*bindName_ : nullptr;
+  }
+  void set_bindName(std::string &&name) { bindName_ = std::move(name); }
+
+private:
+  std::optional<std::string> bindName_;
+};
+
+class SubprogramDetails : public WithBindName {
 public:
   bool isFunction() const { return result_ != nullptr; }
   bool isInterface() const { return isInterface_; }
   void set_isInterface(bool value = true) { isInterface_ = value; }
+  bool isDummy() const { return isDummy_; }
+  void set_isDummy(bool value = true) { isDummy_ = value; }
   Scope *entryScope() { return entryScope_; }
   const Scope *entryScope() const { return entryScope_; }
   void set_entryScope(Scope &scope) { entryScope_ = &scope; }
-  MaybeExpr bindName() const { return bindName_; }
-  void set_bindName(MaybeExpr &&expr) { bindName_ = std::move(expr); }
   const Symbol &result() const {
     CHECK(isFunction());
     return *result_;
@@ -85,7 +97,7 @@ public:
 
 private:
   bool isInterface_{false}; // true if this represents an interface-body
-  MaybeExpr bindName_;
+  bool isDummy_{false}; // true when interface of dummy procedure
   std::vector<Symbol *> dummyArgs_; // nullptr -> alternate return indicator
   Symbol *result_{nullptr};
   Scope *entryScope_{nullptr}; // if ENTRY, points to subprogram's scope
@@ -116,7 +128,7 @@ private:
 };
 
 // A name from an entity-decl -- could be object or function.
-class EntityDetails {
+class EntityDetails : public WithBindName {
 public:
   explicit EntityDetails(bool isDummy = false) : isDummy_{isDummy} {}
   const DeclTypeSpec *type() const { return type_; }
@@ -126,14 +138,11 @@ public:
   void set_isDummy(bool value = true) { isDummy_ = value; }
   bool isFuncResult() const { return isFuncResult_; }
   void set_funcResult(bool x) { isFuncResult_ = x; }
-  MaybeExpr bindName() const { return bindName_; }
-  void set_bindName(MaybeExpr &&expr) { bindName_ = std::move(expr); }
 
 private:
   bool isDummy_{false};
   bool isFuncResult_{false};
   const DeclTypeSpec *type_{nullptr};
-  MaybeExpr bindName_;
   friend llvm::raw_ostream &operator<<(
       llvm::raw_ostream &, const EntityDetails &);
 };
@@ -253,7 +262,7 @@ public:
   void add_paramDecl(const Symbol &symbol) { paramDecls_.push_back(symbol); }
   void add_component(const Symbol &);
   void set_sequence(bool x = true) { sequence_ = x; }
-  void set_isForwardReferenced() { isForwardReferenced_ = true; }
+  void set_isForwardReferenced(bool value) { isForwardReferenced_ = value; }
   const std::list<SourceName> &componentNames() const {
     return componentNames_;
   }
@@ -309,19 +318,16 @@ private:
   SymbolVector objects_;
 };
 
-class CommonBlockDetails {
+class CommonBlockDetails : public WithBindName {
 public:
   MutableSymbolVector &objects() { return objects_; }
   const MutableSymbolVector &objects() const { return objects_; }
   void add_object(Symbol &object) { objects_.emplace_back(object); }
-  MaybeExpr bindName() const { return bindName_; }
-  void set_bindName(MaybeExpr &&expr) { bindName_ = std::move(expr); }
   std::size_t alignment() const { return alignment_; }
   void set_alignment(std::size_t alignment) { alignment_ = alignment; }
 
 private:
   MutableSymbolVector objects_;
-  MaybeExpr bindName_;
   std::size_t alignment_{0}; // required alignment in bytes
 };
 
@@ -356,7 +362,7 @@ private:
 };
 
 // Record the USE of a symbol: location is where (USE statement or renaming);
-// symbol is the USEd module.
+// symbol is in the USEd module.
 class UseDetails {
 public:
   UseDetails(const SourceName &location, const Symbol &symbol)
@@ -491,6 +497,7 @@ public:
       LocalityShared, // named in SHARED locality-spec
       InDataStmt, // initialized in a DATA statement
       InNamelist, // flag is set if the symbol is in Namelist statement
+      CompilerCreated,
       // OpenACC data-sharing attribute
       AccPrivate, AccFirstPrivate, AccShared,
       // OpenACC data-mapping attribute
@@ -502,11 +509,12 @@ public:
       // OpenMP data-mapping attribute
       OmpMapTo, OmpMapFrom, OmpMapAlloc, OmpMapRelease, OmpMapDelete,
       // OpenMP data-copying attribute
-      OmpCopyIn,
+      OmpCopyIn, OmpCopyPrivate,
       // OpenMP miscellaneous flags
-      OmpCommonBlock, OmpReduction, OmpAllocate, OmpDeclareSimd,
-      OmpDeclareTarget, OmpThreadprivate, OmpDeclareReduction, OmpFlushed,
-      OmpCriticalLock, OmpIfSpecified, OmpNone, OmpPreDetermined, OmpAligned);
+      OmpCommonBlock, OmpReduction, OmpAligned, OmpNontemporal, OmpAllocate,
+      OmpDeclarativeAllocateDirective, OmpExecutableAllocateDirective,
+      OmpDeclareSimd, OmpDeclareTarget, OmpThreadprivate, OmpDeclareReduction,
+      OmpFlushed, OmpCriticalLock, OmpIfSpecified, OmpNone, OmpPreDetermined);
   using Flags = common::EnumSet<Flag, Flag_enumSize>;
 
   const Scope &owner() const { return *owner_; }
@@ -564,8 +572,10 @@ public:
 
   inline DeclTypeSpec *GetType();
   inline const DeclTypeSpec *GetType() const;
-
   void SetType(const DeclTypeSpec &);
+
+  const std::string *GetBindName() const;
+  void SetBindName(std::string &&);
   bool IsFuncResult() const;
   bool IsObjectArray() const;
   bool IsSubprogram() const;
@@ -594,10 +604,6 @@ public:
 
   bool operator==(const Symbol &that) const { return this == &that; }
   bool operator!=(const Symbol &that) const { return !(*this == that); }
-  bool operator<(const Symbol &that) const {
-    // For sets of symbols: collate them by source location
-    return name_.begin() < that.name_.begin();
-  }
 
   int Rank() const {
     return std::visit(
@@ -650,6 +656,11 @@ public:
   // for a parameterized derived type instantiation with the instance's scope.
   const DerivedTypeSpec *GetParentTypeSpec(const Scope * = nullptr) const;
 
+  SemanticsContext &GetSemanticsContext() const;
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+  LLVM_DUMP_METHOD void dump() const;
+#endif
+
 private:
   const Scope *owner_;
   SourceName name_;
@@ -672,7 +683,7 @@ private:
   const Symbol *GetParentComponent(const Scope * = nullptr) const;
 
   template <std::size_t> friend class Symbols;
-  template <class, std::size_t> friend struct std::array;
+  template <class, std::size_t> friend class std::array;
 };
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &, Symbol::Flag);
@@ -761,11 +772,45 @@ inline const DeclTypeSpec *Symbol::GetType() const {
       details_);
 }
 
-inline bool operator<(SymbolRef x, SymbolRef y) { return *x < *y; }
-inline bool operator<(MutableSymbolRef x, MutableSymbolRef y) {
-  return *x < *y;
+// Sets and maps keyed by Symbols
+
+struct SymbolAddressCompare {
+  bool operator()(const SymbolRef &x, const SymbolRef &y) const {
+    return &*x < &*y;
+  }
+  bool operator()(const MutableSymbolRef &x, const MutableSymbolRef &y) const {
+    return &*x < &*y;
+  }
+};
+
+// Symbol comparison is usually based on the order of cooked source
+// stream creation and, when both are from the same cooked source,
+// their positions in that cooked source stream.
+// Don't use this comparator or OrderedSymbolSet to hold
+// Symbols that might be subject to ReplaceName().
+struct SymbolSourcePositionCompare {
+  // These functions are implemented in Evaluate/tools.cpp to
+  // satisfy complicated shared library interdependency.
+  bool operator()(const SymbolRef &, const SymbolRef &) const;
+  bool operator()(const MutableSymbolRef &, const MutableSymbolRef &) const;
+};
+
+struct SymbolOffsetCompare {
+  bool operator()(const SymbolRef &, const SymbolRef &) const;
+  bool operator()(const MutableSymbolRef &, const MutableSymbolRef &) const;
+};
+
+using UnorderedSymbolSet = std::set<SymbolRef, SymbolAddressCompare>;
+using SourceOrderedSymbolSet = std::set<SymbolRef, SymbolSourcePositionCompare>;
+
+template <typename A>
+SourceOrderedSymbolSet OrderBySourcePosition(const A &container) {
+  SourceOrderedSymbolSet result;
+  for (SymbolRef x : container) {
+    result.emplace(x);
+  }
+  return result;
 }
-using SymbolSet = std::set<SymbolRef>;
 
 } // namespace Fortran::semantics
 

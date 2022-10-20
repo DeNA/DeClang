@@ -23,6 +23,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
@@ -278,21 +279,46 @@ bool AArch64ExpandPseudo::expandCMP_SWAP_128(
   Register NewLoReg = MI.getOperand(6).getReg();
   Register NewHiReg = MI.getOperand(7).getReg();
 
+  unsigned LdxpOp, StxpOp;
+
+  switch (MI.getOpcode()) {
+  case AArch64::CMP_SWAP_128_MONOTONIC:
+    LdxpOp = AArch64::LDXPX;
+    StxpOp = AArch64::STXPX;
+    break;
+  case AArch64::CMP_SWAP_128_RELEASE:
+    LdxpOp = AArch64::LDXPX;
+    StxpOp = AArch64::STLXPX;
+    break;
+  case AArch64::CMP_SWAP_128_ACQUIRE:
+    LdxpOp = AArch64::LDAXPX;
+    StxpOp = AArch64::STXPX;
+    break;
+  case AArch64::CMP_SWAP_128:
+    LdxpOp = AArch64::LDAXPX;
+    StxpOp = AArch64::STLXPX;
+    break;
+  default:
+    llvm_unreachable("Unexpected opcode");
+  }
+
   MachineFunction *MF = MBB.getParent();
   auto LoadCmpBB = MF->CreateMachineBasicBlock(MBB.getBasicBlock());
   auto StoreBB = MF->CreateMachineBasicBlock(MBB.getBasicBlock());
+  auto FailBB = MF->CreateMachineBasicBlock(MBB.getBasicBlock());
   auto DoneBB = MF->CreateMachineBasicBlock(MBB.getBasicBlock());
 
   MF->insert(++MBB.getIterator(), LoadCmpBB);
   MF->insert(++LoadCmpBB->getIterator(), StoreBB);
-  MF->insert(++StoreBB->getIterator(), DoneBB);
+  MF->insert(++StoreBB->getIterator(), FailBB);
+  MF->insert(++FailBB->getIterator(), DoneBB);
 
   // .Lloadcmp:
   //     ldaxp xDestLo, xDestHi, [xAddr]
   //     cmp xDestLo, xDesiredLo
   //     sbcs xDestHi, xDesiredHi
   //     b.ne .Ldone
-  BuildMI(LoadCmpBB, DL, TII->get(AArch64::LDAXPX))
+  BuildMI(LoadCmpBB, DL, TII->get(LdxpOp))
       .addReg(DestLo.getReg(), RegState::Define)
       .addReg(DestHi.getReg(), RegState::Define)
       .addReg(AddrReg);
@@ -314,22 +340,36 @@ bool AArch64ExpandPseudo::expandCMP_SWAP_128(
       .addImm(AArch64CC::EQ);
   BuildMI(LoadCmpBB, DL, TII->get(AArch64::CBNZW))
       .addUse(StatusReg, getKillRegState(StatusDead))
-      .addMBB(DoneBB);
-  LoadCmpBB->addSuccessor(DoneBB);
+      .addMBB(FailBB);
+  LoadCmpBB->addSuccessor(FailBB);
   LoadCmpBB->addSuccessor(StoreBB);
 
   // .Lstore:
   //     stlxp wStatus, xNewLo, xNewHi, [xAddr]
   //     cbnz wStatus, .Lloadcmp
-  BuildMI(StoreBB, DL, TII->get(AArch64::STLXPX), StatusReg)
+  BuildMI(StoreBB, DL, TII->get(StxpOp), StatusReg)
       .addReg(NewLoReg)
       .addReg(NewHiReg)
       .addReg(AddrReg);
   BuildMI(StoreBB, DL, TII->get(AArch64::CBNZW))
       .addReg(StatusReg, getKillRegState(StatusDead))
       .addMBB(LoadCmpBB);
+  BuildMI(StoreBB, DL, TII->get(AArch64::B)).addMBB(DoneBB);
   StoreBB->addSuccessor(LoadCmpBB);
   StoreBB->addSuccessor(DoneBB);
+
+  // .Lfail:
+  //     stlxp wStatus, xDestLo, xDestHi, [xAddr]
+  //     cbnz wStatus, .Lloadcmp
+  BuildMI(FailBB, DL, TII->get(StxpOp), StatusReg)
+      .addReg(DestLo.getReg())
+      .addReg(DestHi.getReg())
+      .addReg(AddrReg);
+  BuildMI(FailBB, DL, TII->get(AArch64::CBNZW))
+      .addReg(StatusReg, getKillRegState(StatusDead))
+      .addMBB(LoadCmpBB);
+  FailBB->addSuccessor(LoadCmpBB);
+  FailBB->addSuccessor(DoneBB);
 
   DoneBB->splice(DoneBB->end(), &MBB, MI, MBB.end());
   DoneBB->transferSuccessors(&MBB);
@@ -342,9 +382,13 @@ bool AArch64ExpandPseudo::expandCMP_SWAP_128(
   // Recompute liveness bottom up.
   LivePhysRegs LiveRegs;
   computeAndAddLiveIns(LiveRegs, *DoneBB);
+  computeAndAddLiveIns(LiveRegs, *FailBB);
   computeAndAddLiveIns(LiveRegs, *StoreBB);
   computeAndAddLiveIns(LiveRegs, *LoadCmpBB);
+
   // Do an extra pass in the loop to get the loop carried dependencies right.
+  FailBB->clearLiveIns();
+  computeAndAddLiveIns(LiveRegs, *FailBB);
   StoreBB->clearLiveIns();
   computeAndAddLiveIns(LiveRegs, *StoreBB);
   LoadCmpBB->clearLiveIns();
@@ -407,7 +451,7 @@ bool AArch64ExpandPseudo::expand_DestructiveOp(
     assert(DstReg != MI.getOperand(3).getReg());
 
   bool UseRev = false;
-  unsigned PredIdx, DOPIdx, SrcIdx;
+  unsigned PredIdx, DOPIdx, SrcIdx, Src2Idx;
   switch (DType) {
   case AArch64::DestructiveBinaryComm:
   case AArch64::DestructiveBinaryCommWithRev:
@@ -421,7 +465,22 @@ bool AArch64ExpandPseudo::expand_DestructiveOp(
   case AArch64::DestructiveBinary:
   case AArch64::DestructiveBinaryImm:
     std::tie(PredIdx, DOPIdx, SrcIdx) = std::make_tuple(1, 2, 3);
-   break;
+    break;
+  case AArch64::DestructiveUnaryPassthru:
+    std::tie(PredIdx, DOPIdx, SrcIdx) = std::make_tuple(2, 3, 3);
+    break;
+  case AArch64::DestructiveTernaryCommWithRev:
+    std::tie(PredIdx, DOPIdx, SrcIdx, Src2Idx) = std::make_tuple(1, 2, 3, 4);
+    if (DstReg == MI.getOperand(3).getReg()) {
+      // FMLA Zd, Pg, Za, Zd, Zm ==> FMAD Zdn, Pg, Zm, Za
+      std::tie(PredIdx, DOPIdx, SrcIdx, Src2Idx) = std::make_tuple(1, 3, 4, 2);
+      UseRev = true;
+    } else if (DstReg == MI.getOperand(4).getReg()) {
+      // FMLA Zd, Pg, Za, Zm, Zd ==> FMAD Zdn, Pg, Zm, Za
+      std::tie(PredIdx, DOPIdx, SrcIdx, Src2Idx) = std::make_tuple(1, 4, 3, 2);
+      UseRev = true;
+    }
+    break;
   default:
     llvm_unreachable("Unsupported Destructive Operand type");
   }
@@ -438,8 +497,15 @@ bool AArch64ExpandPseudo::expand_DestructiveOp(
       DstReg != MI.getOperand(DOPIdx).getReg() ||
       MI.getOperand(DOPIdx).getReg() != MI.getOperand(SrcIdx).getReg();
     break;
+  case AArch64::DestructiveUnaryPassthru:
   case AArch64::DestructiveBinaryImm:
     DOPRegIsUnique = true;
+    break;
+  case AArch64::DestructiveTernaryCommWithRev:
+    DOPRegIsUnique =
+        DstReg != MI.getOperand(DOPIdx).getReg() ||
+        (MI.getOperand(DOPIdx).getReg() != MI.getOperand(SrcIdx).getReg() &&
+         MI.getOperand(DOPIdx).getReg() != MI.getOperand(Src2Idx).getReg());
     break;
   }
 #endif
@@ -516,12 +582,23 @@ bool AArch64ExpandPseudo::expand_DestructiveOp(
     .addReg(DstReg, RegState::Define | getDeadRegState(DstIsDead));
 
   switch (DType) {
+  case AArch64::DestructiveUnaryPassthru:
+    DOP.addReg(MI.getOperand(DOPIdx).getReg(), RegState::Kill)
+        .add(MI.getOperand(PredIdx))
+        .add(MI.getOperand(SrcIdx));
+    break;
   case AArch64::DestructiveBinaryImm:
   case AArch64::DestructiveBinaryComm:
   case AArch64::DestructiveBinaryCommWithRev:
     DOP.add(MI.getOperand(PredIdx))
        .addReg(MI.getOperand(DOPIdx).getReg(), RegState::Kill)
        .add(MI.getOperand(SrcIdx));
+    break;
+  case AArch64::DestructiveTernaryCommWithRev:
+    DOP.add(MI.getOperand(PredIdx))
+        .addReg(MI.getOperand(DOPIdx).getReg(), RegState::Kill)
+        .add(MI.getOperand(SrcIdx))
+        .add(MI.getOperand(Src2Idx));
     break;
   }
 
@@ -722,9 +799,11 @@ bool AArch64ExpandPseudo::expandStoreSwiftAsyncContext(
     return true;
   }
 
+  // We need to sign the context in an address-discriminated way. 0xc31a is a
+  // fixed random value, chosen as part of the ABI.
   //     add x16, xBase, #Offset
   //     movk x16, #0xc31a, lsl #48
-  //     mov x17, x22
+  //     mov x17, x22/xzr
   //     pacdb x17, x16
   //     str x17, [xBase, #Offset]
   unsigned Opc = Offset >= 0 ? AArch64::ADDXri : AArch64::SUBXri;
@@ -889,12 +968,16 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
     case AArch64::ORRWrr:      Opcode = AArch64::ORRWrs; break;
     case AArch64::ORRXrr:      Opcode = AArch64::ORRXrs; break;
     }
-    MachineInstrBuilder MIB1 =
-        BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(Opcode),
-                MI.getOperand(0).getReg())
-            .add(MI.getOperand(1))
-            .add(MI.getOperand(2))
-            .addImm(AArch64_AM::getShifterImm(AArch64_AM::LSL, 0));
+    MachineFunction &MF = *MBB.getParent();
+    // Try to create new inst without implicit operands added.
+    MachineInstr *NewMI = MF.CreateMachineInstr(
+        TII->get(Opcode), MI.getDebugLoc(), /*NoImplicit=*/true);
+    MBB.insert(MBBI, NewMI);
+    MachineInstrBuilder MIB1(MF, NewMI);
+    MIB1.addReg(MI.getOperand(0).getReg(), RegState::Define)
+        .add(MI.getOperand(1))
+        .add(MI.getOperand(2))
+        .addImm(AArch64_AM::getShifterImm(AArch64_AM::LSL, 0));
     transferImpOps(MI, MIB1, MIB1);
     MI.eraseFromParent();
     return true;
@@ -967,15 +1050,41 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
     MI.eraseFromParent();
     return true;
   }
+  case AArch64::MOVaddrBA: {
+    MachineFunction &MF = *MI.getParent()->getParent();
+    if (MF.getSubtarget<AArch64Subtarget>().isTargetMachO()) {
+      // blockaddress expressions have to come from a constant pool because the
+      // largest addend (and hence offset within a function) allowed for ADRP is
+      // only 8MB.
+      const BlockAddress *BA = MI.getOperand(1).getBlockAddress();
+      assert(MI.getOperand(1).getOffset() == 0 && "unexpected offset");
 
+      MachineConstantPool *MCP = MF.getConstantPool();
+      unsigned CPIdx = MCP->getConstantPoolIndex(BA, Align(8));
+
+      Register DstReg = MI.getOperand(0).getReg();
+      auto MIB1 =
+          BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::ADRP), DstReg)
+              .addConstantPoolIndex(CPIdx, 0, AArch64II::MO_PAGE);
+      auto MIB2 = BuildMI(MBB, MBBI, MI.getDebugLoc(),
+                          TII->get(AArch64::LDRXui), DstReg)
+                      .addUse(DstReg)
+                      .addConstantPoolIndex(
+                          CPIdx, 0, AArch64II::MO_PAGEOFF | AArch64II::MO_NC);
+      transferImpOps(MI, MIB1, MIB2);
+      MI.eraseFromParent();
+      return true;
+    }
+  }
+    LLVM_FALLTHROUGH;
   case AArch64::MOVaddr:
   case AArch64::MOVaddrJT:
   case AArch64::MOVaddrCP:
-  case AArch64::MOVaddrBA:
   case AArch64::MOVaddrTLS:
   case AArch64::MOVaddrEXT: {
     // Expand into ADRP + ADD.
     Register DstReg = MI.getOperand(0).getReg();
+    assert(DstReg != AArch64::XZR);
     MachineInstrBuilder MIB1 =
         BuildMI(MBB, MBBI, MI.getDebugLoc(), TII->get(AArch64::ADRP), DstReg)
             .add(MI.getOperand(1));
@@ -1072,6 +1181,9 @@ bool AArch64ExpandPseudo::expandMI(MachineBasicBlock &MBB,
                           AArch64_AM::getShifterImm(AArch64_AM::LSL, 0),
                           AArch64::XZR, NextMBBI);
   case AArch64::CMP_SWAP_128:
+  case AArch64::CMP_SWAP_128_RELEASE:
+  case AArch64::CMP_SWAP_128_ACQUIRE:
+  case AArch64::CMP_SWAP_128_MONOTONIC:
     return expandCMP_SWAP_128(MBB, MBBI, NextMBBI);
 
   case AArch64::AESMCrrTied:

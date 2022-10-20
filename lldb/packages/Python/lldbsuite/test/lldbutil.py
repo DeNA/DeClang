@@ -96,6 +96,11 @@ def get_xcode_sdk_root(sdk):
                                     ]).rstrip().decode('utf-8')
 
 
+def get_xcode_clang(sdk):
+    return subprocess.check_output(['xcrun', '-sdk', sdk, '-f', 'clang'
+                                    ]).rstrip().decode("utf-8")
+
+
 # ===================================================
 # Disassembly for an SBFunction or an SBSymbol object
 # ===================================================
@@ -248,6 +253,12 @@ def stop_reason_to_str(enum):
         return "watchpoint"
     elif enum == lldb.eStopReasonExec:
         return "exec"
+    elif enum == lldb.eStopReasonFork:
+        return "fork"
+    elif enum == lldb.eStopReasonVFork:
+        return "vfork"
+    elif enum == lldb.eStopReasonVForkDone:
+        return "vforkdone"
     elif enum == lldb.eStopReasonSignal:
         return "signal"
     elif enum == lldb.eStopReasonException:
@@ -568,6 +579,19 @@ def run_break_set_by_file_colon_line(
         line_number = line_number,
         column_number = column_number)
 
+    return get_bpno_from_match(break_results)
+
+def run_break_set_by_exception(
+        test,
+        language,
+        exception_typename=None):
+    command = 'breakpoint set -E ' + language
+    if exception_typename:
+        command += ' --exception-typename ' + exception_typename
+
+    break_results = run_break_set_command(test, command)
+    # No call to check_breakpoint_result as there's nothing to check. In
+    # particular, the exception breakpoint isn't yet guaranteed to be resolved.
     return get_bpno_from_match(break_results)
 
 def run_break_set_command(test, command):
@@ -955,7 +979,8 @@ def run_to_source_breakpoint(test, bkpt_pattern, source_spec,
                              bkpt_module = None,
                              in_cwd = True,
                              only_one_thread = True,
-                             extra_images = None):
+                             extra_images = None,
+                             has_locations_before_run = True):
     """Start up a target, using exe_name as the executable, and run it to
        a breakpoint set by source regex bkpt_pattern.
 
@@ -966,9 +991,10 @@ def run_to_source_breakpoint(test, bkpt_pattern, source_spec,
     # Set the breakpoints
     breakpoint = target.BreakpointCreateBySourceRegex(
             bkpt_pattern, source_spec, bkpt_module)
-    test.assertTrue(breakpoint.GetNumLocations() > 0,
-        'No locations found for source breakpoint: "%s", file: "%s", dir: "%s"'
-        %(bkpt_pattern, source_spec.GetFilename(), source_spec.GetDirectory()))
+    if has_locations_before_run:
+        test.assertTrue(breakpoint.GetNumLocations() > 0,
+                        'No locations found for source breakpoint: "%s", file: "%s", dir: "%s"'
+                        %(bkpt_pattern, source_spec.GetFilename(), source_spec.GetDirectory()))
     return run_to_breakpoint_do_run(test, target, breakpoint, launch_info,
                                     only_one_thread, extra_images)
 
@@ -1198,6 +1224,29 @@ def expect_state_changes(test, listener, process, states, timeout=30):
         test.assertEqual(
             lldb.SBProcess.GetStateFromEvent(event),
             expected_state)
+
+def start_listening_from(broadcaster, event_mask):
+    """Creates a listener for a specific event mask and add it to the source broadcaster."""
+
+    listener = lldb.SBListener("lldb.test.listener")
+    broadcaster.AddListener(listener, event_mask)
+    return listener
+
+def fetch_next_event(test, listener, broadcaster, timeout=10):
+    """Fetch one event from the listener and return it if it matches the provided broadcaster.
+    Fails otherwise."""
+
+    event = lldb.SBEvent()
+
+    if listener.WaitForEvent(timeout, event):
+        if event.BroadcasterMatchesRef(broadcaster):
+            return event
+
+        test.fail("received event '%s' from unexpected broadcaster '%s'." %
+                  (event.GetDescription(), event.GetBroadcaster().GetName()))
+
+    test.fail("couldn't fetch an event before reaching the timeout.")
+
 
 # ===================================
 # Utility functions related to Frames

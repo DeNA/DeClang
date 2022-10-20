@@ -75,6 +75,8 @@ public:
 
   void InitializeObject() override;
 
+  uint64_t GetDebugInfoSize() override;
+
   // Compile Unit function calls
 
   void
@@ -151,9 +153,9 @@ public:
   FindNamespace(ConstString name,
                 const CompilerDeclContext &parent_decl_ctx) override;
 
-  ConstString GetPluginName() override;
-
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override {
+    return GetPluginNameStatic().GetStringRef();
+  }
 
   llvm::pdb::PDBFile &GetPDBFile() { return m_index->pdb(); }
   const llvm::pdb::PDBFile &GetPDBFile() const { return m_index->pdb(); }

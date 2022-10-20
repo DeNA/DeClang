@@ -564,8 +564,7 @@ protected:
       // made to the CFG), so the PreViewCFG needs all the updates reverse
       // applied.
       SmallVector<UpdateType> AllUpdates(Updates.begin(), Updates.end());
-      for (auto &Update : PostViewUpdates)
-        AllUpdates.push_back(Update);
+      append_range(AllUpdates, PostViewUpdates);
       GraphDiff<NodePtr, IsPostDom> PreViewCFG(AllUpdates,
                                                /*ReverseApplyUpdates=*/true);
       GraphDiff<NodePtr, IsPostDom> PostViewCFG(PostViewUpdates);
@@ -839,9 +838,7 @@ protected:
            "NewBB should have a single successor!");
     NodeRef NewBBSucc = *GraphT::child_begin(NewBB);
 
-    SmallVector<NodeRef, 4> PredBlocks;
-    for (auto Pred : children<Inverse<N>>(NewBB))
-      PredBlocks.push_back(Pred);
+    SmallVector<NodeRef, 4> PredBlocks(children<Inverse<N>>(NewBB));
 
     assert(!PredBlocks.empty() && "No predblocks?");
 

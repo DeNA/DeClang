@@ -16,8 +16,8 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
 #include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/lldb-types.h"
@@ -26,7 +26,7 @@
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #endif // LLDB_ENABLE_SWIFT
 
-#include <string.h>
+#include <cstring>
 namespace lldb_private {
 class Declaration;
 }
@@ -125,7 +125,7 @@ lldb::ValueType ValueObjectDynamicValue::GetValueType() const {
 }
 
 bool ValueObjectDynamicValue::UpdateValue() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES));
+  Log *log = GetLog(LLDBLog::Types);
 
   SetValueIsValid(false);
   m_error.Clear();
@@ -152,7 +152,7 @@ bool ValueObjectDynamicValue::UpdateValue() {
   }
 
 #ifdef LLDB_ENABLE_SWIFT
-  auto swift_scratch_ctx_lock = SwiftASTContextLock(&exe_ctx);
+  auto swift_scratch_ctx_lock = SwiftScratchContextLock(&exe_ctx);
 #endif // LLDB_ENABLE_SWIFT
 
   // First make sure our Type and/or Address haven't changed:
@@ -441,8 +441,8 @@ bool ValueObjectDynamicValue::DynamicValueTypeInfoNeedsUpdate() {
 
 #ifdef LLDB_ENABLE_SWIFT
   auto *cached_ctx = m_value.GetCompilerType().GetTypeSystem();
-  llvm::Optional<SwiftASTContextReader> scratch_ctx =
-      GetScratchSwiftASTContext();
+  llvm::Optional<SwiftScratchContextReader> scratch_ctx =
+      GetSwiftScratchContext();
 
   if (!scratch_ctx || !cached_ctx)
     return true;

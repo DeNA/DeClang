@@ -50,7 +50,7 @@ public:
   explicit Attribute(const llvm::DefInit *init);
 
   // Returns the storage type if set. Returns the default storage type
-  // ("Attribute") otherwise.
+  // ("::mlir::Attribute") otherwise.
   StringRef getStorageType() const;
 
   // Returns the return type for this attribute.
@@ -202,6 +202,10 @@ public:
 
   // Returns all allowed cases for this enum attribute.
   std::vector<EnumAttrCase> getAllCases() const;
+
+  bool genSpecializedAttr() const;
+  llvm::Record *getBaseAttrClass() const;
+  StringRef getSpecializedAttrClassName() const;
 };
 
 class StructFieldAttr {

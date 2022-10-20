@@ -52,7 +52,7 @@ class EffectOpInterfaceBase<string name, string baseEffect>
         Collects all of the operation's effects into `effects`.
       }],
       "void", "getEffects",
-         (ins "SmallVectorImpl<::mlir::SideEffects::EffectInstance<"
+         (ins "::mlir::SmallVectorImpl<::mlir::SideEffects::EffectInstance<"
               # baseEffect # ">> &":$effects)
     >,
   ];
@@ -108,6 +108,22 @@ class EffectOpInterfaceBase<string name, string baseEffect>
               }] # baseEffect # [{>> & effects) {
       getEffects(effects);
       llvm::erase_if(effects, [&](auto &it) { return it.getValue() != value; });
+    }
+
+    /// Return the effect of the given type `Effect` that is applied to the
+    /// given value, or None if no effect exists.
+    template <typename Effect>
+    ::llvm::Optional<::mlir::SideEffects::EffectInstance<}] # baseEffect # [{>>
+    getEffectOnValue(::mlir::Value value) {
+      llvm::SmallVector<::mlir::SideEffects::EffectInstance<
+              }] # baseEffect # [{>, 4> effects;
+      getEffects(effects);
+      auto it = llvm::find_if(effects, [&](auto &it) {
+        return isa<Effect>(it.getEffect()) && it.getValue() == value;
+      });
+      if (it == effects.end())
+        return llvm::None;
+      return *it;
     }
 
     /// Collect all of the effect instances that operate on the provided symbol

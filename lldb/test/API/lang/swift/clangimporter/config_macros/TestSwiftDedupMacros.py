@@ -54,7 +54,8 @@ class TestSwiftDedupMacros(TestBase):
         space = 0
         ndebug = 0
         space_with_space = 0
-        logfile = open(log, "r")
+        import io
+        logfile = io.open(log, "r", encoding='utf-8')
         for line in logfile:
             if "-DDEBUG=1" in line:
                 debug += 1
@@ -64,7 +65,8 @@ class TestSwiftDedupMacros(TestBase):
                 space_with_space += 1
             if "-UNDEBUG" in line:
                 ndebug += 1
-        self.assertEqual(debug, 1)
-        self.assertEqual(space, 1)
+        # One extra in SwiftASTContextPerModule.
+        self.assertEqual(debug, 3)
+        self.assertEqual(space, 3)
         self.assertEqual(space_with_space, 0)
-        self.assertEqual(ndebug, 1)
+        self.assertEqual(ndebug, 3)

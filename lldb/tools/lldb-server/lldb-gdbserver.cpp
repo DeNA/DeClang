@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <errno.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cerrno>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 
 #ifndef _WIN32
-#include <signal.h>
+#include <csignal>
 #include <unistd.h>
 #endif
 
@@ -26,9 +26,9 @@
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Pipe.h"
 #include "lldb/Host/Socket.h"
-#include "lldb/Host/StringConvert.h"
 #include "lldb/Host/common/NativeProcessProtocol.h"
 #include "lldb/Target/Process.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Status.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Option/ArgList.h"
@@ -40,7 +40,7 @@
 #if defined(__linux__)
 #include "Plugins/Process/Linux/NativeProcessLinux.h"
 #elif defined(__FreeBSD__)
-#include "Plugins/Process/FreeBSDRemote/NativeProcessFreeBSD.h"
+#include "Plugins/Process/FreeBSD/NativeProcessFreeBSD.h"
 #elif defined(__NetBSD__)
 #include "Plugins/Process/NetBSD/NativeProcessNetBSD.h"
 #elif defined(_WIN32)
@@ -96,7 +96,7 @@ static int g_sighup_received_count = 0;
 static void sighup_handler(MainLoopBase &mainloop) {
   ++g_sighup_received_count;
 
-  Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_PROCESS));
+  Log *log = GetLog(LLDBLog::Process);
   LLDB_LOGF(log, "lldb-server:%s swallowing SIGHUP (receive count=%d)",
             __FUNCTION__, g_sighup_received_count);
 
@@ -200,8 +200,7 @@ void ConnectToRemote(MainLoop &mainloop,
   std::unique_ptr<Connection> connection_up;
   if (connection_fd != -1) {
     // Build the connection string.
-    char connection_url[512];
-    snprintf(connection_url, sizeof(connection_url), "fd://%d", connection_fd);
+    std::string connection_url = llvm::formatv("fd://{0}", connection_fd).str();
 
     // Create the connection.
 #if LLDB_ENABLE_POSIX && !defined _WIN32
@@ -209,23 +208,22 @@ void ConnectToRemote(MainLoop &mainloop,
 #endif
     connection_up.reset(new ConnectionFileDescriptor);
     auto connection_result = connection_up->Connect(connection_url, &error);
-    if (connection_result != eConnectionStatusSuccess) {
-      fprintf(stderr, "error: failed to connect to client at '%s' "
-                      "(connection status: %d)\n",
-              connection_url, static_cast<int>(connection_result));
+    if (error.Fail()) {
+      llvm::errs() << llvm::formatv(
+          "error: failed to connect to client at '{0}': {1}\n", connection_url,
+          error);
       exit(-1);
     }
-    if (error.Fail()) {
-      fprintf(stderr, "error: failed to connect to client at '%s': %s\n",
-              connection_url, error.AsCString());
+    if (connection_result != eConnectionStatusSuccess) {
+      llvm::errs() << llvm::formatv(
+          "error: failed to connect to client at '{0}' "
+          "(connection status: {1})\n",
+          connection_url, static_cast<int>(connection_result));
       exit(-1);
     }
   } else if (!host_and_port.empty()) {
     // Parse out host and port.
     std::string final_host_and_port;
-    std::string connection_host;
-    std::string connection_port;
-    uint32_t connection_portno = 0;
 
     // If host_and_port starts with ':', default the host to be "localhost" and
     // expect the remainder to be the port.
@@ -233,54 +231,53 @@ void ConnectToRemote(MainLoop &mainloop,
       final_host_and_port.append("localhost");
     final_host_and_port.append(host_and_port.str());
 
-    // Note: use rfind, because the host/port may look like "[::1]:12345".
-    const std::string::size_type colon_pos = final_host_and_port.rfind(':');
-    if (colon_pos != std::string::npos) {
-      connection_host = final_host_and_port.substr(0, colon_pos);
-      connection_port = final_host_and_port.substr(colon_pos + 1);
-      connection_portno = StringConvert::ToUInt32(connection_port.c_str(), 0);
-    }
-
-
     if (reverse_connect) {
       // llgs will connect to the gdb-remote client.
 
       // Ensure we have a port number for the connection.
+      // Note: use rfind, because the host/port may look like "[::1]:12345".
+      uint32_t connection_portno = 0;
+      const std::string::size_type colon_pos = final_host_and_port.rfind(':');
+      if (colon_pos != std::string::npos)
+        llvm::to_integer(final_host_and_port.substr(colon_pos + 1),
+                         connection_portno);
       if (connection_portno == 0) {
-        fprintf(stderr, "error: port number must be specified on when using "
-                        "reverse connect\n");
+        llvm::errs() << "error: port number must be specified on when using "
+                        "reverse connect\n";
         exit(1);
       }
 
       // Build the connection string.
-      char connection_url[512];
-      snprintf(connection_url, sizeof(connection_url), "connect://%s",
-               final_host_and_port.c_str());
+      final_host_and_port.insert(0, "connect://");
 
       // Create the connection.
       connection_up.reset(new ConnectionFileDescriptor);
-      auto connection_result = connection_up->Connect(connection_url, &error);
-      if (connection_result != eConnectionStatusSuccess) {
-        fprintf(stderr, "error: failed to connect to client at '%s' "
-                        "(connection status: %d)\n",
-                connection_url, static_cast<int>(connection_result));
+      auto connection_result =
+          connection_up->Connect(final_host_and_port, &error);
+      if (error.Fail()) {
+        llvm::errs() << llvm::formatv(
+            "error: failed to connect to client at '{0}': {1}\n",
+            final_host_and_port, error);
         exit(-1);
       }
-      if (error.Fail()) {
-        fprintf(stderr, "error: failed to connect to client at '%s': %s\n",
-                connection_url, error.AsCString());
+      if (connection_result != eConnectionStatusSuccess) {
+        llvm::errs() << llvm::formatv(
+            "error: failed to connect to client at '{0}' "
+            "(connection status: {1})\n",
+            final_host_and_port, static_cast<int>(connection_result));
         exit(-1);
       }
     } else {
       std::unique_ptr<Acceptor> acceptor_up(
           Acceptor::Create(final_host_and_port, false, error));
       if (error.Fail()) {
-        fprintf(stderr, "failed to create acceptor: %s\n", error.AsCString());
+        llvm::errs() << llvm::formatv("failed to create acceptor: {0}\n",
+                                      error);
         exit(1);
       }
       error = acceptor_up->Listen(1);
       if (error.Fail()) {
-        fprintf(stderr, "failed to listen: %s\n", error.AsCString());
+        llvm::errs() << llvm::formatv("failed to listen: {0}\n", error);
         exit(1);
       }
       const std::string socket_id = acceptor_up->GetLocalSocketId();
@@ -289,26 +286,28 @@ void ConnectToRemote(MainLoop &mainloop,
         if (named_pipe_path && named_pipe_path[0]) {
           error = writeSocketIdToPipe(named_pipe_path, socket_id);
           if (error.Fail())
-            fprintf(stderr, "failed to write to the named pipe \'%s\': %s\n",
-                    named_pipe_path, error.AsCString());
+            llvm::errs() << llvm::formatv(
+                "failed to write to the named peipe '{0}': {1}\n",
+                named_pipe_path, error.AsCString());
         }
         // If we have an unnamed pipe to write the socket id back to, do that
         // now.
         else if (unnamed_pipe != LLDB_INVALID_PIPE) {
           error = writeSocketIdToPipe(unnamed_pipe, socket_id);
           if (error.Fail())
-            fprintf(stderr, "failed to write to the unnamed pipe: %s\n",
-                    error.AsCString());
+            llvm::errs() << llvm::formatv(
+                "failed to write to the unnamed pipe: {0}\n", error);
         }
       } else {
-        fprintf(stderr,
-                "unable to get the socket id for the listening connection\n");
+        llvm::errs()
+            << "unable to get the socket id for the listening connection\n";
       }
 
       Connection *conn = nullptr;
       error = acceptor_up->Accept(false, conn);
       if (error.Fail()) {
-        printf("failed to accept new connection: %s\n", error.AsCString());
+        llvm::errs() << llvm::formatv("failed to accept new connection: {0}\n",
+                                      error);
         exit(1);
       }
       connection_up.reset(conn);
@@ -316,11 +315,10 @@ void ConnectToRemote(MainLoop &mainloop,
   }
   error = gdb_server.InitializeConnection(std::move(connection_up));
   if (error.Fail()) {
-    fprintf(stderr, "Failed to initialize connection: %s\n",
-            error.AsCString());
+    llvm::errs() << llvm::formatv("failed to initialize connection\n", error);
     exit(-1);
   }
-  printf("Connection established.\n");
+  llvm::outs() << "Connection established.\n";
 }
 
 namespace {
@@ -356,7 +354,7 @@ public:
   void PrintHelp(llvm::StringRef Name) {
     std::string Usage =
         (Name + " [options] [[host]:port] [[--] program args...]").str();
-    OptTable::PrintHelp(llvm::outs(), Usage.c_str(), "lldb-server");
+    OptTable::printHelp(llvm::outs(), Usage.c_str(), "lldb-server");
     llvm::outs() << R"(
 DESCRIPTION
   lldb-server connects to the LLDB client, which drives the debugging session.

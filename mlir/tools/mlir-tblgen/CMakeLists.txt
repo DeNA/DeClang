@@ -5,7 +5,10 @@ set(LLVM_LINK_COMPONENTS
 )
 
 add_tablegen(mlir-tblgen MLIR
+  AttrOrTypeDefGen.cpp
+  CodeGenHelpers.cpp
   DialectGen.cpp
+  DirectiveCommonGen.cpp
   EnumsGen.cpp
   LLVMIRConversionGen.cpp
   LLVMIRIntrinsicGen.cpp
@@ -13,16 +16,15 @@ add_tablegen(mlir-tblgen MLIR
   OpDefinitionsGen.cpp
   OpDocGen.cpp
   OpFormatGen.cpp
+  OpGenHelpers.cpp
   OpInterfacesGen.cpp
   OpPythonBindingGen.cpp
-  OpenMPCommonGen.cpp
   PassCAPIGen.cpp
   PassDocGen.cpp
   PassGen.cpp
   RewriterGen.cpp
   SPIRVUtilsGen.cpp
   StructsGen.cpp
-  TypeDefGen.cpp
   )
 
 set_target_properties(mlir-tblgen PROPERTIES FOLDER "Tablegenning")

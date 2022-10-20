@@ -298,18 +298,12 @@ void CommandObjectExpression::HandleCompletion(CompletionRequest &request) {
   options.SetAutoApplyFixIts(false);
   options.SetGenerateDebugInfo(false);
 
-  // We need a valid execution context with a frame pointer for this
-  // completion, so if we don't have one we should try to make a valid
-  // execution context.
-  if (m_interpreter.GetExecutionContext().GetFramePtr() == nullptr)
-    m_interpreter.UpdateExecutionContext(nullptr);
+  ExecutionContext exe_ctx(m_interpreter.GetExecutionContext());
 
-  // This didn't work, so let's get out before we start doing things that
-  // expect a valid frame pointer.
-  if (m_interpreter.GetExecutionContext().GetFramePtr() == nullptr)
+  // Get out before we start doing things that expect a valid frame pointer.
+  if (exe_ctx.GetFramePtr() == nullptr)
     return;
 
-  ExecutionContext exe_ctx(m_interpreter.GetExecutionContext());
   Target *exe_target = exe_ctx.GetTargetPtr();
   Target &target = exe_target ? *exe_target : GetDummyTarget();
 
@@ -431,6 +425,12 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
   lldb::ValueObjectSP result_valobj_sp;
   StackFrame *frame = exe_ctx.GetFramePtr();
 
+  if (m_command_options.top_level && !m_command_options.allow_jit) {
+    result.AppendErrorWithFormat(
+        "Can't disable JIT compilation for top-level expressions.\n");
+    return false;
+  }
+
   const EvaluateExpressionOptions options = GetEvalOptions(target);
   ExpressionResults success = target.EvaluateExpression(
       expr, frame, result_valobj_sp, options, &m_fixed_expression);
@@ -438,9 +438,8 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
   // We only tell you about the FixIt if we applied it.  The compiler errors
   // will suggest the FixIt if it parsed.
   if (!m_fixed_expression.empty() && target.GetEnableNotifyAboutFixIts()) {
-    if (success == eExpressionCompleted)
-      error_stream.Printf("  Fix-it applied, fixed expression was: \n    %s\n",
-                          m_fixed_expression.c_str());
+    error_stream.Printf("  Fix-it applied, fixed expression was: \n    %s\n",
+                        m_fixed_expression.c_str());
   }
 
   if (result_valobj_sp) {
@@ -457,7 +456,6 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
             result.AppendErrorWithFormat(
                 "expression cannot be used with --element-count %s\n",
                 error.AsCString(""));
-            result.SetStatus(eReturnStatusFailed);
             return false;
           }
         }
@@ -704,13 +702,8 @@ bool CommandObjectExpression::DoExecute(llvm::StringRef command,
         fixed_command.append(m_fixed_expression);
       history.AppendString(fixed_command);
     }
-    // Increment statistics to record this expression evaluation success.
-    target.IncrementStats(StatisticKind::ExpressionSuccessful);
     return true;
   }
-
-  // Increment statistics to record this expression evaluation failure.
-  target.IncrementStats(StatisticKind::ExpressionFailure);
   result.SetStatus(eReturnStatusFailed);
   return false;
 }

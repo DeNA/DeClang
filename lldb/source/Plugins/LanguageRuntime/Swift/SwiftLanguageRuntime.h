@@ -34,7 +34,7 @@ class MemoryReader;
 class RemoteAddress;
 } // namespace remote
 
-template <typename T> struct External;
+template <typename Runtime> struct External;
 template <unsigned PointerSize> struct RuntimeTarget;
 
 namespace reflection {
@@ -108,8 +108,9 @@ public:
   /// \}
 
   /// PluginInterface protocol.
-  lldb_private::ConstString GetPluginName() override;
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override {
+    return GetPluginNameStatic().GetStringRef();
+  }
 
   bool GetObjectDescription(Stream &str, Value &value,
                             ExecutionContextScope *exe_scope) override {
@@ -149,6 +150,8 @@ public:
                                             DemangleMode mode,
                                             const SymbolContext *sc = nullptr);
 
+  void DumpTyperef(CompilerType type, TypeSystemSwiftTypeRef *module_holder,
+                   Stream *s);
   class MethodName {
   public:
     enum Type {
@@ -277,7 +280,17 @@ public:
                                               const DataExtractor &data,
                                               ExecutionContext *exe_ctx);
 
-  llvm::Optional<size_t> GetIndexOfChildMemberWithName(
+  /// Behaves like the CompilerType::GetIndexOfChildMemberWithName()
+  /// except for the more nuanced return value.
+  ///
+  /// \returns {false, {}} on error.
+  //
+  /// \returns {true, {}} if the member exists, but it is an enum case
+  ///                     without payload. Enum cases without payload
+  ///                     don't have an index.
+  ///
+  /// \returns {true, {num_idexes}} on success.
+  std::pair<bool, llvm::Optional<size_t>> GetIndexOfChildMemberWithName(
       CompilerType type, llvm::StringRef name, ExecutionContext *exe_ctx,
       bool omit_empty_base_classes, std::vector<uint32_t> &child_indexes);
 

@@ -24,7 +24,7 @@ class TestVLA(TestBase):
         var_opts.SetUseDynamic(lldb.eDynamicCanRunTarget)
         all_locals = self.frame().GetVariables(var_opts)
         for value in all_locals:
-            self.assertFalse("vla_expr" in value.name)
+            self.assertNotIn("vla_expr", value.name)
 
     @skipIf(compiler="clang", compiler_version=['<', '8.0'])
     def test_vla(self):
@@ -51,7 +51,7 @@ class TestVLA(TestBase):
             self.expect("fr v vla", substrs=array)
             self.expect("expr vla", error=True, substrs=["incomplete"])
 
-        test(2, ["int []", "[0] = 2, [1] = 1"])
+        test(2, ["int[]", "[0] = 2, [1] = 1"])
         process.Continue()
-        test(4, ["int []", "[0] = 4, [1] = 3, [2] = 2, [3] = 1"])
+        test(4, ["int[]", "[0] = 4, [1] = 3, [2] = 2, [3] = 1"])
 

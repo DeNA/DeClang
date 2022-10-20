@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/Pass/Pass.h"
@@ -25,7 +26,17 @@ namespace {
 class TestLoopMappingPass
     : public PassWrapper<TestLoopMappingPass, FunctionPass> {
 public:
+  StringRef getArgument() const final {
+    return "test-mapping-to-processing-elements";
+  }
+  StringRef getDescription() const final {
+    return "test mapping a single loop on a virtual processor grid";
+  }
   explicit TestLoopMappingPass() {}
+
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<AffineDialect, scf::SCFDialect>();
+  }
 
   void runOnFunction() override {
     FuncOp func = getFunction();
@@ -53,10 +64,6 @@ public:
 
 namespace mlir {
 namespace test {
-void registerTestLoopMappingPass() {
-  PassRegistration<TestLoopMappingPass>(
-      "test-mapping-to-processing-elements",
-      "test mapping a single loop on a virtual processor grid");
-}
+void registerTestLoopMappingPass() { PassRegistration<TestLoopMappingPass>(); }
 } // namespace test
 } // namespace mlir

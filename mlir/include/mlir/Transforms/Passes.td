@@ -14,9 +14,115 @@
 #define MLIR_TRANSFORMS_PASSES
 
 include "mlir/Pass/PassBase.td"
+include "mlir/Rewrite/PassUtil.td"
 
 def AffineLoopFusion : FunctionPass<"affine-loop-fusion"> {
   let summary = "Fuse affine loop nests";
+  let description = [{
+    This pass performs fusion of loop nests using a slicing-based approach. It
+    combines two fusion strategies: producer-consumer fusion and sibling fusion.
+    Producer-consumer fusion is aimed at fusing pairs of loops where the first
+    one writes to a memref that the second reads. Sibling fusion targets pairs
+    of loops that share no dependences between them but that load from the same
+    memref. The fused loop nests, when possible, are rewritten to access
+    significantly smaller local buffers instead of the original memref's, and
+    the latter are often either completely optimized away or contracted. This
+    transformation leads to enhanced locality and lower memory footprint through
+    the elimination or contraction of temporaries/intermediate memref's. These
+    benefits are sometimes achieved at the expense of redundant computation
+    through a cost model that evaluates available choices such as the depth at
+    which a source slice should be materialized in the designation slice.
+
+    Example 1: Producer-consumer fusion.
+    Input:
+    ```mlir
+    func @producer_consumer_fusion(%arg0: memref<10xf32>, %arg1: memref<10xf32>) {
+      %0 = alloc() : memref<10xf32>
+      %1 = alloc() : memref<10xf32>
+      %cst = arith.constant 0.000000e+00 : f32
+      affine.for %arg2 = 0 to 10 {
+        affine.store %cst, %0[%arg2] : memref<10xf32>
+        affine.store %cst, %1[%arg2] : memref<10xf32>
+      }
+      affine.for %arg2 = 0 to 10 {
+        %2 = affine.load %0[%arg2] : memref<10xf32>
+        %3 = arith.addf %2, %2 : f32
+        affine.store %3, %arg0[%arg2] : memref<10xf32>
+      }
+      affine.for %arg2 = 0 to 10 {
+        %2 = affine.load %1[%arg2] : memref<10xf32>
+        %3 = arith.mulf %2, %2 : f32
+        affine.store %3, %arg1[%arg2] : memref<10xf32>
+      }
+      return
+    }
+    ```
+    Output:
+    ```mlir
+    func @producer_consumer_fusion(%arg0: memref<10xf32>, %arg1: memref<10xf32>) {
+      %0 = alloc() : memref<1xf32>
+      %1 = alloc() : memref<1xf32>
+      %cst = arith.constant 0.000000e+00 : f32
+      affine.for %arg2 = 0 to 10 {
+        affine.store %cst, %0[0] : memref<1xf32>
+        affine.store %cst, %1[0] : memref<1xf32>
+        %2 = affine.load %1[0] : memref<1xf32>
+        %3 = arith.mulf %2, %2 : f32
+        affine.store %3, %arg1[%arg2] : memref<10xf32>
+        %4 = affine.load %0[0] : memref<1xf32>
+        %5 = arith.addf %4, %4 : f32
+        affine.store %5, %arg0[%arg2] : memref<10xf32>
+      }
+      return
+    }
+    ```
+
+    Example 2: Sibling fusion.
+    Input:
+    ```mlir
+    func @sibling_fusion(%arg0: memref<10x10xf32>, %arg1: memref<10x10xf32>,
+                         %arg2: memref<10x10xf32>, %arg3: memref<10x10xf32>,
+                         %arg4: memref<10x10xf32>) {
+      affine.for %arg5 = 0 to 3 {
+        affine.for %arg6 = 0 to 3 {
+          %0 = affine.load %arg0[%arg5, %arg6] : memref<10x10xf32>
+          %1 = affine.load %arg1[%arg5, %arg6] : memref<10x10xf32>
+          %2 = arith.mulf %0, %1 : f32
+          affine.store %2, %arg3[%arg5, %arg6] : memref<10x10xf32>
+        }
+      }
+      affine.for %arg5 = 0 to 3 {
+        affine.for %arg6 = 0 to 3 {
+          %0 = affine.load %arg0[%arg5, %arg6] : memref<10x10xf32>
+          %1 = affine.load %arg2[%arg5, %arg6] : memref<10x10xf32>
+          %2 = arith.addf %0, %1 : f32
+          affine.store %2, %arg4[%arg5, %arg6] : memref<10x10xf32>
+        }
+      }
+      return
+    }
+    ```
+    Output:
+    ```mlir
+    func @sibling_fusion(%arg0: memref<10x10xf32>, %arg1: memref<10x10xf32>,
+                         %arg2: memref<10x10xf32>, %arg3: memref<10x10xf32>,
+                         %arg4: memref<10x10xf32>) {
+      affine.for %arg5 = 0 to 3 {
+        affine.for %arg6 = 0 to 3 {
+          %0 = affine.load %arg0[%arg5, %arg6] : memref<10x10xf32>
+          %1 = affine.load %arg1[%arg5, %arg6] : memref<10x10xf32>
+          %2 = arith.mulf %0, %1 : f32
+          affine.store %2, %arg3[%arg5, %arg6] : memref<10x10xf32>
+          %3 = affine.load %arg0[%arg5, %arg6] : memref<10x10xf32>
+          %4 = affine.load %arg2[%arg5, %arg6] : memref<10x10xf32>
+          %5 = arith.addf %3, %4 : f32
+          affine.store %5, %arg4[%arg5, %arg6] : memref<10x10xf32>
+        }
+      }
+      return
+    }
+    ```
+  }];
   let constructor = "mlir::createLoopFusionPass()";
   let options = [
     Option<"computeToleranceThreshold", "fusion-compute-tolerance", "double",
@@ -30,7 +136,16 @@ def AffineLoopFusion : FunctionPass<"affine-loop-fusion"> {
                             "to fast memory space">,
     Option<"maximalFusion", "fusion-maximal", "bool", /*default=*/"false",
            "Enables maximal loop fusion">,
-  ];
+    Option<"affineFusionMode", "mode", "enum FusionMode",
+           "mlir::FusionMode::Greedy", "fusion mode to attempt",
+           "llvm::cl::values(clEnumValN(mlir::FusionMode::Greedy,"
+           " \"greedy\", \"Perform greedy (both producer-consumer and sibling)  fusion\"), "
+           "clEnumValN( mlir::FusionMode::ProducerConsumer, "
+           "\"producer\", \"Perform only producer-consumer fusion\"), "
+           "clEnumValN( mlir::FusionMode::Sibling, "
+           "\"sibling\", \"Perform only sibling fusion\"))">,
+    ];
+  let dependentDialects = ["memref::MemRefDialect"];
 }
 
 def AffinePipelineDataTransfer
@@ -49,8 +164,8 @@ def AffinePipelineDataTransfer
       %0 = alloc() : memref<256xf32>
       %1 = alloc() : memref<32xf32, 1>
       %2 = alloc() : memref<1xf32>
-      %c0 = constant 0 : index
-      %c128 = constant 128 : index
+      %c0 = arith.constant 0 : index
+      %c128 = arith.constant 128 : index
       affine.for %i0 = 0 to 8 {
         affine.dma_start %0[%i0], %1[%i0], %2[%c0], %c128 : memref<256xf32>, memref<32xf32, 1>, memref<1xf32>
         affine.dma_wait %2[%c0], %c128 : memref<1xf32>
@@ -67,11 +182,11 @@ def AffinePipelineDataTransfer
     ```mlir
     module {
       func @pipelinedatatransfer() {
-        %c8 = constant 8 : index
-        %c0 = constant 0 : index
+        %c8 = arith.constant 8 : index
+        %c0 = arith.constant 0 : index
         %0 = alloc() : memref<256xf32>
-        %c0_0 = constant 0 : index
-        %c128 = constant 128 : index
+        %c0_0 = arith.constant 0 : index
+        %c128 = arith.constant 128 : index
         %1 = alloc() : memref<2x32xf32, 1>
         %2 = alloc() : memref<2x1xf32>
         affine.dma_start %0[%c0], %1[%c0 mod 2, %c0], %2[%c0 mod 2, symbol(%c0_0)], %c128 : memref<256xf32>, memref<2x32xf32, 1>, memref<2x1xf32>
@@ -177,8 +292,6 @@ def BufferDeallocation : FunctionPass<"buffer-deallocation"> {
 
   }];
   let constructor = "mlir::createBufferDeallocationPass()";
-  // TODO: this pass likely shouldn't depend on Linalg?
-  let dependentDialects = ["linalg::LinalgDialect"];
 }
 
 def BufferHoisting : FunctionPass<"buffer-hoisting"> {
@@ -247,7 +360,7 @@ def BufferResultsToOutParams : Pass<"buffer-results-to-out-params", "ModuleOp"> 
     works for static shaped memrefs.
   }];
   let constructor = "mlir::createBufferResultsToOutParamsPass()";
-  let dependentDialects = ["linalg::LinalgDialect"];
+  let dependentDialects = ["memref::MemRefDialect"];
 }
 
 def Canonicalizer : Pass<"canonicalize"> {
@@ -258,11 +371,17 @@ def Canonicalizer : Pass<"canonicalize"> {
     details.
   }];
   let constructor = "mlir::createCanonicalizerPass()";
-}
-
-def CopyRemoval : FunctionPass<"copy-removal"> {
-  let summary = "Remove the redundant copies from input IR";
-  let constructor = "mlir::createCopyRemovalPass()";
+  let options = [
+    Option<"topDownProcessingEnabled", "top-down", "bool",
+           /*default=*/"true",
+           "Seed the worklist in general top-down order">,
+    Option<"enableRegionSimplification", "region-simplify", "bool",
+           /*default=*/"true",
+           "Seed the worklist in general top-down order">,
+    Option<"maxIterations", "max-iterations", "int64_t",
+           /*default=*/"10",
+           "Seed the worklist in general top-down order">
+  ] # RewritePassUtils.options;
 }
 
 def CSE : Pass<"cse"> {
@@ -301,11 +420,11 @@ def FinalizingBufferize : FunctionPass<"finalizing-bufferize"> {
   let summary = "Finalize a partial bufferization";
   let description = [{
     A bufferize pass that finalizes a partial bufferization by removing
-    remaining `tensor_load` and `tensor_to_memref` operations.
+    remaining `memref.tensor_load` and `memref.buffer_cast` operations.
 
     The removal of those operations is only possible if the operations only
-    exist in pairs, i.e., all uses of `tensor_load` operations are
-    `tensor_to_memref` operations.
+    exist in pairs, i.e., all uses of `memref.tensor_load` operations are
+    `memref.buffer_cast` operations.
 
     This pass will fail if not all operations can be removed or if any operation
     with tensor typed operands remains.
@@ -362,56 +481,12 @@ def LoopCoalescing : FunctionPass<"loop-coalescing"> {
   let summary = "Coalesce nested loops with independent bounds into a single "
                 "loop";
   let constructor = "mlir::createLoopCoalescingPass()";
+  let dependentDialects = ["arith::ArithmeticDialect"];
 }
 
 def LoopInvariantCodeMotion : Pass<"loop-invariant-code-motion"> {
   let summary = "Hoist loop invariant instructions outside of the loop";
   let constructor = "mlir::createLoopInvariantCodeMotionPass()";
-}
-
-def MemRefDataFlowOpt : FunctionPass<"memref-dataflow-opt"> {
-  let summary = "Perform store/load forwarding for memrefs";
-  let description = [{
-    This pass performs store to load forwarding for memref's to eliminate memory
-    accesses and potentially the entire memref if all its accesses are
-    forwarded.
-
-    Input
-
-    ```mlir
-    func @store_load_affine_apply() -> memref<10x10xf32> {
-      %cf7 = constant 7.0 : f32
-      %m = alloc() : memref<10x10xf32>
-      affine.for %i0 = 0 to 10 {
-        affine.for %i1 = 0 to 10 {
-          affine.store %cf7, %m[%i0, %i1] : memref<10x10xf32>
-          %v0 = affine.load %m[%i0, %i1] : memref<10x10xf32>
-          %v1 = addf %v0, %v0 : f32
-        }
-      }
-      return %m : memref<10x10xf32>
-    }
-    ```
-
-    Output
-
-    ```mlir
-    module {
-      func @store_load_affine_apply() -> memref<10x10xf32> {
-        %cst = constant 7.000000e+00 : f32
-        %0 = alloc() : memref<10x10xf32>
-        affine.for %arg0 = 0 to 10 {
-          affine.for %arg1 = 0 to 10 {
-            affine.store %cst, %0[%arg0, %arg1] : memref<10x10xf32>
-            %1 = addf %cst, %cst : f32
-          }
-        }
-        return %0 : memref<10x10xf32>
-      }
-    }
-    ```
-  }];
-  let constructor = "mlir::createMemRefDataFlowOptPass()";
 }
 
 def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
@@ -430,7 +505,7 @@ def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
     contained in the op. Operations marked with the [MemRefsNormalizable]
     (https://mlir.llvm.org/docs/Traits/#memrefsnormalizable) trait are
     expected to be normalizable. Supported operations include affine
-    operations, std.alloc, std.dealloc, and std.return.
+    operations, memref.alloc, memref.dealloc, and std.return.
 
     Given an appropriate layout map specified in the code, this transformation
     can express tiled or linearized access to multi-dimensional data
@@ -450,7 +525,7 @@ def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
                  %B: index, %C: memref<16xf64>) -> (memref<16xf64, #tile>) {
       affine.for %arg3 = 0 to 16 {
             %a = affine.load %A[%arg3] : memref<16xf64, #tile>
-            %p = mulf %a, %a : f64
+            %p = arith.mulf %a, %a : f64
             affine.store %p, %A[%arg3] : memref<16xf64, #tile>
       }
       %c = alloc() : memref<16xf64, #tile>
@@ -466,7 +541,7 @@ def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
       -> memref<4x4xf64> {
       affine.for %arg3 = 0 to 16 {
         %3 = affine.load %arg0[%arg3 floordiv 4, %arg3 mod 4]: memref<4x4xf64>
-        %4 = mulf %3, %3 : f64
+        %4 = arith.mulf %3, %3 : f64
         affine.store %4, %arg0[%arg3 floordiv 4, %arg3 mod 4]: memref<4x4xf64>
       }
       %0 = alloc() : memref<4x4xf64>
@@ -483,17 +558,17 @@ def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
     func @linearize(%arg0: memref<8x8xi32, #linear8>,
                     %arg1: memref<8x8xi32, #linear8>,
                     %arg2: memref<8x8xi32, #linear8>) {
-      %c8 = constant 8 : index
-      %c0 = constant 0 : index
-      %c1 = constant 1 : index
+      %c8 = arith.constant 8 : index
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
       affine.for %arg3 = %c0 to %c8  {
       affine.for %arg4 = %c0 to %c8  {
         affine.for %arg5 = %c0 to %c8 {
           %0 = affine.load %arg0[%arg3, %arg5] : memref<8x8xi32, #linear8>
           %1 = affine.load %arg1[%arg5, %arg4] : memref<8x8xi32, #linear8>
           %2 = affine.load %arg2[%arg3, %arg4] : memref<8x8xi32, #linear8>
-          %3 = muli %0, %1 : i32
-          %4 = addi %2, %3 : i32
+          %3 = arith.muli %0, %1 : i32
+          %4 = arith.addi %2, %3 : i32
           affine.store %4, %arg2[%arg3, %arg4] : memref<8x8xi32, #linear8>
         }
       }
@@ -508,16 +583,16 @@ def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
     func @linearize(%arg0: memref<64xi32>,
                     %arg1: memref<64xi32>,
                     %arg2: memref<64xi32>) {
-    %c8 = constant 8 : index
-    %c0 = constant 0 : index
+    %c8 = arith.constant 8 : index
+    %c0 = arith.constant 0 : index
     affine.for %arg3 = %c0 to %c8 {
       affine.for %arg4 = %c0 to %c8 {
         affine.for %arg5 = %c0 to %c8 {
           %0 = affine.load %arg0[%arg3 * 8 + %arg5] : memref<64xi32>
           %1 = affine.load %arg1[%arg5 * 8 + %arg4] : memref<64xi32>
           %2 = affine.load %arg2[%arg3 * 8 + %arg4] : memref<64xi32>
-          %3 = muli %0, %1 : i32
-          %4 = addi %2, %3 : i32
+          %3 = arith.muli %0, %1 : i32
+          %4 = arith.addi %2, %3 : i32
           affine.store %4, %arg2[%arg3 * 8 + %arg4] : memref<64xi32>
         }
       }
@@ -527,6 +602,7 @@ def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
   ```
   }];
   let constructor = "mlir::createNormalizeMemRefsPass()";
+  let dependentDialects = ["AffineDialect"];
 }
 
 def ParallelLoopCollapsing : Pass<"parallel-loop-collapsing"> {
@@ -545,19 +621,9 @@ def ParallelLoopCollapsing : Pass<"parallel-loop-collapsing"> {
   ];
 }
 
-def PrintCFG : FunctionPass<"print-cfg-graph"> {
-  let summary = "Print CFG graph per-Region";
-  let constructor = "mlir::createPrintCFGGraphPass()";
-}
-
 def PrintOpStats : Pass<"print-op-stats"> {
   let summary = "Print statistics of operations";
   let constructor = "mlir::createPrintOpStatsPass()";
-}
-
-def PrintOp : Pass<"print-op-graph", "ModuleOp"> {
-  let summary = "Print op graph per-Region";
-  let constructor = "mlir::createPrintOpGraphPass()";
 }
 
 def SCCP : Pass<"sccp"> {
@@ -625,4 +691,35 @@ def SymbolDCE : Pass<"symbol-dce"> {
   }];
   let constructor = "mlir::createSymbolDCEPass()";
 }
+
+def ViewOpGraphPass : Pass<"view-op-graph"> {
+  let summary = "Print Graphviz visualization of an operation";
+  let description = [{
+    This pass prints a Graphviz graph of a module.
+
+    - Operations are represented as nodes;
+    - Uses (data flow) as edges;
+    - Control flow as dashed edges;
+    - Regions/blocks as subgraphs.
+
+    By default, only data flow edges are printed.
+
+    Note: See https://www.graphviz.org/doc/info/lang.html for more information
+    about the Graphviz DOT language.
+  }];
+  let options = [
+    Option<"maxLabelLen", "max-label-len", "unsigned",
+            /*default=*/"20", "Limit attribute/type length to number of chars">,
+    Option<"printAttrs", "print-attrs", "bool",
+           /*default=*/"true", "Print attributes of operations">,
+    Option<"printControlFlowEdges", "print-control-flow-edges", "bool",
+           /*default=*/"false", "Print control flow edges">,
+    Option<"printDataFlowEdges", "print-data-flow-edges", "bool",
+           /*default=*/"true", "Print data flow edges">,
+    Option<"printResultTypes", "print-result-types", "bool",
+            /*default=*/"true", "Print result types of operations">
+  ];
+  let constructor = "mlir::createPrintOpGraphPass()";
+}
+
 #endif // MLIR_TRANSFORMS_PASSES

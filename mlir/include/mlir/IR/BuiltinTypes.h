@@ -9,7 +9,8 @@
 #ifndef MLIR_IR_BUILTINTYPES_H
 #define MLIR_IR_BUILTINTYPES_H
 
-#include "mlir/IR/Types.h"
+#include "BuiltinAttributeInterfaces.h"
+#include "SubElementInterfaces.h"
 
 namespace llvm {
 struct fltSemantics;
@@ -22,125 +23,7 @@ class FloatType;
 class Identifier;
 class IndexType;
 class IntegerType;
-class Location;
-class MLIRContext;
 class TypeRange;
-
-namespace detail {
-
-struct BaseMemRefTypeStorage;
-struct ComplexTypeStorage;
-struct FunctionTypeStorage;
-struct IntegerTypeStorage;
-struct MemRefTypeStorage;
-struct OpaqueTypeStorage;
-struct RankedTensorTypeStorage;
-struct ShapedTypeStorage;
-struct TupleTypeStorage;
-struct UnrankedMemRefTypeStorage;
-struct UnrankedTensorTypeStorage;
-struct VectorTypeStorage;
-
-} // namespace detail
-
-//===----------------------------------------------------------------------===//
-// ComplexType
-//===----------------------------------------------------------------------===//
-
-/// The 'complex' type represents a complex number with a parameterized element
-/// type, which is composed of a real and imaginary value of that element type.
-///
-/// The element must be a floating point or integer scalar type.
-///
-class ComplexType
-    : public Type::TypeBase<ComplexType, Type, detail::ComplexTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Get or create a ComplexType with the provided element type.
-  static ComplexType get(Type elementType);
-
-  /// Get or create a ComplexType with the provided element type.  This emits
-  /// and error at the specified location and returns null if the element type
-  /// isn't supported.
-  static ComplexType getChecked(Location location, Type elementType);
-
-  /// Verify the construction of an integer type.
-  static LogicalResult verifyConstructionInvariants(Location loc,
-                                                    Type elementType);
-
-  Type getElementType();
-};
-
-//===----------------------------------------------------------------------===//
-// IntegerType
-//===----------------------------------------------------------------------===//
-
-/// Integer types can have arbitrary bitwidth up to a large fixed limit.
-class IntegerType
-    : public Type::TypeBase<IntegerType, Type, detail::IntegerTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Signedness semantics.
-  enum SignednessSemantics : uint32_t {
-    Signless, /// No signedness semantics
-    Signed,   /// Signed integer
-    Unsigned, /// Unsigned integer
-  };
-
-  /// Get or create a new IntegerType of the given width within the context.
-  /// The created IntegerType is signless (i.e., no signedness semantics).
-  /// Assume the width is within the allowed range and assert on failures. Use
-  /// getChecked to handle failures gracefully.
-  static IntegerType get(MLIRContext *context, unsigned width);
-
-  /// Get or create a new IntegerType of the given width within the context.
-  /// The created IntegerType has signedness semantics as indicated via
-  /// `signedness`. Assume the width is within the allowed range and assert on
-  /// failures. Use getChecked to handle failures gracefully.
-  static IntegerType get(MLIRContext *context, unsigned width,
-                         SignednessSemantics signedness);
-
-  /// Get or create a new IntegerType of the given width within the context,
-  /// defined at the given, potentially unknown, location.  The created
-  /// IntegerType is signless (i.e., no signedness semantics). If the width is
-  /// outside the allowed range, emit errors and return a null type.
-  static IntegerType getChecked(Location location, unsigned width);
-
-  /// Get or create a new IntegerType of the given width within the context,
-  /// defined at the given, potentially unknown, location. The created
-  /// IntegerType has signedness semantics as indicated via `signedness`. If the
-  /// width is outside the allowed range, emit errors and return a null type.
-  static IntegerType getChecked(Location location, unsigned width,
-                                SignednessSemantics signedness);
-
-  /// Verify the construction of an integer type.
-  static LogicalResult
-  verifyConstructionInvariants(Location loc, unsigned width,
-                               SignednessSemantics signedness);
-
-  /// Return the bitwidth of this integer type.
-  unsigned getWidth() const;
-
-  /// Return the signedness semantics of this integer type.
-  SignednessSemantics getSignedness() const;
-
-  /// Return true if this is a signless integer type.
-  bool isSignless() const { return getSignedness() == Signless; }
-  /// Return true if this is a signed integer type.
-  bool isSigned() const { return getSignedness() == Signed; }
-  /// Return true if this is an unsigned integer type.
-  bool isUnsigned() const { return getSignedness() == Unsigned; }
-
-  /// Get or create a new IntegerType with the same signedness as `this` and a
-  /// bitwidth scaled by `scale`.
-  /// Return null if the scaled element type cannot be represented.
-  IntegerType scaleElementBitwidth(unsigned scale);
-
-  /// Integer representation maximal bitwidth.
-  static constexpr unsigned kMaxWidth = 4096;
-};
 
 //===----------------------------------------------------------------------===//
 // FloatType
@@ -155,6 +38,8 @@ public:
   static FloatType getF16(MLIRContext *ctx);
   static FloatType getF32(MLIRContext *ctx);
   static FloatType getF64(MLIRContext *ctx);
+  static FloatType getF80(MLIRContext *ctx);
+  static FloatType getF128(MLIRContext *ctx);
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast.
   static bool classof(Type type);
@@ -171,68 +56,6 @@ public:
 };
 
 //===----------------------------------------------------------------------===//
-// FunctionType
-//===----------------------------------------------------------------------===//
-
-/// Function types map from a list of inputs to a list of results.
-class FunctionType
-    : public Type::TypeBase<FunctionType, Type, detail::FunctionTypeStorage> {
-public:
-  using Base::Base;
-
-  static FunctionType get(MLIRContext *context, TypeRange inputs,
-                          TypeRange results);
-
-  /// Input types.
-  unsigned getNumInputs() const;
-  Type getInput(unsigned i) const { return getInputs()[i]; }
-  ArrayRef<Type> getInputs() const;
-
-  /// Result types.
-  unsigned getNumResults() const;
-  Type getResult(unsigned i) const { return getResults()[i]; }
-  ArrayRef<Type> getResults() const;
-
-  /// Returns a new function type without the specified arguments and results.
-  FunctionType getWithoutArgsAndResults(ArrayRef<unsigned> argIndices,
-                                        ArrayRef<unsigned> resultIndices);
-};
-
-//===----------------------------------------------------------------------===//
-// OpaqueType
-//===----------------------------------------------------------------------===//
-
-/// Opaque types represent types of non-registered dialects. These are types
-/// represented in their raw string form, and can only usefully be tested for
-/// type equality.
-class OpaqueType
-    : public Type::TypeBase<OpaqueType, Type, detail::OpaqueTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Get or create a new OpaqueType with the provided dialect and string data.
-  static OpaqueType get(MLIRContext *context, Identifier dialect,
-                        StringRef typeData);
-
-  /// Get or create a new OpaqueType with the provided dialect and string data.
-  /// If the given identifier is not a valid namespace for a dialect, then a
-  /// null type is returned.
-  static OpaqueType getChecked(Location location, Identifier dialect,
-                               StringRef typeData);
-
-  /// Returns the dialect namespace of the opaque type.
-  Identifier getDialectNamespace() const;
-
-  /// Returns the raw type data of the opaque type.
-  StringRef getTypeData() const;
-
-  /// Verify the construction of an opaque type.
-  static LogicalResult verifyConstructionInvariants(Location loc,
-                                                    Identifier dialect,
-                                                    StringRef typeData);
-};
-
-//===----------------------------------------------------------------------===//
 // ShapedType
 //===----------------------------------------------------------------------===//
 
@@ -242,7 +65,6 @@ public:
 /// from ShapedType.
 class ShapedType : public Type {
 public:
-  using ImplType = detail::ShapedTypeStorage;
   using Type::Type;
 
   // TODO: merge these two special values in a single one used everywhere.
@@ -251,6 +73,11 @@ public:
   static constexpr int64_t kDynamicSize = -1;
   static constexpr int64_t kDynamicStrideOrOffset =
       std::numeric_limits<int64_t>::min();
+
+  /// Return clone of this type with new shape and element type.
+  ShapedType clone(ArrayRef<int64_t> shape, Type elementType);
+  ShapedType clone(ArrayRef<int64_t> shape);
+  ShapedType clone(Type elementType);
 
   /// Return the element type.
   Type getElementType() const;
@@ -317,47 +144,6 @@ public:
 };
 
 //===----------------------------------------------------------------------===//
-// VectorType
-//===----------------------------------------------------------------------===//
-
-/// Vector types represent multi-dimensional SIMD vectors, and have a fixed
-/// known constant shape with one or more dimension.
-class VectorType
-    : public Type::TypeBase<VectorType, ShapedType, detail::VectorTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Get or create a new VectorType of the provided shape and element type.
-  /// Assumes the arguments define a well-formed VectorType.
-  static VectorType get(ArrayRef<int64_t> shape, Type elementType);
-
-  /// Get or create a new VectorType of the provided shape and element type
-  /// declared at the given, potentially unknown, location.  If the VectorType
-  /// defined by the arguments would be ill-formed, emit errors and return
-  /// nullptr-wrapping type.
-  static VectorType getChecked(Location location, ArrayRef<int64_t> shape,
-                               Type elementType);
-
-  /// Verify the construction of a vector type.
-  static LogicalResult verifyConstructionInvariants(Location loc,
-                                                    ArrayRef<int64_t> shape,
-                                                    Type elementType);
-
-  /// Returns true of the given type can be used as an element of a vector type.
-  /// In particular, vectors can consist of integer or float primitives.
-  static bool isValidElementType(Type t) {
-    return t.isa<IntegerType, FloatType>();
-  }
-
-  ArrayRef<int64_t> getShape() const;
-
-  /// Get or create a new VectorType with the same shape as `this` and an
-  /// element type of bitwidth scaled by `scale`.
-  /// Return null if the scaled element type cannot be represented.
-  VectorType scaleElementBitwidth(unsigned scale);
-};
-
-//===----------------------------------------------------------------------===//
 // TensorType
 //===----------------------------------------------------------------------===//
 
@@ -375,260 +161,28 @@ public:
 };
 
 //===----------------------------------------------------------------------===//
-// RankedTensorType
-
-/// Ranked tensor types represent multi-dimensional arrays that have a shape
-/// with a fixed number of dimensions. Each shape element can be a non-negative
-/// integer or unknown (represented by -1).
-class RankedTensorType
-    : public Type::TypeBase<RankedTensorType, TensorType,
-                            detail::RankedTensorTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Get or create a new RankedTensorType of the provided shape and element
-  /// type. Assumes the arguments define a well-formed type.
-  static RankedTensorType get(ArrayRef<int64_t> shape, Type elementType);
-
-  /// Get or create a new RankedTensorType of the provided shape and element
-  /// type declared at the given, potentially unknown, location.  If the
-  /// RankedTensorType defined by the arguments would be ill-formed, emit errors
-  /// and return a nullptr-wrapping type.
-  static RankedTensorType getChecked(Location location, ArrayRef<int64_t> shape,
-                                     Type elementType);
-
-  /// Verify the construction of a ranked tensor type.
-  static LogicalResult verifyConstructionInvariants(Location loc,
-                                                    ArrayRef<int64_t> shape,
-                                                    Type elementType);
-
-  ArrayRef<int64_t> getShape() const;
-};
-
-//===----------------------------------------------------------------------===//
-// UnrankedTensorType
-
-/// Unranked tensor types represent multi-dimensional arrays that have an
-/// unknown shape.
-class UnrankedTensorType
-    : public Type::TypeBase<UnrankedTensorType, TensorType,
-                            detail::UnrankedTensorTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Get or create a new UnrankedTensorType of the provided shape and element
-  /// type. Assumes the arguments define a well-formed type.
-  static UnrankedTensorType get(Type elementType);
-
-  /// Get or create a new UnrankedTensorType of the provided shape and element
-  /// type declared at the given, potentially unknown, location.  If the
-  /// UnrankedTensorType defined by the arguments would be ill-formed, emit
-  /// errors and return a nullptr-wrapping type.
-  static UnrankedTensorType getChecked(Location location, Type elementType);
-
-  /// Verify the construction of a unranked tensor type.
-  static LogicalResult verifyConstructionInvariants(Location loc,
-                                                    Type elementType);
-
-  ArrayRef<int64_t> getShape() const { return llvm::None; }
-};
-
-//===----------------------------------------------------------------------===//
 // BaseMemRefType
 //===----------------------------------------------------------------------===//
 
 /// Base MemRef for Ranked and Unranked variants
 class BaseMemRefType : public ShapedType {
 public:
-  using ImplType = detail::BaseMemRefTypeStorage;
   using ShapedType::ShapedType;
 
   /// Return true if the specified element type is ok in a memref.
-  static bool isValidElementType(Type type) {
-    return type.isIntOrIndexOrFloat() || type.isa<VectorType, ComplexType>();
-  }
+  static bool isValidElementType(Type type);
 
   /// Methods for support type inquiry through isa, cast, and dyn_cast.
   static bool classof(Type type);
 
   /// Returns the memory space in which data referred to by this memref resides.
-  unsigned getMemorySpace() const;
+  Attribute getMemorySpace() const;
+
+  /// [deprecated] Returns the memory space in old raw integer representation.
+  /// New `Attribute getMemorySpace()` method should be used instead.
+  unsigned getMemorySpaceAsInt() const;
 };
 
-//===----------------------------------------------------------------------===//
-// MemRefType
-
-/// MemRef types represent a region of memory that have a shape with a fixed
-/// number of dimensions. Each shape element can be a non-negative integer or
-/// unknown (represented by -1). MemRef types also have an affine map
-/// composition, represented as an array AffineMap pointers.
-class MemRefType : public Type::TypeBase<MemRefType, BaseMemRefType,
-                                         detail::MemRefTypeStorage> {
-public:
-  /// This is a builder type that keeps local references to arguments. Arguments
-  /// that are passed into the builder must out-live the builder.
-  class Builder {
-  public:
-    // Build from another MemRefType.
-    explicit Builder(MemRefType other)
-        : shape(other.getShape()), elementType(other.getElementType()),
-          affineMaps(other.getAffineMaps()),
-          memorySpace(other.getMemorySpace()) {}
-
-    // Build from scratch.
-    Builder(ArrayRef<int64_t> shape, Type elementType)
-        : shape(shape), elementType(elementType), affineMaps(), memorySpace(0) {
-    }
-
-    Builder &setShape(ArrayRef<int64_t> newShape) {
-      shape = newShape;
-      return *this;
-    }
-
-    Builder &setElementType(Type newElementType) {
-      elementType = newElementType;
-      return *this;
-    }
-
-    Builder &setAffineMaps(ArrayRef<AffineMap> newAffineMaps) {
-      affineMaps = newAffineMaps;
-      return *this;
-    }
-
-    Builder &setMemorySpace(unsigned newMemorySpace) {
-      memorySpace = newMemorySpace;
-      return *this;
-    }
-
-    operator MemRefType() {
-      return MemRefType::get(shape, elementType, affineMaps, memorySpace);
-    }
-
-  private:
-    ArrayRef<int64_t> shape;
-    Type elementType;
-    ArrayRef<AffineMap> affineMaps;
-    unsigned memorySpace;
-  };
-
-  using Base::Base;
-
-  /// Get or create a new MemRefType based on shape, element type, affine
-  /// map composition, and memory space.  Assumes the arguments define a
-  /// well-formed MemRef type.  Use getChecked to gracefully handle MemRefType
-  /// construction failures.
-  static MemRefType get(ArrayRef<int64_t> shape, Type elementType,
-                        ArrayRef<AffineMap> affineMapComposition = {},
-                        unsigned memorySpace = 0);
-
-  /// Get or create a new MemRefType based on shape, element type, affine
-  /// map composition, and memory space declared at the given location.
-  /// If the location is unknown, the last argument should be an instance of
-  /// UnknownLoc.  If the MemRefType defined by the arguments would be
-  /// ill-formed, emits errors (to the handler registered with the context or to
-  /// the error stream) and returns nullptr.
-  static MemRefType getChecked(Location location, ArrayRef<int64_t> shape,
-                               Type elementType,
-                               ArrayRef<AffineMap> affineMapComposition,
-                               unsigned memorySpace);
-
-  ArrayRef<int64_t> getShape() const;
-
-  /// Returns an array of affine map pointers representing the memref affine
-  /// map composition.
-  ArrayRef<AffineMap> getAffineMaps() const;
-
-  // TODO: merge these two special values in a single one used everywhere.
-  // Unfortunately, uses of `-1` have crept deep into the codebase now and are
-  // hard to track.
-  static int64_t getDynamicStrideOrOffset() {
-    return ShapedType::kDynamicStrideOrOffset;
-  }
-
-private:
-  /// Get or create a new MemRefType defined by the arguments.  If the resulting
-  /// type would be ill-formed, return nullptr.  If the location is provided,
-  /// emit detailed error messages.
-  static MemRefType getImpl(ArrayRef<int64_t> shape, Type elementType,
-                            ArrayRef<AffineMap> affineMapComposition,
-                            unsigned memorySpace, Optional<Location> location);
-  using Base::getImpl;
-};
-
-//===----------------------------------------------------------------------===//
-// UnrankedMemRefType
-
-/// Unranked MemRef type represent multi-dimensional MemRefs that
-/// have an unknown rank.
-class UnrankedMemRefType
-    : public Type::TypeBase<UnrankedMemRefType, BaseMemRefType,
-                            detail::UnrankedMemRefTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Get or create a new UnrankedMemRefType of the provided element
-  /// type and memory space
-  static UnrankedMemRefType get(Type elementType, unsigned memorySpace);
-
-  /// Get or create a new UnrankedMemRefType of the provided element
-  /// type and memory space declared at the given, potentially unknown,
-  /// location. If the UnrankedMemRefType defined by the arguments would be
-  /// ill-formed, emit errors and return a nullptr-wrapping type.
-  static UnrankedMemRefType getChecked(Location location, Type elementType,
-                                       unsigned memorySpace);
-
-  /// Verify the construction of a unranked memref type.
-  static LogicalResult verifyConstructionInvariants(Location loc,
-                                                    Type elementType,
-                                                    unsigned memorySpace);
-
-  ArrayRef<int64_t> getShape() const { return llvm::None; }
-};
-
-//===----------------------------------------------------------------------===//
-// TupleType
-//===----------------------------------------------------------------------===//
-
-/// Tuple types represent a collection of other types. Note: This type merely
-/// provides a common mechanism for representing tuples in MLIR. It is up to
-/// dialect authors to provides operations for manipulating them, e.g.
-/// extract_tuple_element. When possible, users should prefer multi-result
-/// operations in the place of tuples.
-class TupleType
-    : public Type::TypeBase<TupleType, Type, detail::TupleTypeStorage> {
-public:
-  using Base::Base;
-
-  /// Get or create a new TupleType with the provided element types. Assumes the
-  /// arguments define a well-formed type.
-  static TupleType get(MLIRContext *context, TypeRange elementTypes);
-
-  /// Get or create an empty tuple type.
-  static TupleType get(MLIRContext *context);
-
-  /// Return the elements types for this tuple.
-  ArrayRef<Type> getTypes() const;
-
-  /// Accumulate the types contained in this tuple and tuples nested within it.
-  /// Note that this only flattens nested tuples, not any other container type,
-  /// e.g. a tuple<i32, tensor<i32>, tuple<f32, tuple<i64>>> is flattened to
-  /// (i32, tensor<i32>, f32, i64)
-  void getFlattenedTypes(SmallVectorImpl<Type> &types);
-
-  /// Return the number of held types.
-  size_t size() const;
-
-  /// Iterate over the held elements.
-  using iterator = ArrayRef<Type>::iterator;
-  iterator begin() const { return getTypes().begin(); }
-  iterator end() const { return getTypes().end(); }
-
-  /// Return the element type at index 'index'.
-  Type getType(size_t index) const {
-    assert(index < size() && "invalid index for tuple type");
-    return getTypes()[index];
-  }
-};
 } // end namespace mlir
 
 //===----------------------------------------------------------------------===//
@@ -639,16 +193,92 @@ public:
 #include "mlir/IR/BuiltinTypes.h.inc"
 
 //===----------------------------------------------------------------------===//
+// Tablegen Interface Declarations
+//===----------------------------------------------------------------------===//
+
+#include "mlir/IR/BuiltinTypeInterfaces.h.inc"
+
+namespace mlir {
+//===----------------------------------------------------------------------===//
+// MemRefType
+//===----------------------------------------------------------------------===//
+
+/// This is a builder type that keeps local references to arguments. Arguments
+/// that are passed into the builder must out-live the builder.
+class MemRefType::Builder {
+public:
+  // Build from another MemRefType.
+  explicit Builder(MemRefType other)
+      : shape(other.getShape()), elementType(other.getElementType()),
+        layout(other.getLayout()), memorySpace(other.getMemorySpace()) {}
+
+  // Build from scratch.
+  Builder(ArrayRef<int64_t> shape, Type elementType)
+      : shape(shape), elementType(elementType) {}
+
+  Builder &setShape(ArrayRef<int64_t> newShape) {
+    shape = newShape;
+    return *this;
+  }
+
+  Builder &setElementType(Type newElementType) {
+    elementType = newElementType;
+    return *this;
+  }
+
+  Builder &setLayout(MemRefLayoutAttrInterface newLayout) {
+    layout = newLayout;
+    return *this;
+  }
+
+  Builder &setMemorySpace(Attribute newMemorySpace) {
+    memorySpace = newMemorySpace;
+    return *this;
+  }
+
+  // [deprecated] `setMemorySpace(Attribute)` should be used instead.
+  Builder &setMemorySpace(unsigned newMemorySpace);
+
+  operator MemRefType() {
+    return MemRefType::get(shape, elementType, layout, memorySpace);
+  }
+
+private:
+  ArrayRef<int64_t> shape;
+  Type elementType;
+  MemRefLayoutAttrInterface layout;
+  Attribute memorySpace;
+};
+
+/// Given an `originalShape` and a `reducedShape` assumed to be a subset of
+/// `originalShape` with some `1` entries erased, return the set of indices
+/// that specifies which of the entries of `originalShape` are dropped to obtain
+/// `reducedShape`. The returned mask can be applied as a projection to
+/// `originalShape` to obtain the `reducedShape`. This mask is useful to track
+/// which dimensions must be kept when e.g. compute MemRef strides under
+/// rank-reducing operations. Return None if reducedShape cannot be obtained
+/// by dropping only `1` entries in `originalShape`.
+llvm::Optional<llvm::SmallDenseSet<unsigned>>
+computeRankReductionMask(ArrayRef<int64_t> originalShape,
+                         ArrayRef<int64_t> reducedShape);
+
+//===----------------------------------------------------------------------===//
 // Deferred Method Definitions
 //===----------------------------------------------------------------------===//
 
-namespace mlir {
 inline bool BaseMemRefType::classof(Type type) {
   return type.isa<MemRefType, UnrankedMemRefType>();
 }
 
+inline bool BaseMemRefType::isValidElementType(Type type) {
+  return type.isIntOrIndexOrFloat() ||
+         type.isa<ComplexType, MemRefType, VectorType, UnrankedMemRefType>() ||
+         type.isa<MemRefElementTypeInterface>();
+}
+
 inline bool FloatType::classof(Type type) {
-  return type.isa<BFloat16Type, Float16Type, Float32Type, Float64Type>();
+  return type.isa<BFloat16Type, Float16Type, Float32Type, Float64Type,
+                  Float80Type, Float128Type>();
 }
 
 inline FloatType FloatType::getBF16(MLIRContext *ctx) {
@@ -667,6 +297,14 @@ inline FloatType FloatType::getF64(MLIRContext *ctx) {
   return Float64Type::get(ctx);
 }
 
+inline FloatType FloatType::getF80(MLIRContext *ctx) {
+  return Float80Type::get(ctx);
+}
+
+inline FloatType FloatType::getF128(MLIRContext *ctx) {
+  return Float128Type::get(ctx);
+}
+
 inline bool ShapedType::classof(Type type) {
   return type.isa<RankedTensorType, VectorType, UnrankedTensorType,
                   UnrankedMemRefType, MemRefType>();
@@ -681,7 +319,7 @@ inline bool TensorType::classof(Type type) {
 //===----------------------------------------------------------------------===//
 
 /// Returns the strides of the MemRef if the layout map is in strided form.
-/// MemRefs with layout maps in strided form include:
+/// MemRefs with a layout map in strided form include:
 ///   1. empty or identity layout map, in which case the stride information is
 ///      the canonical form computed from sizes;
 ///   2. single affine map layout of the form `K + k0 * d0 + ... kn * dn`,
@@ -690,14 +328,13 @@ inline bool TensorType::classof(Type type) {
 /// A stride specification is a list of integer values that are either static
 /// or dynamic (encoded with getDynamicStrideOrOffset()). Strides encode the
 /// distance in the number of elements between successive entries along a
-/// particular dimension. For example, `memref<42x16xf32, (64 * d0 + d1)>`
-/// specifies a view into a non-contiguous memory region of `42` by `16` `f32`
-/// elements in which the distance between two consecutive elements along the
-/// outer dimension is `1` and the distance between two consecutive elements
-/// along the inner dimension is `64`.
+/// particular dimension.
 ///
-/// Returns whether a simple strided form can be extracted from the composition
-/// of the layout map.
+/// For example, `memref<42x16xf32, (64 * d0 + d1)>` specifies a view into a
+/// non-contiguous memory region of `42` by `16` `f32` elements in which the
+/// distance between two consecutive elements along the outer dimension is `1`
+/// and the distance between two consecutive elements along the inner dimension
+/// is `64`.
 ///
 /// The convention is that the strides for dimensions d0, .. dn appear in
 /// order to make indexing intuitive into the result.
@@ -763,6 +400,10 @@ AffineExpr makeCanonicalStridedLayoutExpr(ArrayRef<int64_t> sizes,
 
 /// Return true if the layout for `t` is compatible with strided semantics.
 bool isStrided(MemRefType t);
+
+/// Return the layout map in strided linear layout AffineMap form.
+/// Return null if the layout is not compatible with a strided layout.
+AffineMap getStridedLinearLayoutMap(MemRefType t);
 
 } // end namespace mlir
 

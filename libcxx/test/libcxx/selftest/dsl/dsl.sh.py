@@ -6,20 +6,16 @@
 #
 #===----------------------------------------------------------------------===##
 
+# XFAIL: LIBCXX-WINDOWS-FIXME
+
 # Note: We prepend arguments with 'x' to avoid thinking there are too few
 #       arguments in case an argument is an empty string.
-# RUN: %{python} %s x%S \
-# RUN:              x%T \
-# RUN:              x%{escaped_exec} \
-# RUN:              x%{escaped_cxx} \
-# RUN:              x%{escaped_flags} \
-# RUN:              x%{escaped_compile_flags} \
-# RUN:              x%{escaped_link_flags}
-# END.
+# RUN: %{python} %s x%S x%T x%{substitutions}
 
 import base64
 import copy
 import os
+import pickle
 import platform
 import subprocess
 import sys
@@ -38,8 +34,13 @@ import lit.util
 # Steal some parameters from the config running this test so that we can
 # bootstrap our own TestingConfig.
 args = list(map(lambda s: s[1:], sys.argv[1:8])) # Remove the leading 'x'
-SOURCE_ROOT, EXEC_PATH, EXEC, CXX, FLAGS, COMPILE_FLAGS, LINK_FLAGS = args
+SOURCE_ROOT, EXEC_PATH, SUBSTITUTIONS = args
 sys.argv[1:8] = []
+
+# Decode the substitutions.
+SUBSTITUTIONS = pickle.loads(base64.b64decode(SUBSTITUTIONS))
+for s, sub in SUBSTITUTIONS:
+    print("Substitution '{}' is '{}'".format(s, sub))
 
 class SetupConfigs(unittest.TestCase):
     """
@@ -67,14 +68,7 @@ class SetupConfigs(unittest.TestCase):
         self.config.test_source_root = SOURCE_ROOT
         self.config.test_exec_root = EXEC_PATH
         self.config.recursiveExpansionLimit = 10
-        base64Decode = lambda s: lit.util.to_string(base64.b64decode(s))
-        self.config.substitutions = [
-            ('%{cxx}', base64Decode(CXX)),
-            ('%{flags}', base64Decode(FLAGS)),
-            ('%{compile_flags}', base64Decode(COMPILE_FLAGS)),
-            ('%{link_flags}', base64Decode(LINK_FLAGS)),
-            ('%{exec}', base64Decode(EXEC))
-        ]
+        self.config.substitutions = copy.deepcopy(SUBSTITUTIONS)
 
     def getSubstitution(self, substitution):
         """
@@ -194,6 +188,7 @@ class TestProgramOutput(SetupConfigs):
         #include <cstdio>
         int main(int, char**) {
             std::printf("MACRO=%u\\n", MACRO);
+            return 0;
         }
         """
         compileFlagsIndex = findIndex(self.config.substitutions, lambda x: x[0] == '%{compile_flags}')
@@ -206,6 +201,19 @@ class TestProgramOutput(SetupConfigs):
         self.config.substitutions[compileFlagsIndex] = ('%{compile_flags}',  compileFlags + ' -DMACRO=2')
         output2 = dsl.programOutput(self.config, source)
         self.assertEqual(output2, "MACRO=2\n")
+
+    def test_program_stderr_is_not_conflated_with_stdout(self):
+        # Run a program that produces stdout output and stderr output too, making
+        # sure the stderr output does not pollute the stdout output.
+        source = """
+        #include <cstdio>
+        int main(int, char**) {
+            std::fprintf(stdout, "STDOUT-OUTPUT");
+            std::fprintf(stderr, "STDERR-OUTPUT");
+            return 0;
+        }
+        """
+        self.assertEqual(dsl.programOutput(self.config, source), "STDOUT-OUTPUT")
 
 
 class TestHasLocale(SetupConfigs):
@@ -340,6 +348,10 @@ class TestParameter(SetupConfigs):
     def test_empty_choices_should_blow_up(self):
         self.assertRaises(ValueError, lambda: dsl.Parameter(name='std', choices=[], type=str, help='', actions=lambda _: []))
 
+    def test_no_choices_is_ok(self):
+        param = dsl.Parameter(name='triple', type=str, help='', actions=lambda _: [])
+        self.assertEqual(param.name, 'triple')
+
     def test_name_is_set_correctly(self):
         param = dsl.Parameter(name='std', choices=['c++03'], type=str, help='', actions=lambda _: [])
         self.assertEqual(param.name, 'std')
@@ -428,6 +440,26 @@ class TestParameter(SetupConfigs):
         for a in param.getActions(self.config, self.litConfig.params):
             a.applyTo(self.config)
         self.assertIn('-fno-exceptions', self.config.available_features)
+
+    def test_list_parsed_from_comma_delimited_string_empty(self):
+        self.litConfig.params['additional_features'] = ""
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), [])
+
+    def test_list_parsed_from_comma_delimited_string_1(self):
+        self.litConfig.params['additional_features'] = "feature1"
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), ['feature1'])
+
+    def test_list_parsed_from_comma_delimited_string_2(self):
+        self.litConfig.params['additional_features'] = "feature1,feature2"
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), ['feature1', 'feature2'])
+
+    def test_list_parsed_from_comma_delimited_string_3(self):
+        self.litConfig.params['additional_features'] = "feature1,feature2, feature3"
+        param = dsl.Parameter(name='additional_features', type=list, help='', actions=lambda f: f)
+        self.assertEqual(param.getActions(self.config, self.litConfig.params), ['feature1', 'feature2', 'feature3'])
 
 
 if __name__ == '__main__':

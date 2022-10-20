@@ -21,6 +21,7 @@
 #include "lldb/Target/ThreadPlanRunToAddress.h"
 #include "lldb/Target/ThreadPlanStepInRange.h"
 #include "lldb/Target/ThreadPlanStepOverRange.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "swift/ABI/Task.h"
 #include "swift/Demangling/Demangle.h"
@@ -81,9 +82,17 @@ static bool IsSwiftAsyncFunctionSymbol(swift::Demangle::NodePointer node) {
     return false;
   if (hasChild(node, Node::Kind::AsyncSuspendResumePartialFunction))
     return false;
-  if (node->getFirstChild()->getKind() == Node::Kind::Static)
-    // Traverse forward to the static node, to handle static functions.
+
+  // Peel off layers over top of Function nodes.
+  switch (node->getFirstChild()->getKind()) {
+  case Node::Kind::Static:
+  case Node::Kind::ExplicitClosure:
     node = node->getFirstChild();
+    break;
+  default:
+    break;
+  }
+
   return childAtPath(node,
                      {Node::Kind::Function, Node::Kind::Type,
                       Node::Kind::FunctionType, Node::Kind::AsyncAnnotation}) ||
@@ -319,7 +328,7 @@ public:
 
   bool StopOthers() override { return false; }
 
-  void WillPop() override {
+  void DidPop() override {
     if (m_async_breakpoint_sp)
       m_async_breakpoint_sp->GetTarget().RemoveBreakpointByID(
           m_async_breakpoint_sp->GetID());
@@ -421,7 +430,7 @@ static lldb::ThreadPlanSP GetStepThroughTrampolinePlan(Thread &thread,
 
   ThreadPlanSP new_thread_plan_sp;
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
+  Log *log(GetLog(LLDBLog::Step));
   StackFrameSP stack_sp = thread.GetStackFrameAtIndex(0);
   if (!stack_sp)
     return new_thread_plan_sp;
@@ -606,6 +615,15 @@ bool SwiftLanguageRuntime::IsSymbolARuntimeThunk(const Symbol &symbol) {
 }
 
 bool SwiftLanguageRuntime::IsSwiftMangledName(llvm::StringRef name) {
+  // Old-style mangling uses a "_T" prefix. This can lead to false positives
+  // with other symbols that just so happen to start with "_T". To prevent this,
+  // only return true for select old-style mangled names. The known cases to are
+  // ObjC classes and protocols. Classes are prefixed with either "_TtC" or
+  // "_TtGC" (generic classes). Protocols are prefixed with "_TtP". Other "_T"
+  // prefixed symbols are not considered to be Swift symbols.
+  if (name.startswith("_T"))
+    return name.startswith("_TtC") || name.startswith("_TtGC") ||
+           name.startswith("_TtP");
   return swift::Demangle::isSwiftSymbol(name);
 }
 
@@ -980,6 +998,16 @@ void SwiftLanguageRuntime::MethodName::Parse() {
     llvm::StringRef full(m_full.GetCString());
     bool was_operator = false;
 
+    if (full.find("+") != llvm::StringRef::npos ||
+        full.find("-") != llvm::StringRef::npos ||
+        full.find("[") != llvm::StringRef::npos) {
+      // Swift identifiers cannot contain +, -, or [. Objective-C expressions
+      // will frequently begin with one of these characters, so reject these
+      // defensively.
+      m_parse_error = true;
+      return;
+    }
+
     if (full.find("::") != llvm::StringRef::npos) {
       // :: is not an allowed operator in Swift (func ::(...) { fails to
       // compile)
@@ -1095,9 +1123,12 @@ bool SwiftLanguageRuntime::GetTargetOfPartialApply(SymbolContext &curr_sc,
   std::string apply_target =
       demangle_ctx.getThunkTarget(apply_name.GetStringRef());
   if (!apply_target.empty()) {
-    curr_sc.module_sp->FindFunctions(ConstString(apply_target), CompilerDeclContext(),
-                                     eFunctionNameTypeFull, true, false,
-                                     sc_list);
+    ModuleFunctionSearchOptions function_options;
+    function_options.include_symbols = true;
+    function_options.include_inlines = false;
+    curr_sc.module_sp->FindFunctions(
+        ConstString(apply_target), CompilerDeclContext(), eFunctionNameTypeFull,
+        function_options, sc_list);
     size_t num_symbols = sc_list.GetSize();
     if (num_symbols == 0)
       return false;

@@ -61,7 +61,7 @@ struct DecomposeCallGraphTypesForFuncArgs
       DecomposeCallGraphTypesOpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(FuncOp op, ArrayRef<Value> operands,
+  matchAndRewrite(FuncOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const final {
     auto functionType = op.getType();
 
@@ -69,7 +69,8 @@ struct DecomposeCallGraphTypesForFuncArgs
     TypeConverter::SignatureConversion conversion(functionType.getNumInputs());
     for (auto argType : llvm::enumerate(functionType.getInputs())) {
       SmallVector<Type, 2> decomposedTypes;
-      getTypeConverter()->convertType(argType.value(), decomposedTypes);
+      if (failed(typeConverter->convertType(argType.value(), decomposedTypes)))
+        return failure();
       if (!decomposedTypes.empty())
         conversion.addInputs(argType.index(), decomposedTypes);
     }
@@ -81,7 +82,9 @@ struct DecomposeCallGraphTypesForFuncArgs
 
     // Update the signature of the function.
     SmallVector<Type, 2> newResultTypes;
-    getTypeConverter()->convertTypes(functionType.getResults(), newResultTypes);
+    if (failed(typeConverter->convertTypes(functionType.getResults(),
+                                           newResultTypes)))
+      return failure();
     rewriter.updateRootInPlace(op, [&] {
       op.setType(rewriter.getFunctionType(conversion.getConvertedTypes(),
                                           newResultTypes));
@@ -103,10 +106,10 @@ struct DecomposeCallGraphTypesForReturnOp
   using DecomposeCallGraphTypesOpConversionPattern::
       DecomposeCallGraphTypesOpConversionPattern;
   LogicalResult
-  matchAndRewrite(ReturnOp op, ArrayRef<Value> operands,
+  matchAndRewrite(ReturnOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const final {
     SmallVector<Value, 2> newOperands;
-    for (Value operand : operands)
+    for (Value operand : adaptor.getOperands())
       decomposer.decomposeValue(rewriter, op.getLoc(), operand.getType(),
                                 operand, newOperands);
     rewriter.replaceOpWithNewOp<ReturnOp>(op, newOperands);
@@ -128,12 +131,12 @@ struct DecomposeCallGraphTypesForCallOp
       DecomposeCallGraphTypesOpConversionPattern;
 
   LogicalResult
-  matchAndRewrite(CallOp op, ArrayRef<Value> operands,
+  matchAndRewrite(CallOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const final {
 
     // Create the operands list of the new `CallOp`.
     SmallVector<Value, 2> newOperands;
-    for (Value operand : operands)
+    for (Value operand : adaptor.getOperands())
       decomposer.decomposeValue(rewriter, op.getLoc(), operand.getType(),
                                 operand, newOperands);
 
@@ -146,13 +149,14 @@ struct DecomposeCallGraphTypesForCallOp
     SmallVector<SmallVector<unsigned, 2>, 4> expandedResultIndices;
     for (Type resultType : op.getResultTypes()) {
       unsigned oldSize = newResultTypes.size();
-      getTypeConverter()->convertType(resultType, newResultTypes);
+      if (failed(typeConverter->convertType(resultType, newResultTypes)))
+        return failure();
       auto &resultMapping = expandedResultIndices.emplace_back();
       for (unsigned i = oldSize, e = newResultTypes.size(); i < e; i++)
         resultMapping.push_back(i);
     }
 
-    CallOp newCallOp = rewriter.create<CallOp>(op.getLoc(), op.getCallee(),
+    CallOp newCallOp = rewriter.create<CallOp>(op.getLoc(), op.getCalleeAttr(),
                                                newResultTypes, newOperands);
 
     // Build a replacement value for each result to replace its uses. If a
@@ -184,9 +188,9 @@ struct DecomposeCallGraphTypesForCallOp
 
 void mlir::populateDecomposeCallGraphTypesPatterns(
     MLIRContext *context, TypeConverter &typeConverter,
-    ValueDecomposer &decomposer, OwningRewritePatternList &patterns) {
-  patterns.insert<DecomposeCallGraphTypesForCallOp,
-                  DecomposeCallGraphTypesForFuncArgs,
-                  DecomposeCallGraphTypesForReturnOp>(typeConverter, context,
-                                                      decomposer);
+    ValueDecomposer &decomposer, RewritePatternSet &patterns) {
+  patterns
+      .add<DecomposeCallGraphTypesForCallOp, DecomposeCallGraphTypesForFuncArgs,
+           DecomposeCallGraphTypesForReturnOp>(typeConverter, context,
+                                               decomposer);
 }

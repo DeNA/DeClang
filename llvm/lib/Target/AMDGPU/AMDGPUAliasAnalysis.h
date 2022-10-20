@@ -12,19 +12,11 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPUALIASANALYSIS_H
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPUALIASANALYSIS_H
 
-#include "AMDGPU.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Pass.h"
-#include <algorithm>
-#include <memory>
 
 namespace llvm {
 
 class DataLayout;
-class MDNode;
 class MemoryLocation;
 
 /// A simple AA result that uses TBAA metadata to answer queries.
@@ -34,8 +26,7 @@ class AMDGPUAAResult : public AAResultBase<AMDGPUAAResult> {
   const DataLayout &DL;
 
 public:
-  explicit AMDGPUAAResult(const DataLayout &DL, Triple T) : AAResultBase(),
-    DL(DL) {}
+  explicit AMDGPUAAResult(const DataLayout &DL) : AAResultBase(), DL(DL) {}
   AMDGPUAAResult(AMDGPUAAResult &&Arg)
       : AAResultBase(std::move(Arg)), DL(Arg.DL) {}
 
@@ -63,8 +54,7 @@ public:
   using Result = AMDGPUAAResult;
 
   AMDGPUAAResult run(Function &F, AnalysisManager<Function> &AM) {
-    return AMDGPUAAResult(F.getParent()->getDataLayout(),
-        Triple(F.getParent()->getTargetTriple()));
+    return AMDGPUAAResult(F.getParent()->getDataLayout());
   }
 };
 
@@ -75,16 +65,13 @@ class AMDGPUAAWrapperPass : public ImmutablePass {
 public:
   static char ID;
 
-  AMDGPUAAWrapperPass() : ImmutablePass(ID) {
-    initializeAMDGPUAAWrapperPassPass(*PassRegistry::getPassRegistry());
-  }
+  AMDGPUAAWrapperPass();
 
   AMDGPUAAResult &getResult() { return *Result; }
   const AMDGPUAAResult &getResult() const { return *Result; }
 
   bool doInitialization(Module &M) override {
-    Result.reset(new AMDGPUAAResult(M.getDataLayout(),
-        Triple(M.getTargetTriple())));
+    Result.reset(new AMDGPUAAResult(M.getDataLayout()));
     return false;
   }
 

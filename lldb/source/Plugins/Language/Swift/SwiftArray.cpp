@@ -49,7 +49,7 @@ ValueObjectSP SwiftArrayNativeBufferHandler::GetElementAtIndex(size_t idx) {
   if (!process_sp)
     return ValueObjectSP();
 
-  DataBufferSP buffer(new DataBufferHeap(m_element_size, 0));
+  WritableDataBufferSP buffer(new DataBufferHeap(m_element_size, 0));
   Status error;
   if (process_sp->ReadMemory(child_location, buffer->GetBytes(), m_element_size,
                              error) != m_element_size ||
@@ -182,7 +182,7 @@ SwiftArraySliceBufferHandler::GetElementAtIndex(size_t idx) {
   if (!process_sp)
     return ValueObjectSP();
 
-  DataBufferSP buffer(new DataBufferHeap(m_element_size, 0));
+  WritableDataBufferSP buffer(new DataBufferHeap(m_element_size, 0));
   Status error;
   if (process_sp->ReadMemory(child_location, buffer->GetBytes(), m_element_size,
                              error) != m_element_size ||
@@ -349,7 +349,10 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
         swift_runtime->GetMetadataPromise(argmetadata_ptr, valobj));
     if (promise_sp)
       if (CompilerType type = promise_sp->FulfillTypePromise())
-        argument_type = SwiftASTContext::GetGenericArgumentType(type, 0);
+        if (TypeSystemSwift *type_system =
+                llvm::dyn_cast<TypeSystemSwift>(type.GetTypeSystem()))
+          argument_type =
+              type_system->GetGenericArgumentType(type.GetOpaqueQualType(), 0);
 
     if (!argument_type.IsValid())
       return nullptr;

@@ -19,6 +19,7 @@ class TestMultipleSimultaneousDebuggers(TestBase):
 
     @skipIfNoSBHeaders
     @skipIfWindows
+    @skipIfAsan # rdar://95807640
     def test_multiple_debuggers(self):
         env = {self.dylibPath: self.getLLDBLibraryEnvVal()}
 

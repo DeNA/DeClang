@@ -39,14 +39,14 @@ define i32 @foo(i32* nocapture %A, i32* nocapture %B, i32 %n) {
 ; CHECK-NEXT:    [[TMP11:%.*]] = icmp sgt <4 x i32> [[WIDE_LOAD]], <i32 19, i32 19, i32 19, i32 19>
 ; CHECK-NEXT:    [[TMP12:%.*]] = icmp slt <4 x i32> [[WIDE_LOAD6]], <i32 4, i32 4, i32 4, i32 4>
 ; CHECK-NEXT:    [[TMP13:%.*]] = select <4 x i1> [[TMP12]], <4 x i32> <i32 4, i32 4, i32 4, i32 4>, <4 x i32> <i32 5, i32 5, i32 5, i32 5>
-; CHECK-NEXT:    [[TMP14:%.*]] = and <4 x i1> [[TMP11]], [[TMP10]]
+; CHECK-NEXT:    [[TMP14:%.*]] = and <4 x i1> [[TMP10]], [[TMP11]]
 ; CHECK-NEXT:    [[TMP15:%.*]] = xor <4 x i1> [[TMP11]], <i1 true, i1 true, i1 true, i1 true>
 ; CHECK-NEXT:    [[TMP16:%.*]] = and <4 x i1> [[TMP10]], [[TMP15]]
 ; CHECK-NEXT:    [[PREDPHI:%.*]] = select <4 x i1> [[TMP14]], <4 x i32> <i32 3, i32 3, i32 3, i32 3>, <4 x i32> <i32 9, i32 9, i32 9, i32 9>
 ; CHECK-NEXT:    [[PREDPHI7:%.*]] = select <4 x i1> [[TMP16]], <4 x i32> [[TMP13]], <4 x i32> [[PREDPHI]]
 ; CHECK-NEXT:    [[TMP17:%.*]] = bitcast i32* [[TMP6]] to <4 x i32>*
 ; CHECK-NEXT:    store <4 x i32> [[PREDPHI7]], <4 x i32>* [[TMP17]], align 4, !alias.scope !0, !noalias !3
-; CHECK-NEXT:    [[INDEX_NEXT]] = add i64 [[INDEX]], 4
+; CHECK-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], 4
 ; CHECK-NEXT:    [[TMP18:%.*]] = icmp eq i64 [[INDEX_NEXT]], [[N_VEC]]
 ; CHECK-NEXT:    br i1 [[TMP18]], label [[MIDDLE_BLOCK:%.*]], label [[VECTOR_BODY]], [[LOOP5:!llvm.loop !.*]]
 ; CHECK:       middle.block:

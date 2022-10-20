@@ -107,13 +107,13 @@ void MarkLive<ELFT>::resolveReloc(InputSectionBase &sec, RelTy &rel,
     // fromFDE being true means this is referenced by a FDE in a .eh_frame
     // piece. The relocation points to the described function or to a LSDA. We
     // only need to keep the LSDA live, so ignore anything that points to
-    // executable sections. If the LSDA is in a section group, we ignore the
-    // relocation as well because (a) if the associated text section is live,
-    // the LSDA will be retained due to section group rules (b) if the
-    // associated text section should be discarded, marking the LSDA will
-    // unnecessarily retain the text section.
-    if (!(fromFDE &&
-          ((relSec->flags & SHF_EXECINSTR) || relSec->nextInSectionGroup)))
+    // executable sections. If the LSDA is in a section group or has the
+    // SHF_LINK_ORDER flag, we ignore the relocation as well because (a) if the
+    // associated text section is live, the LSDA will be retained due to section
+    // group/SHF_LINK_ORDER rules (b) if the associated text section should be
+    // discarded, marking the LSDA will unnecessarily retain the text section.
+    if (!(fromFDE && ((relSec->flags & (SHF_EXECINSTR | SHF_LINK_ORDER)) ||
+                      relSec->nextInSectionGroup)))
       enqueue(relSec, offset);
     return;
   }
@@ -261,12 +261,20 @@ template <class ELFT> void MarkLive<ELFT>::run() {
         scanEhFrameSection(*eh, eh->template rels<ELFT>());
     }
 
+    if (sec->flags & SHF_GNU_RETAIN) {
+      enqueue(sec, 0);
+      continue;
+    }
     if (sec->flags & SHF_LINK_ORDER)
       continue;
 
     if (isReserved(sec) || script->shouldKeep(sec)) {
       enqueue(sec, 0);
-    } else if (isValidCIdentifier(sec->name)) {
+    } else if ((!config->zStartStopGC || sec->name.startswith("__libc_")) &&
+               isValidCIdentifier(sec->name)) {
+      // As a workaround for glibc libc.a before 2.34
+      // (https://sourceware.org/PR27492), retain __libc_atexit and similar
+      // sections regardless of zStartStopGC.
       cNamedSections[saver.save("__start_" + sec->name)].push_back(sec);
       cNamedSections[saver.save("__stop_" + sec->name)].push_back(sec);
     }
@@ -330,7 +338,7 @@ template <class ELFT> void MarkLive<ELFT>::moveToMain() {
 // so that they are emitted to the output file.
 template <class ELFT> void elf::markLive() {
   llvm::TimeTraceScope timeScope("markLive");
-  // If -gc-sections is not given, no sections are removed.
+  // If --gc-sections is not given, retain all input sections.
   if (!config->gcSections) {
     for (InputSectionBase *sec : inputSections)
       sec->markLive();
@@ -345,7 +353,7 @@ template <class ELFT> void elf::markLive() {
 
   // Otherwise, do mark-sweep GC.
   //
-  // The -gc-sections option works only for SHF_ALLOC sections (sections that
+  // The --gc-sections option works only for SHF_ALLOC sections (sections that
   // are memory-mapped at runtime). So we can unconditionally make non-SHF_ALLOC
   // sections alive except SHF_LINK_ORDER, SHT_REL/SHT_RELA sections, and
   // sections in a group.
@@ -361,7 +369,7 @@ template <class ELFT> void elf::markLive() {
   // We are able to garbage collect them.
   //
   // Note on SHF_REL{,A}: Such sections reach here only when -r
-  // or -emit-reloc were given. And they are subject of garbage
+  // or --emit-reloc were given. And they are subject of garbage
   // collection because, if we remove a text section, we also
   // remove its relocation section.
   //

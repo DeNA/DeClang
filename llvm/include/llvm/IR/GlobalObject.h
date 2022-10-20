@@ -18,8 +18,6 @@
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Alignment.h"
-#include <string>
-#include <utility>
 
 namespace llvm {
 
@@ -53,7 +51,7 @@ protected:
 
   Comdat *ObjComdat;
   enum {
-    LastAlignmentBit = 4,
+    LastAlignmentBit = 5,
     HasSectionHashEntryBit,
 
     GlobalObjectBits,
@@ -70,7 +68,7 @@ public:
   GlobalObject(const GlobalObject &) = delete;
 
   /// FIXME: Remove this function once transition to Align is over.
-  unsigned getAlignment() const {
+  uint64_t getAlignment() const {
     MaybeAlign Align = getAlign();
     return Align ? Align->value() : 0;
   }
@@ -140,6 +138,7 @@ public:
   void addTypeMetadata(unsigned Offset, Metadata *TypeID);
   void setVCallVisibilityMetadata(VCallVisibility Visibility);
   VCallVisibility getVCallVisibility() const;
+  std::pair<uint64_t, uint64_t> getVTableOffsetRange() const;
 
   /// Returns true if the alignment of the value can be unilaterally
   /// increased.
@@ -155,7 +154,8 @@ public:
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Value *V) {
     return V->getValueID() == Value::FunctionVal ||
-           V->getValueID() == Value::GlobalVariableVal;
+           V->getValueID() == Value::GlobalVariableVal ||
+           V->getValueID() == Value::GlobalIFuncVal;
   }
 
 private:

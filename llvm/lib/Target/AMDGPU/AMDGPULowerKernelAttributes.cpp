@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
-#include "AMDGPUTargetMachine.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
@@ -21,7 +20,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/PassManager.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Pass.h"
 
@@ -68,7 +67,7 @@ static bool processUse(CallInst *CI) {
   const bool HasReqdWorkGroupSize = MD && MD->getNumOperands() == 3;
 
   const bool HasUniformWorkGroupSize =
-    F->getFnAttribute("uniform-work-group-size").getValueAsString() == "true";
+    F->getFnAttribute("uniform-work-group-size").getValueAsBool();
 
   if (!HasReqdWorkGroupSize && !HasUniformWorkGroupSize)
     return false;
@@ -250,9 +249,9 @@ bool AMDGPULowerKernelAttributes::runOnModule(Module &M) {
 }
 
 INITIALIZE_PASS_BEGIN(AMDGPULowerKernelAttributes, DEBUG_TYPE,
-                      "AMDGPU IR optimizations", false, false)
-INITIALIZE_PASS_END(AMDGPULowerKernelAttributes, DEBUG_TYPE, "AMDGPU IR optimizations",
-                    false, false)
+                      "AMDGPU Kernel Attributes", false, false)
+INITIALIZE_PASS_END(AMDGPULowerKernelAttributes, DEBUG_TYPE,
+                    "AMDGPU Kernel Attributes", false, false)
 
 char AMDGPULowerKernelAttributes::ID = 0;
 

@@ -20,31 +20,12 @@ using namespace lldb_private::repro;
 using namespace llvm;
 using namespace llvm::yaml;
 
-static llvm::Optional<bool> GetEnv(const char *var) {
-  std::string val = llvm::StringRef(getenv(var)).lower();
-  if (val == "0" || val == "off")
-    return false;
-  if (val == "1" || val == "on")
-    return true;
-  return {};
-}
-
 Reproducer &Reproducer::Instance() { return *InstanceImpl(); }
 
 llvm::Error Reproducer::Initialize(ReproducerMode mode,
                                    llvm::Optional<FileSpec> root) {
   lldbassert(!InstanceImpl() && "Already initialized.");
   InstanceImpl().emplace();
-
-  // The environment can override the capture mode.
-  if (mode != ReproducerMode::Replay) {
-    if (llvm::Optional<bool> override = GetEnv("LLDB_CAPTURE_REPRODUCER")) {
-      if (*override)
-        mode = ReproducerMode::Capture;
-      else
-        mode = ReproducerMode::Off;
-    }
-  }
 
   switch (mode) {
   case ReproducerMode::Capture: {
@@ -63,10 +44,6 @@ llvm::Error Reproducer::Initialize(ReproducerMode mode,
     }
     return Instance().SetCapture(root);
   } break;
-  case ReproducerMode::Replay:
-    return Instance().SetReplay(root, /*passive*/ false);
-  case ReproducerMode::PassiveReplay:
-    return Instance().SetReplay(root, /*passive*/ true);
   case ReproducerMode::Off:
     break;
   };
@@ -132,26 +109,6 @@ llvm::Error Reproducer::SetCapture(llvm::Optional<FileSpec> root) {
   }
 
   m_generator.emplace(*root);
-  return Error::success();
-}
-
-llvm::Error Reproducer::SetReplay(llvm::Optional<FileSpec> root, bool passive) {
-  std::lock_guard<std::mutex> guard(m_mutex);
-
-  if (root && m_generator)
-    return make_error<StringError>(
-        "cannot replay a reproducer when generating one",
-        inconvertibleErrorCode());
-
-  if (!root) {
-    m_loader.reset();
-    return Error::success();
-  }
-
-  m_loader.emplace(*root, passive);
-  if (auto e = m_loader->LoadIndex())
-    return e;
-
   return Error::success();
 }
 
@@ -241,8 +198,7 @@ void Generator::AddProvidersToIndex() {
 }
 
 Loader::Loader(FileSpec root, bool passive)
-    : m_root(MakeAbsolute(std::move(root))), m_loaded(false),
-      m_passive_replay(passive) {}
+    : m_root(MakeAbsolute(std::move(root))), m_loaded(false) {}
 
 llvm::Error Loader::LoadIndex() {
   if (m_loaded)

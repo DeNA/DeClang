@@ -20,6 +20,7 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadPlanStepOut.h"
 #include "lldb/Target/ThreadPlanStepThrough.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/Stream.h"
@@ -129,7 +130,7 @@ void ThreadPlanStepInRange::GetDescription(Stream *s,
 }
 
 bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
+  Log *log = GetLog(LLDBLog::Step);
 
   if (log) {
     StreamString s;
@@ -273,7 +274,7 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
 
         if (bytes_to_skip != 0) {
           func_start_address.Slide(bytes_to_skip);
-          log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP);
+          log = GetLog(LLDBLog::Step);
           LLDB_LOGF(log, "Pushing past prologue ");
 
           m_sub_plan_sp = thread.QueueThreadPlanForRunToAddress(
@@ -302,11 +303,10 @@ bool ThreadPlanStepInRange::MischiefManaged() {
 }
 
 void ThreadPlanStepInRange::SetAvoidRegexp(const char *name) {
-  auto name_ref = llvm::StringRef::withNullAsEmpty(name);
   if (m_avoid_regexp_up)
-    *m_avoid_regexp_up = RegularExpression(name_ref);
+    *m_avoid_regexp_up = RegularExpression(name);
   else
-    m_avoid_regexp_up = std::make_unique<RegularExpression>(name_ref);
+    m_avoid_regexp_up = std::make_unique<RegularExpression>(name);
 }
 
 void ThreadPlanStepInRange::SetDefaultFlagValue(uint32_t new_value) {
@@ -316,7 +316,7 @@ void ThreadPlanStepInRange::SetDefaultFlagValue(uint32_t new_value) {
 
 bool ThreadPlanStepInRange::StepInDeepBreakpointExplainsStop(
     lldb::StopInfoSP stop_info_sp) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
+  Log *log = GetLog(LLDBLog::Step);
   size_t num_step_in_deep_bps = m_step_in_deep_bps.size();
   if (num_step_in_deep_bps == 0)
     return false;
@@ -352,7 +352,7 @@ bool ThreadPlanStepInRange::StepInDeepBreakpointExplainsStop(
       for (size_t i = 0; i < num_owners; i++) {
         BreakpointLocationSP owner_loc_sp(bp_site_sp->GetOwnerAtIndex(i));
         Breakpoint &owner_bp(owner_loc_sp->GetBreakpoint());
-        if (owner_loc_sp->ValidForThisThread(&GetThread()) &&
+        if (owner_loc_sp->ValidForThisThread(GetThread()) &&
             !owner_bp.IsInternal()) {
           explains_stop = false;
           break;
@@ -425,7 +425,7 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
             avoid_regexp_to_use->Execute(frame_function_name, &matches);
         if (return_value && matches.size() > 1) {
           std::string match = matches[1].str();
-          LLDB_LOGF(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP),
+          LLDB_LOGF(GetLog(LLDBLog::Step),
                     "Stepping out of function \"%s\" because it matches "
                     "the avoid regexp \"%s\" - match substring: \"%s\".",
                     frame_function_name,
@@ -465,7 +465,7 @@ bool ThreadPlanStepInRange::DefaultShouldStopHereCallback(
 bool ThreadPlanStepInRange::DefaultShouldStopHereImpl(Flags &flags,
                                                       bool should_stop_here) {
   StackFrame *frame = GetThread().GetStackFrameAtIndex(0).get();
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
+  Log *log = GetLog(LLDBLog::Step);
 
   if (m_step_into_target) {
     SymbolContext sc = frame->GetSymbolContext(
@@ -574,7 +574,7 @@ bool ThreadPlanStepInRange::DoPlanExplainsStop(Event *event_ptr) {
           return_value = true;
         }
       } else if (IsUsuallyUnexplainedStopReason(reason)) {
-        Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
+        Log *log = GetLog(LLDBLog::Step);
         if (log)
           log->PutCString("ThreadPlanStepInRange got asked if it explains the "
                           "stop for some reason other than step.");
@@ -597,7 +597,7 @@ bool ThreadPlanStepInRange::DoWillResume(lldb::StateType resume_state,
     // See if we are about to step over a virtual inlined call.
     bool step_without_resume = thread.DecrementCurrentInlinedDepth();
     if (step_without_resume) {
-      Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_STEP));
+      Log *log = GetLog(LLDBLog::Step);
       LLDB_LOGF(log,
                 "ThreadPlanStepInRange::DoWillResume: returning false, "
                 "inline_depth: %d",

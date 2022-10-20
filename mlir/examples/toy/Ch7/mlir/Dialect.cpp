@@ -22,6 +22,8 @@
 using namespace mlir;
 using namespace mlir::toy;
 
+#include "toy/Dialect.cpp.inc"
+
 //===----------------------------------------------------------------------===//
 // ToyInlinerInterface
 //===----------------------------------------------------------------------===//
@@ -77,33 +79,6 @@ struct ToyInlinerInterface : public DialectInlinerInterface {
 };
 
 //===----------------------------------------------------------------------===//
-// ToyDialect
-//===----------------------------------------------------------------------===//
-
-/// Dialect creation, the instance will be owned by the context. This is the
-/// point of registration of custom types and operations for the dialect.
-ToyDialect::ToyDialect(mlir::MLIRContext *ctx)
-    : mlir::Dialect(getDialectNamespace(), ctx, TypeID::get<ToyDialect>()) {
-  addOperations<
-#define GET_OP_LIST
-#include "toy/Ops.cpp.inc"
-      >();
-  addInterfaces<ToyInlinerInterface>();
-  addTypes<StructType>();
-}
-
-mlir::Operation *ToyDialect::materializeConstant(mlir::OpBuilder &builder,
-                                                 mlir::Attribute value,
-                                                 mlir::Type type,
-                                                 mlir::Location loc) {
-  if (type.isa<StructType>())
-    return builder.create<StructConstantOp>(loc, type,
-                                            value.cast<mlir::ArrayAttr>());
-  return builder.create<ConstantOp>(loc, type,
-                                    value.cast<mlir::DenseElementsAttr>());
-}
-
-//===----------------------------------------------------------------------===//
 // Toy Operations
 //===----------------------------------------------------------------------===//
 
@@ -139,7 +114,7 @@ static mlir::ParseResult parseBinaryOp(mlir::OpAsmParser &parser,
 /// A generalized printer for binary operations. It prints in two different
 /// forms depending on if all of the types match.
 static void printBinaryOp(mlir::OpAsmPrinter &printer, mlir::Operation *op) {
-  printer << op->getName() << " " << op->getOperands();
+  printer << " " << op->getOperands();
   printer.printOptionalAttrDict(op->getAttrs());
   printer << " : ";
 
@@ -189,8 +164,8 @@ static mlir::ParseResult parseConstantOp(mlir::OpAsmParser &parser,
 /// The 'OpAsmPrinter' class is a stream that allows for formatting
 /// strings, attributes, operands, types, etc.
 static void print(mlir::OpAsmPrinter &printer, ConstantOp op) {
-  printer << "toy.constant ";
-  printer.printOptionalAttrDict(op.getAttrs(), /*elidedAttrs=*/{"value"});
+  printer << " ";
+  printer.printOptionalAttrDict(op->getAttrs(), /*elidedAttrs=*/{"value"});
   printer << op.value();
 }
 
@@ -284,6 +259,21 @@ void AddOp::inferShapes() { getResult().setType(getOperand(0).getType()); }
 /// inference interface.
 void CastOp::inferShapes() { getResult().setType(getOperand().getType()); }
 
+/// Returns true if the given set of input and result types are compatible with
+/// this cast operation. This is required by the `CastOpInterface` to verify
+/// this operation and provide other additional utilities.
+bool CastOp::areCastCompatible(TypeRange inputs, TypeRange outputs) {
+  if (inputs.size() != 1 || outputs.size() != 1)
+    return false;
+  // The inputs must be Tensors with the same element type.
+  TensorType input = inputs.front().dyn_cast<TensorType>();
+  TensorType output = outputs.front().dyn_cast<TensorType>();
+  if (!input || !output || input.getElementType() != output.getElementType())
+    return false;
+  // The shape is required to match if both types are ranked.
+  return !input.hasRank() || !output.hasRank() || input == output;
+}
+
 //===----------------------------------------------------------------------===//
 // GenericCallOp
 
@@ -292,7 +282,8 @@ void GenericCallOp::build(mlir::OpBuilder &builder, mlir::OperationState &state,
   // Generic call always returns an unranked Tensor initially.
   state.addTypes(UnrankedTensorType::get(builder.getF64Type()));
   state.addOperands(arguments);
-  state.addAttribute("callee", builder.getSymbolRefAttr(callee));
+  state.addAttribute("callee",
+                     mlir::SymbolRefAttr::get(builder.getContext(), callee));
 }
 
 /// Return the callee of the generic call operation, this is required by the
@@ -551,3 +542,29 @@ void ToyDialect::printType(mlir::Type type,
 
 #define GET_OP_CLASSES
 #include "toy/Ops.cpp.inc"
+
+//===----------------------------------------------------------------------===//
+// ToyDialect
+//===----------------------------------------------------------------------===//
+
+/// Dialect initialization, the instance will be owned by the context. This is
+/// the point of registration of types and operations for the dialect.
+void ToyDialect::initialize() {
+  addOperations<
+#define GET_OP_LIST
+#include "toy/Ops.cpp.inc"
+      >();
+  addInterfaces<ToyInlinerInterface>();
+  addTypes<StructType>();
+}
+
+mlir::Operation *ToyDialect::materializeConstant(mlir::OpBuilder &builder,
+                                                 mlir::Attribute value,
+                                                 mlir::Type type,
+                                                 mlir::Location loc) {
+  if (type.isa<StructType>())
+    return builder.create<StructConstantOp>(loc, type,
+                                            value.cast<mlir::ArrayAttr>());
+  return builder.create<ConstantOp>(loc, type,
+                                    value.cast<mlir::DenseElementsAttr>());
+}

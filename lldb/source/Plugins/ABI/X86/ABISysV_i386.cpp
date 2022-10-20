@@ -378,14 +378,14 @@ ValueObjectSP ABISysV_i386::GetReturnValueObjectSimple(
     uint32_t ptr =
         thread.GetRegisterContext()->ReadRegisterAsUnsigned(eax_id, 0) &
         0xffffffff;
-    value.SetValueType(Value::eValueTypeScalar);
+    value.SetValueType(Value::ValueType::Scalar);
     value.GetScalar() = ptr;
     return_valobj_sp = ValueObjectConstResult::Create(
         thread.GetStackFrameAtIndex(0).get(), value, ConstString(""));
   } else if ((type_flags & eTypeIsScalar) ||
              (type_flags & eTypeIsEnumeration)) //'Integral' + 'Floating Point'
   {
-    value.SetValueType(Value::eValueTypeScalar);
+    value.SetValueType(Value::ValueType::Scalar);
     llvm::Optional<uint64_t> byte_size =
         return_compiler_type.GetByteSize(&thread);
     if (!byte_size)
@@ -453,7 +453,7 @@ ValueObjectSP ABISysV_i386::GetReturnValueObjectSimple(
       uint32_t enm =
           thread.GetRegisterContext()->ReadRegisterAsUnsigned(eax_id, 0) &
           0xffffffff;
-      value.SetValueType(Value::eValueTypeScalar);
+      value.SetValueType(Value::ValueType::Scalar);
       value.GetScalar() = enm;
       return_valobj_sp = ValueObjectConstResult::Create(
           thread.GetStackFrameAtIndex(0).get(), value, ConstString(""));
@@ -713,15 +713,4 @@ void ABISysV_i386::Initialize() {
 
 void ABISysV_i386::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
-}
-
-// PluginInterface protocol
-
-lldb_private::ConstString ABISysV_i386::GetPluginNameStatic() {
-  static ConstString g_name("sysv-i386");
-  return g_name;
-}
-
-lldb_private::ConstString ABISysV_i386::GetPluginName() {
-  return GetPluginNameStatic();
 }

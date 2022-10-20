@@ -18,7 +18,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 
-#include <ctype.h>
+#include <cctype>
 #include <locale>
 #include <memory>
 
@@ -293,7 +293,7 @@ static bool DumpEncodedBufferToStream(
       data_ptr = (const SourceDataType *)data.GetDataStart();
     }
 
-    lldb::DataBufferSP utf8_data_buffer_sp;
+    lldb::WritableDataBufferSP utf8_data_buffer_sp;
     llvm::UTF8 *utf8_data_ptr = nullptr;
     llvm::UTF8 *utf8_data_end_ptr = nullptr;
 
@@ -450,7 +450,7 @@ static bool ReadEncodedBufferAndDumpToStream(
   }
 
   const int bufferSPSize = sourceSize * type_width;
-  lldb::DataBufferSP buffer_sp(new DataBufferHeap(bufferSPSize, 0));
+  lldb::WritableDataBufferSP buffer_sp(new DataBufferHeap(bufferSPSize, 0));
 
   // Check if we got bytes. We never get any bytes if we have an empty
   // string, but we still continue so that we end up actually printing
@@ -475,11 +475,9 @@ static bool ReadEncodedBufferAndDumpToStream(
     return true;
   }
 
-  DataExtractor data(buffer_sp, process_sp->GetByteOrder(),
-                     process_sp->GetAddressByteSize());
-
   StringPrinter::ReadBufferAndDumpToStreamOptions dump_options(options);
-  dump_options.SetData(data);
+  dump_options.SetData(DataExtractor(buffer_sp, process_sp->GetByteOrder(),
+                                     process_sp->GetAddressByteSize()));
   dump_options.SetSourceSize(sourceSize);
   dump_options.SetIsTruncated(is_truncated);
   dump_options.SetNeedsZeroTermination(needs_zero_terminator);

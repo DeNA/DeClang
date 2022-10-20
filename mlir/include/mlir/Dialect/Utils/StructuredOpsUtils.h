@@ -19,32 +19,31 @@
 
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Location.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/StringRef.h"
 
 namespace mlir {
 
-inline bool isRowMajorMatmul(ArrayAttr indexingMaps) {
-  auto context = indexingMaps.getContext();
-  AffineExpr m, n, k;
-  bindDims(context, m, n, k);
-  auto mapA = AffineMapAttr::get(AffineMap::get(3, 0, {m, k}, context));
-  auto mapB = AffineMapAttr::get(AffineMap::get(3, 0, {k, n}, context));
-  auto mapC = AffineMapAttr::get(AffineMap::get(3, 0, {m, n}, context));
-  auto maps = ArrayAttr::get({mapA, mapB, mapC}, context);
-  return indexingMaps == maps;
-}
+class OpBuilder;
 
-inline bool isColumnMajorMatmul(ArrayAttr indexingMaps) {
-  auto context = indexingMaps.getContext();
-  AffineExpr m, n, k;
-  bindDims(context, m, n, k);
-  auto mapA = AffineMapAttr::get(AffineMap::get(3, 0, {k, n}, context));
-  auto mapB = AffineMapAttr::get(AffineMap::get(3, 0, {m, k}, context));
-  auto mapC = AffineMapAttr::get(AffineMap::get(3, 0, {n, m}, context));
-  auto maps = ArrayAttr::get({mapA, mapB, mapC}, context);
-  return indexingMaps == maps;
-}
+/// Tests whether the given maps describe a row major matmul. The test is
+/// permutation-invariant. Note that this only checks the affine maps from an
+/// operation, so does not perform any checks on the math being performed within
+/// the reduction.
+bool isRowMajorMatmul(ArrayAttr indexingMaps);
+
+/// Tests whether the given maps describe a column major matmul. The test is
+/// permutation-invariant. Note that this only checks the affine maps from an
+/// operation, so does not perform any checks on the math being performed within
+/// the reduction.
+bool isColumnMajorMatmul(ArrayAttr indexingMaps);
+
+/// Tests whether the given maps describe a row major batch matmul. The test is
+/// permutation-invariant. Note that this only checks the affine maps from an
+/// operation, so does not perform any checks on the math being performed within
+/// the reduction.
+bool isRowMajorBatchMatmul(ArrayAttr indexingMaps);
 
 /// Attribute name for the AffineArrayAttr which encodes the relationship
 /// between a structured op iterators' and its operands.
@@ -54,6 +53,12 @@ constexpr StringRef getIndexingMapsAttrName() { return "indexing_maps"; }
 /// op's iterators.
 constexpr StringRef getIteratorTypesAttrName() { return "iterator_types"; }
 
+/// Attribute name for the StrArrayAttr which encodes the distribution type for
+/// `linalg.tiled_loop`.
+constexpr StringRef getDistributionTypesAttrName() {
+  return "distribution_types";
+}
+
 /// Attribute name for the StringAttr which encodes an optional documentation
 /// string of the structured op.
 constexpr StringRef getDocAttrName() { return "doc"; }
@@ -61,9 +66,6 @@ constexpr StringRef getDocAttrName() { return "doc"; }
 /// Attribute name for the StrArrayAttr which encodes the external library
 /// function that implements the structured op.
 constexpr StringRef getLibraryCallAttrName() { return "library_call"; }
-
-/// Attribute name for the ArrayAttr of StrArrayAttr that encodes sparsity.
-constexpr StringRef getSparseAttrName() { return "sparse"; }
 
 /// Attribute name for the StrArrayAttr which encodes the value of strides.
 constexpr StringRef getStridesAttrName() { return "strides"; }
@@ -133,17 +135,59 @@ inline StringRef toString(IteratorType t) {
   llvm_unreachable("Unsupported IteratorType");
 }
 
-/// Use to encode a dense or sparse dimension.
-constexpr StringRef getSparseDimName() { return "S"; }
-inline bool isSparseDim(Attribute attr) {
-  auto strAttr = attr.dyn_cast_or_null<StringAttr>();
-  return strAttr && strAttr.getValue() == getSparseDimName();
-}
-constexpr StringRef getDenseDimName() { return "D"; }
-inline bool isDenseDim(Attribute attr) {
-  auto strAttr = attr.dyn_cast_or_null<StringAttr>();
-  return strAttr && strAttr.getValue() == getDenseDimName();
-}
+/// Helper StructuredGenerator class to manipulate and rewrite ops with
+/// `StructuredOpInterface`. This is templated for now because VectorOps do not
+/// yet implement the StructuredOpInterface itself.
+template <typename StructuredOpInterface>
+class StructuredGenerator {
+public:
+  using MapList = ArrayRef<ArrayRef<AffineExpr>>;
+
+  struct IteratorType {
+    IteratorType(StringRef strRef) : strRef(strRef) {}
+    bool isOfType(Attribute attr) const {
+      auto sAttr = attr.dyn_cast<StringAttr>();
+      return sAttr && sAttr.getValue() == strRef;
+    }
+    StringRef strRef;
+  };
+  struct Par : public IteratorType {
+    Par() : IteratorType(getParallelIteratorTypeName()) {}
+  };
+  struct Red : public IteratorType {
+    Red() : IteratorType(getReductionIteratorTypeName()) {}
+  };
+  struct Win : public IteratorType {
+    Win() : IteratorType(getWindowIteratorTypeName()) {}
+  };
+
+  StructuredGenerator(OpBuilder &builder, StructuredOpInterface op)
+      : builder(builder), ctx(op.getContext()), loc(op.getLoc()),
+        iterators(op.iterator_types()), maps(op.getIndexingMaps()), op(op) {}
+
+  bool iters(ArrayRef<IteratorType> its) {
+    if (its.size() != iterators.size())
+      return false;
+    for (int i = 0, e = its.size(); i != e; ++i) {
+      if (!its[i].isOfType(iterators[i]))
+        return false;
+    }
+    return true;
+  }
+
+  bool layout(MapList l) {
+    auto infer = [](MapList m) { return AffineMap::inferFromExprList(m); };
+    return maps == infer(l);
+  }
+
+protected:
+  OpBuilder &builder;
+  MLIRContext *ctx;
+  Location loc;
+  ArrayAttr iterators;
+  SmallVector<AffineMap, 4> maps;
+  Operation *op;
+};
 
 } // end namespace mlir
 

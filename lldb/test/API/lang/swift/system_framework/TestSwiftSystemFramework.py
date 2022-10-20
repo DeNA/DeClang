@@ -24,11 +24,13 @@ class TestSwiftSystemFramework(lldbtest.TestBase):
         self.expect("expression -- 0")
         pos = 0
         neg = 0
-        with open(log, "r") as logfile:
+        import io
+        with open(log, "r", encoding='utf-8') as logfile:
             for line in logfile:
-                if ") rejecting framework path " in line:
+                if "-- rejecting framework path " in line:
                     pos += 1
-                elif "/System/Library/Frameworks" in line:
+                elif ("reflection metadata" not in line) and \
+                     ("/System/Library/Frameworks" in line):
                     neg += 1
 
         self.assertGreater(pos, 0, "sanity check failed")

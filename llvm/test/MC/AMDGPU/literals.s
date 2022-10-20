@@ -1,14 +1,14 @@
-// RUN: not llvm-mc -arch=amdgcn -show-encoding %s | FileCheck %s --check-prefix=GCN --check-prefix=SI --check-prefix=SICI
-// RUN: not llvm-mc -arch=amdgcn -mcpu=tahiti -show-encoding %s | FileCheck %s --check-prefix=GCN --check-prefix=SI --check-prefix=SICI
-// RUN: not llvm-mc -arch=amdgcn -mcpu=bonaire -show-encoding %s | FileCheck %s --check-prefix=GCN --check-prefix=SICI --check-prefix=CIVI --check-prefix=CI
-// RUN: not llvm-mc -arch=amdgcn -mcpu=tonga -show-encoding %s | FileCheck %s --check-prefix=GCN --check-prefix=CIVI --check-prefix=GFX89
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx900 -show-encoding %s | FileCheck %s --check-prefix=GCN --check-prefix=CIVI --check-prefix=GFX89 --check-prefix=GFX9
+// RUN: not llvm-mc -arch=amdgcn -show-encoding %s | FileCheck %s --check-prefix=SICI
+// RUN: not llvm-mc -arch=amdgcn -mcpu=tahiti -show-encoding %s | FileCheck %s --check-prefix=SICI
+// RUN: not llvm-mc -arch=amdgcn -mcpu=bonaire -show-encoding %s | FileCheck %s --check-prefixes=SICI,CI
+// RUN: not llvm-mc -arch=amdgcn -mcpu=tonga -show-encoding %s | FileCheck %s --check-prefix=GFX89
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx900 -show-encoding %s | FileCheck %s --check-prefixes=GFX89,GFX9
 
-// RUN: not llvm-mc -arch=amdgcn %s 2>&1 | FileCheck %s --check-prefix=NOGCN --check-prefix=NOSI --check-prefix=NOSICI --check-prefix=NOSICIVI --implicit-check-not=error:
-// RUN: not llvm-mc -arch=amdgcn -mcpu=tahiti %s 2>&1 | FileCheck %s --check-prefix=NOGCN --check-prefix=NOSI --check-prefix=NOSICI --check-prefix=NOSICIVI --implicit-check-not=error:
-// RUN: not llvm-mc -arch=amdgcn -mcpu=bonaire %s 2>&1 | FileCheck %s --check-prefix=NOGCN --check-prefix=NOSICI --check-prefix=NOCIVI --check-prefix=NOSICIVI --implicit-check-not=error:
-// RUN: not llvm-mc -arch=amdgcn -mcpu=tonga %s 2>&1 | FileCheck %s --check-prefix=NOGCN --check-prefix=NOSICIVI --check-prefix=NOVI --check-prefix=NOGFX89 --implicit-check-not=error:
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx900 %s 2>&1 | FileCheck %s --check-prefix=NOGCN --check-prefix=NOGFX89 --check-prefix=NOGFX9 --implicit-check-not=error:
+// RUN: not llvm-mc -arch=amdgcn %s 2>&1 | FileCheck %s --check-prefixes=NOGCN,NOSI,NOSICI,NOSICIVI --implicit-check-not=error:
+// RUN: not llvm-mc -arch=amdgcn -mcpu=tahiti %s 2>&1 | FileCheck %s --check-prefixes=NOGCN,NOSI,NOSICI,NOSICIVI --implicit-check-not=error:
+// RUN: not llvm-mc -arch=amdgcn -mcpu=bonaire %s 2>&1 | FileCheck %s --check-prefixes=NOGCN,NOSICI,NOCIVI,NOSICIVI --implicit-check-not=error:
+// RUN: not llvm-mc -arch=amdgcn -mcpu=tonga %s 2>&1 | FileCheck %s --check-prefixes=NOGCN,NOSICIVI,NOVI,NOGFX89 --implicit-check-not=error:
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx900 %s 2>&1 | FileCheck %s --check-prefixes=NOGCN,NOGFX89,NOGFX9 --implicit-check-not=error:
 
 //---------------------------------------------------------------------------//
 // fp literal, expected fp operand
@@ -597,7 +597,7 @@ v_max_f32 v0, vccz, v0
 v_max_f64 v[0:1], scc, v[0:1]
 
 // NOSICIVI: error: instruction not supported on this GPU
-// GFX9: v_pk_add_f16 v0, src_execz, v0  ; encoding: [0x00,0x00,0x8f,0xd3,0xfc,0x00,0x02,0x18]
+// GFX9: v_pk_add_f16 v0, src_execz, v0  ; encoding: [0x00,0x40,0x8f,0xd3,0xfc,0x00,0x02,0x18]
 v_pk_add_f16 v0, execz, v0
 
 // NOSICI: error: instruction not supported on this GPU
@@ -737,7 +737,7 @@ v_max_f32 v0, src_shared_base, v0
 v_max_f64 v[0:1], src_shared_base, v[0:1]
 
 // NOSICIVI: error: instruction not supported on this GPU
-// GFX9: v_pk_add_f16 v0, src_shared_base, v0 ; encoding: [0x00,0x00,0x8f,0xd3,0xeb,0x00,0x02,0x18]
+// GFX9: v_pk_add_f16 v0, src_shared_base, v0 ; encoding: [0x00,0x40,0x8f,0xd3,0xeb,0x00,0x02,0x18]
 v_pk_add_f16 v0, src_shared_base, v0
 
 // GFX9: v_ceil_f16_e64 v0, -src_shared_base ; encoding: [0x00,0x00,0x85,0xd1,0xeb,0x00,0x00,0x20]
@@ -842,6 +842,20 @@ v_madak_f32 v0, shared_base, v0, 0x11213141
 
 // NOGCN: error: invalid operand (violates constant bus restrictions)
 v_madak_f32 v0, scc, v0, 0x11213141
+
+// NOGCN: error: only one literal operand is allowed
+v_madak_f32 v0, 0xff32ff, v0, 0x11213141
+
+// NOGCN: error: only one literal operand is allowed
+v_madmk_f32 v0, 0xff32ff, 0x11213141, v0
+
+// NOSICI: error: instruction not supported on this GPU
+// NOGFX89: error: only one literal operand is allowed
+v_madak_f16 v0, 0xff32, v0, 0x1122
+
+// NOSICI: error: instruction not supported on this GPU
+// NOGFX89: error: only one literal operand is allowed
+v_madmk_f16 v0, 0xff32, 0x1122, v0
 
 // NOSICIVI: error: register not available on this GPU
 // NOGFX9: error: invalid operand (violates constant bus restrictions)

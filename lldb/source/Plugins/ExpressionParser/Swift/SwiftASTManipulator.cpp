@@ -18,6 +18,7 @@
 #include "lldb/Expression/ExpressionSourceCode.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Status.h"
 #include "swift/AST/ASTContext.h"
@@ -640,7 +641,7 @@ void SwiftASTManipulator::MakeDeclarationsPublic() {
         // to subclass them, and override any overridable members. That is, we
         // should use 'open' when it is possible and correct to do so, rather
         // than just 'public'.
-        if (llvm::isa<swift::ClassDecl>(VD) || VD->isPotentiallyOverridable()) {
+        if (llvm::isa<swift::ClassDecl>(VD) || VD->isSyntacticallyOverridable()) {
           if (!VD->isFinal())
             access = swift::AccessLevel::Open;
         }
@@ -1013,7 +1014,7 @@ bool SwiftASTManipulator::AddExternalVariables(
   if (!IsValid())
     return false;
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
 
   swift::ASTContext &ast_context = m_source_file.getASTContext();
 
@@ -1333,7 +1334,7 @@ swift::ValueDecl *SwiftASTManipulator::MakeGlobalTypealias(
   type_alias_decl->markAsDebuggerAlias(true);
   type_alias_decl->setImplicit(true);
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log = GetLog(LLDBLog::Expressions);
   if (log) {
 
     std::string s;
@@ -1392,8 +1393,9 @@ bool SwiftASTManipulator::SaveExpressionTextToTempFile(
   std::error_code err =
       llvm::sys::fs::createTemporaryFile(prefix, suffix, temp_fd, buffer);
   if (!err) {
-    lldb_private::NativeFile file(temp_fd, /*options*/ File::eOpenOptionWrite,
-                            /*transfer_ownership*/ true);
+    lldb_private::NativeFile file(temp_fd,
+                                  /*options*/ File::eOpenOptionWriteOnly,
+                                  /*transfer_ownership*/ true);
     const size_t text_len = text.size();
     size_t bytes_written = text_len;
     if (file.Write(text.data(), bytes_written).Success()) {

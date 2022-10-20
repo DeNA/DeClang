@@ -137,6 +137,13 @@ public:
     void
     Clear();
 
+    %feature("docstring", "Check if the module is file backed.
+    @return
+        True, if the module is backed by an object file on disk.
+        False, if the module is backed by an object file in memory.") IsFileBacked;
+    bool
+    IsFileBacked() const;
+
     %feature("docstring", "
     Get const accessor for the module file specification.
 
@@ -204,15 +211,15 @@ public:
     GetCompileUnitAtIndex (uint32_t);
 
     %feature("docstring", "
-    Find compile units related to *this module and passed source
+    Find compile units related to this module and passed source
     file.
 
     @param[in] sb_file_spec
-        A lldb::SBFileSpec object that contains source file
+        A :py:class:`SBFileSpec` object that contains source file
         specification.
 
     @return
-        A lldb::SBSymbolContextList that gets filled in with all of
+        A :py:class:`SBSymbolContextList` that gets filled in with all of
         the symbol contexts for all the matches.") FindCompileUnits;
     lldb::SBSymbolContextList
     FindCompileUnits (const lldb::SBFileSpec &sb_file_spec);

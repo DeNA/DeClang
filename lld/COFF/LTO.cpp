@@ -20,10 +20,10 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/DiagnosticPrinter.h"
-#include "llvm/LTO/Caching.h"
 #include "llvm/LTO/Config.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Object/SymbolicFile.h"
+#include "llvm/Support/Caching.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -62,6 +62,7 @@ static std::string getThinLTOOutputFile(StringRef path) {
 static lto::Config createConfig() {
   lto::Config c;
   c.Options = initTargetOptionsFromCodeGenFlags();
+  c.Options.EmitAddrsig = true;
 
   // Always emit a section per function/datum with LTO. LLVM LTO should get most
   // of the benefit of linker GC, but there are still opportunities for ICF.
@@ -84,6 +85,9 @@ static lto::Config createConfig() {
   c.AlwaysEmitRegularLTOObj = !config->ltoObjPath.empty();
   c.UseNewPM = config->ltoNewPassManager;
   c.DebugPassManager = config->ltoDebugPassManager;
+  c.CSIRProfile = std::string(config->ltoCSProfileFile);
+  c.RunCSIRInstr = config->ltoCSProfileGenerate;
+  c.PGOWarnMismatch = config->ltoPGOWarnMismatch;
 
   if (config->saveTemps)
     checkError(c.addSaveTemps(std::string(config->outputFile) + ".",
@@ -152,7 +156,7 @@ void BitcodeCompiler::add(BitcodeFile &f) {
 
 // Merge all the bitcode files we have seen, codegen the result
 // and return the resulting objects.
-std::vector<InputFile *> BitcodeCompiler::compile() {
+std::vector<InputFile *> BitcodeCompiler::compile(COFFLinkerContext &ctx) {
   unsigned maxTasks = ltoObj->getMaxTasks();
   buf.resize(maxTasks);
   files.resize(maxTasks);
@@ -160,16 +164,17 @@ std::vector<InputFile *> BitcodeCompiler::compile() {
   // The /lldltocache option specifies the path to a directory in which to cache
   // native object files for ThinLTO incremental builds. If a path was
   // specified, configure LTO to use it as the cache directory.
-  lto::NativeObjectCache cache;
+  NativeObjectCache cache;
   if (!config->ltoCache.empty())
-    cache = check(lto::localCache(
-        config->ltoCache, [&](size_t task, std::unique_ptr<MemoryBuffer> mb) {
-          files[task] = std::move(mb);
-        }));
+    cache =
+        check(localCache("ThinLTO", "Thin", config->ltoCache,
+                         [&](size_t task, std::unique_ptr<MemoryBuffer> mb) {
+                           files[task] = std::move(mb);
+                         }));
 
   checkError(ltoObj->run(
       [&](size_t task) {
-        return std::make_unique<lto::NativeObjectStream>(
+        return std::make_unique<NativeObjectStream>(
             std::make_unique<raw_svector_ostream>(buf[task]));
       },
       cache));
@@ -220,7 +225,7 @@ std::vector<InputFile *> BitcodeCompiler::compile() {
 
     if (config->saveTemps)
       saveBuffer(buf[i], ltoObjName);
-    ret.push_back(make<ObjFile>(MemoryBufferRef(objBuf, ltoObjName)));
+    ret.push_back(make<ObjFile>(ctx, MemoryBufferRef(objBuf, ltoObjName)));
   }
 
   return ret;

@@ -70,6 +70,7 @@ StackProtector::StackProtector() : FunctionPass(ID), SSPBufferSize(8) {
 INITIALIZE_PASS_BEGIN(StackProtector, DEBUG_TYPE,
                       "Insert stack protectors", false, true)
 INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
+INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
 INITIALIZE_PASS_END(StackProtector, DEBUG_TYPE,
                     "Insert stack protectors", false, true)
 
@@ -192,7 +193,7 @@ bool StackProtector::HasAddressTaken(const Instruction *AI,
       // Ignore intrinsics that do not become real instructions.
       // TODO: Narrow this to intrinsics that have store-like effects.
       const auto *CI = cast<CallInst>(I);
-      if (!isa<DbgInfoIntrinsic>(CI) && !CI->isLifetimeStartOrEnd())
+      if (!CI->isDebugOrPseudoInst() && !CI->isLifetimeStartOrEnd())
         return true;
       break;
     }
@@ -379,9 +380,8 @@ static Value *getStackGuard(const TargetLoweringBase *TLI, Module *M,
                             IRBuilder<> &B,
                             bool *SupportsSelectionDAGSP = nullptr) {
   Value *Guard = TLI->getIRStackGuard(B);
-  auto GuardMode = TLI->getTargetMachine().Options.StackProtectorGuard;
-  if ((GuardMode == llvm::StackProtectorGuards::TLS ||
-       GuardMode == llvm::StackProtectorGuards::None) && Guard)
+  StringRef GuardMode = M->getStackProtectorGuard();
+  if ((GuardMode == "tls" || GuardMode.empty()) && Guard)
     return B.CreateLoad(B.getInt8PtrTy(), Guard, true, "StackGuard");
 
   // Use SelectionDAG SSP handling, since there isn't an IR guard.
@@ -436,13 +436,11 @@ bool StackProtector::InsertStackProtectors() {
   // protection in SDAG.
   bool SupportsSelectionDAGSP =
       TLI->useStackGuardXorFP() ||
-      (EnableSelectionDAGSP && !TM->Options.EnableFastISel &&
-       !TM->Options.EnableGlobalISel);
-  AllocaInst *AI = nullptr;       // Place on stack that stores the stack guard.
+      (EnableSelectionDAGSP && !TM->Options.EnableFastISel);
+  AllocaInst *AI = nullptr; // Place on stack that stores the stack guard.
 
-  for (Function::iterator I = F->begin(), E = F->end(); I != E;) {
-    BasicBlock *BB = &*I++;
-    ReturnInst *RI = dyn_cast<ReturnInst>(BB->getTerminator());
+  for (BasicBlock &BB : llvm::make_early_inc_range(*F)) {
+    ReturnInst *RI = dyn_cast<ReturnInst>(BB.getTerminator());
     if (!RI)
       continue;
 
@@ -530,23 +528,23 @@ bool StackProtector::InsertStackProtectors() {
 
       // Split the basic block before the return instruction.
       BasicBlock *NewBB =
-          BB->splitBasicBlock(CheckLoc->getIterator(), "SP_return");
+          BB.splitBasicBlock(CheckLoc->getIterator(), "SP_return");
 
       // Update the dominator tree if we need to.
-      if (DT && DT->isReachableFromEntry(BB)) {
-        DT->addNewBlock(NewBB, BB);
-        DT->addNewBlock(FailBB, BB);
+      if (DT && DT->isReachableFromEntry(&BB)) {
+        DT->addNewBlock(NewBB, &BB);
+        DT->addNewBlock(FailBB, &BB);
       }
 
       // Remove default branch instruction to the new BB.
-      BB->getTerminator()->eraseFromParent();
+      BB.getTerminator()->eraseFromParent();
 
       // Move the newly created basic block to the point right after the old
       // basic block so that it's in the "fall through" position.
-      NewBB->moveAfter(BB);
+      NewBB->moveAfter(&BB);
 
       // Generate the stack protector instructions in the old basic block.
-      IRBuilder<> B(BB);
+      IRBuilder<> B(&BB);
       Value *Guard = getStackGuard(TLI, M, B);
       LoadInst *LI2 = B.CreateLoad(B.getInt8PtrTy(), AI, true);
       Value *Cmp = B.CreateICmpEQ(Guard, LI2);

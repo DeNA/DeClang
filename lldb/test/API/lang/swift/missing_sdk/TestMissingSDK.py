@@ -1,15 +1,14 @@
 """
-Test the error message if the SDK the program was built against doesn't exist.
+Test that LLDB is oblivious if the SDK the program was built against doesn't exist.
 """
 
-import os
 import lldb
 import lldbsuite.test.lldbutil as lldbutil
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
+import unittest2
 
-
-class TestMissingSDK(TestBase):
+class TestSwiftMissingSDK(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
 
@@ -24,20 +23,9 @@ class TestMissingSDK(TestBase):
     @skipIfDarwinEmbedded # swift crash inspecting swift stdlib with little other swift loaded <rdar://problem/55079456> 
     def testMissingSDK(self):
         self.build()
-        exe = self.getBuildArtifact("a.out")
-
-        # Create a target by the debugger.
-        target = self.dbg.CreateTarget(exe)
-        self.assertTrue(target, VALID_TARGET)
-
-        # Now create a breakpoint in main.c at the source matching
-        # "Set a breakpoint here"
-        breakpoint = target.BreakpointCreateBySourceRegex(
-            'break here', lldb.SBFileSpec("main.swift"))
-        self.assertTrue(breakpoint and
-                        breakpoint.GetNumLocations() >= 1,
-                        VALID_BREAKPOINT)
-        process = target.LaunchSimple(None, None, os.getcwd())
+        os.unlink(self.getBuildArtifact("fakesdk"))
+        lldbutil.run_to_source_breakpoint(self, 'break here',
+                                          lldb.SBFileSpec('main.swift'))
         self.expect("p message", VARIABLES_DISPLAYED_CORRECTLY,
                     substrs = ["Hello"])
 

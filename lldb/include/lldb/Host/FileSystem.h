@@ -10,7 +10,7 @@
 #define LLDB_HOST_FILESYSTEM_H
 
 #include "lldb/Host/File.h"
-#include "lldb/Utility/DataBufferLLVM.h"
+#include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/Status.h"
 
@@ -21,8 +21,8 @@
 
 #include "lldb/lldb-types.h"
 
-#include <stdint.h>
-#include <stdio.h>
+#include <cstdint>
+#include <cstdio>
 #include <sys/stat.h>
 
 namespace lldb_private {
@@ -33,7 +33,7 @@ public:
 
   FileSystem()
       : m_fs(llvm::vfs::getRealFileSystem()), m_collector(nullptr),
-        m_home_directory(), m_mapped(false) {}
+        m_home_directory() {}
   FileSystem(std::shared_ptr<llvm::FileCollectorBase> collector)
       : m_fs(llvm::vfs::getRealFileSystem()), m_collector(std::move(collector)),
         m_home_directory(), m_mapped(false) {}
@@ -144,12 +144,18 @@ public:
 
   //// Create memory buffer from path.
   /// \{
-  std::shared_ptr<DataBufferLLVM> CreateDataBuffer(const llvm::Twine &path,
-                                                   uint64_t size = 0,
-                                                   uint64_t offset = 0);
-  std::shared_ptr<DataBufferLLVM> CreateDataBuffer(const FileSpec &file_spec,
-                                                   uint64_t size = 0,
-                                                   uint64_t offset = 0);
+  std::shared_ptr<DataBuffer> CreateDataBuffer(const llvm::Twine &path,
+                                               uint64_t size = 0,
+                                               uint64_t offset = 0);
+  std::shared_ptr<DataBuffer> CreateDataBuffer(const FileSpec &file_spec,
+                                               uint64_t size = 0,
+                                               uint64_t offset = 0);
+  std::shared_ptr<WritableDataBuffer>
+  CreateWritableDataBuffer(const llvm::Twine &path, uint64_t size = 0,
+                           uint64_t offset = 0);
+  std::shared_ptr<WritableDataBuffer>
+  CreateWritableDataBuffer(const FileSpec &file_spec, uint64_t size = 0,
+                           uint64_t offset = 0);
   /// \}
 
   /// Call into the Host to see if it can help find the file.
@@ -201,7 +207,7 @@ private:
   llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> m_fs;
   std::shared_ptr<llvm::FileCollectorBase> m_collector;
   std::string m_home_directory;
-  bool m_mapped;
+  bool m_mapped = false;
 };
 } // namespace lldb_private
 

@@ -156,7 +156,7 @@ bool MVETailPredication::runOnLoop(Loop *L, LPPassManager&) {
 
       Intrinsic::ID ID = Call->getIntrinsicID();
       if (ID == Intrinsic::start_loop_iterations ||
-          ID == Intrinsic::test_set_loop_iterations)
+          ID == Intrinsic::test_start_loop_iterations)
         return cast<IntrinsicInst>(&I);
     }
     return nullptr;
@@ -205,6 +205,10 @@ bool MVETailPredication::IsSafeActiveMask(IntrinsicInst *ActiveLaneMask,
     EnableTailPredication == TailPredication::ForceEnabled;
 
   Value *ElemCount = ActiveLaneMask->getOperand(1);
+  bool Changed = false;
+  if (!L->makeLoopInvariant(ElemCount, Changed))
+    return false;
+
   auto *EC= SE->getSCEV(ElemCount);
   auto *TC = SE->getSCEV(TripCount);
   int VectorWidth =
@@ -230,18 +234,16 @@ bool MVETailPredication::IsSafeActiveMask(IntrinsicInst *ActiveLaneMask,
     }
 
     // Calculate 2 tripcount values and check that they are consistent with
-    // each other:
-    // i) The number of loop iterations extracted from the set.loop.iterations
-    //    intrinsic, multipled by the vector width:
-    uint64_t TC1 = TC->getZExtValue() * VectorWidth;
+    // each other. The TripCount for a predicated vector loop body is
+    // ceil(ElementCount/Width), or floor((ElementCount+Width-1)/Width) as we
+    // work it out here.
+    uint64_t TC1 = TC->getZExtValue();
+    uint64_t TC2 =
+        (ConstElemCount->getZExtValue() + VectorWidth - 1) / VectorWidth;
 
-    // ii) TC1 has to be equal to TC + 1, with the + 1 to compensate for start
-    //     counting from 0.
-    uint64_t TC2 = ConstElemCount->getZExtValue() + 1;
-
-    // If the tripcount values are inconsistent, we don't want to insert the
-    // VCTP and trigger tail-predication; it's better to keep intrinsic
-    // get.active.lane.mask and legalize this.
+    // If the tripcount values are inconsistent, we can't insert the VCTP and
+    // trigger tail-predication; keep the intrinsic as a get.active.lane.mask
+    // and legalize this.
     if (TC1 != TC2) {
       LLVM_DEBUG(dbgs() << "ARM TP: inconsistent constant tripcount values: "
                  << TC1 << " from set.loop.iterations, and "
@@ -291,14 +293,18 @@ bool MVETailPredication::IsSafeActiveMask(IntrinsicInst *ActiveLaneMask,
     // Check for equality of TC and Ceil by calculating SCEV expression
     // TC - Ceil and test it for zero.
     //
-    bool Zero = SE->getMinusSCEV(
-                      SE->getBackedgeTakenCount(L),
-                      SE->getUDivExpr(SE->getAddExpr(SE->getMulExpr(Ceil, VW),
-                                                     SE->getNegativeSCEV(VW)),
-                                      VW))
-                    ->isZero();
+    const SCEV *Sub =
+      SE->getMinusSCEV(SE->getBackedgeTakenCount(L),
+                       SE->getUDivExpr(SE->getAddExpr(SE->getMulExpr(Ceil, VW),
+                                                      SE->getNegativeSCEV(VW)),
+                                       VW));
 
-    if (!Zero) {
+    // Use context sensitive facts about the path to the loop to refine.  This
+    // comes up as the backedge taken count can incorporate context sensitive
+    // reasoning, and our RHS just above doesn't.
+    Sub = SE->applyLoopGuards(Sub, L);
+
+    if (!Sub->isZero()) {
       LLVM_DEBUG(dbgs() << "ARM TP: possible overflow in sub expression.\n");
       return false;
     }

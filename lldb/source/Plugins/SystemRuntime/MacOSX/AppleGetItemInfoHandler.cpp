@@ -20,6 +20,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/StreamString.h"
 
@@ -98,7 +99,7 @@ AppleGetItemInfoHandler::AppleGetItemInfoHandler(Process *process)
       m_get_item_info_return_buffer_addr(LLDB_INVALID_ADDRESS),
       m_get_item_info_retbuffer_mutex() {}
 
-AppleGetItemInfoHandler::~AppleGetItemInfoHandler() {}
+AppleGetItemInfoHandler::~AppleGetItemInfoHandler() = default;
 
 void AppleGetItemInfoHandler::Detach() {
 
@@ -129,7 +130,7 @@ lldb::addr_t AppleGetItemInfoHandler::SetupGetItemInfoFunction(
     Thread &thread, ValueList &get_item_info_arglist) {
   ExecutionContext exe_ctx(thread.shared_from_this());
   DiagnosticManager diagnostics;
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SYSTEM_RUNTIME));
+  Log *log = GetLog(LLDBLog::SystemRuntime);
   lldb::addr_t args_addr = LLDB_INVALID_ADDRESS;
   FunctionCaller *get_item_info_caller = nullptr;
 
@@ -218,7 +219,7 @@ AppleGetItemInfoHandler::GetItemInfo(Thread &thread, uint64_t item,
   TargetSP target_sp(thread.CalculateTarget());
   TypeSystemClang *clang_ast_context =
       ScratchTypeSystemClang::GetForTarget(*target_sp);
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_SYSTEM_RUNTIME));
+  Log *log = GetLog(LLDBLog::SystemRuntime);
 
   GetItemInfoReturnInfo return_value;
   return_value.item_buffer_ptr = LLDB_INVALID_ADDRESS;
@@ -258,26 +259,26 @@ AppleGetItemInfoHandler::GetItemInfo(Thread &thread, uint64_t item,
   CompilerType clang_void_ptr_type =
       clang_ast_context->GetBasicType(eBasicTypeVoid).GetPointerType();
   Value return_buffer_ptr_value;
-  return_buffer_ptr_value.SetValueType(Value::eValueTypeScalar);
+  return_buffer_ptr_value.SetValueType(Value::ValueType::Scalar);
   return_buffer_ptr_value.SetCompilerType(clang_void_ptr_type);
 
   CompilerType clang_int_type = clang_ast_context->GetBasicType(eBasicTypeInt);
   Value debug_value;
-  debug_value.SetValueType(Value::eValueTypeScalar);
+  debug_value.SetValueType(Value::ValueType::Scalar);
   debug_value.SetCompilerType(clang_int_type);
 
   CompilerType clang_uint64_type =
       clang_ast_context->GetBasicType(eBasicTypeUnsignedLongLong);
   Value item_value;
-  item_value.SetValueType(Value::eValueTypeScalar);
+  item_value.SetValueType(Value::ValueType::Scalar);
   item_value.SetCompilerType(clang_uint64_type);
 
   Value page_to_free_value;
-  page_to_free_value.SetValueType(Value::eValueTypeScalar);
+  page_to_free_value.SetValueType(Value::ValueType::Scalar);
   page_to_free_value.SetCompilerType(clang_void_ptr_type);
 
   Value page_to_free_size_value;
-  page_to_free_size_value.SetValueType(Value::eValueTypeScalar);
+  page_to_free_size_value.SetValueType(Value::ValueType::Scalar);
   page_to_free_size_value.SetCompilerType(clang_uint64_type);
 
   std::lock_guard<std::mutex> guard(m_get_item_info_retbuffer_mutex);

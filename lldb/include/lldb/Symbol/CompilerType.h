@@ -71,10 +71,12 @@ public:
 
   bool IsValid() const { return m_type != nullptr && m_type_system != nullptr; }
 
-  bool IsArrayType(CompilerType *element_type, uint64_t *size,
-                   bool *is_incomplete) const;
+  bool IsArrayType(CompilerType *element_type = nullptr,
+                   uint64_t *size = nullptr,
+                   bool *is_incomplete = nullptr) const;
 
-  bool IsVectorType(CompilerType *element_type, uint64_t *size) const;
+  bool IsVectorType(CompilerType *element_type = nullptr,
+                    uint64_t *size = nullptr) const;
 
   bool IsArrayOfScalarType() const;
 
@@ -110,7 +112,8 @@ public:
 
   bool IsFunctionPointerType() const;
 
-  bool IsBlockPointerType(CompilerType *function_pointer_type_ptr) const;
+  bool
+  IsBlockPointerType(CompilerType *function_pointer_type_ptr = nullptr) const;
 
   bool IsIntegerType(bool &is_signed) const;
 
@@ -381,15 +384,18 @@ public:
                    size_t data_byte_size);
 
   /// Dump to stdout.
-  void DumpTypeDescription(lldb::DescriptionLevel level =
-                           lldb::eDescriptionLevelFull) const;
+  void DumpTypeDescription(
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+            ExecutionContextScope *exe_scope = nullptr) const;
 
   /// Print a description of the type to a stream. The exact implementation
   /// varies, but the expectation is that eDescriptionLevelFull returns a
   /// source-like representation of the type, whereas eDescriptionLevelVerbose
   /// does a dump of the underlying AST if applicable.
-  void DumpTypeDescription(Stream *s, lldb::DescriptionLevel level =
-                                          lldb::eDescriptionLevelFull) const;
+  void DumpTypeDescription(
+      Stream *s,
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) const;
   /// \}
 
   bool GetValueAsScalar(const DataExtractor &data, lldb::offset_t data_offset,

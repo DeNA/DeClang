@@ -23,10 +23,10 @@
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/DiagnosticPrinter.h"
-#include "llvm/LTO/Caching.h"
 #include "llvm/LTO/Config.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Object/SymbolicFile.h"
+#include "llvm/Support/Caching.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
@@ -57,9 +57,9 @@ static std::unique_ptr<raw_fd_ostream> openFile(StringRef file) {
   return ret;
 }
 
-// The merged bitcode after LTO is large. Try openning a file stream that
+// The merged bitcode after LTO is large. Try opening a file stream that
 // supports reading, seeking and writing. Such a file allows BitcodeWriter to
-// flush buffered data to reduce memory comsuption. If this fails, open a file
+// flush buffered data to reduce memory consumption. If this fails, open a file
 // stream that supports only write.
 static std::unique_ptr<raw_fd_ostream> openLTOOutputFile(StringRef file) {
   std::error_code ec;
@@ -162,6 +162,7 @@ static lto::Config createConfig() {
 
   c.CSIRProfile = std::string(config->ltoCSProfileFile);
   c.RunCSIRInstr = config->ltoCSProfileGenerate;
+  c.PGOWarnMismatch = config->ltoPGOWarnMismatch;
 
   if (config->emitLLVM) {
     c.PostInternalizeModuleHook = [](size_t task, const Module &m) {
@@ -246,6 +247,11 @@ void BitcodeCompiler::add(BitcodeFile &f) {
     r.VisibleToRegularObj = config->relocatable || sym->isUsedInRegularObj ||
                             (r.Prevailing && sym->includeInDynsym()) ||
                             usedStartStop.count(objSym.getSectionName());
+    // Identify symbols exported dynamically, and that therefore could be
+    // referenced by a shared library not visible to the linker.
+    r.ExportDynamic = sym->computeBinding() != STB_LOCAL &&
+                      (sym->isExportDynamic(sym->kind(), sym->visibility) ||
+                       sym->exportDynamic || sym->inDynamicList);
     const auto *dr = dyn_cast<Defined>(sym);
     r.FinalDefinitionInLinkageUnit =
         (isExec || sym->visibility != STV_DEFAULT) && dr &&
@@ -298,18 +304,18 @@ std::vector<InputFile *> BitcodeCompiler::compile() {
   // The --thinlto-cache-dir option specifies the path to a directory in which
   // to cache native object files for ThinLTO incremental builds. If a path was
   // specified, configure LTO to use it as the cache directory.
-  lto::NativeObjectCache cache;
+  NativeObjectCache cache;
   if (!config->thinLTOCacheDir.empty())
-    cache = check(
-        lto::localCache(config->thinLTOCacheDir,
-                        [&](size_t task, std::unique_ptr<MemoryBuffer> mb) {
-                          files[task] = std::move(mb);
-                        }));
+    cache =
+        check(localCache("ThinLTO", "Thin", config->thinLTOCacheDir,
+                         [&](size_t task, std::unique_ptr<MemoryBuffer> mb) {
+                           files[task] = std::move(mb);
+                         }));
 
   if (!bitcodeFiles.empty())
     checkError(ltoObj->run(
         [&](size_t task) {
-          return std::make_unique<lto::NativeObjectStream>(
+          return std::make_unique<NativeObjectStream>(
               std::make_unique<raw_svector_ostream>(buf[task]));
         },
         cache));

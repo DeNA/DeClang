@@ -20,6 +20,10 @@ This document describes the available MLIR passes and their contracts.
 
 [include "AffinePasses.md"]
 
+## `arith` Dialect Passes
+
+[include "ArithmeticPasses.md"]
+
 ## `gpu` Dialect Passes
 
 [include "GPUPasses.md"]
@@ -31,6 +35,10 @@ This document describes the available MLIR passes and their contracts.
 ## `llvm` Dialect Passes
 
 [include "LLVMPasses.md"]
+
+## `memref` Dialect Passes
+
+[include "MemRefPasses.md"]
 
 ## `quant` Dialect Passes
 
@@ -47,6 +55,10 @@ This document describes the available MLIR passes and their contracts.
 ## `shape` Dialect Passes
 
 [include "ShapePasses.md"]
+
+## `sparse_tensor` Dialect Passes
+
+[include "SparseTensorPasses.md"]
 
 ## `spv` Dialect Passes
 

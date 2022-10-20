@@ -160,7 +160,7 @@ enum Format {
   eFormatBytes,
   eFormatBytesWithASCII,
   eFormatChar,
-  eFormatCharPrintable, ///< Only printable characters, space if not printable
+  eFormatCharPrintable, ///< Only printable characters, '.' if not printable
   eFormatComplex,       ///< Floating point complex type
   eFormatComplexFloat = eFormatComplex,
   eFormatCString, ///< NULL terminated C strings
@@ -247,7 +247,11 @@ enum StopReason {
   eStopReasonExec, ///< Program was re-exec'ed
   eStopReasonPlanComplete,
   eStopReasonThreadExiting,
-  eStopReasonInstrumentation
+  eStopReasonInstrumentation,
+  eStopReasonProcessorTrace,
+  eStopReasonFork,
+  eStopReasonVFork,
+  eStopReasonVForkDone,
 };
 
 /// Command Return Status Types.
@@ -597,6 +601,7 @@ enum CommandArgumentType {
   eArgTypeCommand,
   eArgTypeColumnNum,
   eArgTypeModuleUUID,
+  eArgTypeSaveCoreStyle,
   eArgTypeLastArg // Always keep this entry as the last entry in this
                   // enumeration!!
 };
@@ -963,6 +968,25 @@ enum ExpressionEvaluationPhase {
   eExpressionEvaluationComplete
 };
 
+/// Architecture-agnostic categorization of instructions for traversing the
+/// control flow of a trace.
+///
+/// A single instruction can match one or more of these categories.
+FLAGS_ENUM(TraceInstructionControlFlowType){
+    /// Any instruction.
+    eTraceInstructionControlFlowTypeInstruction = (1u << 1),
+    /// A conditional or unconditional branch/jump.
+    eTraceInstructionControlFlowTypeBranch = (1u << 2),
+    /// A conditional or unconditional branch/jump that changed
+    /// the control flow of the program.
+    eTraceInstructionControlFlowTypeTakenBranch = (1u << 3),
+    /// A call to a function.
+    eTraceInstructionControlFlowTypeCall = (1u << 4),
+    /// A return from a function.
+    eTraceInstructionControlFlowTypeReturn = (1u << 5)};
+
+LLDB_MARK_AS_BITMASK_ENUM(TraceInstructionControlFlowType)
+
 /// Watchpoint Kind.
 ///
 /// Indicates what types of events cause the watchpoint to fire. Used by Native
@@ -979,7 +1003,7 @@ enum GdbSignal {
   eGdbSignalBreakpoint = 0x96
 };
 
-/// Used with SBHost::GetPath (lldb::PathType) to find files that are
+/// Used with SBHostOS::GetLLDBPath (lldb::PathType) to find files that are
 /// related to LLDB on the current host machine. Most files are
 /// relative to LLDB or are in known locations.
 enum PathType {
@@ -1123,6 +1147,15 @@ enum CommandInterpreterResult {
   /// Stopped because quit was requested.
   eCommandInterpreterResultQuitRequested,
 };
+
+// Style of core file to create when calling SaveCore.
+enum SaveCoreStyle {
+  eSaveCoreUnspecified = 0,
+  eSaveCoreFull = 1,
+  eSaveCoreDirtyOnly = 2,
+  eSaveCoreStackOnly = 3,
+};
+
 } // namespace lldb
 
 #endif // LLDB_LLDB_ENUMERATIONS_H

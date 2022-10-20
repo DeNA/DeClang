@@ -5,7 +5,7 @@ add_custom_command(
   DEPENDS ${SWIG_INTERFACES}
   DEPENDS ${SWIG_HEADERS}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/prepare_binding_python.py
-  COMMAND ${PYTHON_EXECUTABLE} ${LLDB_SOURCE_DIR}/bindings/prepare_bindings.py
+  COMMAND ${Python3_EXECUTABLE} ${LLDB_SOURCE_DIR}/bindings/prepare_bindings.py
       ${framework_arg}
       --srcRoot=${LLDB_SOURCE_DIR}
       --targetDir=${CMAKE_CURRENT_BINARY_DIR}
@@ -19,6 +19,18 @@ add_custom_target(swig_wrapper_python ALL DEPENDS
   ${CMAKE_CURRENT_BINARY_DIR}/LLDBWrapPython.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/lldb.py
 )
+
+if (NOT WIN32)
+add_custom_command(
+  OUTPUT  ${LLVM_RUNTIME_OUTPUT_INTDIR}/lldb-python
+  VERBATIM
+  COMMAND ${CMAKE_COMMAND} -E copy lldb-python ${LLVM_RUNTIME_OUTPUT_INTDIR}/lldb-python
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+add_custom_target(lldb-python-wrapper ALL DEPENDS
+  ${LLVM_RUNTIME_OUTPUT_INTDIR}/lldb-python
+)
+endif()
 
 function(create_python_package swig_target working_dir pkg_dir)
   cmake_parse_arguments(ARG "NOINIT" "" "FILES" ${ARGN})
@@ -101,11 +113,19 @@ function(finish_swig_python swig_target lldb_python_bindings_dir lldb_python_tar
     FILES "${LLDB_SOURCE_DIR}/examples/python/in_call_stack.py"
           "${LLDB_SOURCE_DIR}/examples/python/symbolication.py")
 
+  create_python_package(
+    ${swig_target}
+    ${lldb_python_target_dir}
+    "plugins"
+    FILES
+    "${LLDB_SOURCE_DIR}/examples/python/scripted_process/scripted_process.py")
+
   if(APPLE)
     create_python_package(
       ${swig_target}
       ${lldb_python_target_dir} "macosx"
       FILES "${LLDB_SOURCE_DIR}/examples/python/crashlog.py"
+            "${LLDB_SOURCE_DIR}/examples/python/scripted_process/crashlog_scripted_process.py"
             "${LLDB_SOURCE_DIR}/examples/darwin/heap_find/heap.py")
 
     create_python_package(
@@ -138,6 +158,11 @@ function(finish_swig_python swig_target lldb_python_bindings_dir lldb_python_tar
   endif()
   create_relative_symlink(${swig_target} ${LIBLLDB_SYMLINK_DEST}
                           ${lldb_python_target_dir} ${LIBLLDB_SYMLINK_OUTPUT_FILE})
+
+
+  if (NOT WIN32)
+  add_dependencies(${swig_target} lldb-python-wrapper)
+  endif()
 
   if(NOT LLDB_BUILD_FRAMEWORK)
     set(LLDB_ARGDUMPER_FILENAME "lldb-argdumper${CMAKE_EXECUTABLE_SUFFIX}")

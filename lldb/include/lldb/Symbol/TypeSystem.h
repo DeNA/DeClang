@@ -80,11 +80,13 @@ public:
                                            Module *module);
 
   static lldb::TypeSystemSP CreateInstance(lldb::LanguageType language,
+                                           Target *target);
+
+  // BEGIN SWIFT
+  static lldb::TypeSystemSP CreateInstance(lldb::LanguageType language,
                                            Target *target,
                                            const char *compiler_options);
-
-  static lldb::TypeSystemSP CreateInstance(lldb::LanguageType language,
-                                           Target *target);
+  // END SWIFT
 
   // Free up any resources associated with this TypeSystem.  Done before
   // removing all the TypeSystems from the TypeSystemMap.
@@ -411,7 +413,8 @@ public:
   /// Dump the type to stdout.
   virtual void DumpTypeDescription(
       lldb::opaque_compiler_type_t type,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) = 0;
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) = 0;
 
   /// Print a description of the type to a stream. The exact implementation
   /// varies, but the expectation is that eDescriptionLevelFull returns a
@@ -419,7 +422,14 @@ public:
   /// does a dump of the underlying AST if applicable.
   virtual void DumpTypeDescription(
       lldb::opaque_compiler_type_t type, Stream *s,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) = 0;
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) = 0;
+
+  /// Dump a textual representation of the internal TypeSystem state to the
+  /// given stream.
+  ///
+  /// This should not modify the state of the TypeSystem if possible.
+  virtual void Dump(llvm::raw_ostream &output) = 0;
 
   // TODO: These methods appear unused. Should they be removed?
 
@@ -550,22 +560,28 @@ public:
   // callback to keep iterating, false to stop iterating.
   void ForEach(std::function<bool(TypeSystem *)> const &callback);
 
-  void RemoveTypeSystemsForLanguage(lldb::LanguageType language);
-
   llvm::Expected<TypeSystem &>
   GetTypeSystemForLanguage(lldb::LanguageType language, Module *module,
                            bool can_create);
 
   llvm::Expected<TypeSystem &>
   GetTypeSystemForLanguage(lldb::LanguageType language, Target *target,
+                           bool can_create);
+
+  // BEGIN SWIFT
+  llvm::Expected<TypeSystem &>
+  GetTypeSystemForLanguage(lldb::LanguageType language, Target *target,
                            bool can_create, const char *compiler_options);
+
+  void RemoveTypeSystemsForLanguage(lldb::LanguageType language);
+  // END SWIFT
 
 protected:
   typedef std::map<lldb::LanguageType, lldb::TypeSystemSP> collection;
   mutable std::mutex m_mutex; ///< A mutex to keep this object happy in
                               ///multi-threaded environments.
   collection m_map;
-  bool m_clear_in_progress;
+  bool m_clear_in_progress = false;
 
 private:
   typedef llvm::function_ref<lldb::TypeSystemSP()> CreateCallback;

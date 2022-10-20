@@ -2,6 +2,11 @@ lldb_tablegen(CommandOptions.inc -gen-lldb-option-defs
   SOURCE Options.td
   TARGET LLDBOptionsGen)
 
+if (LLDB_ENABLE_SWIFT_SUPPORT)
+  set(Healtcheck_SOURCES CommandObjectHealthcheck.cpp)
+endif()
+set(LLVM_OPTIONAL_SOURCES CommandObjectHealthcheck.cpp)
+
 add_lldb_library(lldbCommands
   CommandCompletions.cpp
   CommandObjectApropos.cpp
@@ -16,6 +21,7 @@ add_lldb_library(lldbCommands
   CommandObjectLanguage.cpp
   CommandObjectLog.cpp
   CommandObjectMemory.cpp
+  CommandObjectMemoryTag.cpp
   CommandObjectMultiword.cpp
   CommandObjectPlatform.cpp
   CommandObjectPlugin.cpp
@@ -37,9 +43,11 @@ add_lldb_library(lldbCommands
   CommandObjectVersion.cpp
   CommandObjectWatchpoint.cpp
   CommandObjectWatchpointCommand.cpp
+  CommandOptionsProcessLaunch.cpp
+
+  ${Healtcheck_SOURCES}
 
   LINK_LIBS
-    lldbBase
     lldbBreakpoint
     lldbCore
     lldbDataFormatters
@@ -49,6 +57,7 @@ add_lldb_library(lldbCommands
     lldbSymbol
     lldbTarget
     lldbUtility
+    lldbVersion
 
   LINK_COMPONENTS
     Support

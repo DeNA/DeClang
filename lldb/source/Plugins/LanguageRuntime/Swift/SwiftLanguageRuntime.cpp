@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SwiftLanguageRuntime.h"
+#include "Plugins/LanguageRuntime/Swift/LLDBMemoryReader.h"
 #include "SwiftLanguageRuntimeImpl.h"
 
 #include "Plugins/Process/Utility/RegisterContext_x86.h"
@@ -18,7 +19,9 @@
 #include "Utility/ARM64_DWARF_Registers.h"
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
 #include "lldb/Core/Debugger.h"
+#include "lldb/Core/JITSection.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/Progress.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/StringPrinter.h"
@@ -37,6 +40,7 @@
 #include "swift/AST/ASTMangler.h"
 #include "swift/AST/Decl.h"
 #include "swift/AST/Module.h"
+#include "swift/Demangling/Demangle.h"
 #include "swift/Reflection/ReflectionContext.h"
 #include "swift/RemoteAST/RemoteAST.h"
 
@@ -96,7 +100,7 @@ AppleObjCRuntimeV2 *
 SwiftLanguageRuntime::GetObjCRuntime(lldb_private::Process &process) {
   if (auto objc_runtime = ObjCLanguageRuntime::Get(process)) {
     if (objc_runtime->GetPluginName() ==
-        AppleObjCRuntimeV2::GetPluginNameStatic())
+        AppleObjCRuntimeV2::GetPluginNameStatic().GetStringRef())
       return (AppleObjCRuntimeV2 *)objc_runtime;
   }
   return nullptr;
@@ -107,6 +111,12 @@ AppleObjCRuntimeV2 *SwiftLanguageRuntime::GetObjCRuntime() {
 }
 
 enum class RuntimeKind { Swift, ObjC };
+
+/// Detect a statically linked Swift runtime by looking for a well-known symbol.
+static bool IsStaticSwiftRuntime(Module &image) {
+  static ConstString swift_release_dealloc_sym("_swift_release_dealloc");
+  return image.FindFirstSymbolWithNameAndType(swift_release_dealloc_sym);
+}
 
 /// \return the Swift or Objective-C runtime found in the loaded images.
 static ModuleSP findRuntime(Process &process, RuntimeKind runtime_kind) {
@@ -131,6 +141,17 @@ static ModuleSP findRuntime(Process &process, RuntimeKind runtime_kind) {
     }
     return true;
   });
+
+  if (!runtime_image && runtime_kind == RuntimeKind::Swift) {
+    // Do a more expensive search for a statically linked Swift runtime.
+    process.GetTarget().GetImages().ForEach([&](const ModuleSP &image) {
+      if (image && IsStaticSwiftRuntime(*image)) {
+        runtime_image = image;
+        return false;
+      }
+      return true;
+    });
+  }
   return runtime_image;
 }
 
@@ -145,14 +166,13 @@ FindSymbolForSwiftObject(Process &process, RuntimeKind runtime_kind,
     if (runtime_kind == RuntimeKind::ObjC) {
       auto *obj_file = target.GetExecutableModule()->GetObjectFile();
       bool have_objc_interop =
-          obj_file && obj_file->GetPluginName().GetStringRef().equals("mach-o");
+          obj_file && obj_file->GetPluginName().equals("mach-o");
       if (!have_objc_interop)
         return {};
     }
     target.GetDebugger().GetAsyncErrorStream()->Printf(
         "Couldn't find the %s runtime library in loaded images.\n",
         (runtime_kind == RuntimeKind::Swift) ? "Swift" : "Objective-C");
-    lldbassert(image.get() && "couldn't find runtime library in loaded images");
     return {};
   }
 
@@ -203,8 +223,7 @@ public:
 
 #define STUB_LOG()                                                             \
   do {                                                                         \
-    LLDB_LOGF(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS | \
-                                                     LIBLLDB_LOG_TYPES),       \
+    LLDB_LOGF(GetLog(LLDBLog::Expressions | LLDBLog::Types),                   \
               g_stub_log_message,                                              \
               GetStandardLibraryName(m_process).AsCString());                  \
     assert(false && "called into swift language runtime stub");                \
@@ -255,6 +274,11 @@ public:
     return false;
   }
 
+  void DumpTyperef(CompilerType type, TypeSystemSwiftTypeRef *module_holder,
+                   Stream *s) {
+    STUB_LOG();
+  }
+
   llvm::Optional<uint64_t> GetMemberVariableOffset(CompilerType instance_type,
                                                    ValueObject *instance,
                                                    llvm::StringRef member_name,
@@ -276,7 +300,7 @@ public:
     return {};
   }
 
-  llvm::Optional<size_t> GetIndexOfChildMemberWithName(
+  std::pair<bool, llvm::Optional<size_t>> GetIndexOfChildMemberWithName(
       CompilerType type, llvm::StringRef name, ExecutionContext *exe_ctx,
       bool omit_empty_base_classes, std::vector<uint32_t> &child_indexes) {
     STUB_LOG();
@@ -411,7 +435,7 @@ static bool HasReflectionInfo(ObjectFile *obj_file) {
   return hasReflectionSection;
 }
 
-SwiftLanguageRuntimeImpl::NativeReflectionContext *
+SwiftLanguageRuntimeImpl::ReflectionContextInterface *
 SwiftLanguageRuntimeImpl::GetReflectionContext() {
   if (!m_initialized_reflection_ctx)
     SetupReflection();
@@ -437,20 +461,53 @@ void SwiftLanguageRuntimeImpl::SetupReflection() {
   if (m_initialized_reflection_ctx)
     return;
 
-  m_reflection_ctx.reset(new NativeReflectionContext(this->GetMemoryReader()));
-  m_initialized_reflection_ctx = true;
-
   auto &target = m_process.GetTarget();
   auto exe_module = target.GetExecutableModule();
-  if (!AddModuleToReflectionContext(exe_module)) {
-    m_reflection_ctx.reset();
+
+  if (!exe_module) {
+    LLDB_LOGF(GetLog(LLDBLog::Types), "%s: Failed to get executable module",
+              LLVM_PRETTY_FUNCTION);
+    m_initialized_reflection_ctx = false;
     return;
   }
+
+  bool objc_interop = (bool)findRuntime(m_process, RuntimeKind::ObjC);
+  const char *objc_interop_msg =
+      objc_interop ? "with Objective-C interopability" : "Swift only";
+
+  auto &triple = exe_module->GetArchitecture().GetTriple();
+  if (triple.isArch64Bit()) {
+    LLDB_LOGF(GetLog(LLDBLog::Types),
+              "Initializing a 64-bit reflection context (%s) for \"%s\"",
+              triple.str().c_str(), objc_interop_msg);
+    m_reflection_ctx = ReflectionContextInterface::CreateReflectionContext64(
+        this->GetMemoryReader(), objc_interop);
+  } else if (triple.isArch32Bit()) {
+    LLDB_LOGF(GetLog(LLDBLog::Types),
+              "Initializing a 32-bit reflection context (%s) for \"%s\"",
+              triple.str().c_str(), objc_interop_msg);
+    m_reflection_ctx = ReflectionContextInterface::CreateReflectionContext32(
+        this->GetMemoryReader(), objc_interop);
+  } else {
+    LLDB_LOGF(GetLog(LLDBLog::Types),
+              "Could not initialize reflection context for \"%s\"",
+              triple.str().c_str());
+  }
+
+  m_initialized_reflection_ctx = true;
+
+  Progress progress(
+      llvm::formatv("Setting up Swift reflection for '{0}'",
+                    exe_module->GetFileSpec().GetFilename().AsCString()),
+      m_modules_to_add.GetSize());
+
+  size_t completion = 0;
 
   // Add all defered modules to reflection context that were added to
   // the target since this SwiftLanguageRuntime was created.
   m_modules_to_add.ForEach([&](const ModuleSP &module_sp) -> bool {
     AddModuleToReflectionContext(module_sp);
+    progress.Increment(++completion);
     return true;
   });
   m_modules_to_add.Clear();
@@ -476,7 +533,7 @@ void SwiftLanguageRuntimeImpl::SetupExclusivity() {
   m_dynamic_exclusivity_flag_addr = FindSymbolForSwiftObject(
       m_process, RuntimeKind::Swift, "_swift_disableExclusivityChecking",
       eSymbolTypeData);
-  Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log(GetLog(LLDBLog::Expressions));
   if (log)
     log->Printf(
         "SwiftLanguageRuntime: _swift_disableExclusivityChecking = %llu",
@@ -534,13 +591,230 @@ void SwiftLanguageRuntime::ModulesDidLoad(const ModuleList &module_list) {
 
   bool did_load_runtime = false;
   module_list.ForEach([&](const ModuleSP &module_sp) -> bool {
-    did_load_runtime |= IsModuleSwiftRuntime(*m_process, *module_sp);
+    did_load_runtime |= IsModuleSwiftRuntime(*m_process, *module_sp) ||
+                        IsStaticSwiftRuntime(*module_sp);
     return !did_load_runtime;
   });
   if (did_load_runtime) {
     m_impl = std::make_unique<SwiftLanguageRuntimeImpl>(*m_process);
     m_impl->ModulesDidLoad(module_list);
   }
+}
+
+static std::unique_ptr<swift::SwiftObjectFileFormat>
+GetObjectFileFormat(llvm::Triple::ObjectFormatType obj_format_type) {
+  std::unique_ptr<swift::SwiftObjectFileFormat> obj_file_format;
+  switch (obj_format_type) {
+  case llvm::Triple::MachO:
+    obj_file_format = std::make_unique<swift::SwiftObjectFileFormatMachO>();
+    break;
+  case llvm::Triple::ELF:
+    obj_file_format = std::make_unique<swift::SwiftObjectFileFormatELF>();
+    break;
+  case llvm::Triple::COFF:
+    obj_file_format = std::make_unique<swift::SwiftObjectFileFormatCOFF>();
+    break;
+  default:
+    if (Log *log = GetLog(LLDBLog::Types))
+      log->Printf("%s: Could not find out swift reflection section names for "
+                  "object format type.",
+                  __FUNCTION__);
+  }
+  return obj_file_format;
+}
+
+static llvm::SmallVector<llvm::StringRef, 1>
+GetLikelySwiftImageNamesForModule(ModuleSP module) {
+  if (!module || !module->GetFileSpec())
+    return {};
+
+  auto name =
+      module->GetFileSpec().GetFileNameStrippingExtension().GetStringRef();
+  if (name == "libswiftCore")
+    name = "Swift";
+  if (name.startswith("libswift"))
+    name = name.drop_front(8);
+  if (name.startswith("lib"))
+    name = name.drop_front(3);
+  return {name};
+}
+
+bool SwiftLanguageRuntimeImpl::AddJitObjectFileToReflectionContext(
+    ObjectFile &obj_file, llvm::Triple::ObjectFormatType obj_format_type,
+      llvm::SmallVector<llvm::StringRef, 1> likely_module_names) {
+  assert(obj_file.GetType() == ObjectFile::eTypeJIT &&
+         "Not a JIT object file!");
+  auto obj_file_format = GetObjectFileFormat(obj_format_type);
+
+  if (!obj_file_format)
+    return false;
+
+  return m_reflection_ctx->addImage(
+      [&](swift::ReflectionSectionKind section_kind)
+          -> std::pair<swift::remote::RemoteRef<void>, uint64_t> {
+        auto section_name = obj_file_format->getSectionName(section_kind);
+        for (auto section : *obj_file.GetSectionList()) {
+          JITSection *jit_section = llvm::dyn_cast<JITSection>(section.get());
+          if (jit_section && section->GetName().AsCString() == section_name) {
+            DataExtractor extractor;
+            auto section_size = section->GetSectionData(extractor);
+            if (!section_size)
+              return {};
+            auto size = jit_section->getNonJitSize();
+            auto data = extractor.GetData();
+            if (section_size < size || !data.begin())
+              return {};
+
+            auto *Buf = malloc(size);
+            std::memcpy(Buf, data.begin(), size);
+            swift::remote::RemoteRef<void> remote_ref(section->GetFileAddress(),
+                                                      Buf);
+
+            return {remote_ref, size};
+          }
+        }
+        return {};
+      },
+      likely_module_names);
+}
+
+bool SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
+    ModuleSP module,
+    llvm::SmallVector<llvm::StringRef, 1> likely_module_names) {
+  auto obj_format_type =
+      module->GetArchitecture().GetTriple().getObjectFormat();
+
+  auto obj_file_format = GetObjectFileFormat(obj_format_type);
+  if (!obj_file_format)
+    return false;
+
+  bool should_register_with_symbol_obj_file = [&]() -> bool {
+    if (!m_process.GetTarget().GetSwiftReadMetadataFromDSYM())
+      return false;
+    auto *symbol_file = module->GetSymbolFile();
+    if (!symbol_file)
+      return false;
+    auto *sym_obj_file = symbol_file->GetObjectFile();
+    if (!sym_obj_file)
+      return false;
+
+    llvm::Optional<llvm::StringRef> maybe_segment_name =
+        obj_file_format->getSymbolRichSegmentName();
+    if (!maybe_segment_name)
+      return false;
+
+    llvm::StringRef segment_name = *maybe_segment_name;
+
+    auto *section_list = sym_obj_file->GetSectionList();
+    auto segment_iter = llvm::find_if(*section_list, [&](auto segment) {
+      return segment->GetName() == segment_name.begin();
+    });
+
+    if (segment_iter == section_list->end())
+      return false;
+
+    auto *segment = segment_iter->get();
+
+    auto section_iter =
+        llvm::find_if(segment->GetChildren(), [&](auto section) {
+          return obj_file_format->sectionContainsReflectionData(
+              section->GetName().GetStringRef());
+        });
+    return section_iter != segment->GetChildren().end();
+  }();
+
+  llvm::Optional<llvm::StringRef> maybe_segment_name;
+  llvm::Optional<llvm::StringRef> maybe_secondary_segment_name;
+  ObjectFile *object_file;
+  if (should_register_with_symbol_obj_file) {
+    maybe_segment_name = obj_file_format->getSymbolRichSegmentName();
+    maybe_secondary_segment_name = obj_file_format->getSegmentName();
+    object_file = module->GetSymbolFile()->GetObjectFile();
+  } else {
+    maybe_segment_name = obj_file_format->getSegmentName();
+    object_file = module->GetObjectFile();
+  }
+
+  if (!maybe_segment_name)
+    return false;
+
+  llvm::StringRef segment_name = *maybe_segment_name;
+
+  auto lldb_memory_reader = GetMemoryReader();
+  auto maybe_start_and_end = lldb_memory_reader->addModuleToAddressMap(
+      module, should_register_with_symbol_obj_file);
+  if (!maybe_start_and_end)
+    return false;
+
+  uint64_t start_address, end_address;
+  std::tie(start_address, end_address) = *maybe_start_and_end;
+
+  auto *section_list = object_file->GetSectionList();
+  auto segment_iter = llvm::find_if(*section_list, [&](auto segment) {
+    return segment->GetName() == segment_name.begin();
+  });
+
+  if (segment_iter == section_list->end())
+    return false;
+
+  auto *segment = segment_iter->get();
+  Section *maybe_secondary_segment = nullptr;
+  if (maybe_secondary_segment_name) {
+    auto secondary_segment_name = *maybe_secondary_segment_name;
+    auto segment_iter = llvm::find_if(*section_list, [&](auto segment) {
+      return segment->GetName() == secondary_segment_name.begin();
+    });
+
+    if (segment_iter != section_list->end())
+      maybe_secondary_segment = segment_iter->get();
+  }
+  auto find_section_with_kind = [&](Section *segment,
+                                    swift::ReflectionSectionKind section_kind)
+      -> std::pair<swift::remote::RemoteRef<void>, uint64_t> {
+    if (!segment)
+      return {};
+
+    auto section_name = obj_file_format->getSectionName(section_kind);
+    for (auto section : segment->GetChildren()) {
+      // Iterate over the sections until we find the reflection section we
+      // need.
+      if (section->GetName().AsCString() == section_name) {
+        DataExtractor extractor;
+        auto size = section->GetSectionData(extractor);
+        auto data = extractor.GetData();
+        size = section->GetFileSize();
+        if (!data.begin())
+          return {};
+
+        // Alloc a buffer and copy over the reflection section's contents.
+        // This buffer will be owned by reflection context.
+        auto *Buf = malloc(size);
+        std::memcpy(Buf, data.begin(), size);
+
+        // The section's address is the start address for this image
+        // added with the section's virtual address. We need to use the
+        // virtual address instead of the file offset because the offsets
+        // encoded in the reflection section are calculated in the virtual
+        // address space.
+        auto address = start_address + section->GetFileAddress();
+        assert(address <= end_address && "Address outside of range!");
+
+        swift::remote::RemoteRef<void> remote_ref(address, Buf);
+        return {remote_ref, size};
+      }
+    }
+    return {};
+  };
+
+  return m_reflection_ctx->addImage(
+      [&](swift::ReflectionSectionKind section_kind)
+          -> std::pair<swift::remote::RemoteRef<void>, uint64_t> {
+        auto pair = find_section_with_kind(segment, section_kind);
+        if (pair.first)
+          return pair;
+        return find_section_with_kind(maybe_secondary_segment, section_kind);
+      },
+      likely_module_names);
 }
 
 bool SwiftLanguageRuntimeImpl::AddModuleToReflectionContext(
@@ -555,29 +829,53 @@ bool SwiftLanguageRuntimeImpl::AddModuleToReflectionContext(
   auto *obj_file = module_sp->GetObjectFile();
   if (!obj_file)
     return false;
+  auto &target = m_process.GetTarget();
   Address start_address = obj_file->GetBaseAddress();
   auto load_ptr = static_cast<uintptr_t>(
-      start_address.GetLoadAddress(&(m_process.GetTarget())));
+      start_address.GetLoadAddress(&target));
+  auto likely_module_names = GetLikelySwiftImageNamesForModule(module_sp);
+  if (obj_file->GetType() == ObjectFile::eTypeJIT) {
+    auto object_format_type =
+        module_sp->GetArchitecture().GetTriple().getObjectFormat();
+    return AddJitObjectFileToReflectionContext(*obj_file, object_format_type,
+                                               likely_module_names);
+  }
+
   if (load_ptr == 0 || load_ptr == LLDB_INVALID_ADDRESS) {
     if (obj_file->GetType() != ObjectFile::eTypeJIT)
-      if (Log *log = GetLogIfAnyCategoriesSet(LIBLLDB_LOG_TYPES))
+      if (Log *log = GetLog(LLDBLog::Types))
         log->Printf("%s: failed to get start address for %s.", __FUNCTION__,
                     obj_file->GetFileSpec().GetFilename().GetCString());
     return false;
   }
-  if (HasReflectionInfo(obj_file)) {
-    // When dealing with ELF, we need to pass in the contents of the on-disk
-    // file, since the Section Header Table is not present in the child process
-    if (obj_file->GetPluginName().GetStringRef().equals("elf")) {
-      DataExtractor extractor;
-      auto size = obj_file->GetData(0, obj_file->GetByteSize(), extractor);
-      const uint8_t *file_data = extractor.GetDataStart();
-      llvm::sys::MemoryBlock file_buffer((void *)file_data, size);
-      m_reflection_ctx->readELF(swift::remote::RemoteAddress(load_ptr),
-          llvm::Optional<llvm::sys::MemoryBlock>(file_buffer));
-    } else {
-      m_reflection_ctx->addImage(swift::remote::RemoteAddress(load_ptr));
+  bool found = HasReflectionInfo(obj_file);
+  LLDB_LOGF(GetLog(LLDBLog::Types), "%s reflection metadata in \"%s\"",
+            found ? "Adding" : "No", obj_file->GetFileSpec().GetCString());
+  if (!found)
+    return true;
+
+  auto read_from_file_cache =
+      GetMemoryReader()->readMetadataFromFileCacheEnabled();
+  // When dealing with ELF, we need to pass in the contents of the on-disk
+  // file, since the Section Header Table is not present in the child process
+  if (obj_file->GetPluginName().equals("elf")) {
+    DataExtractor extractor;
+    auto size = obj_file->GetData(0, obj_file->GetByteSize(), extractor);
+    const uint8_t *file_data = extractor.GetDataStart();
+    llvm::sys::MemoryBlock file_buffer((void *)file_data, size);
+    m_reflection_ctx->readELF(
+        swift::remote::RemoteAddress(load_ptr),
+        llvm::Optional<llvm::sys::MemoryBlock>(file_buffer),
+        likely_module_names);
+  } else if (read_from_file_cache &&
+             obj_file->GetPluginName().equals("mach-o")) {
+    if (!AddObjectFileToReflectionContext(module_sp, likely_module_names)) {
+      m_reflection_ctx->addImage(swift::remote::RemoteAddress(load_ptr),
+                                 likely_module_names);
     }
+  } else {
+    m_reflection_ctx->addImage(swift::remote::RemoteAddress(load_ptr),
+                               likely_module_names);
   }
   return true;
 }
@@ -598,7 +896,7 @@ void SwiftLanguageRuntimeImpl::ModulesDidLoad(const ModuleList &module_list) {
 
 std::string 
 SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Result(ValueObject &object) {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_DATAFORMATTERS));
+  Log *log(GetLog(LLDBLog::DataFormatters));
   std::string expr_string
       = llvm::formatv("Swift._DebuggerSupport.stringForPrintObject({0})",
                       object.GetName().GetCString()).str();
@@ -610,7 +908,7 @@ SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Result(ValueObject &object) {
 
 std::string 
 SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Ref(ValueObject &object) {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_DATAFORMATTERS));
+  Log *log(GetLog(LLDBLog::DataFormatters));
 
   StreamString expr_string;
   std::string expr_str 
@@ -634,7 +932,7 @@ std::string
 SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Copy(ValueObject &object,
     lldb::addr_t &copy_location)
 {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_DATAFORMATTERS));
+  Log *log(GetLog(LLDBLog::DataFormatters));
 
   ValueObjectSP static_sp(object.GetStaticValue());
 
@@ -654,7 +952,7 @@ SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Copy(ValueObject &object,
   auto *swift_ast_ctx =
       llvm::dyn_cast_or_null<TypeSystemSwift>(static_type.GetTypeSystem());
   if (swift_ast_ctx) {
-    SwiftASTContextLock lock(GetSwiftExeCtx(object));
+    SwiftScratchContextLock lock(GetSwiftExeCtx(object));
     static_type = BindGenericTypeParameters(*frame_sp, static_type);
   }
 
@@ -702,7 +1000,7 @@ SwiftLanguageRuntimeImpl::RunObjectDescriptionExpr(ValueObject &object,
     std::string &expr_string, 
     Stream &result)
 {
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_DATAFORMATTERS));
+  Log *log(GetLog(LLDBLog::DataFormatters));
   ValueObjectSP result_sp;
   EvaluateExpressionOptions eval_options;
   eval_options.SetLanguage(lldb::eLanguageTypeSwift);
@@ -882,10 +1180,11 @@ void SwiftLanguageRuntime::FindFunctionPointersInCall(
       Status error;
       Target &target = frame.GetThread()->GetProcess()->GetTarget();
       ExecutionContext exe_ctx(frame);
-      llvm::Optional<SwiftASTContextReader> maybe_swift_ast =
-          target.GetScratchSwiftASTContext(error, frame);
-      if (maybe_swift_ast) {
-        SwiftASTContext *swift_ast = maybe_swift_ast->get();
+      llvm::Optional<SwiftScratchContextReader> maybe_swift_ast =
+          target.GetSwiftScratchContext(error, frame);
+      auto scratch_ctx = maybe_swift_ast->get();
+      if (scratch_ctx) {
+        if (SwiftASTContext *swift_ast = scratch_ctx->GetSwiftASTContext()) {
         CompilerType function_type = swift_ast->GetTypeFromMangledTypename(
             mangled_name.GetMangledName());
         if (error.Success()) {
@@ -917,7 +1216,7 @@ void SwiftLanguageRuntime::FindFunctionPointersInCall(
                 CompilerType clang_void_ptr_type =
                     clang_ctx->GetBasicType(eBasicTypeVoid).GetPointerType();
 
-                input_value.SetValueType(Value::eValueTypeScalar);
+                input_value.SetValueType(Value::ValueType::Scalar);
                 input_value.SetCompilerType(clang_void_ptr_type);
                 argument_values.PushValue(input_value);
 
@@ -974,6 +1273,7 @@ void SwiftLanguageRuntime::FindFunctionPointersInCall(
             }
           }
         }
+      }
       }
     }
   }
@@ -1089,11 +1389,17 @@ SwiftLanguageRuntime::CalculateErrorValue(StackFrameSP frame_sp,
   if (!exe_scope)
     return error_valobj_sp;
 
-  llvm::Optional<SwiftASTContextReader> maybe_ast_context =
-      target->GetScratchSwiftASTContext(error, *frame_sp);
-  if (!maybe_ast_context || error.Fail())
+  llvm::Optional<SwiftScratchContextReader> maybe_scratch_context =
+      target->GetSwiftScratchContext(error, *frame_sp);
+  if (!maybe_scratch_context || error.Fail())
     return error_valobj_sp;
-  SwiftASTContext *ast_context = maybe_ast_context->get();
+  auto scratch_ctx = maybe_scratch_context->get();
+  if (!scratch_ctx)
+    return error_valobj_sp;
+  SwiftASTContext *ast_context = scratch_ctx->GetSwiftASTContext();
+  if (!ast_context)
+    return error_valobj_sp;
+
 
   auto buffer_up =
       std::make_unique<DataBufferHeap>(arg0->GetScalar().GetByteSize(), 0);
@@ -1428,7 +1734,7 @@ SwiftLanguageRuntimeImpl::GetBridgedSyntheticChildProvider(
   ProjectionSyntheticChildren::TypeProjectionUP type_projection(
       new ProjectionSyntheticChildren::TypeProjectionUP::element_type());
 
-  if (auto maybe_swift_ast_ctx = valobj.GetScratchSwiftASTContext()) {
+  if (auto maybe_swift_ast_ctx = valobj.GetSwiftScratchContext()) {
     CompilerType swift_type =
         maybe_swift_ast_ctx->get()->GetTypeFromMangledTypename(type_name);
 
@@ -1466,7 +1772,7 @@ void SwiftLanguageRuntimeImpl::WillStartExecutingUserExpression(
     return;
 
   std::lock_guard<std::mutex> lock(m_active_user_expr_mutex);
-  Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log(GetLog(LLDBLog::Expressions));
   LLDB_LOG(log,
            "SwiftLanguageRuntime: starting user expression. "
            "Number active: %u",
@@ -1534,7 +1840,7 @@ void SwiftLanguageRuntimeImpl::DidFinishExecutingUserExpression(
     return;
 
   std::lock_guard<std::mutex> lock(m_active_user_expr_mutex);
-  Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  Log *log(GetLog(LLDBLog::Expressions));
 
   --m_active_user_expr_count;
   LLDB_LOG(log,
@@ -1627,8 +1933,8 @@ llvm::Optional<Value> SwiftLanguageRuntime::GetErrorReturnLocationAfterReturn(
 
   Value val;
   if (reg_value.GetScalarValue(val.GetScalar())) {
-    val.SetValueType(Value::eValueTypeScalar);
-    val.SetContext(Value::eContextTypeRegisterInfo,
+    val.SetValueType(Value::ValueType::Scalar);
+    val.SetContext(Value::ContextType::RegisterInfo,
                    const_cast<RegisterInfo *>(reg_info));
     error_val = val;
   }
@@ -1681,19 +1987,6 @@ lldb::BreakpointResolverSP
 SwiftLanguageRuntime::CreateExceptionResolver(const lldb::BreakpointSP &bkpt, bool catch_bp,
                                               bool throw_bp) {
   return ::CreateExceptionResolver(bkpt, catch_bp, throw_bp);
-}
-
-static const char *
-SwiftDemangleNodeKindToCString(const swift::Demangle::Node::Kind node_kind) {
-#define NODE(e)                                                                \
-  case swift::Demangle::Node::Kind::e:                                         \
-    return #e;
-
-  switch (node_kind) {
-#include "swift/Demangling/DemangleNodes.def"
-  }
-  return "swift::Demangle::Node::Kind::???";
-#undef NODE
 }
 
 static OptionDefinition g_swift_demangle_options[] = {
@@ -1754,43 +2047,25 @@ public:
   };
 
 protected:
-  void PrintNode(swift::Demangle::NodePointer node_ptr, Stream &stream,
-                 int depth = 0) {
-    if (!node_ptr)
-      return;
-
-    std::string indent(2 * depth, ' ');
-
-    stream.Printf("%s", indent.c_str());
-
-    stream.Printf("kind=%s",
-                  SwiftDemangleNodeKindToCString(node_ptr->getKind()));
-    if (node_ptr->hasText()) {
-      std::string Text = node_ptr->getText().str();
-      stream.Printf(", text=\"%s\"", Text.c_str());
-    }
-    if (node_ptr->hasIndex())
-      stream.Printf(", index=%" PRIu64, node_ptr->getIndex());
-
-    stream.Printf("\n");
-
-    for (auto &&child : *node_ptr) {
-      PrintNode(child, stream, depth + 1);
-    }
-  }
-
   bool DoExecute(Args &command, CommandReturnObject &result) override {
     for (size_t i = 0; i < command.GetArgumentCount(); i++) {
-      const char *arg = command.GetArgumentAtIndex(i);
-      if (arg && *arg) {
+      StringRef name = command.GetArgumentAtIndex(i);
+      if (!name.empty()) {
         swift::Demangle::Context demangle_ctx;
-        auto node_ptr = demangle_ctx.demangleSymbolAsNode(llvm::StringRef(arg));
+        NodePointer node_ptr = nullptr;
+        // Match the behavior of swift-demangle and accept Swift symbols without
+        // the leading `$`. This makes symbol copy & paste more convenient.
+        if (name.startswith("S") || name.startswith("s")) {
+          std::string correctedName = std::string("$") + name.str();
+          node_ptr = demangle_ctx.demangleSymbolAsNode(correctedName);
+        } else {
+          node_ptr = demangle_ctx.demangleSymbolAsNode(name);
+        }
         if (node_ptr) {
-          if (m_options.m_expand) {
-            PrintNode(node_ptr, result.GetOutputStream());
-          }
+          if (m_options.m_expand)
+            result.GetOutputStream().PutCString(getNodeTreeAsString(node_ptr));
           result.GetOutputStream().Printf(
-              "%s ---> %s\n", arg,
+              "%s ---> %s\n", name.data(),
               swift::Demangle::nodeToString(node_ptr).c_str());
         }
       }
@@ -1951,12 +2226,6 @@ lldb_private::ConstString SwiftLanguageRuntime::GetPluginNameStatic() {
   return g_name;
 }
 
-lldb_private::ConstString SwiftLanguageRuntime::GetPluginName() {
-  return GetPluginNameStatic();
-}
-
-uint32_t SwiftLanguageRuntime::GetPluginVersion() { return 1; }
-
 #define FORWARD(METHOD, ...)                                                   \
   assert(m_impl || m_stub);                                                    \
   return m_impl ? m_impl->METHOD(__VA_ARGS__) : m_stub->METHOD(__VA_ARGS__);
@@ -1967,6 +2236,12 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
     Value::ValueType &value_type) {
   FORWARD(GetDynamicTypeAndAddress, in_value, use_dynamic, class_type_or_name,
           address, value_type);
+}
+
+void SwiftLanguageRuntime::DumpTyperef(CompilerType type,
+                                       TypeSystemSwiftTypeRef *module_holder,
+                                       Stream *s) {
+  FORWARD(DumpTyperef, type, module_holder, s);
 }
 
 TypeAndOrName
@@ -2017,7 +2292,8 @@ llvm::Optional<std::string> SwiftLanguageRuntime::GetEnumCaseName(
   FORWARD(GetEnumCaseName, type, data, exe_ctx);
 }
 
-llvm::Optional<size_t> SwiftLanguageRuntime::GetIndexOfChildMemberWithName(
+std::pair<bool, llvm::Optional<size_t>>
+SwiftLanguageRuntime::GetIndexOfChildMemberWithName(
     CompilerType type, llvm::StringRef name, ExecutionContext *exe_ctx,
     bool omit_empty_base_classes, std::vector<uint32_t> &child_indexes) {
   FORWARD(GetIndexOfChildMemberWithName, type, name, exe_ctx,
@@ -2212,33 +2488,49 @@ SwiftLanguageRuntime::GetRuntimeUnwindPlan(ProcessSP process_sp,
                                             eSymbolContextSymbol))
       return UnwindPlanSP();
 
+  Address func_start_addr;
+  uint32_t prologue_size;
+  ConstString mangled_name;
   if (sc.function) {
-    Address func_start_addr = sc.function->GetAddressRange().GetBaseAddress();
-    AddressRange prologue_range(func_start_addr,
-                                sc.function->GetPrologueByteSize());
-    if (prologue_range.ContainsLoadAddress(pc, &target) ||
-        func_start_addr == pc) {
-      return UnwindPlanSP();
-    }
+    func_start_addr = sc.function->GetAddressRange().GetBaseAddress();
+    prologue_size = sc.function->GetPrologueByteSize();
+    mangled_name = sc.function->GetMangled().GetMangledName();
   } else if (sc.symbol) {
-    Address func_start_addr = sc.symbol->GetAddress();
-    AddressRange prologue_range(func_start_addr,
-                                sc.symbol->GetPrologueByteSize());
-    if (prologue_range.ContainsLoadAddress(pc, &target) ||
-        func_start_addr == pc) {
-      return UnwindPlanSP();
-    }
+    func_start_addr = sc.symbol->GetAddress();
+    prologue_size = sc.symbol->GetPrologueByteSize();
+    mangled_name = sc.symbol->GetMangled().GetMangledName();
+  } else {
+    return UnwindPlanSP();
   }
 
-  addr_t saved_fp = LLDB_INVALID_ADDRESS;
-  Status error;
-  if (!process_sp->ReadMemory(fp, &saved_fp, 8, error))
-    return UnwindPlanSP();
+  AddressRange prologue_range(func_start_addr, prologue_size);
+  bool in_prologue = (func_start_addr == pc ||
+                      prologue_range.ContainsLoadAddress(pc, &target));
 
-  // Get the high nibble of the dreferenced fp; if the 60th bit is set,
-  // this is the transition to a swift async AsyncContext chain.
-  if ((saved_fp & (0xfULL << 60)) >> 60 != 1)
-    return UnwindPlanSP();
+  if (in_prologue) {
+    if (!IsAnySwiftAsyncFunctionSymbol(mangled_name.GetStringRef()))
+      return UnwindPlanSP();
+  } else {
+    addr_t saved_fp = LLDB_INVALID_ADDRESS;
+    Status error;
+    if (!process_sp->ReadMemory(fp, &saved_fp, 8, error))
+      return UnwindPlanSP();
+
+    // Get the high nibble of the dreferenced fp; if the 60th bit is set,
+    // this is the transition to a swift async AsyncContext chain.
+    if ((saved_fp & (0xfULL << 60)) >> 60 != 1)
+      return UnwindPlanSP();
+  }
+
+  // The coroutine funclets split from an async function have 2 different ABIs:
+  //  - Async suspend partial functions and the first funclet get their async
+  //    context directly in the async register.
+  //  - Async await resume partial functions take their context indirectly, it
+  //    needs to be dereferenced to get the actual function's context.
+  // The debug info for locals reflects this difference, so our unwinding of the
+  // context register needs to reflect it too.
+  bool indirect_context =
+      IsSwiftAsyncAwaitResumePartialFunctionSymbol(mangled_name.GetStringRef());
 
   UnwindPlan::RowSP row(new UnwindPlan::Row);
   const int32_t ptr_size = 8;
@@ -2279,30 +2571,30 @@ SwiftLanguageRuntime::GetRuntimeUnwindPlan(ProcessSP process_sp,
   else
     llvm_unreachable("Unsupported architecture");
 
-  row->GetCFAValue().SetIsDWARFExpression(expr, expr_size);
-  // The coroutine funclets split from an async function have 2 different ABIs:
-  //  - Async suspend partial functions and the first funclet get their async
-  //    context directly in the async register.
-  //  - Async await resume partial functions take their context indirectly, it
-  //    needs to be dereferenced to get the actual function's context.
-  // The debug info for locals reflects this difference, so our unwinding of the
-  // context register needs to reflect it too.
-  bool indirect_context =
-      sc.symbol ? IsSwiftAsyncAwaitResumePartialFunctionSymbol(
-                      sc.symbol->GetMangled().GetMangledName().GetStringRef())
-                : false;
+  if (in_prologue) {
+    if (indirect_context)
+      row->GetCFAValue().SetIsRegisterDereferenced(regnums->async_ctx_regnum);
+    else
+      row->GetCFAValue().SetIsRegisterPlusOffset(regnums->async_ctx_regnum, 0);
+  } else {
+    row->GetCFAValue().SetIsDWARFExpression(expr, expr_size);
+  }
 
   if (indirect_context) {
-    // In a "resume" coroutine, the passed context argument needs to be
-    // dereferenced once to get the context. This is reflected in the debug
-    // info so we need to account for it and report am async register value
-    // that needs to be dereferenced to get to the context.
-    // Note that the size passed for the DWARF expression is the size of the
-    // array minus one. This skips the last deref for this use.
-    assert(expr[expr_size - 1] == llvm::dwarf::DW_OP_deref &&
-           "Should skip a deref");
-    row->SetRegisterLocationToIsDWARFExpression(regnums->async_ctx_regnum, expr,
-                                                expr_size - 1, false);
+    if (in_prologue) {
+      row->SetRegisterLocationToSame(regnums->async_ctx_regnum, false);
+    } else {
+      // In a "resume" coroutine, the passed context argument needs to be
+      // dereferenced once to get the context. This is reflected in the debug
+      // info so we need to account for it and report am async register value
+      // that needs to be dereferenced to get to the context.
+      // Note that the size passed for the DWARF expression is the size of the
+      // array minus one. This skips the last deref for this use.
+      assert(expr[expr_size - 1] == llvm::dwarf::DW_OP_deref &&
+             "Should skip a deref");
+      row->SetRegisterLocationToIsDWARFExpression(regnums->async_ctx_regnum,
+                                                  expr, expr_size - 1, false);
+    }
   } else {
     // In the first part of a split async function, the context is passed
     // directly, so we can use the CFA value directly.

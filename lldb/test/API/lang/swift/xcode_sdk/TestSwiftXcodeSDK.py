@@ -12,11 +12,12 @@ class TestSwiftXcodeSDK(lldbtest.TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
     def check_log(self, log, expected_path):
-        logfile = open(log, "r")
+        import io
+        logfile = io.open(log, "r", encoding='utf-8')
         in_expr_log = 0
         found = 0
         for line in logfile:
-            if line.startswith(" SwiftASTContextForExpressions::LogConfiguration"):
+            if line.startswith(" SwiftASTContextForExpressions::LogConfiguration(SwiftASTContext"):
                 in_expr_log += 1
             if in_expr_log and "SDK path" in line and expected_path in line:
                 found += 1
@@ -35,7 +36,7 @@ class TestSwiftXcodeSDK(lldbtest.TestBase):
         lldbutil.run_to_name_breakpoint(self, 'main')
 
         self.expect("p 1")
-        self.check_log(log, ".sdk")
+        self.check_log(log, "MacOSX")
 
     @swiftTest
     @skipUnlessDarwin

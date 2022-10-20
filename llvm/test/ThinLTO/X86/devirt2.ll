@@ -131,10 +131,12 @@
 ; RUN:   -r=%t1.o,_ZN1D1mEi, \
 ; RUN:   -r=%t1.o,test2, \
 ; RUN:   -r=%t2.o,_ZN1A1nEi,p \
+; RUN:   -r=%t2.o,_ZN1A1nEi, \
 ; RUN:   -r=%t2.o,_ZN1B1fEi,p \
 ; RUN:   -r=%t2.o,_ZN1C1fEi,p \
 ; RUN:   -r=%t2.o,_ZN1D1mEi,p \
 ; RUN:   -r=%t2.o,_ZN1E1mEi,p \
+; RUN:   -r=%t2.o,_ZN1E1mEi, \
 ; RUN:   -r=%t2.o,_ZTV1B, \
 ; RUN:   -r=%t2.o,_ZTV1C, \
 ; RUN:   -r=%t2.o,_ZTV1D, \
@@ -167,10 +169,12 @@
 ; RUN:   -r=%t1.o,_ZN1D1mEi, \
 ; RUN:   -r=%t1.o,test2, \
 ; RUN:   -r=%t2.o,_ZN1A1nEi,p \
+; RUN:   -r=%t2.o,_ZN1A1nEi, \
 ; RUN:   -r=%t2.o,_ZN1B1fEi,p \
 ; RUN:   -r=%t2.o,_ZN1C1fEi,p \
 ; RUN:   -r=%t2.o,_ZN1D1mEi,p \
 ; RUN:   -r=%t2.o,_ZN1E1mEi,p \
+; RUN:   -r=%t2.o,_ZN1E1mEi, \
 ; RUN:   -r=%t2.o,_ZTV1B, \
 ; RUN:   -r=%t2.o,_ZTV1C, \
 ; RUN:   -r=%t2.o,_ZTV1D, \
@@ -190,12 +194,12 @@
 ; RUN: llvm-nm %t5.1 | FileCheck %s --check-prefix=NM-HYBRID1
 ; RUN: llvm-nm %t5.2 | FileCheck %s --check-prefix=NM-HYBRID2
 
-; NM-HYBRID1-DAG: U _ZN1A1nEi$
-; NM-HYBRID1-DAG: U _ZN1E1mEi$
+; NM-HYBRID1-DAG: U _ZN1A1nEi.{{[0-9a-f]*}}
+; NM-HYBRID1-DAG: U _ZN1E1mEi.{{[0-9a-f]*}}
 ; NM-HYBRID1-DAG: U _ZN1D1mEi
 
-; NM-HYBRID2-DAG: T _ZN1A1nEi$
-; NM-HYBRID2-DAG: T _ZN1E1mEi$
+; NM-HYBRID2-DAG: T _ZN1A1nEi.{{[0-9a-f]*}}
+; NM-HYBRID2-DAG: T _ZN1E1mEi.{{[0-9a-f]*}}
 ; NM-HYBRID2-DAG: W _ZN1D1mEi
 ; NM-HYBRID2-DAG: T _ZN1B1fEi
 ; NM-HYBRID2-DAG: T _ZN1C1fEi

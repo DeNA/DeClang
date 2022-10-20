@@ -1,12 +1,46 @@
-add_subdirectory(assert)
+function(add_fp_unittest name)
+  cmake_parse_arguments(
+    "MATH_UNITTEST"
+    "NEED_MPFR" # Optional arguments
+    "" # Single value arguments
+    "" # Multi-value arguments
+    ${ARGN}
+  )
+
+  if(MATH_UNITTEST_NEED_MPFR)
+    if(NOT LIBC_TESTS_CAN_USE_MPFR)
+      message("WARNING: Math test ${name} will be skipped as MPFR library is not available.")
+      return()
+    endif()
+  endif()
+
+  add_libc_unittest(${name} ${MATH_UNITTEST_UNPARSED_ARGUMENTS})
+  get_fq_target_name(${name} fq_target_name)
+  if (NOT TARGET ${fq_target_name})
+    return()
+  endif()
+  if(MATH_UNITTEST_NEED_MPFR)
+    target_link_libraries(${fq_target_name} PRIVATE libcMPFRWrapper -lmpfr -lgmp)
+  endif()
+  target_link_libraries(${fq_target_name} PRIVATE LibcFPTestHelpers)
+endfunction(add_fp_unittest)
+
+add_subdirectory(__support)
 add_subdirectory(ctype)
 add_subdirectory(errno)
 add_subdirectory(fenv)
+add_subdirectory(inttypes)
 add_subdirectory(math)
+add_subdirectory(string)
+add_subdirectory(stdlib)
+
+if(NOT LLVM_LIBC_FULL_BUILD)
+  return()
+endif()
+
+add_subdirectory(assert)
 add_subdirectory(signal)
 add_subdirectory(stdio)
-add_subdirectory(stdlib)
-add_subdirectory(string)
 add_subdirectory(sys)
 add_subdirectory(threads)
 add_subdirectory(time)
@@ -15,7 +49,7 @@ add_subdirectory(unistd)
 set(public_test ${CMAKE_CURRENT_BINARY_DIR}/public_integration_test.cpp)
 
 set(entrypoints_name_list "")
-foreach(entry IN LISTS TARGET_LIBC_ENTRYPOINTS TARGET_LIBM_ENTRYPOINTS)
+foreach(entry IN LISTS TARGET_LLVMLIBC_ENTRYPOINTS)
   get_target_property(entry_name ${entry} "ENTRYPOINT_NAME")
   list(APPEND entrypoints_name_list ${entry_name})
 endforeach()
@@ -36,7 +70,7 @@ add_custom_command(
 
   DEPENDS ${LIBC_SOURCE_DIR}/config/${LIBC_TARGET_OS}/api.td ${spec_files}
           libc-prototype-testgen ${TARGET_PUBLIC_HEADERS}
-          llvmlibc llvmlibm
+          llvmlibc
 )
 
 add_executable(
@@ -69,7 +103,7 @@ target_link_options(
   PRIVATE "-nostdlib"
 )
 set(library_files)
-foreach(library_name IN LISTS "llvmlibc;llvmlibm")
+foreach(library_name IN LISTS "llvmlibc")
   get_target_property(library_file ${library_name} "LIBRARY_FILE")
   list(APPEND library_files ${library_file})
 endforeach()

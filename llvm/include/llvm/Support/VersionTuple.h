@@ -17,6 +17,7 @@
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/Support/HashBuilder.h"
 #include <string>
 #include <tuple>
 
@@ -99,6 +100,20 @@ public:
     return *this;
   }
 
+  /// Return a version tuple that contains only components that are non-zero.
+  VersionTuple normalize() const {
+    VersionTuple Result = *this;
+    if (Result.Build == 0) {
+      Result.HasBuild = false;
+      if (Result.Subminor == 0) {
+        Result.HasSubminor = false;
+        if (Result.Minor == 0)
+          Result.HasMinor = false;
+      }
+    }
+    return Result;
+  }
+
   /// Determine if two version numbers are equivalent. If not
   /// provided, minor and subminor version numbers are considered to be zero.
   friend bool operator==(const VersionTuple &X, const VersionTuple &Y) {
@@ -153,6 +168,12 @@ public:
     return llvm::hash_combine(VT.Major, VT.Minor, VT.Subminor, VT.Build);
   }
 
+  template <typename HasherT, llvm::support::endianness Endianness>
+  friend void addHash(HashBuilderImpl<HasherT, Endianness> &HBuilder,
+                      const VersionTuple &VT) {
+    HBuilder.add(VT.Major, VT.Minor, VT.Subminor, VT.Build);
+  }
+
   /// Retrieve a string representation of the version number.
   std::string getAsString() const;
 
@@ -165,32 +186,28 @@ public:
 /// Print a version number.
 raw_ostream &operator<<(raw_ostream &Out, const VersionTuple &V);
 
-  // Provide DenseMapInfo for version tuples.
-  template<>
-  struct DenseMapInfo<VersionTuple> {
-    static inline VersionTuple getEmptyKey() {
-      return VersionTuple(0x7FFFFFFF);
-    }
-    static inline VersionTuple getTombstoneKey() {
-      return VersionTuple(0x7FFFFFFE);
-    }
-    static unsigned getHashValue(const VersionTuple &value) {
-      unsigned result = value.getMajor();
-      if (auto minor = value.getMinor())
-        result = detail::combineHashValue(result, *minor);
-      if (auto subminor = value.getSubminor())
-        result = detail::combineHashValue(result, *subminor);
-      if (auto build = value.getBuild())
-        result = detail::combineHashValue(result, *build);
+// Provide DenseMapInfo for version tuples.
+template <> struct DenseMapInfo<VersionTuple> {
+  static inline VersionTuple getEmptyKey() { return VersionTuple(0x7FFFFFFF); }
+  static inline VersionTuple getTombstoneKey() {
+    return VersionTuple(0x7FFFFFFE);
+  }
+  static unsigned getHashValue(const VersionTuple &Value) {
+    unsigned Result = Value.getMajor();
+    if (auto Minor = Value.getMinor())
+      Result = detail::combineHashValue(Result, *Minor);
+    if (auto Subminor = Value.getSubminor())
+      Result = detail::combineHashValue(Result, *Subminor);
+    if (auto Build = Value.getBuild())
+      Result = detail::combineHashValue(Result, *Build);
 
-      return result;
-    }
+    return Result;
+  }
 
-    static bool isEqual(const VersionTuple &lhs,
-                        const VersionTuple &rhs) {
-      return lhs == rhs;
-    }
-  };
+  static bool isEqual(const VersionTuple &LHS, const VersionTuple &RHS) {
+    return LHS == RHS;
+  }
+};
 
 } // end namespace llvm
 #endif // LLVM_SUPPORT_VERSIONTUPLE_H

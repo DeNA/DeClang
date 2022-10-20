@@ -13,6 +13,7 @@
 #ifndef LLVM_TRANSFORMS_UTILS_MODULEUTILS_H
 #define LLVM_TRANSFORMS_UTILS_MODULEUTILS_H
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include <utility> // for std::pair
@@ -24,6 +25,7 @@ class Module;
 class Function;
 class FunctionCallee;
 class GlobalValue;
+class GlobalVariable;
 class Constant;
 class Value;
 class Type;
@@ -68,11 +70,6 @@ std::pair<Function *, FunctionCallee> getOrCreateSanitizerCtorAndInitFunctions(
     function_ref<void(Function *, FunctionCallee)> FunctionsCreatedCallback,
     StringRef VersionCheckName = StringRef());
 
-// Creates and returns a sanitizer init function without argument if it doesn't
-// exist, and adds it to the global constructors list. Otherwise it returns the
-// existing function.
-Function *getOrCreateInitFunction(Module &M, StringRef Name);
-
 /// Rename all the anon globals in the module using a hash computed from
 /// the list of public globals in the module.
 bool nameUnamedGlobals(Module &M);
@@ -82,6 +79,10 @@ void appendToUsed(Module &M, ArrayRef<GlobalValue *> Values);
 
 /// Adds global values to the llvm.compiler.used list.
 void appendToCompilerUsed(Module &M, ArrayRef<GlobalValue *> Values);
+
+/// Replaces llvm.used or llvm.compiler.used list with a new set of values.
+GlobalVariable *setUsedInitializer(GlobalVariable &V,
+                                   const SmallPtrSetImpl<GlobalValue *> &Init);
 
 /// Filter out potentially dead comdat functions where other entries keep the
 /// entire comdat group alive.
@@ -120,4 +121,4 @@ void setVectorVariantNames(CallInst *CI,
 } // End VFABI namespace
 } // End llvm namespace
 
-#endif //  LLVM_TRANSFORMS_UTILS_MODULEUTILS_H
+#endif // LLVM_TRANSFORMS_UTILS_MODULEUTILS_H

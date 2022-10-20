@@ -26,6 +26,10 @@ Some of the important classes are described here:
 * :py:class:`SBBlock`: Represents a lexical block. :py:class:`SBFunction` contains SBBlocks.
 * :py:class:`SBLineEntry`: Specifies an association with a contiguous range of instructions
   and a source file location. :py:class:`SBCompileUnit` contains SBLineEntry.
+
+The different enums in the `lldb` module are described in :doc:`python_api_enums`.
+
+
 """
 
 from sys import version_info as _swig_python_version_info
@@ -157,6 +161,8 @@ LLDB_REGNUM_GENERIC_ARG6 = _lldb.LLDB_REGNUM_GENERIC_ARG6
 LLDB_REGNUM_GENERIC_ARG7 = _lldb.LLDB_REGNUM_GENERIC_ARG7
 
 LLDB_REGNUM_GENERIC_ARG8 = _lldb.LLDB_REGNUM_GENERIC_ARG8
+
+LLDB_INVALID_STOP_ID = _lldb.LLDB_INVALID_STOP_ID
 
 LLDB_INVALID_ADDRESS = _lldb.LLDB_INVALID_ADDRESS
 
@@ -441,6 +447,14 @@ eStopReasonPlanComplete = _lldb.eStopReasonPlanComplete
 eStopReasonThreadExiting = _lldb.eStopReasonThreadExiting
 
 eStopReasonInstrumentation = _lldb.eStopReasonInstrumentation
+
+eStopReasonProcessorTrace = _lldb.eStopReasonProcessorTrace
+
+eStopReasonFork = _lldb.eStopReasonFork
+
+eStopReasonVFork = _lldb.eStopReasonVFork
+
+eStopReasonVForkDone = _lldb.eStopReasonVForkDone
 
 eReturnStatusInvalid = _lldb.eReturnStatusInvalid
 
@@ -924,6 +938,8 @@ eArgTypeColumnNum = _lldb.eArgTypeColumnNum
 
 eArgTypeModuleUUID = _lldb.eArgTypeModuleUUID
 
+eArgTypeSaveCoreStyle = _lldb.eArgTypeSaveCoreStyle
+
 eArgTypeLastArg = _lldb.eArgTypeLastArg
 
 eSymbolTypeAny = _lldb.eSymbolTypeAny
@@ -1390,6 +1406,16 @@ eExpressionEvaluationExecution = _lldb.eExpressionEvaluationExecution
 
 eExpressionEvaluationComplete = _lldb.eExpressionEvaluationComplete
 
+eTraceInstructionControlFlowTypeInstruction = _lldb.eTraceInstructionControlFlowTypeInstruction
+
+eTraceInstructionControlFlowTypeBranch = _lldb.eTraceInstructionControlFlowTypeBranch
+
+eTraceInstructionControlFlowTypeTakenBranch = _lldb.eTraceInstructionControlFlowTypeTakenBranch
+
+eTraceInstructionControlFlowTypeCall = _lldb.eTraceInstructionControlFlowTypeCall
+
+eTraceInstructionControlFlowTypeReturn = _lldb.eTraceInstructionControlFlowTypeReturn
+
 eWatchpointKindWrite = _lldb.eWatchpointKindWrite
 
 eWatchpointKindRead = _lldb.eWatchpointKindRead
@@ -1532,6 +1558,14 @@ eCommandInterpreterResultCommandError = _lldb.eCommandInterpreterResultCommandEr
 
 eCommandInterpreterResultQuitRequested = _lldb.eCommandInterpreterResultQuitRequested
 
+eSaveCoreUnspecified = _lldb.eSaveCoreUnspecified
+
+eSaveCoreFull = _lldb.eSaveCoreFull
+
+eSaveCoreDirtyOnly = _lldb.eSaveCoreDirtyOnly
+
+eSaveCoreStackOnly = _lldb.eSaveCoreStackOnly
+
 class SBAddress(object):
     r"""
     A section + offset based address class.
@@ -1645,8 +1679,8 @@ class SBAddress(object):
             An address might refer to code or data from an existing module, or it
             might refer to something on the stack or heap. The following functions
             will only return valid values if the address has been resolved to a code
-            or data address using 'void SBAddress::SetLoadAddress(...)' or
-            'lldb::SBAddress SBTarget::ResolveLoadAddress (...)'.
+            or data address using :py:class:`SBAddress.SetLoadAddress' or
+            :py:class:`SBTarget.ResolveLoadAddress`.
         """
         return _lldb.SBAddress_GetSymbolContext(self, resolve_scope)
 
@@ -1656,10 +1690,9 @@ class SBAddress(object):
 
             GetModule() and the following grab individual objects for a given address and
             are less efficient if you want more than one symbol related objects.
-            Use one of the following when you want multiple debug symbol related
-            objects for an address:
-               lldb::SBSymbolContext SBAddress::GetSymbolContext (uint32_t resolve_scope);
-               lldb::SBSymbolContext SBTarget::ResolveSymbolContextForAddress (const SBAddress &addr, uint32_t resolve_scope);
+            Use :py:class:`SBAddress.GetSymbolContext` or
+            :py:class:`SBTarget.ResolveSymbolContextForAddress` when you want multiple
+            debug symbol related objects for an address.
             One or more bits from the SymbolContextItem enumerations can be logically
             OR'ed together to more efficiently retrieve multiple symbol objects.
         """
@@ -1735,7 +1768,7 @@ class SBAddress(object):
 _lldb.SBAddress_swigregister(SBAddress)
 
 class SBAttachInfo(object):
-    r"""Proxy of C++ lldb::SBAttachInfo class."""
+    r"""Describes how to attach when calling :py:class:`SBTarget.Attach`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -2275,7 +2308,7 @@ class SBBreakpoint(object):
         SetScriptCallbackFunction(SBBreakpoint self, char const * callback_function_name, SBStructuredData extra_args) -> SBError
 
             Set the name of the script function to be called when the breakpoint is hit.
-            To use this variant, the function should take (frame, bp_loc, extra_args, dict) and
+            To use this variant, the function should take (frame, bp_loc, extra_args, internal_dict) and
             when the breakpoint is hit the extra_args will be passed to the callback function.
         """
         return _lldb.SBBreakpoint_SetScriptCallbackFunction(self, *args)
@@ -2462,7 +2495,7 @@ def SBBreakpoint_GetNumBreakpointLocationsFromEvent(event_sp):
     return _lldb.SBBreakpoint_GetNumBreakpointLocationsFromEvent(event_sp)
 
 class SBBreakpointList(object):
-    r"""Proxy of C++ lldb::SBBreakpointList class."""
+    r"""Represents a list of :py:class:`SBBreakpoint`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -2599,7 +2632,7 @@ class SBBreakpointLocation(object):
         SetScriptCallbackFunction(SBBreakpointLocation self, char const * callback_function_name, SBStructuredData extra_args) -> SBError
 
             Set the name of the script function to be called when the breakpoint is hit.
-            To use this variant, the function should take (frame, bp_loc, extra_args, dict) and
+            To use this variant, the function should take (frame, bp_loc, extra_args, internal_dict) and
             when the breakpoint is hit the extra_args will be passed to the callback function.
         """
         return _lldb.SBBreakpointLocation_SetScriptCallbackFunction(self, *args)
@@ -2866,7 +2899,9 @@ _lldb.SBBreakpointName_swigregister(SBBreakpointName)
 
 class SBBroadcaster(object):
     r"""
-    Represents an entity which can broadcast events. A default broadcaster is
+    Represents an entity which can broadcast events.
+
+    A default broadcaster is
     associated with an SBCommandInterpreter, SBProcess, and SBTarget.  For
     example, use ::
 
@@ -3102,6 +3137,10 @@ class SBCommandInterpreter(object):
     def HasAliasOptions(self):
         r"""HasAliasOptions(SBCommandInterpreter self) -> bool"""
         return _lldb.SBCommandInterpreter_HasAliasOptions(self)
+
+    def IsInteractive(self):
+        r"""IsInteractive(SBCommandInterpreter self) -> bool"""
+        return _lldb.SBCommandInterpreter_IsInteractive(self)
 
     def GetProcess(self):
         r"""GetProcess(SBCommandInterpreter self) -> SBProcess"""
@@ -3394,7 +3433,7 @@ class SBCommandReturnObject(object):
 _lldb.SBCommandReturnObject_swigregister(SBCommandReturnObject)
 
 class SBCommunication(object):
-    r"""Proxy of C++ lldb::SBCommunication class."""
+    r"""Allows sending/receiving data."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -3652,7 +3691,7 @@ class SBCompileUnit(object):
 _lldb.SBCompileUnit_swigregister(SBCompileUnit)
 
 class SBData(object):
-    r"""Proxy of C++ lldb::SBData class."""
+    r"""Represents a data buffer."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -3762,6 +3801,10 @@ class SBData(object):
     def SetData(self, error, buf, endian, addr_size):
         r"""SetData(SBData self, SBError error, void const * buf, lldb::ByteOrder endian, uint8_t addr_size)"""
         return _lldb.SBData_SetData(self, error, buf, endian, addr_size)
+
+    def SetDataWithOwnership(self, error, buf, endian, addr_size):
+        r"""SetDataWithOwnership(SBData self, SBError error, void const * buf, lldb::ByteOrder endian, uint8_t addr_size)"""
+        return _lldb.SBData_SetDataWithOwnership(self, error, buf, endian, addr_size)
 
     def Append(self, rhs):
         r"""Append(SBData self, SBData rhs) -> bool"""
@@ -4116,6 +4159,26 @@ class SBDebugger(object):
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
+    eBroadcastBitProgress = _lldb.SBDebugger_eBroadcastBitProgress
+    
+    eBroadcastBitWarning = _lldb.SBDebugger_eBroadcastBitWarning
+    
+    eBroadcastBitError = _lldb.SBDebugger_eBroadcastBitError
+    
+
+    @staticmethod
+    def GetProgressFromEvent(event):
+        r"""GetProgressFromEvent(SBEvent event) -> char const *"""
+        return _lldb.SBDebugger_GetProgressFromEvent(event)
+
+    @staticmethod
+    def GetDiagnosticFromEvent(event):
+        r"""GetDiagnosticFromEvent(SBEvent event) -> SBStructuredData"""
+        return _lldb.SBDebugger_GetDiagnosticFromEvent(event)
+
+    def GetBroadcaster(self):
+        r"""GetBroadcaster(SBDebugger self) -> SBBroadcaster"""
+        return _lldb.SBDebugger_GetBroadcaster(self)
 
     @staticmethod
     def Initialize():
@@ -4126,6 +4189,11 @@ class SBDebugger(object):
     def InitializeWithErrorHandling():
         r"""InitializeWithErrorHandling() -> SBError"""
         return _lldb.SBDebugger_InitializeWithErrorHandling()
+
+    @staticmethod
+    def PrintStackTraceOnError():
+        r"""PrintStackTraceOnError()"""
+        return _lldb.SBDebugger_PrintStackTraceOnError()
 
     @staticmethod
     def Terminate():
@@ -4218,6 +4286,10 @@ class SBDebugger(object):
     def GetErrorFileHandle(self):
         r"""GetErrorFileHandle(SBDebugger self) -> lldb::FileSP"""
         return _lldb.SBDebugger_GetErrorFileHandle(self)
+
+    def SetInputString(self, data):
+        r"""SetInputString(SBDebugger self, char const * data) -> SBError"""
+        return _lldb.SBDebugger_SetInputString(self, data)
 
     def SetInputFile(self, *args):
         r"""
@@ -4562,6 +4634,10 @@ class SBDebugger(object):
         r"""GetSyntheticForType(SBDebugger self, SBTypeNameSpecifier arg2) -> SBTypeSynthetic"""
         return _lldb.SBDebugger_GetSyntheticForType(self, arg2)
 
+    def GetScriptInterpreterInfo(self, arg2):
+        r"""GetScriptInterpreterInfo(SBDebugger self, lldb::ScriptLanguage arg2) -> SBStructuredData"""
+        return _lldb.SBDebugger_GetScriptInterpreterInfo(self, arg2)
+
     def __str__(self):
         r"""__str__(SBDebugger self) -> std::string"""
         return _lldb.SBDebugger___str__(self)
@@ -4585,12 +4661,12 @@ class SBDebugger(object):
         indicating whether quitting the interpreter was requested and another boolean
         set to True in case of a crash.
 
-        Example:
+        Example: ::
 
-        # Start an interactive lldb session from a script (with a valid debugger object
-        # created beforehand):
-        n_errors, quit_requested, has_crashed = debugger.RunCommandInterpreter(True,
-            False, lldb.SBCommandInterpreterRunOptions(), 0, False, False)
+            # Start an interactive lldb session from a script (with a valid debugger object
+            # created beforehand):
+            n_errors, quit_requested, has_crashed = debugger.RunCommandInterpreter(True,
+                False, lldb.SBCommandInterpreterRunOptions(), 0, False, False)
         """
         return _lldb.SBDebugger_RunCommandInterpreter(self, auto_handle_events, spawn_thread, options, num_errors, quit_requested, stopped_for_crash)
 
@@ -4610,6 +4686,14 @@ class SBDebugger(object):
 # Register SBDebugger in _lldb:
 _lldb.SBDebugger_swigregister(SBDebugger)
 
+def SBDebugger_GetProgressFromEvent(event):
+    r"""SBDebugger_GetProgressFromEvent(SBEvent event) -> char const *"""
+    return _lldb.SBDebugger_GetProgressFromEvent(event)
+
+def SBDebugger_GetDiagnosticFromEvent(event):
+    r"""SBDebugger_GetDiagnosticFromEvent(SBEvent event) -> SBStructuredData"""
+    return _lldb.SBDebugger_GetDiagnosticFromEvent(event)
+
 def SBDebugger_Initialize():
     r"""SBDebugger_Initialize()"""
     return _lldb.SBDebugger_Initialize()
@@ -4617,6 +4701,10 @@ def SBDebugger_Initialize():
 def SBDebugger_InitializeWithErrorHandling():
     r"""SBDebugger_InitializeWithErrorHandling() -> SBError"""
     return _lldb.SBDebugger_InitializeWithErrorHandling()
+
+def SBDebugger_PrintStackTraceOnError():
+    r"""SBDebugger_PrintStackTraceOnError()"""
+    return _lldb.SBDebugger_PrintStackTraceOnError()
 
 def SBDebugger_Terminate():
     r"""SBDebugger_Terminate()"""
@@ -5122,7 +5210,7 @@ def SBEvent_GetCStringFromEvent(event):
     return _lldb.SBEvent_GetCStringFromEvent(event)
 
 class SBExecutionContext(object):
-    r"""Proxy of C++ lldb::SBExecutionContext class."""
+    r"""Describes the program context in which a command should be executed."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -5497,7 +5585,7 @@ class SBFile(object):
 
             If there is no underlying python file to unwrap, GetFile will
             use the file descriptor, if available to create a new python
-            file object using `open(fd, mode=..., closefd=False)`
+            file object using ``open(fd, mode=..., closefd=False)``
 
         """
         return _lldb.SBFile_GetFile(self)
@@ -5650,7 +5738,7 @@ def SBFileSpec_ResolvePath(src_path, dst_path, dst_len):
     return _lldb.SBFileSpec_ResolvePath(src_path, dst_path, dst_len)
 
 class SBFileSpecList(object):
-    r"""Proxy of C++ lldb::SBFileSpecList class."""
+    r"""Represents a list of :py:class:`SBFileSpec`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -5697,32 +5785,33 @@ _lldb.SBFileSpecList_swigregister(SBFileSpecList)
 class SBFrame(object):
     r"""
     Represents one of the stack frames associated with a thread.
+
     SBThread contains SBFrame(s). For example (from test/lldbutil.py), ::
 
-    def print_stacktrace(thread, string_buffer = False):
-        '''Prints a simple stack trace of this thread.'''
+        def print_stacktrace(thread, string_buffer = False):
+            '''Prints a simple stack trace of this thread.'''
 
-        ...
+            ...
 
-        for i in range(depth):
-            frame = thread.GetFrameAtIndex(i)
-            function = frame.GetFunction()
+            for i in range(depth):
+                frame = thread.GetFrameAtIndex(i)
+                function = frame.GetFunction()
 
-            load_addr = addrs[i].GetLoadAddress(target)
-            if not function:
-                file_addr = addrs[i].GetFileAddress()
-                start_addr = frame.GetSymbol().GetStartAddress().GetFileAddress()
-                symbol_offset = file_addr - start_addr
-                print >> output, '  frame #{num}: {addr:#016x} {mod}`{symbol} + {offset}'.format(
-                    num=i, addr=load_addr, mod=mods[i], symbol=symbols[i], offset=symbol_offset)
-            else:
-                print >> output, '  frame #{num}: {addr:#016x} {mod}`{func} at {file}:{line} {args}'.format(
-                    num=i, addr=load_addr, mod=mods[i],
-                    func='%s [inlined]' % funcs[i] if frame.IsInlined() else funcs[i],
-                    file=files[i], line=lines[i],
-                    args=get_args_as_string(frame, showFuncName=False) if not frame.IsInlined() else '()')
+                load_addr = addrs[i].GetLoadAddress(target)
+                if not function:
+                    file_addr = addrs[i].GetFileAddress()
+                    start_addr = frame.GetSymbol().GetStartAddress().GetFileAddress()
+                    symbol_offset = file_addr - start_addr
+                    print >> output, '  frame #{num}: {addr:#016x} {mod}`{symbol} + {offset}'.format(
+                        num=i, addr=load_addr, mod=mods[i], symbol=symbols[i], offset=symbol_offset)
+                else:
+                    print >> output, '  frame #{num}: {addr:#016x} {mod}`{func} at {file}:{line} {args}'.format(
+                        num=i, addr=load_addr, mod=mods[i],
+                        func='%s [inlined]' % funcs[i] if frame.IsInlined() else funcs[i],
+                        file=files[i], line=lines[i],
+                        args=get_args_as_string(frame, showFuncName=False) if not frame.IsInlined() else '()')
 
-        ...
+            ...
 
     And, ::
 
@@ -5971,20 +6060,27 @@ class SBFrame(object):
 
             Get a lldb.SBValue for a variable path.
 
-            Variable paths can include access to pointer or instance members:
+            Variable paths can include access to pointer or instance members: ::
+
                 rect_ptr->origin.y
                 pt.x
-            Pointer dereferences:
+
+            Pointer dereferences: ::
+
                 *this->foo_ptr
                 **argv
-            Address of:
+
+            Address of: ::
+
                 &pt
                 &my_array[3].x
-            Array accesses and treating pointers as arrays:
+
+            Array accesses and treating pointers as arrays: ::
+
                 int_array[1]
                 pt_ptr[22].x
 
-            Unlike EvaluateExpression() which returns lldb.SBValue objects
+            Unlike `EvaluateExpression()` which returns :py:class:`SBValue` objects
             with constant copies of the values at the time of evaluation,
             the result of this function is a value that will continue to
             track the current value of the value as execution progresses
@@ -6000,7 +6096,7 @@ class SBFrame(object):
             Find variables, register sets, registers, or persistent variables using
             the frame as the scope.
 
-            The version that doesn't supply a 'use_dynamic' value will use the
+            The version that doesn't supply a ``use_dynamic`` value will use the
             target's default.
         """
         return _lldb.SBFrame_FindValue(self, *args)
@@ -6257,7 +6353,7 @@ class SBFunction(object):
 _lldb.SBFunction_swigregister(SBFunction)
 
 class SBHostOS(object):
-    r"""Proxy of C++ lldb::SBHostOS class."""
+    r"""Provides information about the host system."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -6352,7 +6448,7 @@ def SBHostOS_ThreadJoin(thread, result, err):
     return _lldb.SBHostOS_ThreadJoin(thread, result, err)
 
 class SBInstruction(object):
-    r"""Proxy of C++ lldb::SBInstruction class."""
+    r"""Represents a (machine language) instruction."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -6571,7 +6667,7 @@ class SBInstructionList(object):
 _lldb.SBInstructionList_swigregister(SBInstructionList)
 
 class SBLanguageRuntime(object):
-    r"""Proxy of C++ lldb::SBLanguageRuntime class."""
+    r"""Utility functions for :ref:`LanguageType`"""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -6603,7 +6699,7 @@ def SBLanguageRuntime_GetNameForLanguageType(language):
     return _lldb.SBLanguageRuntime_GetNameForLanguageType(language)
 
 class SBLaunchInfo(object):
-    r"""Proxy of C++ lldb::SBLaunchInfo class."""
+    r"""Describes how a target or program should be launched."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -6771,6 +6867,22 @@ class SBLaunchInfo(object):
     def SetDetachOnError(self, enable):
         r"""SetDetachOnError(SBLaunchInfo self, bool enable)"""
         return _lldb.SBLaunchInfo_SetDetachOnError(self, enable)
+
+    def GetScriptedProcessClassName(self):
+        r"""GetScriptedProcessClassName(SBLaunchInfo self) -> char const *"""
+        return _lldb.SBLaunchInfo_GetScriptedProcessClassName(self)
+
+    def SetScriptedProcessClassName(self, class_name):
+        r"""SetScriptedProcessClassName(SBLaunchInfo self, char const * class_name)"""
+        return _lldb.SBLaunchInfo_SetScriptedProcessClassName(self, class_name)
+
+    def GetScriptedProcessDictionary(self):
+        r"""GetScriptedProcessDictionary(SBLaunchInfo self) -> SBStructuredData"""
+        return _lldb.SBLaunchInfo_GetScriptedProcessDictionary(self)
+
+    def SetScriptedProcessDictionary(self, dict):
+        r"""SetScriptedProcessDictionary(SBLaunchInfo self, SBStructuredData dict)"""
+        return _lldb.SBLaunchInfo_SetScriptedProcessDictionary(self, dict)
     __swig_destroy__ = _lldb.delete_SBLaunchInfo
 
 # Register SBLaunchInfo in _lldb:
@@ -6779,7 +6891,9 @@ _lldb.SBLaunchInfo_swigregister(SBLaunchInfo)
 class SBLineEntry(object):
     r"""
     Specifies an association with a contiguous range of instructions and
-    a source file location. :py:class:`SBCompileUnit` contains SBLineEntry(s). For example, ::
+    a source file location.
+
+    :py:class:`SBCompileUnit` contains SBLineEntry(s). For example, ::
 
         for lineEntry in compileUnit:
             print('line entry: %s:%d' % (str(lineEntry.GetFileSpec()),
@@ -6902,7 +7016,7 @@ class SBListener(object):
     r"""
     API clients can register its own listener to debugger events.
 
-    See aslo :py:class:`SBEvent` for example usage of creating and adding a listener.
+    See also :py:class:`SBEvent` for example usage of creating and adding a listener.
     """
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
@@ -7004,6 +7118,7 @@ class SBMemoryRegionInfo(object):
         r"""
         __init__(SBMemoryRegionInfo self) -> SBMemoryRegionInfo
         __init__(SBMemoryRegionInfo self, SBMemoryRegionInfo rhs) -> SBMemoryRegionInfo
+        __init__(SBMemoryRegionInfo self, char const * name, lldb::addr_t begin, lldb::addr_t end, uint32_t permissions, bool mapped, bool stack_memory) -> SBMemoryRegionInfo
         """
         _lldb.SBMemoryRegionInfo_swiginit(self, _lldb.new_SBMemoryRegionInfo(*args))
     __swig_destroy__ = _lldb.delete_SBMemoryRegionInfo
@@ -7040,6 +7155,50 @@ class SBMemoryRegionInfo(object):
         r"""GetName(SBMemoryRegionInfo self) -> char const *"""
         return _lldb.SBMemoryRegionInfo_GetName(self)
 
+    def HasDirtyMemoryPageList(self):
+        r"""
+
+        GetRegionEnd(SBMemoryRegionInfo self) -> lldb::addr_t
+        Returns whether this memory region has a list of modified (dirty)
+        pages available or not.  When calling GetNumDirtyPages(), you will
+        have 0 returned for both "dirty page list is not known" and 
+        "empty dirty page list" (that is, no modified pages in this
+        memory region).  You must use this method to disambiguate.
+        """
+        return _lldb.SBMemoryRegionInfo_HasDirtyMemoryPageList(self)
+
+    def GetNumDirtyPages(self):
+        r"""
+
+        GetNumDirtyPages(SBMemoryRegionInfo self) -> uint32_t
+        Return the number of dirty (modified) memory pages in this
+        memory region, if available.  You must use the 
+        SBMemoryRegionInfo::HasDirtyMemoryPageList() method to
+        determine if a dirty memory list is available; it will depend
+        on the target system can provide this information.
+        """
+        return _lldb.SBMemoryRegionInfo_GetNumDirtyPages(self)
+
+    def GetDirtyPageAddressAtIndex(self, idx):
+        r"""
+
+        GetDirtyPageAddressAtIndex(SBMemoryRegionInfo self, uint32_t idx) -> lldb::addr_t
+        Return the address of a modified, or dirty, page of memory.
+        If the provided index is out of range, or this memory region 
+        does not have dirty page information, LLDB_INVALID_ADDRESS 
+        is returned.
+        """
+        return _lldb.SBMemoryRegionInfo_GetDirtyPageAddressAtIndex(self, idx)
+
+    def GetPageSize(self):
+        r"""
+
+        GetPageSize(SBMemoryRegionInfo self) -> int
+        Return the size of pages in this memory region.  0 will be returned
+        if this information was unavailable.
+        """
+        return _lldb.SBMemoryRegionInfo_GetPageSize(self)
+
     def __eq__(self, rhs):
         r"""__eq__(SBMemoryRegionInfo self, SBMemoryRegionInfo rhs) -> bool"""
         return _lldb.SBMemoryRegionInfo___eq__(self, rhs)
@@ -7060,7 +7219,7 @@ class SBMemoryRegionInfo(object):
 _lldb.SBMemoryRegionInfo_swigregister(SBMemoryRegionInfo)
 
 class SBMemoryRegionInfoList(object):
-    r"""Proxy of C++ lldb::SBMemoryRegionInfoList class."""
+    r"""Represents a list of :py:class:`SBMemoryRegionInfo`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -7076,6 +7235,10 @@ class SBMemoryRegionInfoList(object):
     def GetSize(self):
         r"""GetSize(SBMemoryRegionInfoList self) -> uint32_t"""
         return _lldb.SBMemoryRegionInfoList_GetSize(self)
+
+    def GetMemoryRegionContainingAddress(self, addr, region_info):
+        r"""GetMemoryRegionContainingAddress(SBMemoryRegionInfoList self, lldb::addr_t addr, SBMemoryRegionInfo region_info) -> bool"""
+        return _lldb.SBMemoryRegionInfoList_GetMemoryRegionContainingAddress(self, addr, region_info)
 
     def GetMemoryRegionAtIndex(self, idx, region_info):
         r"""GetMemoryRegionAtIndex(SBMemoryRegionInfoList self, uint32_t idx, SBMemoryRegionInfo region_info) -> bool"""
@@ -7227,6 +7390,16 @@ class SBModule(object):
         r"""Clear(SBModule self)"""
         return _lldb.SBModule_Clear(self)
 
+    def IsFileBacked(self):
+        r"""
+        IsFileBacked(SBModule self) -> bool
+        Check if the module is file backed.
+            @return
+                True, if the module is backed by an object file on disk.
+                False, if the module is backed by an object file in memory.
+        """
+        return _lldb.SBModule_IsFileBacked(self)
+
     def GetFileSpec(self):
         r"""
         GetFileSpec(SBModule self) -> SBFileSpec
@@ -7317,15 +7490,15 @@ class SBModule(object):
         r"""
         FindCompileUnits(SBModule self, SBFileSpec sb_file_spec) -> SBSymbolContextList
 
-            Find compile units related to *this module and passed source
+            Find compile units related to this module and passed source
             file.
 
             @param[in] sb_file_spec
-                A lldb::SBFileSpec object that contains source file
+                A :py:class:`SBFileSpec` object that contains source file
                 specification.
 
             @return
-                A lldb::SBSymbolContextList that gets filled in with all of
+                A :py:class:`SBSymbolContextList` that gets filled in with all of
                 the symbol contexts for all the matches.
         """
         return _lldb.SBModule_FindCompileUnits(self, sb_file_spec)
@@ -7875,7 +8048,7 @@ class SBModuleSpec(object):
 _lldb.SBModuleSpec_swigregister(SBModuleSpec)
 
 class SBModuleSpecList(object):
-    r"""Proxy of C++ lldb::SBModuleSpecList class."""
+    r"""Represents a list of :py:class:`SBModuleSpec`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -7932,7 +8105,7 @@ def SBModuleSpecList_GetModuleSpecifications(path):
     return _lldb.SBModuleSpecList_GetModuleSpecifications(path)
 
 class SBPlatformConnectOptions(object):
-    r"""Proxy of C++ lldb::SBPlatformConnectOptions class."""
+    r"""Describes how :py:class:`SBPlatform.ConnectRemote` connects to a remote platform."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -7977,7 +8150,7 @@ class SBPlatformConnectOptions(object):
 _lldb.SBPlatformConnectOptions_swigregister(SBPlatformConnectOptions)
 
 class SBPlatformShellCommand(object):
-    r"""Proxy of C++ lldb::SBPlatformShellCommand class."""
+    r"""Represents a shell command that can be run by :py:class:`SBPlatform.Run`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -8487,11 +8660,11 @@ class SBProcess(object):
 
         Reads memory from the current process's address space and removes any
         traps that may have been inserted into the memory. It returns the byte
-        buffer in a Python string. Example:
+        buffer in a Python string. Example: ::
 
-        # Read 4 bytes from address 'addr' and assume error.Success() is True.
-        content = process.ReadMemory(addr, 4, error)
-        new_bytes = bytearray(content)
+            # Read 4 bytes from address 'addr' and assume error.Success() is True.
+            content = process.ReadMemory(addr, 4, error)
+            new_bytes = bytearray(content)
         """
         return _lldb.SBProcess_ReadMemory(self, addr, buf, error)
 
@@ -8499,13 +8672,13 @@ class SBProcess(object):
         r"""
 
         Writes memory to the current process's address space and maintains any
-        traps that might be present due to software breakpoints. Example:
+        traps that might be present due to software breakpoints. Example: ::
 
-        # Create a Python string from the byte array.
-        new_value = str(bytes)
-        result = process.WriteMemory(addr, new_value, error)
-        if not error.Success() or result != len(bytes):
-            print('SBProcess.WriteMemory() failed!')
+            # Create a Python string from the byte array.
+            new_value = str(bytes)
+            result = process.WriteMemory(addr, new_value, error)
+            if not error.Success() or result != len(bytes):
+                print('SBProcess.WriteMemory() failed!')
         """
         return _lldb.SBProcess_WriteMemory(self, addr, buf, error)
 
@@ -8514,15 +8687,15 @@ class SBProcess(object):
 
         Reads a NULL terminated C string from the current process's address space.
         It returns a python string of the exact length, or truncates the string if
-        the maximum character limit is reached. Example:
+        the maximum character limit is reached. Example: ::
 
-        # Read a C string of at most 256 bytes from address '0x1000'
-        error = lldb.SBError()
-        cstring = process.ReadCStringFromMemory(0x1000, 256, error)
-        if error.Success():
-            print('cstring: ', cstring)
-        else
-            print('error: ', error)
+            # Read a C string of at most 256 bytes from address '0x1000'
+            error = lldb.SBError()
+            cstring = process.ReadCStringFromMemory(0x1000, 256, error)
+            if error.Success():
+                print('cstring: ', cstring)
+            else
+                print('error: ', error)
         """
         return _lldb.SBProcess_ReadCStringFromMemory(self, addr, char_buf, error)
 
@@ -8530,30 +8703,30 @@ class SBProcess(object):
         r"""
 
         Reads an unsigned integer from memory given a byte size and an address.
-        Returns the unsigned integer that was read. Example:
+        Returns the unsigned integer that was read. Example: ::
 
-        # Read a 4 byte unsigned integer from address 0x1000
-        error = lldb.SBError()
-        uint = ReadUnsignedFromMemory(0x1000, 4, error)
-        if error.Success():
-            print('integer: %u' % uint)
-        else
-            print('error: ', error)
+            # Read a 4 byte unsigned integer from address 0x1000
+            error = lldb.SBError()
+            uint = ReadUnsignedFromMemory(0x1000, 4, error)
+            if error.Success():
+                print('integer: %u' % uint)
+            else
+                print('error: ', error)
         """
         return _lldb.SBProcess_ReadUnsignedFromMemory(self, addr, byte_size, error)
 
     def ReadPointerFromMemory(self, addr, error):
         r"""
 
-        Reads a pointer from memory from an address and returns the value. Example:
+        Reads a pointer from memory from an address and returns the value. Example: ::
 
-        # Read a pointer from address 0x1000
-        error = lldb.SBError()
-        ptr = ReadPointerFromMemory(0x1000, error)
-        if error.Success():
-            print('pointer: 0x%x' % ptr)
-        else
-            print('error: ', error)
+            # Read a pointer from address 0x1000
+            error = lldb.SBError()
+            ptr = ReadPointerFromMemory(0x1000, error)
+            if error.Success():
+                print('pointer: 0x%x' % ptr)
+            else
+                print('error: ', error)
         """
         return _lldb.SBProcess_ReadPointerFromMemory(self, addr, error)
 
@@ -8676,10 +8849,6 @@ class SBProcess(object):
         r"""SaveCore(SBProcess self, char const * file_name) -> SBError"""
         return _lldb.SBProcess_SaveCore(self, file_name)
 
-    def StartTrace(self, options, error):
-        r"""StartTrace(SBProcess self, SBTraceOptions options, SBError error) -> SBTrace"""
-        return _lldb.SBProcess_StartTrace(self, options, error)
-
     def GetMemoryRegionInfo(self, load_addr, region_info):
         r"""GetMemoryRegionInfo(SBProcess self, lldb::addr_t load_addr, SBMemoryRegionInfo region_info) -> SBError"""
         return _lldb.SBProcess_GetMemoryRegionInfo(self, load_addr, region_info)
@@ -8693,13 +8862,34 @@ class SBProcess(object):
 
         Get information about the process.
         Valid process info will only be returned when the process is alive,
-        use IsValid() to check if the info returned is valid.
+        use IsValid() to check if the info returned is valid. ::
 
-        process_info = process.GetProcessInfo()
-        if process_info.IsValid():
-            process_info.GetProcessID()
+            process_info = process.GetProcessInfo()
+            if process_info.IsValid():
+                process_info.GetProcessID()
         """
         return _lldb.SBProcess_GetProcessInfo(self)
+
+    def AllocateMemory(self, size, permissions, error):
+        r"""
+
+        Allocates a block of memory within the process, with size and
+        access permissions specified in the arguments. The permisssions
+        argument is an or-combination of zero or more of
+        lldb.ePermissionsWritable, lldb.ePermissionsReadable, and
+        lldb.ePermissionsExecutable. Returns the address
+        of the allocated buffer in the process, or
+        lldb.LLDB_INVALID_ADDRESS if the allocation failed.
+        """
+        return _lldb.SBProcess_AllocateMemory(self, size, permissions, error)
+
+    def DeallocateMemory(self, ptr):
+        r"""
+
+        Deallocates the block of memory (previously allocated using
+        AllocateMemory) given in the argument.
+        """
+        return _lldb.SBProcess_DeallocateMemory(self, ptr)
 
     def __str__(self):
         r"""__str__(SBProcess self) -> std::string"""
@@ -8901,11 +9091,18 @@ class SBProcessInfo(object):
         r"""GetParentProcessID(SBProcessInfo self) -> lldb::pid_t"""
         return _lldb.SBProcessInfo_GetParentProcessID(self)
 
+    def GetTriple(self):
+        r"""
+        GetTriple(SBProcessInfo self) -> char const *
+        Return the target triple (arch-vendor-os) for the described process.
+        """
+        return _lldb.SBProcessInfo_GetTriple(self)
+
 # Register SBProcessInfo in _lldb:
 _lldb.SBProcessInfo_swigregister(SBProcessInfo)
 
 class SBQueue(object):
-    r"""Proxy of C++ lldb::SBQueue class."""
+    r"""Represents a libdispatch queue in the process."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -8987,7 +9184,7 @@ class SBQueue(object):
 _lldb.SBQueue_swigregister(SBQueue)
 
 class SBQueueItem(object):
-    r"""Proxy of C++ lldb::SBQueueItem class."""
+    r"""This class represents an item in an :py:class:`SBQueue`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -9042,7 +9239,7 @@ class SBQueueItem(object):
 _lldb.SBQueueItem_swigregister(SBQueueItem)
 
 class SBReproducer(object):
-    r"""Proxy of C++ lldb::SBReproducer class."""
+    r"""Controls LLDB's reproducer functionality."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -9419,7 +9616,7 @@ class SBStream(object):
 _lldb.SBStream_swigregister(SBStream)
 
 class SBStringList(object):
-    r"""Proxy of C++ lldb::SBStringList class."""
+    r"""Represents a list of strings."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -9554,9 +9751,12 @@ class SBStructuredData(object):
         r"""GetDescription(SBStructuredData self, SBStream stream) -> SBError"""
         return _lldb.SBStructuredData_GetDescription(self, stream)
 
-    def SetFromJSON(self, stream):
-        r"""SetFromJSON(SBStructuredData self, SBStream stream) -> SBError"""
-        return _lldb.SBStructuredData_SetFromJSON(self, stream)
+    def SetFromJSON(self, *args):
+        r"""
+        SetFromJSON(SBStructuredData self, SBStream stream) -> SBError
+        SetFromJSON(SBStructuredData self, char const * json) -> SBError
+        """
+        return _lldb.SBStructuredData_SetFromJSON(self, *args)
 
 # Register SBStructuredData in _lldb:
 _lldb.SBStructuredData_swigregister(SBStructuredData)
@@ -9815,7 +10015,7 @@ class SBSymbolContextList(object):
     For example (from test/python_api/target/TestTargetAPI.py), ::
 
         def find_functions(self, exe_name):
-            '''Exercise SBTaget.FindFunctions() API.'''
+            '''Exercise SBTarget.FindFunctions() API.'''
             exe = os.path.join(os.getcwd(), exe_name)
 
             # Create a target by the debugger.
@@ -9960,7 +10160,7 @@ class SBTarget(object):
         for m in target.module_iter():
             print m
 
-    produces:
+    produces: ::
 
         (x86_64) /Volumes/data/lldb/svn/trunk/test/python_api/lldbutil/iter/a.out
         (x86_64) /usr/lib/dyld
@@ -10090,30 +10290,16 @@ class SBTarget(object):
 
             Launch a new process with sensible defaults.
 
-            @param[in] argv
-                The argument array.
+            :param argv: The argument array.
+            :param envp: The environment array.
+            :param working_directory: The working directory to have the child process run in
+            :return: The newly created process.
+            :rtype: SBProcess
 
-            @param[in] envp
-                The environment array.
+            A pseudo terminal will be used as stdin/stdout/stderr.
+            No launch flags are passed and the target's debuger is used as a listener.
 
-            @param[in] working_directory
-                The working directory to have the child process run in
-
-            Default: listener
-                Set to the target's debugger (SBTarget::GetDebugger())
-
-            Default: launch_flags
-                Empty launch flags
-
-            Default: stdin_path
-            Default: stdout_path
-            Default: stderr_path
-                A pseudo terminal will be used.
-
-            @return
-                 A process object for the newly created process.
-
-            For example,
+            For example, ::
 
                 process = target.LaunchSimple(['X', 'Y', 'Z'], None, os.getcwd())
 
@@ -10347,16 +10533,13 @@ class SBTarget(object):
         r"""
         FindCompileUnits(SBTarget self, SBFileSpec sb_file_spec) -> SBSymbolContextList
 
-            Find compile units related to *this target and passed source
+            Find compile units related to this target and passed source
             file.
 
-            @param[in] sb_file_spec
-                A lldb::SBFileSpec object that contains source file
+            :param sb_file_spec: A :py:class:`lldb::SBFileSpec` object that contains source file
                 specification.
-
-            @return
-                A lldb::SBSymbolContextList that gets filled in with all of
-                the symbol contexts for all the matches.
+            :return: The symbol contexts for all the matches.
+            :rtype: SBSymbolContextList
         """
         return _lldb.SBTarget_FindCompileUnits(self, sb_file_spec)
 
@@ -10378,9 +10561,9 @@ class SBTarget(object):
 
             Architecture data byte width accessor
 
-            @return
-            The size in 8-bit (host) bytes of a minimum addressable
-            unit from the Architecture's data bus
+            :return: The size in 8-bit (host) bytes of a minimum addressable unit from the Architecture's data bus.
+
+
         """
         return _lldb.SBTarget_GetDataByteSize(self)
 
@@ -10388,11 +10571,11 @@ class SBTarget(object):
         r"""
         GetCodeByteSize(SBTarget self) -> uint32_t
 
-            Architecture code byte width accessor
+            Architecture code byte width accessor.
 
-            @return
-            The size in 8-bit (host) bytes of a minimum addressable
-            unit from the Architecture's code bus
+            :return: The size in 8-bit (host) bytes of a minimum addressable unit from the Architecture's code bus.
+
+
         """
         return _lldb.SBTarget_GetCodeByteSize(self)
 
@@ -10418,17 +10601,16 @@ class SBTarget(object):
 
             Find functions by name.
 
-            @param[in] name
-                The name of the function we are looking for.
+            :param name: The name of the function we are looking for.
 
-            @param[in] name_type_mask
+            :param name_type_mask:
                 A logical OR of one or more FunctionNameType enum bits that
                 indicate what kind of names should be used when doing the
                 lookup. Bits include fully qualified names, base names,
                 C++ methods, or ObjC selectors.
                 See FunctionNameType for more details.
 
-            @return
+            :return:
                 A lldb::SBSymbolContextList that gets filled in with all of
                 the symbol contexts for all the matches.
         """
@@ -10613,41 +10795,42 @@ class SBTarget(object):
 
             @param[in] class_name
                This is the name of the class that implements a scripted resolver.
-               The class should have the following signature:
-               class Resolver:
-                   def __init__(self, bkpt, extra_args):
-                       # bkpt - the breakpoint for which this is the resolver.  When
-                       # the resolver finds an interesting address, call AddLocation
-                       # on this breakpoint to add it.
-                       #
-                       # extra_args - an SBStructuredData that can be used to
-                       # parametrize this instance.  Same as the extra_args passed
-                       # to BreakpointCreateFromScript.
+               The class should have the following signature: ::
 
-                   def __get_depth__ (self):
-                       # This is optional, but if defined, you should return the
-                       # depth at which you want the callback to be called.  The
-                       # available options are:
-                       #    lldb.eSearchDepthModule
-                       #    lldb.eSearchDepthCompUnit
-                       # The default if you don't implement this method is
-                       # eSearchDepthModule.
+                   class Resolver:
+                       def __init__(self, bkpt, extra_args):
+                           # bkpt - the breakpoint for which this is the resolver.  When
+                           # the resolver finds an interesting address, call AddLocation
+                           # on this breakpoint to add it.
+                           #
+                           # extra_args - an SBStructuredData that can be used to
+                           # parametrize this instance.  Same as the extra_args passed
+                           # to BreakpointCreateFromScript.
 
-                   def __callback__(self, sym_ctx):
-                       # sym_ctx - an SBSymbolContext that is the cursor in the
-                       # search through the program to resolve breakpoints.
-                       # The sym_ctx will be filled out to the depth requested in
-                       # __get_depth__.
-                       # Look in this sym_ctx for new breakpoint locations,
-                       # and if found use bkpt.AddLocation to add them.
-                       # Note, you will only get called for modules/compile_units that
-                       # pass the SearchFilter provided by the module_list & file_list
-                       # passed into BreakpointCreateFromScript.
+                       def __get_depth__ (self):
+                           # This is optional, but if defined, you should return the
+                           # depth at which you want the callback to be called.  The
+                           # available options are:
+                           #    lldb.eSearchDepthModule
+                           #    lldb.eSearchDepthCompUnit
+                           # The default if you don't implement this method is
+                           # eSearchDepthModule.
 
-                   def get_short_help(self):
-                       # Optional, but if implemented return a short string that will
-                       # be printed at the beginning of the break list output for the
-                       # breakpoint.
+                       def __callback__(self, sym_ctx):
+                           # sym_ctx - an SBSymbolContext that is the cursor in the
+                           # search through the program to resolve breakpoints.
+                           # The sym_ctx will be filled out to the depth requested in
+                           # __get_depth__.
+                           # Look in this sym_ctx for new breakpoint locations,
+                           # and if found use bkpt.AddLocation to add them.
+                           # Note, you will only get called for modules/compile_units that
+                           # pass the SearchFilter provided by the module_list & file_list
+                           # passed into BreakpointCreateFromScript.
+
+                       def get_short_help(self):
+                           # Optional, but if implemented return a short string that will
+                           # be printed at the beginning of the break list output for the
+                           # breakpoint.
 
             @param[in] extra_args
                This is an SBStructuredData object that will get passed to the
@@ -10810,11 +10993,12 @@ class SBTarget(object):
         ReadInstructions(SBTarget self, SBAddress base_addr, uint32_t count, char const * flavor_string) -> SBInstructionList
 
             Disassemble a specified number of instructions starting at an address.
-            Parameters:
-               base_addr       -- the address to start disassembly from
-               count           -- the number of instructions to disassemble
-               flavor_string   -- may be 'intel' or 'att' on x86 targets to specify that style of disassembly
-            Returns an SBInstructionList.
+
+            :param base_addr: the address to start disassembly from.
+            :param count: the number of instructions to disassemble.
+            :param flavor_string: may be 'intel' or 'att' on x86 targets to specify that style of disassembly.
+            :rtype: SBInstructionList
+
         """
         return _lldb.SBTarget_ReadInstructions(self, *args)
 
@@ -10823,11 +11007,12 @@ class SBTarget(object):
         GetInstructions(SBTarget self, SBAddress base_addr, void const * buf) -> SBInstructionList
 
             Disassemble the bytes in a buffer and return them in an SBInstructionList.
-            Parameters:
-               base_addr -- used for symbolicating the offsets in the byte stream when disassembling
-               buf       -- bytes to be disassembled
-               size      -- (C++) size of the buffer
-            Returns an SBInstructionList.
+
+            :param base_addr: used for symbolicating the offsets in the byte stream when disassembling.
+            :param buf: bytes to be disassembled.
+            :param size: (C++) size of the buffer.
+            :rtype: SBInstructionList
+
         """
         return _lldb.SBTarget_GetInstructions(self, base_addr, buf)
 
@@ -10836,12 +11021,13 @@ class SBTarget(object):
         GetInstructionsWithFlavor(SBTarget self, SBAddress base_addr, char const * flavor_string, void const * buf) -> SBInstructionList
 
             Disassemble the bytes in a buffer and return them in an SBInstructionList, with a supplied flavor.
-            Parameters:
-               base_addr -- used for symbolicating the offsets in the byte stream when disassembling
-               flavor    -- may be 'intel' or 'att' on x86 targets to specify that style of disassembly
-               buf       -- bytes to be disassembled
-               size      -- (C++) size of the buffer
-            Returns an SBInstructionList.
+
+            :param base_addr: used for symbolicating the offsets in the byte stream when disassembling.
+            :param flavor:  may be 'intel' or 'att' on x86 targets to specify that style of disassembly.
+            :param buf: bytes to be disassembled.
+            :param size: (C++) size of the buffer.
+            :rtype: SBInstructionList
+
         """
         return _lldb.SBTarget_GetInstructionsWithFlavor(self, base_addr, flavor_string, buf)
 
@@ -10908,6 +11094,14 @@ class SBTarget(object):
     def __str__(self):
         r"""__str__(SBTarget self) -> std::string"""
         return _lldb.SBTarget___str__(self)
+
+    def GetTrace(self):
+        r"""GetTrace(SBTarget self) -> SBTrace"""
+        return _lldb.SBTarget_GetTrace(self)
+
+    def CreateTrace(self, error):
+        r"""CreateTrace(SBTarget self, SBError error) -> SBTrace"""
+        return _lldb.SBTarget_CreateTrace(self, error)
 
     class modules_access(object):
         '''A helper object that will lazily hand out lldb.SBModule objects for a target when supplied an index, or by full or partial path.'''
@@ -11158,6 +11352,9 @@ class SBThread(object):
             eStopReasonSignal        1     unix signal number
             eStopReasonException     N     exception data
             eStopReasonExec          0
+            eStopReasonFork          1     pid of the child process
+            eStopReasonVFork         1     pid of the child process
+            eStopReasonVForkDone     0
             eStopReasonPlanComplete  0
         """
         return _lldb.SBThread_GetStopReasonDataAtIndex(self, idx)
@@ -11612,7 +11809,11 @@ class SBThreadCollection(object):
 _lldb.SBThreadCollection_swigregister(SBThreadCollection)
 
 class SBThreadPlan(object):
-    r"""Proxy of C++ lldb::SBThreadPlan class."""
+    r"""
+    Represents a plan for the execution control of a given thread.
+
+    See also :py:class:`SBThread` and :py:class:`SBFrame`.
+    """
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -11676,6 +11877,9 @@ class SBThreadPlan(object):
             eStopReasonSignal        1     unix signal number
             eStopReasonException     N     exception data
             eStopReasonExec          0
+            eStopReasonFork          1     pid of the child process
+            eStopReasonVFork         1     pid of the child process
+            eStopReasonVForkDone     0
             eStopReasonPlanComplete  0
         """
         return _lldb.SBThreadPlan_GetStopReasonDataAtIndex(self, idx)
@@ -11739,7 +11943,7 @@ class SBThreadPlan(object):
 _lldb.SBThreadPlan_swigregister(SBThreadPlan)
 
 class SBTrace(object):
-    r"""Proxy of C++ lldb::SBTrace class."""
+    r"""Represents a processor trace."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -11748,25 +11952,23 @@ class SBTrace(object):
         r"""__init__(SBTrace self) -> SBTrace"""
         _lldb.SBTrace_swiginit(self, _lldb.new_SBTrace())
 
-    def GetTraceData(self, error, buf, offset, thread_id):
-        r"""GetTraceData(SBTrace self, SBError error, void * buf, size_t offset, lldb::tid_t thread_id) -> size_t"""
-        return _lldb.SBTrace_GetTraceData(self, error, buf, offset, thread_id)
+    def GetStartConfigurationHelp(self):
+        r"""GetStartConfigurationHelp(SBTrace self) -> char const *"""
+        return _lldb.SBTrace_GetStartConfigurationHelp(self)
 
-    def GetMetaData(self, error, buf, offset, thread_id):
-        r"""GetMetaData(SBTrace self, SBError error, void * buf, size_t offset, lldb::tid_t thread_id) -> size_t"""
-        return _lldb.SBTrace_GetMetaData(self, error, buf, offset, thread_id)
+    def Start(self, *args):
+        r"""
+        Start(SBTrace self, SBStructuredData configuration) -> SBError
+        Start(SBTrace self, SBThread thread, SBStructuredData configuration) -> SBError
+        """
+        return _lldb.SBTrace_Start(self, *args)
 
-    def StopTrace(self, error, thread_id):
-        r"""StopTrace(SBTrace self, SBError error, lldb::tid_t thread_id)"""
-        return _lldb.SBTrace_StopTrace(self, error, thread_id)
-
-    def GetTraceConfig(self, options, error):
-        r"""GetTraceConfig(SBTrace self, SBTraceOptions options, SBError error)"""
-        return _lldb.SBTrace_GetTraceConfig(self, options, error)
-
-    def GetTraceUID(self):
-        r"""GetTraceUID(SBTrace self) -> lldb::user_id_t"""
-        return _lldb.SBTrace_GetTraceUID(self)
+    def Stop(self, *args):
+        r"""
+        Stop(SBTrace self) -> SBError
+        Stop(SBTrace self, SBThread thread) -> SBError
+        """
+        return _lldb.SBTrace_Stop(self, *args)
 
     def __nonzero__(self):
         return _lldb.SBTrace___nonzero__(self)
@@ -11782,72 +11984,8 @@ class SBTrace(object):
 # Register SBTrace in _lldb:
 _lldb.SBTrace_swigregister(SBTrace)
 
-class SBTraceOptions(object):
-    r"""Proxy of C++ lldb::SBTraceOptions class."""
-
-    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
-    __repr__ = _swig_repr
-
-    def __init__(self):
-        r"""__init__(SBTraceOptions self) -> SBTraceOptions"""
-        _lldb.SBTraceOptions_swiginit(self, _lldb.new_SBTraceOptions())
-
-    def getType(self):
-        r"""getType(SBTraceOptions self) -> lldb::TraceType"""
-        return _lldb.SBTraceOptions_getType(self)
-
-    def getTraceBufferSize(self):
-        r"""getTraceBufferSize(SBTraceOptions self) -> uint64_t"""
-        return _lldb.SBTraceOptions_getTraceBufferSize(self)
-
-    def getTraceParams(self, error):
-        r"""getTraceParams(SBTraceOptions self, SBError error) -> SBStructuredData"""
-        return _lldb.SBTraceOptions_getTraceParams(self, error)
-
-    def getMetaDataBufferSize(self):
-        r"""getMetaDataBufferSize(SBTraceOptions self) -> uint64_t"""
-        return _lldb.SBTraceOptions_getMetaDataBufferSize(self)
-
-    def setTraceParams(self, params):
-        r"""setTraceParams(SBTraceOptions self, SBStructuredData params)"""
-        return _lldb.SBTraceOptions_setTraceParams(self, params)
-
-    def setType(self, type):
-        r"""setType(SBTraceOptions self, lldb::TraceType type)"""
-        return _lldb.SBTraceOptions_setType(self, type)
-
-    def setTraceBufferSize(self, size):
-        r"""setTraceBufferSize(SBTraceOptions self, uint64_t size)"""
-        return _lldb.SBTraceOptions_setTraceBufferSize(self, size)
-
-    def setMetaDataBufferSize(self, size):
-        r"""setMetaDataBufferSize(SBTraceOptions self, uint64_t size)"""
-        return _lldb.SBTraceOptions_setMetaDataBufferSize(self, size)
-
-    def setThreadID(self, thread_id):
-        r"""setThreadID(SBTraceOptions self, lldb::tid_t thread_id)"""
-        return _lldb.SBTraceOptions_setThreadID(self, thread_id)
-
-    def getThreadID(self):
-        r"""getThreadID(SBTraceOptions self) -> lldb::tid_t"""
-        return _lldb.SBTraceOptions_getThreadID(self)
-
-    def __nonzero__(self):
-        return _lldb.SBTraceOptions___nonzero__(self)
-    __bool__ = __nonzero__
-
-
-
-    def IsValid(self):
-        r"""IsValid(SBTraceOptions self) -> bool"""
-        return _lldb.SBTraceOptions_IsValid(self)
-    __swig_destroy__ = _lldb.delete_SBTraceOptions
-
-# Register SBTraceOptions in _lldb:
-_lldb.SBTraceOptions_swigregister(SBTraceOptions)
-
 class SBTypeMember(object):
-    r"""Represents a member of a type in lldb."""
+    r"""Represents a member of a type."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -11910,7 +12048,7 @@ class SBTypeMember(object):
 _lldb.SBTypeMember_swigregister(SBTypeMember)
 
 class SBTypeMemberFunction(object):
-    r"""Proxy of C++ lldb::SBTypeMemberFunction class."""
+    r"""Represents a member function of a type."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -11978,8 +12116,24 @@ _lldb.SBTypeMemberFunction_swigregister(SBTypeMemberFunction)
 
 class SBType(object):
     r"""
-    Represents a data type in lldb.  The FindFirstType() method of SBTarget/SBModule
-    returns a SBType.
+    Represents a data type in lldb.
+
+    The actual characteristics of each type are defined by the semantics of the
+    programming language and the specific language implementation that was used
+    to compile the target program. See the language-specific notes in the
+    documentation of each method.
+
+    SBType instances can be obtained by a variety of methods.
+    `SBTarget.FindFirstType` and `SBModule.FindFirstType` can be used to create
+    `SBType` representations of types in executables/libraries with debug
+    information. For some languages such as C, C++ and Objective-C it is possible
+    to create new types by evaluating expressions that define a new type.
+
+    Note that most `SBType` properties are computed independently of any runtime
+    information so for dynamic languages the functionality can be very limited.
+    `SBValue` can be used to represent runtime values which then can be more
+    accurately queried for certain information such as byte size.
+
 
     SBType supports the eq/ne operator. For example,::
 
@@ -12048,7 +12202,7 @@ class SBType(object):
                 # id_type and int_type should be the same type!
                 self.assertTrue(id_type == int_type)
 
-    ...
+
     """
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
@@ -12073,15 +12227,56 @@ class SBType(object):
 
 
     def GetByteSize(self):
-        r"""GetByteSize(SBType self) -> uint64_t"""
+        r"""
+        GetByteSize(SBType self) -> uint64_t
+        Returns the number of bytes a variable with the given types occupies in memory.
+
+            Returns ``0`` if the size can't be determined.
+
+            If a type occupies ``N`` bytes + ``M`` bits in memory, this function returns
+            the rounded up amount of bytes (i.e., if ``M`` is ``0``,
+            this function returns ``N`` and otherwise ``N + 1``).
+
+            Language-specific behaviour:
+
+            * C: The output is expected to match the value of ``sizeof(Type)``. If
+              ``sizeof(Type)`` is not a valid expression for the given type, the
+              function returns ``0``.
+            * C++: Same as in C.
+            * Objective-C: Same as in C. For Objective-C classes this always returns
+              `0`` as the actual size depends on runtime information.
+
+        """
         return _lldb.SBType_GetByteSize(self)
 
     def IsPointerType(self):
-        r"""IsPointerType(SBType self) -> bool"""
+        r"""
+        IsPointerType(SBType self) -> bool
+        Returns true if this type is a pointer type.
+
+            Language-specific behaviour:
+
+            * C: Returns true for C pointer types (or typedefs of these types).
+            * C++: Pointer types include the C pointer types as well as pointers to data
+              mebers or member functions.
+            * Objective-C: Pointer types include the C pointer types. ``id``, ``Class``
+              and pointers to blocks are also considered pointer types.
+
+        """
         return _lldb.SBType_IsPointerType(self)
 
     def IsReferenceType(self):
-        r"""IsReferenceType(SBType self) -> bool"""
+        r"""
+        IsReferenceType(SBType self) -> bool
+        Returns true if this type is a reference type.
+
+            Language-specific behaviour:
+
+            * C: Returns false for all types.
+            * C++: Both l-value and r-value references are considered reference types.
+            * Objective-C: Returns false for all types.
+
+        """
         return _lldb.SBType_IsReferenceType(self)
 
     def IsFunctionType(self):
@@ -12089,51 +12284,219 @@ class SBType(object):
         return _lldb.SBType_IsFunctionType(self)
 
     def IsPolymorphicClass(self):
-        r"""IsPolymorphicClass(SBType self) -> bool"""
+        r"""
+        IsPolymorphicClass(SBType self) -> bool
+        Returns true if this type is a polymorphic type.
+
+            Language-specific behaviour:
+
+            * C: Returns false for all types.
+            * C++: Returns true if the type is a class type that contains at least one
+              virtual member function or if at least one of its base classes is
+              considered a polymorphic type.
+            * Objective-C: Returns false for all types.
+
+        """
         return _lldb.SBType_IsPolymorphicClass(self)
 
     def IsArrayType(self):
-        r"""IsArrayType(SBType self) -> bool"""
+        r"""
+        IsArrayType(SBType self) -> bool
+        Returns true if this type is an array type.
+
+            Language-specific behaviour:
+
+            * C: Returns true if the types is an array type. This includes incomplete
+              array types ``T[]`` and array types with integer (``T[1]``) or variable
+              length (``T[some_variable]``). Pointer types are not considered arrays.
+            * C++: Includes C's array types and dependent array types (i.e., array types
+              in templates which size depends on template arguments).
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_IsArrayType(self)
 
     def IsVectorType(self):
-        r"""IsVectorType(SBType self) -> bool"""
+        r"""
+        IsVectorType(SBType self) -> bool
+        Returns true if this type is a vector type.
+
+            Language-specific behaviour:
+
+            * C: Returns true if the types is a vector type created with
+              GCC's ``vector_size`` or Clang's ``ext_vector_type`` feature.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_IsVectorType(self)
 
     def IsTypedefType(self):
-        r"""IsTypedefType(SBType self) -> bool"""
+        r"""
+        IsTypedefType(SBType self) -> bool
+        Returns true if this type is a typedef.
+
+            Language-specific behaviour:
+
+            * C: Returns true if the type is a C typedef.
+            * C++: Same as in C. Also treats type aliases as typedefs.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_IsTypedefType(self)
 
     def IsAnonymousType(self):
-        r"""IsAnonymousType(SBType self) -> bool"""
+        r"""
+        IsAnonymousType(SBType self) -> bool
+        Returns true if this type is an anonymous type.
+
+            Language-specific behaviour:
+
+            * C: Returns true for anonymous unions. Also returns true for
+              anonymous structs (which are a GNU language extension).
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_IsAnonymousType(self)
 
     def IsScopedEnumerationType(self):
-        r"""IsScopedEnumerationType(SBType self) -> bool"""
+        r"""
+        IsScopedEnumerationType(SBType self) -> bool
+        Returns true if this type is a scoped enum.
+
+            Language-specific behaviour:
+
+            * C: Returns false for all types.
+            * C++: Return true only for C++11 scoped enums.
+            * Objective-C: Returns false for all types.
+
+        """
         return _lldb.SBType_IsScopedEnumerationType(self)
 
+    def IsAggregateType(self):
+        r"""
+        IsAggregateType(SBType self) -> bool
+        Returns true if this type is an aggregate type.
+
+            Language-specific behaviour:
+
+            * C: Returns true for struct values, arrays, and vectors.
+            * C++: Same a C. Also includes class instances.
+            * Objective-C: Same as C. Also includes class instances.
+
+        """
+        return _lldb.SBType_IsAggregateType(self)
+
     def GetPointerType(self):
-        r"""GetPointerType(SBType self) -> SBType"""
+        r"""
+        GetPointerType(SBType self) -> SBType
+        Returns a type that represents a pointer to this type.
+
+            If the type system of the current language can't represent a pointer to this
+            type or this type is invalid, an invalid `SBType` is returned.
+
+            Language-specific behaviour:
+
+            * C: Returns the pointer type of this type.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetPointerType(self)
 
     def GetPointeeType(self):
-        r"""GetPointeeType(SBType self) -> SBType"""
+        r"""
+        GetPointeeType(SBType self) -> SBType
+        Returns the underlying pointee type.
+
+            If this type is a pointer type as specified by `IsPointerType` then this
+            returns the underlying type. If this is not a pointer type or an invalid
+            `SBType` then this returns an invalid `SBType`.
+
+            Language-specific behaviour:
+
+            * C: Returns the underlying type for for C pointer types or typedefs of
+              these types). For example, ``int *`` will return ``int``.
+            * C++: Same as in C. Returns an `SBType` representation for data members/
+              member functions in case the `SBType` is a pointer to data member or
+              pointer to member function.
+            * Objective-C: Same as in C. The pointee type of ``id`` and ``Class`` is
+              an invalid `SBType`. The pointee type of pointers Objective-C types is an
+              `SBType` for the non-pointer type of the respective type. For example,
+              ``NSString *`` will return ``NSString`` as a pointee type.
+
+        """
         return _lldb.SBType_GetPointeeType(self)
 
     def GetReferenceType(self):
-        r"""GetReferenceType(SBType self) -> SBType"""
+        r"""
+        GetReferenceType(SBType self) -> SBType
+        Returns a type that represents a reference to this type.
+
+            If the type system of the current language can't represent a reference to
+            this type, an invalid `SBType` is returned.
+
+            Language-specific behaviour:
+
+            * C: Currently assumes the type system is C++ and returns an l-value
+              reference type. For example, ``int`` will return ``int&``. This behavior
+              is likely to change in the future and shouldn't be relied on.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetReferenceType(self)
 
     def GetTypedefedType(self):
-        r"""GetTypedefedType(SBType self) -> SBType"""
+        r"""
+        GetTypedefedType(SBType self) -> SBType
+        Returns the underlying type of a typedef.
+
+            If this type is a typedef as designated by `IsTypedefType`, then the
+            underlying type is being returned. Otherwise an invalid `SBType` is
+            returned.
+
+            Language-specific behaviour:
+
+            * C: Returns the underlying type of a typedef type.
+            * C++: Same as in C. For type aliases, the underlying type is returned.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetTypedefedType(self)
 
     def GetDereferencedType(self):
-        r"""GetDereferencedType(SBType self) -> SBType"""
+        r"""
+        GetDereferencedType(SBType self) -> SBType
+        Returns the underlying type of a reference type.
+
+            If this type is a reference as designated by `IsReferenceType`, then the
+            underlying type is being returned. Otherwise an invalid `SBType` is
+            returned.
+
+            Language-specific behaviour:
+
+            * C: Always returns an invalid type.
+            * C++: For l-value and r-value references the underlying type is returned.
+              For example, ``int &`` will return ``int``.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetDereferencedType(self)
 
     def GetUnqualifiedType(self):
-        r"""GetUnqualifiedType(SBType self) -> SBType"""
+        r"""
+        GetUnqualifiedType(SBType self) -> SBType
+        Returns the unqualified version of this type.
+
+            Language-specific behaviour:
+
+            * C: If this type with any const or volatile specifier removed.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetUnqualifiedType(self)
 
     def GetCanonicalType(self):
@@ -12141,118 +12504,581 @@ class SBType(object):
         return _lldb.SBType_GetCanonicalType(self)
 
     def GetEnumerationIntegerType(self):
-        r"""GetEnumerationIntegerType(SBType self) -> SBType"""
+        r"""
+        GetEnumerationIntegerType(SBType self) -> SBType
+        Returns the underlying integer type if this is an enumeration type.
+
+            If this type is an invalid `SBType` or not an enumeration type an invalid
+            `SBType` is returned.
+
+            Language-specific behaviour:
+
+            * C: Returns the underlying type for enums.
+            * C++: Same as in C but also returns the underlying type for scoped enums.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetEnumerationIntegerType(self)
 
     def GetArrayElementType(self):
-        r"""GetArrayElementType(SBType self) -> SBType"""
+        r"""
+        GetArrayElementType(SBType self) -> SBType
+        Returns the array element type if this type is an array type.
+
+            Otherwise returns an invalid `SBType` if this type is invalid or not an
+            array type.
+
+            Language-specific behaviour:
+
+            * C: If this is an array type (see `IsArrayType`) such as ``T[]``, returns
+              the element type.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+            See also `IsArrayType`.
+
+        """
         return _lldb.SBType_GetArrayElementType(self)
 
     def GetArrayType(self, size):
-        r"""GetArrayType(SBType self, uint64_t size) -> SBType"""
+        r"""
+        GetArrayType(SBType self, uint64_t size) -> SBType
+        Returns the array type with the given constant size.
+
+            Language-specific behaviour:
+
+            * C: Returns a constant-size array `T[size]` for any non-void type.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+            See also `IsArrayType` and `GetArrayElementType`.
+
+        """
         return _lldb.SBType_GetArrayType(self, size)
 
     def GetVectorElementType(self):
-        r"""GetVectorElementType(SBType self) -> SBType"""
+        r"""
+        GetVectorElementType(SBType self) -> SBType
+        Returns the vector element type if this type is a vector type.
+
+            Otherwise returns an invalid `SBType` if this type is invalid or not a
+            vector type.
+
+            Language-specific behaviour:
+
+            * C: If this is a vector type (see `IsVectorType`), returns the element
+              type.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+            See also `IsVectorType`.
+
+        """
         return _lldb.SBType_GetVectorElementType(self)
 
     def GetBasicType(self, *args):
         r"""
         GetBasicType(SBType self) -> lldb::BasicType
         GetBasicType(SBType self, lldb::BasicType type) -> SBType
+        Returns the `BasicType` value that is most appropriate to this type.
+
+            Returns `eBasicTypeInvalid` if no appropriate `BasicType` was found or this
+            type is invalid. See the `BasicType` documentation for the language-specific m
+            aning of each `BasicType` value.
+
+            **Overload behaviour:** When called with a `BasicType` parameter, the
+            following behaviour applies:
+
+            Returns the `SBType` that represents the passed `BasicType` value. Returns
+            an invalid `SBType` if no fitting `SBType` could be created.
+
+            Language-specific behaviour:
+
+            * C: Returns the respective builtin type. Note that some types
+              (e.g. ``__uint128_t``) might even be successfully created even if they are
+              not available on the target platform. C++ and Objective-C specific types
+              might also be created even if the target program is not written in C++ or
+              Objective-C.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
         """
         return _lldb.SBType_GetBasicType(self, *args)
 
     def GetNumberOfFields(self):
-        r"""GetNumberOfFields(SBType self) -> uint32_t"""
+        r"""
+        GetNumberOfFields(SBType self) -> uint32_t
+        Returns the number of fields of this type.
+
+            Returns ``0`` if this type does not have fields.
+
+            Language-specific behaviour:
+
+            * C: Returns the number of fields if the type is a struct. If the type
+              contains an anonymous struct/union it only counts as a single field (even
+              if the struct/union contains several fields).
+            * C++: Returns the number of non-static fields if the type is a
+              struct/class. If the type contains an anonymous struct/union it only
+              counts as a single field (even if the struct/union contains several
+              fields). The fields of any base classes are not included in the count.
+            * Objective-C: Same as in C for structs. For Objective-C classes the number
+              of ivars is returned.
+
+            See also `GetFieldAtIndex`.
+
+        """
         return _lldb.SBType_GetNumberOfFields(self)
 
     def GetNumberOfDirectBaseClasses(self):
-        r"""GetNumberOfDirectBaseClasses(SBType self) -> uint32_t"""
+        r"""
+        GetNumberOfDirectBaseClasses(SBType self) -> uint32_t
+        Returns the number of base/parent classes of this type.
+
+            Returns ``0`` if this type doesn't have any base classes.
+
+            Language-specific behaviour:
+
+            * C: Returns always ``0``.
+            * C++: The number of direct non-virtual base classes if this type is
+              a class.
+            * Objective-C: The number of super classes for Objective-C classes.
+              As Objective-C doesn't have multiple inheritance this is usually returns 1
+              except for NSObject.
+
+        """
         return _lldb.SBType_GetNumberOfDirectBaseClasses(self)
 
     def GetNumberOfVirtualBaseClasses(self):
-        r"""GetNumberOfVirtualBaseClasses(SBType self) -> uint32_t"""
+        r"""
+        GetNumberOfVirtualBaseClasses(SBType self) -> uint32_t
+        Returns the number of virtual base/parent classes of this type
+
+            Returns ``0`` if this type doesn't have any base classes.
+
+            Language-specific behaviour:
+
+            * C: Returns always ``0``.
+            * C++: The number of direct virtual base classes if this type is a
+              class.
+            * Objective-C: Returns always ``0``.
+
+        """
         return _lldb.SBType_GetNumberOfVirtualBaseClasses(self)
 
     def GetFieldAtIndex(self, idx):
-        r"""GetFieldAtIndex(SBType self, uint32_t idx) -> SBTypeMember"""
+        r"""
+        GetFieldAtIndex(SBType self, uint32_t idx) -> SBTypeMember
+        Returns the field at the given index.
+
+            Returns an invalid `SBType` if the index is out of range or the current
+            type doesn't have any fields.
+
+            Language-specific behaviour:
+
+            * C: Returns the field with the given index for struct types. Fields are
+              ordered/indexed starting from ``0`` for the first field in a struct (as
+              declared in the definition).
+            * C++: Returns the non-static field with the given index for struct types.
+              Fields are ordered/indexed starting from ``0`` for the first field in a
+              struct (as declared in the definition).
+            * Objective-C: Same as in C for structs. For Objective-C classes the ivar
+              with the given index is returned. ivars are indexed starting from ``0``.
+
+        """
         return _lldb.SBType_GetFieldAtIndex(self, idx)
 
     def GetDirectBaseClassAtIndex(self, idx):
-        r"""GetDirectBaseClassAtIndex(SBType self, uint32_t idx) -> SBTypeMember"""
+        r"""
+        GetDirectBaseClassAtIndex(SBType self, uint32_t idx) -> SBTypeMember
+        Returns the direct base class as indexed by `GetNumberOfDirectBaseClasses`.
+
+            Returns an invalid SBTypeMember if the index is invalid or this SBType is
+            invalid.
+
+        """
         return _lldb.SBType_GetDirectBaseClassAtIndex(self, idx)
 
     def GetVirtualBaseClassAtIndex(self, idx):
-        r"""GetVirtualBaseClassAtIndex(SBType self, uint32_t idx) -> SBTypeMember"""
+        r"""
+        GetVirtualBaseClassAtIndex(SBType self, uint32_t idx) -> SBTypeMember
+        Returns the virtual base class as indexed by
+            `GetNumberOfVirtualBaseClasses`.
+
+            Returns an invalid SBTypeMember if the index is invalid or this SBType is
+            invalid.
+
+        """
         return _lldb.SBType_GetVirtualBaseClassAtIndex(self, idx)
 
     def GetEnumMembers(self):
-        r"""GetEnumMembers(SBType self) -> SBTypeEnumMemberList"""
+        r"""
+        GetEnumMembers(SBType self) -> SBTypeEnumMemberList
+        Returns the `BasicType` value that is most appropriate to this type.
+
+            Returns `eBasicTypeInvalid` if no appropriate `BasicType` was found or this
+            type is invalid. See the `BasicType` documentation for the language-specific m
+            aning of each `BasicType` value.
+
+            **Overload behaviour:** When called with a `BasicType` parameter, the
+            following behaviour applies:
+
+            Returns the `SBType` that represents the passed `BasicType` value. Returns
+            an invalid `SBType` if no fitting `SBType` could be created.
+
+            Language-specific behaviour:
+
+            * C: Returns the respective builtin type. Note that some types
+              (e.g. ``__uint128_t``) might even be successfully created even if they are
+              not available on the target platform. C++ and Objective-C specific types
+              might also be created even if the target program is not written in C++ or
+              Objective-C.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetEnumMembers(self)
 
     def GetModule(self):
-        r"""GetModule(SBType self) -> SBModule"""
+        r"""
+        GetModule(SBType self) -> SBModule
+        Returns the `SBModule` this `SBType` belongs to.
+
+            Returns no `SBModule` if this type does not belong to any specific
+            `SBModule` or this `SBType` is invalid. An invalid `SBModule` might also
+            indicate that once came from an `SBModule` but LLDB could no longer
+            determine the original module.
+
+        """
         return _lldb.SBType_GetModule(self)
 
     def GetName(self):
-        r"""GetName(SBType self) -> char const *"""
+        r"""
+        GetName() -> string
+        Returns the name of this type.
+
+            Returns an empty string if an error occurred or this type is invalid.
+
+            Use this function when trying to match a specific type by name in a script.
+            The names returned by this function try to uniquely identify a name but
+            conflicts can occur (for example, if a C++ program contains two different
+            classes with the same name in different translation units. `GetName` can
+            return the same name for both class types.)
+
+
+            Language-specific behaviour:
+
+            * C: The name of the type. For structs the ``struct`` prefix is omitted.
+            * C++: Returns the qualified name of the type (including anonymous/inline
+              namespaces and all template arguments).
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetName(self)
 
     def GetDisplayTypeName(self):
-        r"""GetDisplayTypeName(SBType self) -> char const *"""
+        r"""
+        GetDisplayTypeName() -> string
+        Returns the name of this type in a user-friendly format.
+
+            Returns an empty string if an error occurred or this type is invalid.
+
+            Use this function when displaying a type name to the user.
+
+            Language-specific behaviour:
+
+            * C: Returns the type name. For structs the ``struct`` prefix is omitted.
+            * C++: Returns the qualified name. Anonymous/inline namespaces are omitted.
+              Template arguments that match their default value might also be hidden
+              (this functionality depends on whether LLDB can determine the template's
+              default arguments).
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_GetDisplayTypeName(self)
 
     def GetTypeClass(self):
-        r"""GetTypeClass(SBType self) -> lldb::TypeClass"""
+        r"""
+        GetTypeClass() -> TypeClass
+        Returns the `TypeClass` for this type.
+
+            Returns an `eTypeClassInvalid` if this `SBType` is invalid.
+
+            See `TypeClass` for the language-specific meaning of each `TypeClass` value.
+
+        """
         return _lldb.SBType_GetTypeClass(self)
 
     def GetNumberOfTemplateArguments(self):
-        r"""GetNumberOfTemplateArguments(SBType self) -> uint32_t"""
+        r"""
+        GetNumberOfTemplateArguments(SBType self) -> uint32_t
+        Returns the number of template arguments of this type.
+
+            Returns ``0`` if this type is not a template.
+
+            Language-specific behaviour:
+
+            * C: Always returns ``0``.
+            * C++: If this type is a class template instantiation then this returns the
+              number of template parameters that were used in this instantiation. This i
+              cludes both explicit and implicit template parameters.
+            * Objective-C: Always returns ``0``.
+
+        """
         return _lldb.SBType_GetNumberOfTemplateArguments(self)
 
     def GetTemplateArgumentType(self, idx):
-        r"""GetTemplateArgumentType(SBType self, uint32_t idx) -> SBType"""
+        r"""
+        GetTemplateArgumentType(SBType self, uint32_t idx) -> SBType
+        Returns the type of the template argument with the given index.
+
+            Returns an invalid `SBType` if there is no template argument with the given
+            index or this type is not a template. The first template  argument has the
+            index ``0``.
+
+            Language-specific behaviour:
+
+            * C: Always returns an invalid SBType.
+            * C++: If this type is a class template instantiation and the template
+              parameter with the given index is a type template parameter, then this
+              returns the type of that parameter. Otherwise returns an invalid `SBType`.
+            * Objective-C: Always returns an invalid SBType.
+
+        """
         return _lldb.SBType_GetTemplateArgumentType(self, idx)
 
     def GetTemplateArgumentKind(self, idx):
-        r"""GetTemplateArgumentKind(SBType self, uint32_t idx) -> lldb::TemplateArgumentKind"""
+        r"""
+        GetTemplateArgumentKind(SBType self, uint32_t idx) -> lldb::TemplateArgumentKind
+        Returns the kind of the template argument with the given index.
+
+            Returns `eTemplateArgumentKindNull` if there is no template argument
+            with the given index or this type is not a template. The first template
+            argument has the index ``0``.
+
+            Language-specific behaviour:
+
+            * C: Always returns `eTemplateArgumentKindNull`.
+            * C++: If this type is a class template instantiation then this returns
+              the appropriate `TemplateArgument` value for the parameter with the given
+              index. See the documentation of `TemplateArgument` for how certain C++
+              template parameter kinds are mapped to `TemplateArgument` values.
+            * Objective-C: Always returns `eTemplateArgumentKindNull`.
+
+        """
         return _lldb.SBType_GetTemplateArgumentKind(self, idx)
 
     def GetFunctionReturnType(self):
-        r"""GetFunctionReturnType(SBType self) -> SBType"""
+        r"""
+        GetFunctionReturnType(SBType self) -> SBType
+        Returns the return type if this type represents a function.
+
+            Returns an invalid `SBType` if this type is not a function type or invalid.
+
+            Language-specific behaviour:
+
+            * C: For functions return the return type. Returns an invalid `SBType` if
+              this type is a function pointer type.
+            * C++: Same as in C for functions and instantiated template functions.
+              Member functions are also considered functions. For functions that have
+              their return type specified by a placeholder type specifier (``auto``)
+              this returns the deduced return type.
+            * Objective-C: Same as in C for functions. For Objective-C methods this
+              returns the return type of the method.
+
+        """
         return _lldb.SBType_GetFunctionReturnType(self)
 
     def GetFunctionArgumentTypes(self):
-        r"""GetFunctionArgumentTypes(SBType self) -> SBTypeList"""
+        r"""
+        GetFunctionArgumentTypes(SBType self) -> SBTypeList
+        Returns the list of argument types if this type represents a function.
+
+            Returns an invalid `SBType` if this type is not a function type or invalid.
+
+            Language-specific behaviour:
+
+            * C: For functions return the types of each parameter. Returns an invalid
+              `SBType` if this type is a function pointer. For variadic functions this
+              just returns the list of parameters before the variadic arguments.
+            * C++: Same as in C for functions and instantiated template functions.
+              Member functions are also considered functions.
+            * Objective-C: Always returns an invalid SBType for Objective-C methods.
+
+        """
         return _lldb.SBType_GetFunctionArgumentTypes(self)
 
     def GetNumberOfMemberFunctions(self):
-        r"""GetNumberOfMemberFunctions(SBType self) -> uint32_t"""
+        r"""
+        GetNumberOfMemberFunctions(SBType self) -> uint32_t
+        Returns the number of member functions of this type.
+
+            Returns ``0`` if an error occurred or this type is invalid.
+
+            Language-specific behaviour:
+
+            * C: Always returns ``0``.
+            * C++: If this type represents a struct/class, then the number of
+              member functions (static and non-static) is returned. The count includes
+              constructors and destructors (both explicit and implicit). Member
+              functions of base classes are not included in the count.
+            * Objective-C: If this type represents a struct/class, then the
+              number of methods is returned. Methods in categories or super classes
+              are not counted.
+
+        """
         return _lldb.SBType_GetNumberOfMemberFunctions(self)
 
     def GetMemberFunctionAtIndex(self, idx):
-        r"""GetMemberFunctionAtIndex(SBType self, uint32_t idx) -> SBTypeMemberFunction"""
+        r"""
+        GetMemberFunctionAtIndex(SBType self, uint32_t idx) -> SBTypeMemberFunction
+        Returns the member function of this type with the given index.
+
+            Returns an invalid `SBTypeMemberFunction` if the index is invalid or this
+            type is invalid.
+
+            Language-specific behaviour:
+
+            * C: Always returns an invalid `SBTypeMemberFunction`.
+            * C++: Returns the member function or constructor/destructor with the given
+              index.
+            * Objective-C: Returns the method with the given index.
+
+            See `GetNumberOfMemberFunctions` for what functions can be queried by this
+            function.
+
+        """
         return _lldb.SBType_GetMemberFunctionAtIndex(self, idx)
 
     def IsTypeComplete(self):
-        r"""IsTypeComplete(SBType self) -> bool"""
+        r"""
+        IsTypeComplete(SBType self) -> bool
+        Returns the `BasicType` value that is most appropriate to this type.
+
+            Returns `eBasicTypeInvalid` if no appropriate `BasicType` was found or this
+            type is invalid. See the `BasicType` documentation for the language-specific m
+            aning of each `BasicType` value.
+
+            **Overload behaviour:** When called with a `BasicType` parameter, the
+            following behaviour applies:
+
+            Returns the `SBType` that represents the passed `BasicType` value. Returns
+            an invalid `SBType` if no fitting `SBType` could be created.
+
+            Language-specific behaviour:
+
+            * C: Returns the respective builtin type. Note that some types
+              (e.g. ``__uint128_t``) might even be successfully created even if they are
+              not available on the target platform. C++ and Objective-C specific types
+              might also be created even if the target program is not written in C++ or
+              Objective-C.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType_IsTypeComplete(self)
 
     def GetTypeFlags(self):
-        r"""GetTypeFlags(SBType self) -> uint32_t"""
+        r"""
+        GetTypeFlags(SBType self) -> uint32_t
+        Returns the `TypeFlags` values for this type.
+
+            See the respective `TypeFlags` values for what values can be set. Returns an
+            integer in which each `TypeFlags` value is represented by a bit. Specific
+            flags can be checked via Python's bitwise operators. For example, the
+            `eTypeIsInteger` flag can be checked like this:
+
+            ``(an_sb_type.GetTypeFlags() & lldb.eTypeIsInteger) != 0``
+
+            If this type is invalid this returns ``0``.
+
+            See the different values for `TypeFlags` for the language-specific meanings
+            of each `TypeFlags` value.
+
+        """
         return _lldb.SBType_GetTypeFlags(self)
 
     def __eq__(self, rhs):
-        r"""__eq__(SBType self, SBType rhs) -> bool"""
+        r"""
+        __eq__(SBType self, SBType rhs) -> bool
+        Returns the `BasicType` value that is most appropriate to this type.
+
+            Returns `eBasicTypeInvalid` if no appropriate `BasicType` was found or this
+            type is invalid. See the `BasicType` documentation for the language-specific m
+            aning of each `BasicType` value.
+
+            **Overload behaviour:** When called with a `BasicType` parameter, the
+            following behaviour applies:
+
+            Returns the `SBType` that represents the passed `BasicType` value. Returns
+            an invalid `SBType` if no fitting `SBType` could be created.
+
+            Language-specific behaviour:
+
+            * C: Returns the respective builtin type. Note that some types
+              (e.g. ``__uint128_t``) might even be successfully created even if they are
+              not available on the target platform. C++ and Objective-C specific types
+              might also be created even if the target program is not written in C++ or
+              Objective-C.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType___eq__(self, rhs)
 
     def __ne__(self, rhs):
-        r"""__ne__(SBType self, SBType rhs) -> bool"""
+        r"""
+        __ne__(SBType self, SBType rhs) -> bool
+        Returns the `BasicType` value that is most appropriate to this type.
+
+            Returns `eBasicTypeInvalid` if no appropriate `BasicType` was found or this
+            type is invalid. See the `BasicType` documentation for the language-specific m
+            aning of each `BasicType` value.
+
+            **Overload behaviour:** When called with a `BasicType` parameter, the
+            following behaviour applies:
+
+            Returns the `SBType` that represents the passed `BasicType` value. Returns
+            an invalid `SBType` if no fitting `SBType` could be created.
+
+            Language-specific behaviour:
+
+            * C: Returns the respective builtin type. Note that some types
+              (e.g. ``__uint128_t``) might even be successfully created even if they are
+              not available on the target platform. C++ and Objective-C specific types
+              might also be created even if the target program is not written in C++ or
+              Objective-C.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType___ne__(self, rhs)
 
     def __str__(self):
-        r"""__str__(SBType self) -> std::string"""
+        r"""
+        __str__(SBType self) -> std::string
+        Returns the `BasicType` value that is most appropriate to this type.
+
+            Returns `eBasicTypeInvalid` if no appropriate `BasicType` was found or this
+            type is invalid. See the `BasicType` documentation for the language-specific m
+            aning of each `BasicType` value.
+
+            **Overload behaviour:** When called with a `BasicType` parameter, the
+            following behaviour applies:
+
+            Returns the `SBType` that represents the passed `BasicType` value. Returns
+            an invalid `SBType` if no fitting `SBType` could be created.
+
+            Language-specific behaviour:
+
+            * C: Returns the respective builtin type. Note that some types
+              (e.g. ``__uint128_t``) might even be successfully created even if they are
+              not available on the target platform. C++ and Objective-C specific types
+              might also be created even if the target program is not written in C++ or
+              Objective-C.
+            * C++: Same as in C.
+            * Objective-C: Same as in C.
+
+        """
         return _lldb.SBType___str__(self)
 
     def template_arg_array(self):
@@ -12357,8 +13183,9 @@ _lldb.SBType_swigregister(SBType)
 
 class SBTypeList(object):
     r"""
-    Represents a list of :py:class:`SBType` s.  The FindTypes() method of
-    :py:class:`SBTarget`/:py:class:`SBModule` returns a SBTypeList.
+    Represents a list of :py:class:`SBType` s.
+
+    The FindTypes() method of :py:class:`SBTarget`/:py:class:`SBModule` returns a SBTypeList.
 
     SBTypeList supports :py:class:`SBType` iteration. For example,
 
@@ -12736,6 +13563,7 @@ _lldb.SBTypeEnumMember_swigregister(SBTypeEnumMember)
 class SBTypeEnumMemberList(object):
     r"""
     Represents a list of SBTypeEnumMembers.
+
     SBTypeEnumMemberList supports SBTypeEnumMember iteration.
     It also supports [] access either by index, or by enum
     element name by doing: ::
@@ -13845,22 +14673,18 @@ class SBValue(object):
             Get an SBData wrapping what this SBValue points to.
 
             This method will dereference the current SBValue, if its
-            data type is a T* or T[], and extract item_count elements
-            of type T from it, copying their contents in an SBData.
+            data type is a ``T\*`` or ``T[]``, and extract ``item_count`` elements
+            of type ``T`` from it, copying their contents in an :py:class:`SBData`.
 
-            @param[in] item_idx
-                The index of the first item to retrieve. For an array
+            :param item_idx: The index of the first item to retrieve. For an array
                 this is equivalent to array[item_idx], for a pointer
-                to *(pointer + item_idx). In either case, the measurement
-                unit for item_idx is the sizeof(T) rather than the byte
-
-            @param[in] item_count
-                How many items should be copied into the output. By default
+                to ``\*(pointer + item_idx)``. In either case, the measurement
+                unit for item_idx is the ``sizeof(T)`` rather than the byte
+            :param item_count: How many items should be copied into the output. By default
                 only one item is copied, but more can be asked for.
+            :return: The contents of the copied items on success. An empty :py:class:`SBData` otherwise.
+            :rtype: SBData
 
-            @return
-                An SBData with the contents of the copied items, on success.
-                An empty SBData otherwise.
         """
         return _lldb.SBValue_GetPointeeData(self, item_idx, item_count)
 
@@ -14221,7 +15045,7 @@ class SBValueList(object):
 _lldb.SBValueList_swigregister(SBValueList)
 
 class SBVariablesOptions(object):
-    r"""Proxy of C++ lldb::SBVariablesOptions class."""
+    r"""Describes which variables should be returned from :py:class:`SBFrame.GetVariables`."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -14465,6 +15289,7 @@ class declaration(object):
         self.col = col
 
 class value_iter(object):
+    '''Allows iterating over the children of an :py:class:`SBValue`.'''
     def __iter__(self):
         return self
 
@@ -14486,10 +15311,10 @@ class value_iter(object):
         self.length = self.sbvalue.GetNumChildren()
 
 class value(object):
-    '''A class designed to wrap :py:class:`SBValue` objects so the resulting object
-    can be used as a variable would be in code. So if you have a Point structure
-    variable in your code in the current frame named "pt", you can initialize an instance
-    of this class with it: ::
+    '''Wraps :py:class:`SBValue` objects so the resulting object can be used as a variable would be in code.
+
+    So if you have a Point structure variable in your code in the current frame named "pt",
+    you can initialize an instance of this class with it: ::
 
         pt = lldb.value(lldb.frame.FindVariable("pt"))
         print pt
@@ -14764,15 +15589,8 @@ def is_numeric_type(basic_type):
 
 
 
-_initialize = True
-try:
-   import lldbconfig
-   _initialize = lldbconfig.INITIALIZE
-except ImportError:
-   pass
 debugger_unique_id = 0
-if _initialize:
-   SBDebugger.Initialize()
+SBDebugger.Initialize()
 debugger = None
 target = None
 process = None

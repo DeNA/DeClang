@@ -19,18 +19,16 @@ class FunctionStartsTestCase(TestBase):
 
     @skipIfRemote
     @skipUnlessDarwin
-    @skipIfReproducer # File synchronization is not supported during replay.
     def test_function_starts_binary(self):
         """Test that we make synthetic symbols when we have the binary."""
-        self.build()
+        self.build(dictionary={'CODESIGN': ''}) # Binary is getting stripped later.
         self.do_function_starts(False)
 
     @skipIfRemote
     @skipUnlessDarwin
-    @skipIfReproducer # File synchronization is not supported during replay.
     def test_function_starts_no_binary(self):
         """Test that we make synthetic symbols when we don't have the binary"""
-        self.build()
+        self.build(dictionary={'CODESIGN': ''}) # Binary is getting stripped later.
         self.do_function_starts(True)
 
     def do_function_starts(self, in_memory):
@@ -67,7 +65,7 @@ class FunctionStartsTestCase(TestBase):
         attach_info.SetProcessID(popen.pid)
         attach_info.SetIgnoreExisting(False)
         process = target.Attach(attach_info, error)
-        self.assertTrue(error.Success(), "Didn't attach successfully to %d: %s"%(popen.pid, error.GetCString()))
+        self.assertSuccess(error, "Didn't attach successfully to %d"%(popen.pid))
 
         bkpt = target.BreakpointCreateByName("dont_strip_me", exe)
         self.assertTrue(bkpt.GetNumLocations() > 0, "Didn't set the dont_strip_me bkpt.")
@@ -81,7 +79,6 @@ class FunctionStartsTestCase(TestBase):
         self.assertTrue(thread.num_frames > 1, "Couldn't backtrace.")
         name = thread.frame[1].GetFunctionName()
         self.assertTrue(name.startswith("___lldb_unnamed_symbol"))
-        self.assertTrue(name.endswith("$$StripMe"))
 
 
 

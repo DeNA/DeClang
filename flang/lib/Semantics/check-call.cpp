@@ -46,7 +46,12 @@ static void CheckImplicitInterfaceArg(
     }
   }
   if (const auto *expr{arg.UnwrapExpr()}) {
-    if (auto named{evaluate::ExtractNamedEntity(*expr)}) {
+    if (IsBOZLiteral(*expr)) {
+      messages.Say("BOZ argument requires an explicit interface"_err_en_US);
+    } else if (evaluate::IsNullPointer(*expr)) {
+      messages.Say(
+          "Null pointer argument requires an explicit interface"_err_en_US);
+    } else if (auto named{evaluate::ExtractNamedEntity(*expr)}) {
       const Symbol &symbol{named->GetLastSymbol()};
       if (symbol.Corank() > 0) {
         messages.Say(
@@ -139,13 +144,16 @@ static bool DefersSameTypeParameters(
 static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
     const std::string &dummyName, evaluate::Expr<evaluate::SomeType> &actual,
     characteristics::TypeAndShape &actualType, bool isElemental,
-    bool actualIsArrayElement, evaluate::FoldingContext &context,
-    const Scope *scope, const evaluate::SpecificIntrinsic *intrinsic) {
+    evaluate::FoldingContext &context, const Scope *scope,
+    const evaluate::SpecificIntrinsic *intrinsic,
+    bool allowIntegerConversions) {
 
   // Basic type & rank checking
   parser::ContextualMessages &messages{context.messages()};
   PadShortCharacterActual(actual, dummy.type, actualType, context, messages);
-  ConvertIntegerActual(actual, dummy.type, actualType, messages);
+  if (allowIntegerConversions) {
+    ConvertIntegerActual(actual, dummy.type, actualType, messages);
+  }
   bool typesCompatible{dummy.type.type().IsTkCompatibleWith(actualType.type())};
   if (typesCompatible) {
     if (isElemental) {
@@ -153,14 +161,15 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
                    characteristics::TypeAndShape::Attr::AssumedRank)) {
     } else if (!dummy.type.attrs().test(
                    characteristics::TypeAndShape::Attr::AssumedShape) &&
-        (actualType.Rank() > 0 || actualIsArrayElement)) {
+        (actualType.Rank() > 0 || IsArrayElement(actual))) {
       // Sequence association (15.5.2.11) applies -- rank need not match
       // if the actual argument is an array or array element designator.
     } else {
       // Let CheckConformance accept scalars; storage association
       // cases are checked here below.
       CheckConformance(messages, dummy.type.shape(), actualType.shape(),
-          "dummy argument", "actual argument", true, true);
+          evaluate::CheckConformanceFlags::EitherScalarExpandable,
+          "dummy argument", "actual argument");
     }
   } else {
     const auto &len{actualType.LEN()};
@@ -265,14 +274,15 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
   // Rank and shape checks
   const auto *actualLastSymbol{evaluate::GetLastSymbol(actual)};
   if (actualLastSymbol) {
-    actualLastSymbol = GetAssociationRoot(*actualLastSymbol);
+    actualLastSymbol = &ResolveAssociations(*actualLastSymbol);
   }
   const ObjectEntityDetails *actualLastObject{actualLastSymbol
-          ? actualLastSymbol->GetUltimate().detailsIf<ObjectEntityDetails>()
+          ? actualLastSymbol->detailsIf<ObjectEntityDetails>()
           : nullptr};
   int actualRank{evaluate::GetRank(actualType.shape())};
-  bool actualIsPointer{(actualLastSymbol && IsPointer(*actualLastSymbol)) ||
-      evaluate::IsNullPointer(actual)};
+  bool actualIsPointer{evaluate::IsObjectPointer(actual, context)};
+  bool dummyIsAssumedRank{dummy.type.attrs().test(
+      characteristics::TypeAndShape::Attr::AssumedRank)};
   if (dummy.type.attrs().test(
           characteristics::TypeAndShape::Attr::AssumedShape)) {
     // 15.5.2.4(16)
@@ -293,8 +303,11 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
           "Coindexed scalar actual argument must be associated with a scalar %s"_err_en_US,
           dummyName);
     }
-    if (actualLastSymbol && actualLastSymbol->Rank() == 0 &&
-        !(dummy.type.type().IsAssumedType() && dummyIsAssumedSize)) {
+    if (!IsArrayElement(actual) &&
+        !(actualType.type().category() == TypeCategory::Character &&
+            actualType.type().kind() == 1) &&
+        !(dummy.type.type().IsAssumedType() && dummyIsAssumedSize) &&
+        !dummyIsAssumedRank) {
       messages.Say(
           "Whole scalar actual argument may not be associated with a %s array"_err_en_US,
           dummyName);
@@ -354,8 +367,6 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
   bool dummyIsContiguous{
       dummy.attrs.test(characteristics::DummyDataObject::Attr::Contiguous)};
   bool actualIsContiguous{IsSimplyContiguous(actual, context)};
-  bool dummyIsAssumedRank{dummy.type.attrs().test(
-      characteristics::TypeAndShape::Attr::AssumedRank)};
   bool dummyIsAssumedShape{dummy.type.attrs().test(
       characteristics::TypeAndShape::Attr::AssumedShape)};
   if ((actualIsAsynchronous || actualIsVolatile) &&
@@ -493,16 +504,27 @@ static void CheckExplicitDataArg(const characteristics::DummyDataObject &dummy,
       }
     }
   }
+
+  // NULL(MOLD=) checking for non-intrinsic procedures
+  bool dummyIsOptional{
+      dummy.attrs.test(characteristics::DummyDataObject::Attr::Optional)};
+  bool actualIsNull{evaluate::IsNullPointer(actual)};
+  if (!intrinsic && !dummyIsPointer && !dummyIsOptional && actualIsNull) {
+    messages.Say(
+        "Actual argument associated with %s may not be null pointer %s"_err_en_US,
+        dummyName, actual.AsFortran());
+  }
 }
 
 static void CheckProcedureArg(evaluate::ActualArgument &arg,
-    const characteristics::DummyProcedure &proc, const std::string &dummyName,
+    const characteristics::Procedure &proc,
+    const characteristics::DummyProcedure &dummy, const std::string &dummyName,
     evaluate::FoldingContext &context) {
   parser::ContextualMessages &messages{context.messages()};
-  const characteristics::Procedure &interface{proc.procedure.value()};
+  const characteristics::Procedure &interface { dummy.procedure.value() };
   if (const auto *expr{arg.UnwrapExpr()}) {
     bool dummyIsPointer{
-        proc.attrs.test(characteristics::DummyProcedure::Attr::Pointer)};
+        dummy.attrs.test(characteristics::DummyProcedure::Attr::Pointer)};
     const auto *argProcDesignator{
         std::get_if<evaluate::ProcedureDesignator>(&expr->u)};
     const auto *argProcSymbol{
@@ -537,9 +559,23 @@ static void CheckProcedureArg(evaluate::ActualArgument &arg,
           }
           if (interface.HasExplicitInterface()) {
             if (interface != argInterface) {
-              messages.Say(
-                  "Actual argument procedure has interface incompatible with %s"_err_en_US,
-                  dummyName);
+              // 15.5.2.9(1): Explicit interfaces must match
+              if (argInterface.HasExplicitInterface()) {
+                messages.Say(
+                    "Actual procedure argument has interface incompatible with %s"_err_en_US,
+                    dummyName);
+                return;
+              } else if (proc.IsPure()) {
+                messages.Say(
+                    "Actual procedure argument for %s of a PURE procedure must have an explicit interface"_err_en_US,
+                    dummyName);
+              } else {
+                messages.Say(
+                    "Actual procedure argument has an implicit interface "
+                    "which is not known to be compatible with %s which has an "
+                    "explicit interface"_en_US,
+                    dummyName);
+              }
             }
           } else { // 15.5.2.9(2,3)
             if (interface.IsSubroutine() && argInterface.IsFunction()) {
@@ -565,27 +601,27 @@ static void CheckProcedureArg(evaluate::ActualArgument &arg,
               "Actual argument associated with procedure %s is not a procedure"_err_en_US,
               dummyName);
         }
-      } else if (!(dummyIsPointer && IsNullPointer(*expr))) {
+      } else if (IsNullPointer(*expr)) {
+        if (!dummyIsPointer) {
+          messages.Say(
+              "Actual argument associated with procedure %s is a null pointer"_err_en_US,
+              dummyName);
+        }
+      } else {
         messages.Say(
-            "Actual argument associated with procedure %s is not a procedure"_err_en_US,
+            "Actual argument associated with procedure %s is typeless"_err_en_US,
             dummyName);
       }
     }
-    if (interface.HasExplicitInterface()) {
-      if (dummyIsPointer) {
+    if (interface.HasExplicitInterface() && dummyIsPointer &&
+        dummy.intent != common::Intent::In) {
+      const Symbol *last{GetLastSymbol(*expr)};
+      if (!(last && IsProcedurePointer(*last))) {
         // 15.5.2.9(5) -- dummy procedure POINTER
         // Interface compatibility has already been checked above by comparison.
-        if (proc.intent != common::Intent::In && !IsVariable(*expr)) {
-          messages.Say(
-              "Actual argument associated with procedure pointer %s must be a POINTER unless INTENT(IN)"_err_en_US,
-              dummyName);
-        }
-      } else { // 15.5.2.9(4) -- dummy procedure is not POINTER
-        if (!argProcDesignator) {
-          messages.Say(
-              "Actual argument associated with non-POINTER procedure %s must be a procedure (and not a procedure pointer)"_err_en_US,
-              dummyName);
-        }
+        messages.Say(
+            "Actual argument associated with procedure pointer %s must be a POINTER unless INTENT(IN)"_err_en_US,
+            dummyName);
       }
     }
   } else {
@@ -598,7 +634,8 @@ static void CheckProcedureArg(evaluate::ActualArgument &arg,
 static void CheckExplicitInterfaceArg(evaluate::ActualArgument &arg,
     const characteristics::DummyArgument &dummy,
     const characteristics::Procedure &proc, evaluate::FoldingContext &context,
-    const Scope *scope, const evaluate::SpecificIntrinsic *intrinsic) {
+    const Scope *scope, const evaluate::SpecificIntrinsic *intrinsic,
+    bool allowIntegerConversions) {
   auto &messages{context.messages()};
   std::string dummyName{"dummy argument"};
   if (!dummy.name.empty()) {
@@ -613,15 +650,20 @@ static void CheckExplicitInterfaceArg(evaluate::ActualArgument &arg,
                 arg.set_dummyIntent(object.intent);
                 bool isElemental{object.type.Rank() == 0 && proc.IsElemental()};
                 CheckExplicitDataArg(object, dummyName, *expr, *type,
-                    isElemental, IsArrayElement(*expr), context, scope,
-                    intrinsic);
+                    isElemental, context, scope, intrinsic,
+                    allowIntegerConversions);
               } else if (object.type.type().IsTypelessIntrinsicArgument() &&
-                  std::holds_alternative<evaluate::BOZLiteralConstant>(
-                      expr->u)) {
+                  IsBOZLiteral(*expr)) {
                 // ok
               } else if (object.type.type().IsTypelessIntrinsicArgument() &&
                   evaluate::IsNullPointer(*expr)) {
-                // ok, calling ASSOCIATED(NULL())
+                // ok, ASSOCIATED(NULL())
+              } else if ((object.attrs.test(characteristics::DummyDataObject::
+                                  Attr::Pointer) ||
+                             object.attrs.test(characteristics::
+                                     DummyDataObject::Attr::Optional)) &&
+                  evaluate::IsNullPointer(*expr)) {
+                // ok, FOO(NULL())
               } else {
                 messages.Say(
                     "Actual argument '%s' associated with %s is not a variable or typed expression"_err_en_US,
@@ -643,11 +685,11 @@ static void CheckExplicitInterfaceArg(evaluate::ActualArgument &arg,
               }
             }
           },
-          [&](const characteristics::DummyProcedure &proc) {
-            CheckProcedureArg(arg, proc, dummyName, context);
+          [&](const characteristics::DummyProcedure &dummy) {
+            CheckProcedureArg(arg, proc, dummy, dummyName, context);
           },
           [&](const characteristics::AlternateReturn &) {
-            // TODO check alternate return
+            // All semantic checking is done elsewhere
           },
       },
       dummy.u);
@@ -704,10 +746,46 @@ static void RearrangeArguments(const characteristics::Procedure &proc,
   }
 }
 
+// The actual argument arrays to an ELEMENTAL procedure must conform.
+static bool CheckElementalConformance(parser::ContextualMessages &messages,
+    const characteristics::Procedure &proc, evaluate::ActualArguments &actuals,
+    evaluate::FoldingContext &context) {
+  std::optional<evaluate::Shape> shape;
+  std::string shapeName;
+  int index{0};
+  for (const auto &arg : actuals) {
+    const auto &dummy{proc.dummyArguments.at(index++)};
+    if (arg) {
+      if (const auto *expr{arg->UnwrapExpr()}) {
+        if (auto argShape{evaluate::GetShape(context, *expr)}) {
+          if (GetRank(*argShape) > 0) {
+            std::string argName{"actual argument ("s + expr->AsFortran() +
+                ") corresponding to dummy argument #" + std::to_string(index) +
+                " ('" + dummy.name + "')"};
+            if (shape) {
+              auto tristate{evaluate::CheckConformance(messages, *shape,
+                  *argShape, evaluate::CheckConformanceFlags::None,
+                  shapeName.c_str(), argName.c_str())};
+              if (tristate && !*tristate) {
+                return false;
+              }
+            } else {
+              shape = std::move(argShape);
+              shapeName = argName;
+            }
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
 static parser::Messages CheckExplicitInterface(
     const characteristics::Procedure &proc, evaluate::ActualArguments &actuals,
     const evaluate::FoldingContext &context, const Scope *scope,
-    const evaluate::SpecificIntrinsic *intrinsic) {
+    const evaluate::SpecificIntrinsic *intrinsic,
+    bool allowIntegerConversions) {
   parser::Messages buffer;
   parser::ContextualMessages messages{context.messages().at(), &buffer};
   RearrangeArguments(proc, actuals, messages);
@@ -717,8 +795,8 @@ static parser::Messages CheckExplicitInterface(
     for (auto &actual : actuals) {
       const auto &dummy{proc.dummyArguments.at(index++)};
       if (actual) {
-        CheckExplicitInterfaceArg(
-            *actual, dummy, proc, localContext, scope, intrinsic);
+        CheckExplicitInterfaceArg(*actual, dummy, proc, localContext, scope,
+            intrinsic, allowIntegerConversions);
       } else if (!dummy.IsOptional()) {
         if (dummy.name.empty()) {
           messages.Say(
@@ -733,6 +811,9 @@ static parser::Messages CheckExplicitInterface(
         }
       }
     }
+    if (proc.IsElemental() && !buffer.AnyFatalError()) {
+      CheckElementalConformance(messages, proc, actuals, localContext);
+    }
   }
   return buffer;
 }
@@ -740,14 +821,16 @@ static parser::Messages CheckExplicitInterface(
 parser::Messages CheckExplicitInterface(const characteristics::Procedure &proc,
     evaluate::ActualArguments &actuals, const evaluate::FoldingContext &context,
     const Scope &scope, const evaluate::SpecificIntrinsic *intrinsic) {
-  return CheckExplicitInterface(proc, actuals, context, &scope, intrinsic);
+  return CheckExplicitInterface(
+      proc, actuals, context, &scope, intrinsic, true);
 }
 
 bool CheckInterfaceForGeneric(const characteristics::Procedure &proc,
-    evaluate::ActualArguments &actuals,
-    const evaluate::FoldingContext &context) {
-  return CheckExplicitInterface(proc, actuals, context, nullptr, nullptr)
-      .empty();
+    evaluate::ActualArguments &actuals, const evaluate::FoldingContext &context,
+    bool allowIntegerConversions) {
+  return !CheckExplicitInterface(
+      proc, actuals, context, nullptr, nullptr, allowIntegerConversions)
+              .AnyFatalError();
 }
 
 void CheckArguments(const characteristics::Procedure &proc,

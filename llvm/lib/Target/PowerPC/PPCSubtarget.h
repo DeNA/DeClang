@@ -100,6 +100,7 @@ protected:
   bool HasAltivec;
   bool HasFPU;
   bool HasSPE;
+  bool HasEFPU2;
   bool HasVSX;
   bool NeedsTwoConstNR;
   bool HasP8Vector;
@@ -111,6 +112,8 @@ protected:
   bool HasPrefixInstrs;
   bool HasPCRelativeMemops;
   bool HasMMA;
+  bool HasROPProtect;
+  bool HasPrivileged;
   bool HasFCPSGN;
   bool HasFSQRT;
   bool HasFRE, HasFRES, HasFRSQRTE, HasFRSQRTES;
@@ -136,6 +139,7 @@ protected:
   bool HasICBT;
   bool HasInvariantFunctionDescriptors;
   bool HasPartwordAtomics;
+  bool HasQuadwordAtomics;
   bool HasDirectMove;
   bool HasHTM;
   bool HasFloat128;
@@ -143,6 +147,8 @@ protected:
   bool HasStoreFusion;
   bool HasAddiLoadFusion;
   bool HasAddisLoadFusion;
+  bool IsISA2_06;
+  bool IsISA2_07;
   bool IsISA3_0;
   bool IsISA3_1;
   bool UseLongCalls;
@@ -152,6 +158,8 @@ protected:
   bool UsePPCPostRASchedStrategy;
   bool PairedVectorMemops;
   bool PredictableSelectIsExpensive;
+  bool HasModernAIXAs;
+  bool IsAIX;
 
   POPCNTDKind HasPOPCNTD;
 
@@ -257,6 +265,7 @@ public:
   bool hasFPCVT() const { return HasFPCVT; }
   bool hasAltivec() const { return HasAltivec; }
   bool hasSPE() const { return HasSPE; }
+  bool hasEFPU2() const { return HasEFPU2; }
   bool hasFPU() const { return HasFPU; }
   bool hasVSX() const { return HasVSX; }
   bool needsTwoConstNR() const { return NeedsTwoConstNR; }
@@ -269,6 +278,8 @@ public:
   bool hasPrefixInstrs() const { return HasPrefixInstrs; }
   bool hasPCRelativeMemops() const { return HasPCRelativeMemops; }
   bool hasMMA() const { return HasMMA; }
+  bool hasROPProtect() const { return HasROPProtect; }
+  bool hasPrivileged() const { return HasPrivileged; }
   bool pairedVectorMemops() const { return PairedVectorMemops; }
   bool hasMFOCRF() const { return HasMFOCRF; }
   bool hasISEL() const { return HasISEL; }
@@ -293,6 +304,7 @@ public:
   bool usePPCPreRASchedStrategy() const { return UsePPCPreRASchedStrategy; }
   bool usePPCPostRASchedStrategy() const { return UsePPCPostRASchedStrategy; }
   bool hasPartwordAtomics() const { return HasPartwordAtomics; }
+  bool hasQuadwordAtomics() const { return HasQuadwordAtomics; }
   bool hasDirectMove() const { return HasDirectMove; }
 
   Align getPlatformStackAlignment() const {
@@ -311,6 +323,8 @@ public:
 
   bool hasHTM() const { return HasHTM; }
   bool hasFloat128() const { return HasFloat128; }
+  bool isISA2_06() const { return IsISA2_06; }
+  bool isISA2_07() const { return IsISA2_07; }
   bool isISA3_0() const { return IsISA3_0; }
   bool isISA3_1() const { return IsISA3_1; }
   bool useLongCalls() const { return UseLongCalls; }
@@ -401,6 +415,16 @@ public:
 
   bool isPredictableSelectIsExpensive() const {
     return PredictableSelectIsExpensive;
+  }
+
+  // Select allocation orders of GPRC and G8RC. It should be strictly consistent
+  // with corresponding AltOrders in PPCRegisterInfo.td.
+  unsigned getGPRAllocationOrderIdx() const {
+    if (is64BitELFABI())
+      return 1;
+    if (isAIXABI())
+      return 2;
+    return 0;
   }
 
   // GlobalISEL

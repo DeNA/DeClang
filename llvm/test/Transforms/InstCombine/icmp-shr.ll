@@ -507,6 +507,10 @@ define <2 x i1> @exact_eq0_multiuse(<2 x i32> %x, <2 x i32> %y) {
   ret <2 x i1> %cmp
 }
 
+; Verify conversions of ashr+icmp to a sign-bit test.
+
+; negative test, but different transform possible
+
 define i1 @ashr_ugt_0(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_0(
 ; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[X:%.*]], 1
@@ -516,6 +520,8 @@ define i1 @ashr_ugt_0(i4 %x) {
   %r = icmp ugt i4 %s, 0 ; 0b0000
   ret i1 %r
 }
+
+; negative test
 
 define i1 @ashr_ugt_1(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_1(
@@ -528,6 +534,8 @@ define i1 @ashr_ugt_1(i4 %x) {
   ret i1 %r
 }
 
+; negative test
+
 define i1 @ashr_ugt_2(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_2(
 ; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
@@ -538,6 +546,9 @@ define i1 @ashr_ugt_2(i4 %x) {
   %r = icmp ugt i4 %s, 2 ; 0b0010
   ret i1 %r
 }
+
+; negative test
+; TODO: This is a sign-bit test, but we don't recognize the pattern.
 
 define i1 @ashr_ugt_3(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_3(
@@ -552,8 +563,7 @@ define i1 @ashr_ugt_3(i4 %x) {
 
 define i1 @ashr_ugt_4(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_4(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[S]], 4
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i4 [[X:%.*]], 0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -563,8 +573,7 @@ define i1 @ashr_ugt_4(i4 %x) {
 
 define i1 @ashr_ugt_5(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_5(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[S]], 5
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i4 [[X:%.*]], 0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -574,8 +583,7 @@ define i1 @ashr_ugt_5(i4 %x) {
 
 define i1 @ashr_ugt_6(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_6(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[S]], 6
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i4 [[X:%.*]], 0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -595,8 +603,7 @@ define i1 @ashr_ugt_7(i4 %x) {
 
 define i1 @ashr_ugt_8(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_8(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[S]], -8
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i4 [[X:%.*]], 0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -606,8 +613,7 @@ define i1 @ashr_ugt_8(i4 %x) {
 
 define i1 @ashr_ugt_9(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_9(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[S]], -7
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i4 [[X:%.*]], 0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -617,8 +623,7 @@ define i1 @ashr_ugt_9(i4 %x) {
 
 define i1 @ashr_ugt_10(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_10(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[S]], -6
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i4 [[X:%.*]], 0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -628,14 +633,15 @@ define i1 @ashr_ugt_10(i4 %x) {
 
 define i1 @ashr_ugt_11(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_11(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[S]], -5
+; CHECK-NEXT:    [[R:%.*]] = icmp slt i4 [[X:%.*]], 0
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
   %r = icmp ugt i4 %s, 11 ; 0b1011
   ret i1 %r
 }
+
+; negative test
 
 define i1 @ashr_ugt_12(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_12(
@@ -648,6 +654,8 @@ define i1 @ashr_ugt_12(i4 %x) {
   ret i1 %r
 }
 
+; negative test
+
 define i1 @ashr_ugt_13(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_13(
 ; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
@@ -659,6 +667,8 @@ define i1 @ashr_ugt_13(i4 %x) {
   ret i1 %r
 }
 
+; negative test, but different transform possible
+
 define i1 @ashr_ugt_14(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_14(
 ; CHECK-NEXT:    [[R:%.*]] = icmp ugt i4 [[X:%.*]], -3
@@ -669,6 +679,8 @@ define i1 @ashr_ugt_14(i4 %x) {
   ret i1 %r
 }
 
+; negative test, but simplifies
+
 define i1 @ashr_ugt_15(i4 %x) {
 ; CHECK-LABEL: @ashr_ugt_15(
 ; CHECK-NEXT:    ret i1 false
@@ -678,6 +690,8 @@ define i1 @ashr_ugt_15(i4 %x) {
   ret i1 %r
 }
 
+; negative test, but simplifies
+
 define i1 @ashr_ult_0(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_0(
 ; CHECK-NEXT:    ret i1 false
@@ -686,6 +700,8 @@ define i1 @ashr_ult_0(i4 %x) {
   %r = icmp ult i4 %s, 0 ; 0b0000
   ret i1 %r
 }
+
+; negative test, but different transform possible
 
 define i1 @ashr_ult_1(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_1(
@@ -697,6 +713,8 @@ define i1 @ashr_ult_1(i4 %x) {
   ret i1 %r
 }
 
+; negative test
+
 define i1 @ashr_ult_2(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_2(
 ; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
@@ -707,6 +725,8 @@ define i1 @ashr_ult_2(i4 %x) {
   %r = icmp ult i4 %s, 2 ; 0b0010
   ret i1 %r
 }
+
+; negative test
 
 define i1 @ashr_ult_3(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_3(
@@ -721,8 +741,7 @@ define i1 @ashr_ult_3(i4 %x) {
 
 define i1 @ashr_ult_4(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_4(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[S]], 4
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i4 [[X:%.*]], -1
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -732,8 +751,7 @@ define i1 @ashr_ult_4(i4 %x) {
 
 define i1 @ashr_ult_5(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_5(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[S]], 5
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i4 [[X:%.*]], -1
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -743,8 +761,7 @@ define i1 @ashr_ult_5(i4 %x) {
 
 define i1 @ashr_ult_6(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_6(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[S]], 6
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i4 [[X:%.*]], -1
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -754,8 +771,7 @@ define i1 @ashr_ult_6(i4 %x) {
 
 define i1 @ashr_ult_7(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_7(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[S]], 7
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i4 [[X:%.*]], -1
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -775,8 +791,7 @@ define i1 @ashr_ult_8(i4 %x) {
 
 define i1 @ashr_ult_9(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_9(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[S]], -7
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i4 [[X:%.*]], -1
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -786,8 +801,7 @@ define i1 @ashr_ult_9(i4 %x) {
 
 define i1 @ashr_ult_10(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_10(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[S]], -6
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i4 [[X:%.*]], -1
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
@@ -797,14 +811,16 @@ define i1 @ashr_ult_10(i4 %x) {
 
 define i1 @ashr_ult_11(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_11(
-; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
-; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[S]], -5
+; CHECK-NEXT:    [[R:%.*]] = icmp sgt i4 [[X:%.*]], -1
 ; CHECK-NEXT:    ret i1 [[R]]
 ;
   %s = ashr i4 %x, 1
   %r = icmp ult i4 %s, 11 ; 0b1011
   ret i1 %r
 }
+
+; negative test
+; TODO: This is a sign-bit test, but we don't recognize the pattern.
 
 define i1 @ashr_ult_12(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_12(
@@ -817,6 +833,8 @@ define i1 @ashr_ult_12(i4 %x) {
   ret i1 %r
 }
 
+; negative test
+
 define i1 @ashr_ult_13(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_13(
 ; CHECK-NEXT:    [[S:%.*]] = ashr i4 [[X:%.*]], 1
@@ -827,6 +845,8 @@ define i1 @ashr_ult_13(i4 %x) {
   %r = icmp ult i4 %s, 13 ; 0b1101
   ret i1 %r
 }
+
+; negative test
 
 define i1 @ashr_ult_14(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_14(
@@ -839,6 +859,8 @@ define i1 @ashr_ult_14(i4 %x) {
   ret i1 %r
 }
 
+; negative test, but different transform possible
+
 define i1 @ashr_ult_15(i4 %x) {
 ; CHECK-LABEL: @ashr_ult_15(
 ; CHECK-NEXT:    [[R:%.*]] = icmp ult i4 [[X:%.*]], -2
@@ -848,3 +870,109 @@ define i1 @ashr_ult_15(i4 %x) {
   %r = icmp ult i4 %s, 15 ; 0b1111
   ret i1 %r
 }
+
+define i1 @lshr_eq_0_multiuse(i8 %x) {
+; CHECK-LABEL: @lshr_eq_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = lshr i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp ult i8 [[X]], 4
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = lshr i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp eq i8 %s, 0
+  ret i1 %c
+}
+
+define i1 @lshr_ne_0_multiuse(i8 %x) {
+; CHECK-LABEL: @lshr_ne_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = lshr i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp ugt i8 [[X]], 3
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = lshr i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp ne i8 %s, 0
+  ret i1 %c
+}
+
+define i1 @ashr_eq_0_multiuse(i8 %x) {
+; CHECK-LABEL: @ashr_eq_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = ashr i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp ult i8 [[X]], 4
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = ashr i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp eq i8 %s, 0
+  ret i1 %c
+}
+
+define i1 @ashr_ne_0_multiuse(i8 %x) {
+; CHECK-LABEL: @ashr_ne_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = ashr i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp ugt i8 [[X]], 3
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = ashr i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp ne i8 %s, 0
+  ret i1 %c
+}
+
+define i1 @lshr_exact_eq_0_multiuse(i8 %x) {
+; CHECK-LABEL: @lshr_exact_eq_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = lshr exact i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp eq i8 [[X]], 0
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = lshr exact i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp eq i8 %s, 0
+  ret i1 %c
+}
+
+define i1 @lshr_exact_ne_0_multiuse(i8 %x) {
+; CHECK-LABEL: @lshr_exact_ne_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = lshr exact i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp ne i8 [[X]], 0
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = lshr exact i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp ne i8 %s, 0
+  ret i1 %c
+}
+
+define i1 @ashr_exact_eq_0_multiuse(i8 %x) {
+; CHECK-LABEL: @ashr_exact_eq_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = ashr exact i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp eq i8 [[X]], 0
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = ashr exact i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp eq i8 %s, 0
+  ret i1 %c
+}
+
+define i1 @ashr_exact_ne_0_multiuse(i8 %x) {
+; CHECK-LABEL: @ashr_exact_ne_0_multiuse(
+; CHECK-NEXT:    [[S:%.*]] = ashr exact i8 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i8 [[S]])
+; CHECK-NEXT:    [[C:%.*]] = icmp ne i8 [[X]], 0
+; CHECK-NEXT:    ret i1 [[C]]
+;
+  %s = ashr exact i8 %x, 2
+  call void @use(i8 %s)
+  %c = icmp ne i8 %s, 0
+  ret i1 %c
+}
+
+declare void @use(i8)

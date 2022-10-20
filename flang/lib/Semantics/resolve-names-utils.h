@@ -76,8 +76,8 @@ std::optional<std::int64_t> EvaluateInt64(
 // Analyze a generic-spec and generate a symbol name and GenericKind for it.
 class GenericSpecInfo {
 public:
-  GenericSpecInfo(const parser::DefinedOpName &x) { Analyze(x); }
-  GenericSpecInfo(const parser::GenericSpec &x) { Analyze(x); }
+  explicit GenericSpecInfo(const parser::DefinedOpName &x) { Analyze(x); }
+  explicit GenericSpecInfo(const parser::GenericSpec &x) { Analyze(x); }
 
   GenericKind kind() const { return kind_; }
   const SourceName &symbolName() const { return symbolName_.value(); }
@@ -88,18 +88,20 @@ public:
       llvm::raw_ostream &, const GenericSpecInfo &);
 
 private:
+  void Analyze(const parser::DefinedOpName &);
+  void Analyze(const parser::GenericSpec &);
+
   GenericKind kind_;
   const parser::Name *parseName_{nullptr};
   std::optional<SourceName> symbolName_;
-
-  void Analyze(const parser::DefinedOpName &);
-  void Analyze(const parser::GenericSpec &);
 };
 
 // Analyze a parser::ArraySpec or parser::CoarraySpec
 ArraySpec AnalyzeArraySpec(SemanticsContext &, const parser::ArraySpec &);
 ArraySpec AnalyzeArraySpec(
     SemanticsContext &, const parser::ComponentArraySpec &);
+ArraySpec AnalyzeDeferredShapeSpecList(
+    SemanticsContext &, const parser::DeferredShapeSpecList &);
 ArraySpec AnalyzeCoarraySpec(
     SemanticsContext &context, const parser::CoarraySpec &);
 

@@ -25,7 +25,7 @@ using namespace llvm;
 struct TestTypeSystemSwiftTypeRef : public testing::Test {
   TypeSystemSwiftTypeRef m_swift_ts;
 
-  TestTypeSystemSwiftTypeRef() : m_swift_ts(nullptr) {}
+  TestTypeSystemSwiftTypeRef() : m_swift_ts() {}
   CompilerType GetCompilerType(std::string mangled_name) {
     ConstString internalized(mangled_name);
     return m_swift_ts.GetTypeFromMangledTypename(internalized);
@@ -88,7 +88,7 @@ public:
     return GlobalTypeMangling(Node(Node::Kind::Type, type));
   }
 
-  std::string Mangle(NodePointer node) { return mangleNode(node); }
+  std::string Mangle(NodePointer node) { return mangleNode(node).result(); }
 };
 
 TEST_F(TestTypeSystemSwiftTypeRef, Array) {
@@ -705,3 +705,100 @@ TEST_F(TestTypeSystemSwiftTypeRef, IsTypedefType) {
   };
 }
 
+TEST_F(TestTypeSystemSwiftTypeRef, GetBaseName) {
+  using namespace swift::Demangle;
+  Demangler dem;
+  NodeBuilder b(dem);
+  {
+    NodePointer n = 
+            b.Node(Node::Kind::Class,
+              b.Node(Node::Kind::Function,
+                b.Node(Node::Kind::Module, "a"),
+                b.Node(Node::Kind::Identifier, "main"),
+                b.Node(Node::Kind::Type,
+                  b.Node(Node::Kind::FunctionType,
+                    b.Node(Node::Kind::ArgumentTuple,
+                      b.Node(Node::Kind::Type,
+                        b.Node(Node::Kind::Tuple)))),
+                  b.Node(Node::Kind::ReturnType,
+                    b.Node(Node::Kind::Type,
+                      b.Node(Node::Kind::Structure,
+                        b.Node(Node::Kind::Module, "Swift"),
+                        b.Node(Node::Kind::Identifier, "Int")))))),
+          b.Node(Node::Kind::LocalDeclName,
+            b.NodeWithIndex(Node::Kind::Number, 0),
+            b.Node(Node::Kind::Identifier, "Base")));
+    auto name = TypeSystemSwiftTypeRef::GetBaseName(n);
+    ASSERT_EQ(name, "Base");
+  }
+}
+
+TEST_F(TestTypeSystemSwiftTypeRef, GetGenericArgumentType) {
+  using namespace swift::Demangle;
+  Demangler dem;
+  NodeBuilder b(dem);
+  {
+    NodePointer n = b.GlobalType(b.Node(
+        Node::Kind::BoundGenericClass,
+        b.Node(Node::Kind::Type,
+               b.Node(Node::Kind::Class, b.Node(Node::Kind::Module, "Swift"),
+                      b.Node(Node::Kind::Identifier, "_DictionaryStorage"))),
+        b.Node(Node::Kind::TypeList,
+               b.Node(Node::Kind::Type,
+                      b.Node(Node::Kind::Structure,
+                             b.Node(Node::Kind::Module, "Foundation"),
+                             b.Node(Node::Kind::Identifier, "URL"))),
+               b.Node(Node::Kind::Type,
+                      b.Node(Node::Kind::Structure,
+                             b.Node(Node::Kind::Module, "Swift"),
+                             b.Node(Node::Kind::Identifier, "Int"))))));
+    CompilerType t = GetCompilerType(b.Mangle(n));
+    lldb::opaque_compiler_type_t opaque = t.GetOpaqueQualType();
+
+    // Check if the first element is an URL
+    CompilerType first = m_swift_ts.GetGenericArgumentType(opaque, 0);
+    ASSERT_EQ(first.GetMangledTypeName(), "$s10Foundation3URLVD");
+    // Check if the second element is an Int
+    CompilerType second = m_swift_ts.GetGenericArgumentType(opaque, 1);
+    ASSERT_EQ(second.GetMangledTypeName(), "$sSiD");
+    // Check that the third element is invalid, and that getting it doesn't
+    // crash
+    CompilerType invalid = m_swift_ts.GetGenericArgumentType(opaque, 2);
+    ASSERT_FALSE(invalid.IsValid());
+  }
+}
+
+TEST_F(TestTypeSystemSwiftTypeRef, IsTupleType) {
+  using namespace swift::Demangle;
+  Demangler dem;
+  NodeBuilder b(dem);
+  {
+    // Test with a true tuple type
+    NodePointer n = b.GlobalType(
+        b.Node(Node::Kind::Tuple,
+               b.Node(Node::Kind::TupleElement,
+                      b.Node(Node::Kind::TupleElementName, "key"),
+                      b.Node(Node::Kind::Type,
+                             b.Node(Node::Kind::Structure,
+                                    b.Node(Node::Kind::Module, "Foundation"),
+                                    b.Node(Node::Kind::Identifier, "URL")))),
+               b.Node(Node::Kind::TupleElement,
+                      b.Node(Node::Kind::TupleElementName, "value"),
+                      b.Node(Node::Kind::Type,
+                             b.Node(Node::Kind::Structure,
+                                    b.Node(Node::Kind::Module, "Swift"),
+                                    b.Node(Node::Kind::Identifier, "Int"))))));
+    CompilerType t = GetCompilerType(b.Mangle(n));
+    lldb::opaque_compiler_type_t opaque = t.GetOpaqueQualType();
+    ASSERT_TRUE(m_swift_ts.IsTupleType(opaque));
+  }
+  {
+    // Test with some non-tuple type
+    NodePointer n = b.GlobalType(b.Node(Node::Kind::Structure,
+                                        b.Node(Node::Kind::Module, "Swift"),
+                                        b.Node(Node::Kind::Identifier, "Int")));
+    CompilerType t = GetCompilerType(b.Mangle(n));
+    lldb::opaque_compiler_type_t opaque = t.GetOpaqueQualType();
+    ASSERT_FALSE(m_swift_ts.IsTupleType(opaque));
+  }
+}

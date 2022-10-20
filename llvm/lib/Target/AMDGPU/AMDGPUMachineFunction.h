@@ -12,7 +12,6 @@
 #include "Utils/AMDGPUBaseInfo.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/Support/Alignment.h"
 
 namespace llvm {
 
@@ -95,6 +94,7 @@ public:
   }
 
   unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV);
+  void allocateModuleLDSGlobal(const Module *M);
 
   Align getDynLDSAlign() const { return DynLDSAlign; }
 

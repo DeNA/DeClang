@@ -32,11 +32,13 @@ public:
   RelType getDynRel(RelType type) const override;
   void writeGotPltHeader(uint8_t *buf) const override;
   void writeGotPlt(uint8_t *buf, const Symbol &s) const override;
+  void writeIgotPlt(uint8_t *buf, const Symbol &s) const override;
   void writePltHeader(uint8_t *buf) const override;
   void writePlt(uint8_t *buf, const Symbol &sym,
                 uint64_t pltEntryAddr) const override;
   void relocate(uint8_t *loc, const Relocation &rel,
                 uint64_t val) const override;
+  int64_t getImplicitAddend(const uint8_t *buf, RelType type) const override;
   void applyJumpInstrMod(uint8_t *loc, JumpModType type,
                          unsigned size) const override;
 
@@ -76,7 +78,6 @@ static const std::vector<std::vector<uint8_t>> nopInstructions = {
 X86_64::X86_64() {
   copyRel = R_X86_64_COPY;
   gotRel = R_X86_64_GLOB_DAT;
-  noneRel = R_X86_64_NONE;
   pltRel = R_X86_64_JUMP_SLOT;
   relativeRel = R_X86_64_RELATIVE;
   iRelativeRel = R_X86_64_IRELATIVE;
@@ -85,6 +86,8 @@ X86_64::X86_64() {
   tlsGotRel = R_X86_64_TPOFF64;
   tlsModuleIndexRel = R_X86_64_DTPMOD64;
   tlsOffsetRel = R_X86_64_DTPOFF64;
+  gotBaseSymInGotPlt = true;
+  gotEntrySize = 8;
   pltHeaderSize = 16;
   pltEntrySize = 16;
   ipltEntrySize = 16;
@@ -275,12 +278,12 @@ bool X86_64::deleteFallThruJmpInsn(InputSection &is, InputFile *file,
   const unsigned sizeOfJmpCCInsn = 6;
   // To flip, there must be atleast one JmpCC and one direct jmp.
   if (is.getSize() < sizeOfDirectJmpInsn + sizeOfJmpCCInsn)
-    return 0;
+    return false;
 
   unsigned rbIndex =
       getRelocationWithOffset(is, (is.getSize() - sizeOfDirectJmpInsn - 4));
   if (rbIndex == is.relocations.size())
-    return 0;
+    return false;
 
   Relocation &rB = is.relocations[rbIndex];
 
@@ -353,6 +356,8 @@ RelExpr X86_64::getRelExpr(RelType type, const Symbol &s,
     return R_GOT_PC;
   case R_X86_64_GOTOFF64:
     return R_GOTPLTREL;
+  case R_X86_64_PLTOFF64:
+    return R_PLT_GOTPLT;
   case R_X86_64_GOTPC32:
   case R_X86_64_GOTPC64:
     return R_GOTPLTONLY_PC;
@@ -376,6 +381,12 @@ void X86_64::writeGotPltHeader(uint8_t *buf) const {
 void X86_64::writeGotPlt(uint8_t *buf, const Symbol &s) const {
   // See comments in X86::writeGotPlt.
   write64le(buf, s.getPltVA() + 6);
+}
+
+void X86_64::writeIgotPlt(uint8_t *buf, const Symbol &s) const {
+  // An x86 entry is the address of the ifunc resolver function (for -z rel).
+  if (config->writeAddends)
+    write64le(buf, s.getVA());
 }
 
 void X86_64::writePltHeader(uint8_t *buf) const {
@@ -674,6 +685,56 @@ void X86_64::applyJumpInstrMod(uint8_t *loc, JumpModType type,
   }
 }
 
+int64_t X86_64::getImplicitAddend(const uint8_t *buf, RelType type) const {
+  switch (type) {
+  case R_X86_64_8:
+  case R_X86_64_PC8:
+    return SignExtend64<8>(*buf);
+  case R_X86_64_16:
+  case R_X86_64_PC16:
+    return SignExtend64<16>(read16le(buf));
+  case R_X86_64_32:
+  case R_X86_64_32S:
+  case R_X86_64_TPOFF32:
+  case R_X86_64_GOT32:
+  case R_X86_64_GOTPC32:
+  case R_X86_64_GOTPC32_TLSDESC:
+  case R_X86_64_GOTPCREL:
+  case R_X86_64_GOTPCRELX:
+  case R_X86_64_REX_GOTPCRELX:
+  case R_X86_64_PC32:
+  case R_X86_64_GOTTPOFF:
+  case R_X86_64_PLT32:
+  case R_X86_64_TLSGD:
+  case R_X86_64_TLSLD:
+  case R_X86_64_DTPOFF32:
+  case R_X86_64_SIZE32:
+    return SignExtend64<32>(read32le(buf));
+  case R_X86_64_64:
+  case R_X86_64_TPOFF64:
+  case R_X86_64_DTPOFF64:
+  case R_X86_64_DTPMOD64:
+  case R_X86_64_PC64:
+  case R_X86_64_SIZE64:
+  case R_X86_64_GLOB_DAT:
+  case R_X86_64_GOT64:
+  case R_X86_64_GOTOFF64:
+  case R_X86_64_GOTPC64:
+  case R_X86_64_PLTOFF64:
+  case R_X86_64_IRELATIVE:
+  case R_X86_64_RELATIVE:
+    return read64le(buf);
+  case R_X86_64_JUMP_SLOT:
+  case R_X86_64_NONE:
+    // These relocations are defined as not having an implicit addend.
+    return 0;
+  default:
+    internalLinkerError(getErrorLocation(buf),
+                        "cannot read addend for relocation " + toString(type));
+    return 0;
+  }
+}
+
 void X86_64::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   switch (rel.type) {
   case R_X86_64_8:
@@ -721,6 +782,7 @@ void X86_64::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
   case R_X86_64_GOT64:
   case R_X86_64_GOTOFF64:
   case R_X86_64_GOTPC64:
+  case R_X86_64_PLTOFF64:
     write64le(loc, val);
     break;
   default:

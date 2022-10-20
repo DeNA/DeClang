@@ -69,10 +69,16 @@ public:
 ///                      TypeSystemSwift (abstract)
 ///                        │         │
 ///                        ↓         ↓
-///    TypeSystemSwiftTypeRef ⟷ SwiftASTContext (deprecated)
-///                                  │
-///                                  ↓
-///                               SwiftASTContextForExpressions
+///    TypeSystemSwiftTypeRef ⟷ SwiftASTContextForModules (deprecated)
+///               │                                  │
+///               ↓                                  ↓
+///  TypeSystemSwiftTypeRefForExpressions ⟷ SwiftASTContextForExpressions
+///
+///
+/// Memory management:
+///
+/// A per-module TypeSystemSwiftTypeRef owns a lazily initialized SwiftASTContext.
+/// A SwiftASTContextForExpressions owns a  TypeSystemSwiftTypeRef.
 ///
 /// \endverbatim
 class TypeSystemSwift : public TypeSystem {
@@ -92,8 +98,9 @@ public:
   /// \{
   static void Initialize();
   static void Terminate();
-  ConstString GetPluginName() override;
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override {
+    return GetPluginNameStatic().GetStringRef();
+  }
   static ConstString GetPluginNameStatic();
   /// \}
 
@@ -107,13 +114,15 @@ public:
     LanguageFlags() = delete;
   };
 
+  const std::string &GetDescription() const { return m_description; }
   static LanguageSet GetSupportedLanguagesForTypes();
-  virtual SwiftASTContext *GetSwiftASTContext() = 0;
+  virtual SwiftASTContext *GetSwiftASTContext() const = 0;
   virtual TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() = 0;
-  virtual Module *GetModule() const = 0;
-  virtual lldb::TypeSP GetCachedType(ConstString mangled) = 0;
-  virtual void SetCachedType(ConstString mangled,
-                             const lldb::TypeSP &type_sp) = 0;
+  virtual const TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() const = 0;
+  virtual void SetTriple(const llvm::Triple triple) = 0;
+  virtual void ClearModuleDependentCaches() = 0;
+  virtual lldb::TargetWP GetTargetWP() const = 0;
+
   virtual bool IsImportedType(lldb::opaque_compiler_type_t type,
                               CompilerType *original_type) = 0;
   virtual CompilerType GetErrorType() = 0;
@@ -121,23 +130,28 @@ public:
   static CompilerType GetInstanceType(CompilerType ct);
   virtual CompilerType GetInstanceType(lldb::opaque_compiler_type_t type) = 0;
   enum class TypeAllocationStrategy { eInline, ePointer, eDynamic, eUnknown };
-  virtual TypeAllocationStrategy
-  GetAllocationStrategy(lldb::opaque_compiler_type_t type) = 0;
   struct TupleElement {
     ConstString element_name;
     CompilerType element_type;
+    
+    TupleElement() = default;
+    TupleElement(ConstString name, CompilerType type)
+        : element_name(name), element_type(type) {}
   };
   virtual CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) = 0;
+  virtual bool IsTupleType(lldb::opaque_compiler_type_t type) = 0;
   using TypeSystem::DumpTypeDescription;
   virtual void DumpTypeDescription(
       lldb::opaque_compiler_type_t type, bool print_help_if_available,
       bool print_extensions_if_available,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) = 0;
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) = 0;
   virtual void DumpTypeDescription(
       lldb::opaque_compiler_type_t type, Stream *s,
       bool print_help_if_available, bool print_extensions_if_available,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) = 0;
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) = 0;
 
   /// Create a CompilerType from a mangled Swift type name.
   virtual CompilerType
@@ -156,6 +170,11 @@ public:
                  uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
                  bool show_types, bool show_summary, bool verbose,
                  uint32_t depth) override;
+
+  /// \see lldb_private::TypeSystem::Dump
+  void Dump(llvm::raw_ostream &output) override;
+  
+  lldb::Format GetFormat(lldb::opaque_compiler_type_t type) override;
 
   /// Unavailable hardcoded functions that don't make sense for Swift.
   /// \{
@@ -264,10 +283,31 @@ public:
                                    const char *name, ExecutionContext *exe_ctx,
                                    bool omit_empty_base_classes) override;
 
+  CompilerType
+  GetLValueReferenceType(lldb::opaque_compiler_type_t type) override {
+    return {};
+  }
+
+  CompilerType
+  GetRValueReferenceType(lldb::opaque_compiler_type_t type) override {
+    return {};
+  }
+
+  CompilerType GetNonReferenceType(lldb::opaque_compiler_type_t type) override {
+    return {};
+  }
+
+  // TODO: This method appear unused. Should they be removed?
+  void DumpSummary(lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx,
+                   Stream *s, const DataExtractor &data,
+                   lldb::offset_t data_offset, size_t data_byte_size) override {
+  }
   /// \}
 protected:
   /// Used in the logs.
   std::string m_description;
+  /// The module this typesystem belongs to if any.
+  Module *m_module = nullptr;
 };
 
 } // namespace lldb_private

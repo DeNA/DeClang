@@ -112,7 +112,7 @@ COMMANDS
 
 .. option:: --source-quietly
 
- Tells the debugger to execute this one-line lldb command before any file has been loaded.
+ Tells the debugger not to echo commands while sourcing files or one-line commands provided on the command line.
 
 .. option:: --source <file>
 
@@ -235,6 +235,10 @@ SCRIPTING
 
  Alias for --script-language
 
+.. option:: --print-script-interpreter-info
+
+  Prints out a json dictionary with information about the scripting language interpreter.
+
 .. option:: --python-path
 
  Prints out the path to the lldb.py file for this version of lldb.
@@ -257,11 +261,11 @@ executable. To disambiguate between arguments passed to lldb and arguments
 passed to the debugged executable, arguments starting with a - must be passed
 after --.
 
-  lldb --arch x86_64 /path/to/program program argument -- --arch arvm7
+  lldb --arch x86_64 /path/to/program program argument -- --arch armv7
 
 For convenience, passing the executable after -- is also supported.
 
-  lldb --arch x86_64 -- /path/to/program program argument --arch arvm7
+  lldb --arch x86_64 -- /path/to/program program argument --arch armv7
 
 Passing one of the attach options causes :program:`lldb` to immediately attach
 to the given process.
@@ -313,9 +317,9 @@ and ~/.lldbinit-Xcode for Xcode. If there is no application specific init
 file, :program:`lldb` will look for an init file in the home directory.
 If launched with a `REPL`_ option, it will first look for a REPL configuration
 file, specific to the REPL language. The init file should be named as follow:
-`.lldbinit-<language>-repl` (i.e. `.lldbinit-swift-repl`). If this file doesn't
+``.lldbinit-<language>-repl`` (i.e. ``.lldbinit-swift-repl``). If this file doesn't
 exist, or :program:`lldb` wasn't launch with `REPL`_, meaning there is neither
-a REPL init file nor an application specific init file, `lldb` will fallback to
+a REPL init file nor an application specific init file, ``lldb`` will fallback to
 the global ~/.lldbinit.
 
 Secondly, it will look for an .lldbinit file in the current working directory.

@@ -202,8 +202,7 @@ namespace {
   public:
     WidenedLoad(SmallVectorImpl<LoadInst*> &Lds, LoadInst *Wide)
       : NewLd(Wide) {
-      for (auto *I : Lds)
-        Loads.push_back(I);
+      append_range(Loads, Lds);
     }
     LoadInst *getLoad() {
       return NewLd;
@@ -298,14 +297,6 @@ namespace {
       return Changes;
     }
   };
-}
-
-template<typename MemInst>
-static bool AreSequentialAccesses(MemInst *MemOp0, MemInst *MemOp1,
-                                  const DataLayout &DL, ScalarEvolution &SE) {
-  if (isConsecutiveAccess(MemOp0, MemOp1, DL, SE))
-    return true;
-  return false;
 }
 
 bool ARMParallelDSP::AreSequentialLoads(LoadInst *Ld0, LoadInst *Ld1,
@@ -415,7 +406,7 @@ bool ARMParallelDSP::RecordMemoryOps(BasicBlock *BB) {
       if (Base == Offset || OffsetLoads.count(Offset))
         continue;
 
-      if (AreSequentialAccesses<LoadInst>(Base, Offset, *DL, *SE) &&
+      if (isConsecutiveAccess(Base, Offset, *DL, *SE) &&
           SafeToPair(Base, Offset)) {
         LoadPairs[Base] = Offset;
         OffsetLoads.insert(Offset);

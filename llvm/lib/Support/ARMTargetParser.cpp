@@ -82,6 +82,10 @@ unsigned ARM::parseArchVersion(StringRef Arch) {
   case ArchKind::ARMV8MMainline:
   case ArchKind::ARMV8_1MMainline:
     return 8;
+  case ArchKind::ARMV9A:
+  case ArchKind::ARMV9_1A:
+  case ArchKind::ARMV9_2A:
+    return 9;
   case ArchKind::INVALID:
     return 0;
   }
@@ -113,6 +117,9 @@ ARM::ProfileKind ARM::parseArchProfile(StringRef Arch) {
   case ArchKind::ARMV8_5A:
   case ArchKind::ARMV8_6A:
   case ArchKind::ARMV8_7A:
+  case ArchKind::ARMV9A:
+  case ArchKind::ARMV9_1A:
+  case ArchKind::ARMV9_2A:
     return ProfileKind::A;
   case ArchKind::ARMV2:
   case ArchKind::ARMV2A:
@@ -158,6 +165,9 @@ StringRef ARM::getArchSynonym(StringRef Arch) {
       .Case("v8.6a", "v8.6-a")
       .Case("v8.7a", "v8.7-a")
       .Case("v8r", "v8-r")
+      .Cases("v9", "v9a", "v9-a")
+      .Case("v9.1a", "v9.1-a")
+      .Case("v9.2a", "v9.2-a")
       .Case("v8m.base", "v8-m.base")
       .Case("v8m.main", "v8-m.main")
       .Case("v8.1m.main", "v8.1-m.main")
@@ -213,8 +223,9 @@ bool ARM::getFPUFeatures(unsigned FPUKind, std::vector<StringRef> &Features) {
     const char *PlusName, *MinusName;
     NeonSupportLevel MinSupportLevel;
   } NeonFeatureInfoList[] = {
-    {"+neon", "-neon", NeonSupportLevel::Neon},
-    {"+crypto", "-crypto", NeonSupportLevel::Crypto},
+      {"+neon", "-neon", NeonSupportLevel::Neon},
+      {"+sha2", "-sha2", NeonSupportLevel::Crypto},
+      {"+aes", "-aes", NeonSupportLevel::Crypto},
   };
 
   for (const auto &Info: NeonFeatureInfoList) {
@@ -296,7 +307,7 @@ StringRef ARM::getCanonicalArchName(StringRef Arch) {
   else if (A.startswith("aarch64")) {
     offset = 7;
     // AArch64 uses "_be", not "eb" suffix.
-    if (A.find("eb") != StringRef::npos)
+    if (A.contains("eb"))
       return Error;
     if (A.substr(offset, 3) == "_be")
       offset += 3;
@@ -322,7 +333,7 @@ StringRef ARM::getCanonicalArchName(StringRef Arch) {
     if (A.size() >= 2 && (A[0] != 'v' || !std::isdigit(A[1])))
       return Error;
     // Can't have an extra 'eb'.
-    if (A.find("eb") != StringRef::npos)
+    if (A.contains("eb"))
       return Error;
   }
 
@@ -537,14 +548,6 @@ bool ARM::appendArchExtFeatures(StringRef CPU, ARM::ArchKind AK,
     return ARM::getFPUFeatures(FPUKind, Features);
   }
   return StartingNumFeatures != Features.size();
-}
-
-StringRef ARM::getHWDivName(uint64_t HWDivKind) {
-  for (const auto &D : HWDivNames) {
-    if (HWDivKind == D.ID)
-      return D.getName();
-  }
-  return StringRef();
 }
 
 StringRef ARM::getDefaultCPU(StringRef Arch) {

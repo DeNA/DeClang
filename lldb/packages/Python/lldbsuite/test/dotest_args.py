@@ -55,8 +55,8 @@ def create_parser():
                                                            suggestions: do not lump the "-A arch1 -A arch2" together such that the -E option applies to only one of the architectures'''))
 
     group.add_argument('--dsymutil', metavar='dsymutil', dest='dsymutil', help=textwrap.dedent('Specify which dsymutil to use.'))
-    group.add_argument('--yaml2obj', metavar='yaml2obj', dest='yaml2obj', help=textwrap.dedent('Specify which yaml2obj binary to use.'))
-    group.add_argument('--filecheck', metavar='filecheck', dest='filecheck', help=textwrap.dedent('Specify which FileCheck binary to use.'))
+    group.add_argument('--llvm-tools-dir', metavar='dir', dest='llvm_tools_dir',
+            help=textwrap.dedent('The location of llvm tools used for testing (yaml2obj, FileCheck, etc.).'))
 
     # Test filtering options
     group = parser.add_argument_group('Test filtering options')
@@ -104,10 +104,6 @@ def create_parser():
         '--executable',
         metavar='executable-path',
         help='The path to the lldb executable')
-    group.add_argument(
-        '--server',
-        metavar='server-path',
-        help='The path to the debug server executable to use')
     group.add_argument(
         '--out-of-tree-debugserver',
         dest='out_of_tree_debugserver',
@@ -196,17 +192,6 @@ def create_parser():
         dest='lldb_platform_working_dir',
         metavar='platform-working-dir',
         help='The directory to use on the remote platform.')
-
-    # Reproducer options
-    group = parser.add_argument_group('Reproducer options')
-    group.add_argument(
-        '--capture-path',
-        metavar='reproducer path',
-        help='The reproducer capture path')
-    group.add_argument(
-        '--replay-path',
-        metavar='reproducer path',
-        help='The reproducer replay path')
 
     # Test-suite behaviour
     group = parser.add_argument_group('Runtime behaviour options')

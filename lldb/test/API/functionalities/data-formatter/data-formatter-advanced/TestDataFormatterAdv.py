@@ -42,6 +42,9 @@ class AdvDataFormatterTestCase(TestBase):
             self.runCmd(
                 "settings set target.max-children-count 256",
                 check=False)
+            self.runCmd(
+                "settings clear target.max-children-depth",
+                check=False)
 
         # Execute the cleanup function during test case tear down.
         self.addTearDownHook(cleanup)
@@ -65,7 +68,7 @@ class AdvDataFormatterTestCase(TestBase):
         self.runCmd("type summary clear")
 
         self.runCmd(
-            "type summary add --summary-string \"${var[]}\" -x \"int \\[[0-9]\\]")
+            "type summary add --summary-string \"${var[]}\" -x \"int\\[[0-9]\\]")
 
         self.expect("frame variable int_array",
                     substrs=['1,2,3,4,5'])
@@ -124,27 +127,27 @@ class AdvDataFormatterTestCase(TestBase):
         self.runCmd("type summary clear")
 
         self.runCmd(
-            'type summary add --summary-string \"${var[0-1]}\" -x \"int \[[0-9]\]\"')
+            'type summary add --summary-string \"${var[0-1]}\" -x \"int\[[0-9]\]\"')
 
         self.expect("frame variable int_array",
                     substrs=['1,2'])
 
         self.runCmd(
-            'type summary add --summary-string \"${var[0-1]}\" "int []"')
+            'type summary add --summary-string \"${var[0-1]}\" "int[]"')
 
         self.expect("frame variable int_array",
                     substrs=['1,2'])
 
         # Test the patterns are matched in reverse-chronological order.
         self.runCmd(
-            'type summary add --summary-string \"${var[2-3]}\" "int []"')
+            'type summary add --summary-string \"${var[2-3]}\" "int[]"')
 
         self.expect("frame variable int_array",
                     substrs=['3,4'])
 
         self.runCmd("type summary clear")
 
-        self.runCmd("type summary add -c -x \"i_am_cool \[[0-9]\]\"")
+        self.runCmd("type summary add -c -x \"i_am_cool\[[0-9]\]\"")
         self.runCmd("type summary add -c i_am_cool")
 
         self.expect(
@@ -199,7 +202,7 @@ class AdvDataFormatterTestCase(TestBase):
         self.runCmd("type summary clear")
 
         self.runCmd(
-            "type summary add --summary-string \"${*var[].x[0-3]%hex} is a bitfield on a set of integers\" -x \"SimpleWithPointers \[[0-9]\]\"")
+            "type summary add --summary-string \"${*var[].x[0-3]%hex} is a bitfield on a set of integers\" -x \"SimpleWithPointers\[[0-9]\]\"")
 
         self.expect(
             "frame variable couple --summary-string \"${*var.sp.x[0-2]} are low bits of integer ${*var.sp.x}. If I pretend it is an array I get ${var.sp.x[0-5]}\"",
@@ -243,6 +246,12 @@ class AdvDataFormatterTestCase(TestBase):
 
         self.expect("frame variable a_simple_object", matching=True,
                     substrs=['x=0x00000003'])
+
+        self.expect_var_path("constInt", value='0x0000002a')
+
+        self.expect_var_path("volatileInt", value='0x0000002b')
+
+        self.expect_var_path("constVolatileInt", value='0x0000002c')
 
         # check that we can correctly cap the number of children shown
         self.runCmd("settings set target.max-children-count 5")
@@ -340,3 +349,30 @@ class AdvDataFormatterTestCase(TestBase):
             'frame variable a_long_guy --show-all-children',
             matching=False,
             substrs=['...'])
+
+        # The below tests need the hex formatting of int removed.
+        self.runCmd('type format delete int')
+
+        # First, check the following:
+        #   1. Verify the default max-children-depth (6) is applied
+        #   2. Ensure the one-time warning is printed
+        warning = '*** Some of the displayed variables have a greater depth'
+        self.expect(
+            'frame variable quite_nested',
+            matching=True,
+            substrs=['six ={...}', warning])
+        self.expect(
+            'frame variable quite_nested',
+            matching=False,
+            substrs=['leaf = 41', warning])
+
+        # Check that both ways of overriding max-children-depth work.
+        self.expect(
+            'frame variable --depth 8 quite_nested',
+            matching=True,
+            substrs=['leaf = 41'])
+        self.runCmd("settings set target.max-children-depth 8")
+        self.expect(
+            'frame variable quite_nested',
+            matching=True,
+            substrs=['leaf = 41'])

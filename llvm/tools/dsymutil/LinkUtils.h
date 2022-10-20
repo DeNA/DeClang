@@ -30,6 +30,9 @@ struct LinkOptions {
   /// Statistics
   bool Statistics = false;
 
+  /// Verify the input DWARF.
+  bool VerifyInputDWARF = false;
+
   /// Skip emitting output
   bool NoOutput = false;
 
@@ -38,9 +41,6 @@ struct LinkOptions {
 
   /// Update
   bool Update = false;
-
-  /// Minimize
-  bool Minimize = false;
 
   /// Do not check swiftmodule timestamp
   bool NoTimestamp = false;

@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "TargetInfo/CSKYTargetInfo.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
 using namespace llvm;
 
 Target &llvm::getTheCSKYTarget() {
@@ -15,6 +15,6 @@ Target &llvm::getTheCSKYTarget() {
   return TheCSKYTarget;
 }
 
-extern "C" void LLVMInitializeCSKYTargetInfo() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeCSKYTargetInfo() {
   RegisterTarget<Triple::csky> X(getTheCSKYTarget(), "csky", "C-SKY", "CSKY");
 }

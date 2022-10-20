@@ -134,18 +134,6 @@ if is_configured('shared_libs'):
     lit_config.warning("unable to inject shared library path on '{}'".format(
         platform.system()))
 
-# Support running the test suite under the lldb-repro wrapper. This makes it
-# possible to capture a test suite run and then rerun all the test from the
-# just captured reproducer.
-lldb_repro_mode = lit_config.params.get('lldb-run-with-repro', None)
-if lldb_repro_mode:
-  lit_config.note("Running API tests in {} mode.".format(lldb_repro_mode))
-  mkdir_p(config.lldb_reproducer_directory)
-  if lldb_repro_mode == 'capture':
-    config.available_features.add('lldb-repro-capture')
-  elif lldb_repro_mode == 'replay':
-    config.available_features.add('lldb-repro-replay')
-
 lldb_use_simulator = lit_config.params.get('lldb-run-with-simulator', None)
 if lldb_use_simulator:
   if lldb_use_simulator == "ios":
@@ -205,17 +193,20 @@ if is_configured('lldb_executable'):
 if is_configured('test_compiler'):
   dotest_cmd += ['--compiler', config.test_compiler]
 
+# swift_stdlibs_dir is where the built swift standard libraries live, e.g. in a
+# x86 build: ../Ninja-RelWithDebInfoAssert/swift-macosx-x86_64/lib/swift/
+swift_stdlibs_dir = None
+
 if is_configured('test_swift_compiler'):
   dotest_cmd += ['--swift-compiler', config.test_swift_compiler]
+  swift_stdlibs_dir = os.path.join(os.path.dirname(config.test_swift_compiler),
+          '..', 'lib', 'swift')
 
 if is_configured('dsymutil'):
   dotest_cmd += ['--dsymutil', config.dsymutil]
 
-if is_configured('filecheck'):
-  dotest_cmd += ['--filecheck', config.filecheck]
-
-if is_configured('yaml2obj'):
-  dotest_cmd += ['--yaml2obj', config.yaml2obj]
+if is_configured('llvm_tools_dir'):
+  dotest_cmd += ['--llvm-tools-dir', config.llvm_tools_dir]
 
 if is_configured('server'):
   dotest_cmd += ['--server', config.server]
@@ -229,6 +220,11 @@ if is_configured('lldb_framework_dir'):
 if 'lldb-repro-capture' in config.available_features or \
     'lldb-repro-replay' in config.available_features:
   dotest_cmd += ['--skip-category=lldb-vscode', '--skip-category=std-module']
+
+# Skip the swiftmaccatalyst category if its stdlib support is missing.
+if swift_stdlibs_dir and \
+        not os.path.isdir(os.path.join(swift_stdlibs_dir, 'maccatalyst')):
+  dotest_cmd += ['--skip-category=swiftmaccatalyst']
 
 if 'lldb-simulator-ios' in config.available_features:
   dotest_cmd += ['--apple-sdk', 'iphonesimulator',
@@ -258,15 +254,13 @@ import lldbtest
 # testFormat: The test format to use to interpret tests.
 config.test_format = lldbtest.LLDBTest(dotest_cmd)
 
+# Propagate TERM or default to vt100.
+config.environment['TERM'] = os.getenv('TERM', default='vt100')
+
 # Propagate FREEBSD_LEGACY_PLUGIN
 if 'FREEBSD_LEGACY_PLUGIN' in os.environ:
   config.environment['FREEBSD_LEGACY_PLUGIN'] = os.environ[
       'FREEBSD_LEGACY_PLUGIN']
-
-# Propagate LLDB_CAPTURE_REPRODUCER
-if 'LLDB_CAPTURE_REPRODUCER' in os.environ:
-  config.environment['LLDB_CAPTURE_REPRODUCER'] = os.environ[
-      'LLDB_CAPTURE_REPRODUCER']
 
 # Propagate XDG_CACHE_HOME
 if 'XDG_CACHE_HOME' in os.environ:

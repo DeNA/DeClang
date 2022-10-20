@@ -14,6 +14,7 @@
 #include "flang/Semantics/tools.h"
 #include "llvm/Support/raw_ostream.h"
 #include <string>
+#include <type_traits>
 
 namespace Fortran::semantics {
 
@@ -84,7 +85,8 @@ void ModuleDetails::set_scope(const Scope *scope) {
 llvm::raw_ostream &operator<<(
     llvm::raw_ostream &os, const SubprogramDetails &x) {
   DumpBool(os, "isInterface", x.isInterface_);
-  DumpExpr(os, "bindName", x.bindName_);
+  DumpBool(os, "dummy", x.isDummy_);
+  DumpOptional(os, "bindName", x.bindName());
   if (x.result_) {
     DumpType(os << " result:", x.result());
     os << x.result_->name();
@@ -258,11 +260,11 @@ bool Symbol::CanReplaceDetails(const Details &details) const {
               return has<SubprogramNameDetails>() || has<EntityDetails>();
             },
             [&](const DerivedTypeDetails &) {
-              const auto *derived{detailsIf<DerivedTypeDetails>()};
+              const auto *derived{this->detailsIf<DerivedTypeDetails>()};
               return derived && derived->isForwardReferenced();
             },
             [&](const UseDetails &x) {
-              const auto *use{detailsIf<UseDetails>()};
+              const auto *use{this->detailsIf<UseDetails>()};
               return use && use->symbol() == x.symbol();
             },
             [](const auto &) { return false; },
@@ -287,6 +289,33 @@ void Symbol::SetType(const DeclTypeSpec &type) {
                  [&](TypeParamDetails &x) { x.set_type(type); },
                  [](auto &) {},
              },
+      details_);
+}
+
+template <typename T>
+constexpr bool HasBindName{std::is_convertible_v<T, const WithBindName *>};
+
+const std::string *Symbol::GetBindName() const {
+  return std::visit(
+      [&](auto &x) -> const std::string * {
+        if constexpr (HasBindName<decltype(&x)>) {
+          return x.bindName();
+        } else {
+          return nullptr;
+        }
+      },
+      details_);
+}
+
+void Symbol::SetBindName(std::string &&name) {
+  std::visit(
+      [&](auto &x) {
+        if constexpr (HasBindName<decltype(&x)>) {
+          x.set_bindName(std::move(name));
+        } else {
+          DIE("bind name not allowed on this kind of symbol");
+        }
+      },
       details_);
 }
 
@@ -331,7 +360,7 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const EntityDetails &x) {
   if (x.type()) {
     os << " type: " << *x.type();
   }
-  DumpExpr(os, "bindName", x.bindName_);
+  DumpOptional(os, "bindName", x.bindName());
   return os;
 }
 
@@ -361,7 +390,7 @@ llvm::raw_ostream &operator<<(
   } else {
     DumpType(os, x.interface_.type());
   }
-  DumpExpr(os, "bindName", x.bindName());
+  DumpOptional(os, "bindName", x.bindName());
   DumpOptional(os, "passName", x.passName());
   if (x.init()) {
     if (const Symbol * target{*x.init()}) {
@@ -448,6 +477,7 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Details &details) {
             DumpSymbolVector(os, x.objects());
           },
           [&](const CommonBlockDetails &x) {
+            DumpOptional(os, "bindName", x.bindName());
             if (x.alignment()) {
               os << " alignment=" << x.alignment();
             }
@@ -504,6 +534,10 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const Symbol &symbol) {
   os << ": " << symbol.details_;
   return os;
 }
+
+#if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
+void Symbol::dump() const { llvm::errs() << *this << '\n'; }
+#endif
 
 // Output a unique name for a scope by qualifying it with the names of
 // parent scopes. For scopes without corresponding symbols, use the kind
@@ -644,6 +678,40 @@ std::string GenericKind::ToString() const {
 bool GenericKind::Is(GenericKind::OtherKind x) const {
   const OtherKind *y{std::get_if<OtherKind>(&u)};
   return y && *y == x;
+}
+
+bool SymbolOffsetCompare::operator()(
+    const SymbolRef &x, const SymbolRef &y) const {
+  const Symbol *xCommon{FindCommonBlockContaining(*x)};
+  const Symbol *yCommon{FindCommonBlockContaining(*y)};
+  if (xCommon) {
+    if (yCommon) {
+      const SymbolSourcePositionCompare sourceCmp;
+      if (sourceCmp(*xCommon, *yCommon)) {
+        return true;
+      } else if (sourceCmp(*yCommon, *xCommon)) {
+        return false;
+      } else if (x->offset() == y->offset()) {
+        return x->size() > y->size();
+      } else {
+        return x->offset() < y->offset();
+      }
+    } else {
+      return false;
+    }
+  } else if (yCommon) {
+    return true;
+  } else if (x->offset() == y->offset()) {
+    return x->size() > y->size();
+  } else {
+    return x->offset() < y->offset();
+  }
+  return x->GetSemanticsContext().allCookedSources().Precedes(
+      x->name(), y->name());
+}
+bool SymbolOffsetCompare::operator()(
+    const MutableSymbolRef &x, const MutableSymbolRef &y) const {
+  return (*this)(SymbolRef{*x}, SymbolRef{*y});
 }
 
 } // namespace Fortran::semantics

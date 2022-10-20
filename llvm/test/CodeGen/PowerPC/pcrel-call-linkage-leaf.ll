@@ -109,10 +109,10 @@ define dso_local signext i32 @X2IsCallerSaved(i32 signext %a, i32 signext %b, i3
 ; CHECK-S-NEXT:    sub r29, r8, r9
 ; CHECK-S-NEXT:    add r9, r10, r9
 ; CHECK-S-NEXT:    sub r10, r10, r3
+; CHECK-S-NEXT:    mullw r3, r4, r3
 ; CHECK-S-NEXT:    sub r12, r4, r5
 ; CHECK-S-NEXT:    add r0, r6, r5
 ; CHECK-S-NEXT:    sub r2, r6, r7
-; CHECK-S-NEXT:    mullw r3, r4, r3
 ; CHECK-S-NEXT:    add r30, r8, r7
 ; CHECK-S-NEXT:    mullw r3, r3, r11
 ; CHECK-S-NEXT:    mullw r3, r3, r5
@@ -173,7 +173,9 @@ define dso_local double @UsesX2AsConstPoolTOC() local_unnamed_addr {
 ; CHECK-LARGE:     add r2, r2, r12
 ; CHECK-S-NOT:       .localentry
 ; CHECK-ALL:       # %bb.0: # %entry
-; CHECK-S-NEXT:    plfd f1, .LCPI7_0@PCREL(0), 1
+; CHECK-S-NEXT:    xxsplti32dx vs1, 0, 1078011044
+; CHECK-S-NEXT:    xxsplti32dx vs1, 1, -337824948
+; CHECK-S-NEXT:    # kill: def $f1 killed $f1 killed $vsl1
 ; CHECK-S-NEXT:    blr
 entry:
   ret double 0x404124A4EBDD334C

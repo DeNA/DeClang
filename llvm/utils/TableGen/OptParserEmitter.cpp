@@ -20,7 +20,7 @@
 
 using namespace llvm;
 
-static const std::string getOptionName(const Record &R) {
+static std::string getOptionName(const Record &R) {
   // Use the record name unless EnumName is defined.
   if (isa<UnsetInit>(R.getValueInit("EnumName")))
     return std::string(R.getName());
@@ -35,8 +35,7 @@ static raw_ostream &write_cstring(raw_ostream &OS, llvm::StringRef Str) {
   return OS;
 }
 
-static const std::string getOptionSpelling(const Record &R,
-                                           size_t &PrefixLength) {
+static std::string getOptionSpelling(const Record &R, size_t &PrefixLength) {
   std::vector<StringRef> Prefixes = R.getValueAsListOfStrings("Prefixes");
   StringRef Name = R.getValueAsString("Name");
 
@@ -49,7 +48,7 @@ static const std::string getOptionSpelling(const Record &R,
   return (Twine(Prefixes[0]) + Twine(Name)).str();
 }
 
-static const std::string getOptionSpelling(const Record &R) {
+static std::string getOptionSpelling(const Record &R) {
   size_t PrefixLength;
   return getOptionSpelling(R, PrefixLength);
 }
@@ -66,6 +65,7 @@ public:
   static constexpr const char *MacroName = "OPTION_WITH_MARSHALLING";
   const Record &R;
   bool ShouldAlwaysEmit;
+  StringRef MacroPrefix;
   StringRef KeyPath;
   StringRef DefaultValue;
   StringRef NormalizedValuesScope;
@@ -99,6 +99,10 @@ struct SimpleEnumValueTable {
       "static const SimpleEnumValueTable SimpleEnumValueTables[] = ";
 
   MarshallingInfo(const Record &R) : R(R) {}
+
+  std::string getMacroName() const {
+    return (MacroPrefix + MarshallingInfo::MacroName).str();
+  }
 
   void emit(raw_ostream &OS) const {
     write_cstring(OS, StringRef(getOptionSpelling(R)));
@@ -163,6 +167,7 @@ static MarshallingInfo createMarshallingInfo(const Record &R) {
   MarshallingInfo Ret(R);
 
   Ret.ShouldAlwaysEmit = R.getValueAsBit("ShouldAlwaysEmit");
+  Ret.MacroPrefix = R.getValueAsString("MacroPrefix");
   Ret.KeyPath = R.getValueAsString("KeyPath");
   Ret.DefaultValue = R.getValueAsString("DefaultValue");
   Ret.NormalizedValuesScope = R.getValueAsString("NormalizedValuesScope");
@@ -246,7 +251,7 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
 
     // Prefix values.
     OS << ", {";
-    for (StringRef PrefixKey : Prefix.first)
+    for (const auto &PrefixKey : Prefix.first)
       OS << "\"" << PrefixKey << "\" COMMA ";
     OS << "nullptr})\n";
   }
@@ -424,13 +429,13 @@ void EmitOptParser(RecordKeeper &Records, raw_ostream &OS) {
     MarshallingInfos.push_back(createMarshallingInfo(*R));
 
   for (const auto &MI : MarshallingInfos) {
-    OS << "#ifdef " << MarshallingInfo::MacroName << "\n";
-    OS << MarshallingInfo::MacroName << "(";
+    OS << "#ifdef " << MI.getMacroName() << "\n";
+    OS << MI.getMacroName() << "(";
     WriteOptRecordFields(OS, MI.R);
     OS << ", ";
     MI.emit(OS);
     OS << ")\n";
-    OS << "#endif // " << MarshallingInfo::MacroName << "\n";
+    OS << "#endif // " << MI.getMacroName() << "\n";
   }
 
   OS << "\n";

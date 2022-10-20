@@ -1,18 +1,23 @@
-// Tests basic FORMAT string traversal
+//===-- flang/unittests/RuntimeGTest/Format.cpp -----------------*- C++ -*-===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
 
-#include "testing.h"
+#include "CrashHandlerFixture.h"
 #include "../runtime/format-implementation.h"
 #include "../runtime/io-error.h"
-#include <cstdarg>
-#include <cstring>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace Fortran::runtime;
 using namespace Fortran::runtime::io;
 using namespace std::literals::string_literals;
 
-using Results = std::vector<std::string>;
+using ResultsTy = std::vector<std::string>;
 
 // A test harness context for testing FormatControl
 class TestFormatContext : public IoErrorHandler {
@@ -26,8 +31,7 @@ public:
   void HandleRelativePosition(std::int64_t);
   void HandleAbsolutePosition(std::int64_t);
   void Report(const DataEdit &);
-  void Check(Results &);
-  Results results;
+  ResultsTy results;
   MutableModes &mutableModes() { return mutableModes_; }
 
 private:
@@ -88,52 +92,92 @@ void TestFormatContext::Report(const DataEdit &edit) {
   results.push_back(str);
 }
 
-void TestFormatContext::Check(Results &expect) {
-  if (expect != results) {
-    Fail() << "expected:";
-    for (const std::string &s : expect) {
-      llvm::errs() << ' ' << s;
-    }
-    llvm::errs() << "\ngot:";
-    for (const std::string &s : results) {
-      llvm::errs() << ' ' << s;
-    }
-    llvm::errs() << '\n';
-  }
-  expect.clear();
-  results.clear();
-}
+struct FormatTests : public CrashHandlerFixture {};
 
-static void Test(int n, const char *format, Results &&expect, int repeat = 1) {
-  TestFormatContext context;
-  FormatControl<TestFormatContext> control{
-      context, format, std::strlen(format)};
-  try {
-    for (int j{0}; j < n; ++j) {
-      context.Report(control.GetNextDataEdit(context, repeat));
+TEST(FormatTests, FormatStringTraversal) {
+
+  using ParamsTy = std::tuple<int, const char *, ResultsTy, int>;
+
+  static const std::vector<ParamsTy> params{
+      {1, "('PI=',F9.7)", ResultsTy{"'PI='", "F9.7"}, 1},
+      {1, "(3HPI=F9.7)", ResultsTy{"'PI='", "F9.7"}, 1},
+      {1, "(3HPI=/F9.7)", ResultsTy{"'PI='", "/", "F9.7"}, 1},
+      {2, "('PI=',F9.7)", ResultsTy{"'PI='", "F9.7", "/", "'PI='", "F9.7"}, 1},
+      {2, "(2('PI=',F9.7),'done')",
+          ResultsTy{"'PI='", "F9.7", "'PI='", "F9.7", "'done'"}, 1},
+      {2, "(3('PI=',F9.7,:),'tooFar')",
+          ResultsTy{"'PI='", "F9.7", "'PI='", "F9.7"}, 1},
+      {2, "(*('PI=',F9.7,:),'tooFar')",
+          ResultsTy{"'PI='", "F9.7", "'PI='", "F9.7"}, 1},
+      {1, "(3F9.7)", ResultsTy{"2*F9.7"}, 2},
+  };
+
+  for (const auto &[n, format, expect, repeat] : params) {
+    TestFormatContext context;
+    FormatControl<decltype(context)> control{
+        context, format, std::strlen(format)};
+
+    for (auto i{0}; i < n; i++) {
+      context.Report(/*edit=*/control.GetNextDataEdit(context, repeat));
     }
     control.Finish(context);
-    if (int iostat{context.GetIoStat()}) {
-      context.Crash("GetIoStat() == %d", iostat);
+
+    auto iostat{context.GetIoStat()};
+    ASSERT_EQ(iostat, 0) << "Expected iostat == 0, but GetIoStat() == "
+                         << iostat;
+
+    // Create strings of the expected/actual results for printing errors
+    std::string allExpectedResults{""}, allActualResults{""};
+    for (const auto &res : context.results) {
+      allActualResults += " "s + res;
     }
-  } catch (const std::string &crash) {
-    context.results.push_back("Crash:"s + crash);
+    for (const auto &res : expect) {
+      allExpectedResults += " "s + res;
+    }
+
+    const auto &results = context.results;
+    ASSERT_EQ(expect, results) << "Expected '" << allExpectedResults
+                               << "' but got '" << allActualResults << "'";
   }
-  context.Check(expect);
 }
 
-int main() {
-  StartTests();
-  Test(1, "('PI=',F9.7)", Results{"'PI='", "F9.7"});
-  Test(1, "(3HPI=F9.7)", Results{"'PI='", "F9.7"});
-  Test(1, "(3HPI=/F9.7)", Results{"'PI='", "/", "F9.7"});
-  Test(2, "('PI=',F9.7)", Results{"'PI='", "F9.7", "/", "'PI='", "F9.7"});
-  Test(2, "(2('PI=',F9.7),'done')",
-      Results{"'PI='", "F9.7", "'PI='", "F9.7", "'done'"});
-  Test(2, "(3('PI=',F9.7,:),'tooFar')",
-      Results{"'PI='", "F9.7", "'PI='", "F9.7"});
-  Test(2, "(*('PI=',F9.7,:),'tooFar')",
-      Results{"'PI='", "F9.7", "'PI='", "F9.7"});
-  Test(1, "(3F9.7)", Results{"2*F9.7"}, 2);
-  return EndTests();
+struct InvalidFormatFailure : CrashHandlerFixture {};
+
+TEST(InvalidFormatFailure, ParenMismatch) {
+  static constexpr const char *format{"("};
+  static constexpr int repeat{1};
+
+  TestFormatContext context;
+  FormatControl<decltype(context)> control{
+      context, format, std::strlen(format)};
+
+  ASSERT_DEATH(
+      context.Report(/*edit=*/control.GetNextDataEdit(context, repeat)),
+      R"(FORMAT missing at least one '\)')");
+}
+
+TEST(InvalidFormatFailure, MissingPrecision) {
+  static constexpr const char *format{"(F9.)"};
+  static constexpr int repeat{1};
+
+  TestFormatContext context;
+  FormatControl<decltype(context)> control{
+      context, format, std::strlen(format)};
+
+  ASSERT_DEATH(
+      context.Report(/*edit=*/control.GetNextDataEdit(context, repeat)),
+      R"(Invalid FORMAT: integer expected at '\)')");
+}
+
+TEST(InvalidFormatFailure, MissingFormatWidth) {
+  static constexpr const char *format{"(F.9)"};
+  static constexpr int repeat{1};
+
+  TestFormatContext context;
+  FormatControl<decltype(context)> control{
+      context, format, std::strlen(format)};
+
+  ASSERT_DEATH(
+      context.Report(/*edit=*/control.GetNextDataEdit(context, repeat)),
+      "Invalid FORMAT: integer expected at '.'");
 }

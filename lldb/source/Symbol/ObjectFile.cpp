@@ -19,6 +19,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Timer.h"
 #include "lldb/lldb-private.h"
@@ -27,11 +28,12 @@ using namespace lldb;
 using namespace lldb_private;
 
 char ObjectFile::ID;
+size_t ObjectFile::g_initial_bytes_to_read = 512;
 
 static ObjectFileSP
 CreateObjectFromContainer(const lldb::ModuleSP &module_sp, const FileSpec *file,
                           lldb::offset_t file_offset, lldb::offset_t file_size,
-                          DataBufferSP &data_sp, lldb::offset_t &data_offset) {
+                          DataBufferSP data_sp, lldb::offset_t &data_offset) {
   ObjectContainerCreateInstance callback;
   for (uint32_t idx = 0;
        (callback = PluginManager::GetObjectContainerCreateCallbackAtIndex(
@@ -78,8 +80,8 @@ ObjectFile::FindPlugin(const lldb::ModuleSP &module_sp, const FileSpec *file,
     // container plug-ins can use these bytes to see if they can parse this
     // file.
     if (file_size > 0) {
-      data_sp = FileSystem::Instance().CreateDataBuffer(file->GetPath(), 512,
-                                                        file_offset);
+      data_sp = FileSystem::Instance().CreateDataBuffer(
+          file->GetPath(), g_initial_bytes_to_read, file_offset);
       data_offset = 0;
     }
   }
@@ -112,7 +114,7 @@ ObjectFile::FindPlugin(const lldb::ModuleSP &module_sp, const FileSpec *file,
         // We failed to find any cached object files in the container plug-
         // ins, so lets read the first 512 bytes and try again below...
         data_sp = FileSystem::Instance().CreateDataBuffer(
-            archive_file.GetPath(), 512, file_offset);
+            archive_file.GetPath(), g_initial_bytes_to_read, file_offset);
       }
     }
   }
@@ -148,7 +150,7 @@ ObjectFile::FindPlugin(const lldb::ModuleSP &module_sp, const FileSpec *file,
 ObjectFileSP ObjectFile::FindPlugin(const lldb::ModuleSP &module_sp,
                                     const ProcessSP &process_sp,
                                     lldb::addr_t header_addr,
-                                    DataBufferSP &data_sp) {
+                                    WritableDataBufferSP data_sp) {
   ObjectFileSP object_file_sp;
 
   if (module_sp) {
@@ -186,8 +188,8 @@ size_t ObjectFile::GetModuleSpecifications(const FileSpec &file,
                                            ModuleSpecList &specs,
                                            DataBufferSP data_sp) {
   if (!data_sp)
-    data_sp = FileSystem::Instance().CreateDataBuffer(file.GetPath(), 512,
-                                                      file_offset);
+    data_sp = FileSystem::Instance().CreateDataBuffer(
+        file.GetPath(), g_initial_bytes_to_read, file_offset);
   if (data_sp) {
     if (file_size == 0) {
       const lldb::offset_t actual_file_size =
@@ -237,8 +239,7 @@ size_t ObjectFile::GetModuleSpecifications(
 ObjectFile::ObjectFile(const lldb::ModuleSP &module_sp,
                        const FileSpec *file_spec_ptr,
                        lldb::offset_t file_offset, lldb::offset_t length,
-                       const lldb::DataBufferSP &data_sp,
-                       lldb::offset_t data_offset)
+                       lldb::DataBufferSP data_sp, lldb::offset_t data_offset)
     : ModuleChild(module_sp),
       m_file(), // This file could be different from the original module's file
       m_type(eTypeInvalid), m_strata(eStrataInvalid),
@@ -249,7 +250,7 @@ ObjectFile::ObjectFile(const lldb::ModuleSP &module_sp,
     m_file = *file_spec_ptr;
   if (data_sp)
     m_data.SetData(data_sp, data_offset, length);
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+  Log *log = GetLog(LLDBLog::Object);
   LLDB_LOGF(log,
             "%p ObjectFile::ObjectFile() module = %p (%s), file = %s, "
             "file_offset = 0x%8.8" PRIx64 ", size = %" PRIu64,
@@ -261,14 +262,14 @@ ObjectFile::ObjectFile(const lldb::ModuleSP &module_sp,
 
 ObjectFile::ObjectFile(const lldb::ModuleSP &module_sp,
                        const ProcessSP &process_sp, lldb::addr_t header_addr,
-                       DataBufferSP &header_data_sp)
+                       DataBufferSP header_data_sp)
     : ModuleChild(module_sp), m_file(), m_type(eTypeInvalid),
       m_strata(eStrataInvalid), m_file_offset(0), m_length(0), m_data(),
       m_process_wp(process_sp), m_memory_addr(header_addr), m_sections_up(),
       m_symtab_up(), m_synthetic_symbol_idx(0) {
   if (header_data_sp)
     m_data.SetData(header_data_sp, 0, header_data_sp->GetByteSize());
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+  Log *log = GetLog(LLDBLog::Object);
   LLDB_LOGF(log,
             "%p ObjectFile::ObjectFile() module = %p (%s), process = %p, "
             "header_addr = 0x%" PRIx64,
@@ -278,7 +279,7 @@ ObjectFile::ObjectFile(const lldb::ModuleSP &module_sp,
 }
 
 ObjectFile::~ObjectFile() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+  Log *log = GetLog(LLDBLog::Object);
   LLDB_LOGF(log, "%p ObjectFile::~ObjectFile ()\n", static_cast<void *>(this));
 }
 
@@ -553,6 +554,13 @@ size_t ObjectFile::ReadSectionData(Section *section,
                   section_data);
 }
 
+const char *
+ObjectFile::GetCStrFromSection(Section *section,
+                               lldb::offset_t section_offset) const {
+  offset_t offset = section->GetOffset() + section_offset;
+  return m_data.GetCStr(&offset);
+}
+
 bool ObjectFile::SplitArchivePathWithObject(llvm::StringRef path_with_object,
                                             FileSpec &archive_file,
                                             ConstString &archive_object,
@@ -575,7 +583,7 @@ void ObjectFile::ClearSymtab() {
   ModuleSP module_sp(GetModule());
   if (module_sp) {
     std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
-    Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+    Log *log = GetLog(LLDBLog::Object);
     LLDB_LOGF(log, "%p ObjectFile::ClearSymtab () symtab = %p",
               static_cast<void *>(this),
               static_cast<void *>(m_symtab_up.get()));
@@ -617,14 +625,6 @@ ObjectFile::GetSymbolTypeFromName(llvm::StringRef name,
     }
   }
   return symbol_type_hint;
-}
-
-ConstString ObjectFile::GetNextSyntheticSymbolName() {
-  StreamString ss;
-  ConstString file_name = GetModule()->GetFileSpec().GetFilename();
-  ss.Printf("___lldb_unnamed_symbol%u$$%s", ++m_synthetic_symbol_idx,
-            file_name.GetCString());
-  return ConstString(ss.GetString());
 }
 
 std::vector<ObjectFile::LoadableData>

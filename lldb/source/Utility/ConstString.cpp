@@ -21,9 +21,9 @@
 #include <array>
 #include <utility>
 
-#include <inttypes.h>
-#include <stdint.h>
-#include <string.h>
+#include <cinttypes>
+#include <cstdint>
+#include <cstring>
 
 using namespace lldb_private;
 
@@ -171,6 +171,17 @@ public:
     return mem_size;
   }
 
+  ConstString::MemoryStats GetMemoryStats() const {
+    ConstString::MemoryStats stats;
+    for (const auto &pool : m_string_pools) {
+      llvm::sys::SmartScopedReader<false> rlock(pool.m_mutex);
+      const Allocator &alloc = pool.m_string_map.getAllocator();
+      stats.bytes_total += alloc.getTotalMemory();
+      stats.bytes_used += alloc.getBytesAllocated();
+    }
+    return stats;
+  }
+
 protected:
   uint8_t hash(const llvm::StringRef &s) const {
     uint32_t h = llvm::djbHash(s);
@@ -253,7 +264,7 @@ bool ConstString::Equals(ConstString lhs, ConstString rhs,
   // perform case insensitive equality test
   llvm::StringRef lhs_string_ref(lhs.GetStringRef());
   llvm::StringRef rhs_string_ref(rhs.GetStringRef());
-  return lhs_string_ref.equals_lower(rhs_string_ref);
+  return lhs_string_ref.equals_insensitive(rhs_string_ref);
 }
 
 int ConstString::Compare(ConstString lhs, ConstString rhs,
@@ -270,7 +281,7 @@ int ConstString::Compare(ConstString lhs, ConstString rhs,
     if (case_sensitive) {
       return lhs_string_ref.compare(rhs_string_ref);
     } else {
-      return lhs_string_ref.compare_lower(rhs_string_ref);
+      return lhs_string_ref.compare_insensitive(rhs_string_ref);
     }
   }
 
@@ -330,6 +341,10 @@ void ConstString::SetTrimmedCStringWithLength(const char *cstr,
 size_t ConstString::StaticMemorySize() {
   // Get the size of the static string pool
   return StringPool().MemorySize();
+}
+
+ConstString::MemoryStats ConstString::GetMemoryStats() {
+  return StringPool().GetMemoryStats();
 }
 
 void llvm::format_provider<ConstString>::format(const ConstString &CS,

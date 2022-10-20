@@ -14,14 +14,14 @@
 #include "lldb/Symbol/LineEntry.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-types.h"
 
-#include <inttypes.h>
+#include <cinttypes>
 #include <vector>
 
 using namespace lldb;
@@ -32,7 +32,7 @@ AddressResolverFileLine::AddressResolverFileLine(
     SourceLocationSpec location_spec)
     : AddressResolver(), m_src_location_spec(location_spec) {}
 
-AddressResolverFileLine::~AddressResolverFileLine() {}
+AddressResolverFileLine::~AddressResolverFileLine() = default;
 
 Searcher::CallbackReturn
 AddressResolverFileLine::SearchCallback(SearchFilter &filter,
@@ -40,7 +40,7 @@ AddressResolverFileLine::SearchCallback(SearchFilter &filter,
   SymbolContextList sc_list;
   CompileUnit *cu = context.comp_unit;
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
 
   // TODO: Handle SourceLocationSpec column information
   cu->ResolveSymbolContext(m_src_location_spec, eSymbolContextEverything,

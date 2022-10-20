@@ -215,8 +215,7 @@ void InstrProfWriter::overlapRecord(NamedInstrProfRecord &&Other,
   InstrProfRecord &Dest = Where->second;
 
   uint64_t ValueCutoff = FuncFilter.ValueCutoff;
-  if (!FuncFilter.NameFilter.empty() &&
-      Name.find(FuncFilter.NameFilter) != Name.npos)
+  if (!FuncFilter.NameFilter.empty() && Name.contains(FuncFilter.NameFilter))
     ValueCutoff = 0;
 
   Dest.overlap(Other, Overlap, FuncLevelOverlap, ValueCutoff);
@@ -285,7 +284,7 @@ static void setSummary(IndexedInstrProf::Summary *TheSummary,
     TheSummary->setEntry(I, Res[I]);
 }
 
-void InstrProfWriter::writeImpl(ProfOStream &OS) {
+Error InstrProfWriter::writeImpl(ProfOStream &OS) {
   using namespace IndexedInstrProf;
 
   OnDiskChainedHashTableGenerator<InstrProfRecordWriterTrait> Generator;
@@ -376,12 +375,19 @@ void InstrProfWriter::writeImpl(ProfOStream &OS) {
        (int)CSSummarySize}};
 
   OS.patch(PatchItems, sizeof(PatchItems) / sizeof(*PatchItems));
+
+  for (const auto &I : FunctionData)
+    for (const auto &F : I.getValue())
+      if (Error E = validateRecord(F.second))
+        return E;
+
+  return Error::success();
 }
 
-void InstrProfWriter::write(raw_fd_ostream &OS) {
+Error InstrProfWriter::write(raw_fd_ostream &OS) {
   // Write the hash table.
   ProfOStream POS(OS);
-  writeImpl(POS);
+  return writeImpl(POS);
 }
 
 std::unique_ptr<MemoryBuffer> InstrProfWriter::writeBuffer() {
@@ -389,7 +395,8 @@ std::unique_ptr<MemoryBuffer> InstrProfWriter::writeBuffer() {
   raw_string_ostream OS(Data);
   ProfOStream POS(OS);
   // Write the hash table.
-  writeImpl(POS);
+  if (Error E = writeImpl(POS))
+    return nullptr;
   // Return this in an aligned memory buffer.
   return MemoryBuffer::getMemBufferCopy(Data);
 }
@@ -398,6 +405,27 @@ static const char *ValueProfKindStr[] = {
 #define VALUE_PROF_KIND(Enumerator, Value, Descr) #Enumerator,
 #include "llvm/ProfileData/InstrProfData.inc"
 };
+
+Error InstrProfWriter::validateRecord(const InstrProfRecord &Func) {
+  for (uint32_t VK = 0; VK <= IPVK_Last; VK++) {
+    uint32_t NS = Func.getNumValueSites(VK);
+    if (!NS)
+      continue;
+    for (uint32_t S = 0; S < NS; S++) {
+      uint32_t ND = Func.getNumValueDataForSite(VK, S);
+      std::unique_ptr<InstrProfValueData[]> VD = Func.getValueForSite(VK, S);
+      bool WasZero = false;
+      for (uint32_t I = 0; I < ND; I++)
+        if ((VK != IPVK_IndirectCallTarget) && (VD[I].Value == 0)) {
+          if (WasZero)
+            return make_error<InstrProfError>(instrprof_error::invalid_prof);
+          WasZero = true;
+        }
+    }
+  }
+
+  return Error::success();
+}
 
 void InstrProfWriter::writeRecordInText(StringRef Name, uint64_t Hash,
                                         const InstrProfRecord &Func,
@@ -471,6 +499,12 @@ Error InstrProfWriter::writeText(raw_fd_ostream &OS) {
     const StringRef &Name = record.first;
     const FuncPair &Func = record.second;
     writeRecordInText(Name, Func.first, Func.second, Symtab, OS);
+  }
+
+  for (const auto &record : OrderedFuncData) {
+    const FuncPair &Func = record.second;
+    if (Error E = validateRecord(Func.second))
+      return E;
   }
 
   return Error::success();

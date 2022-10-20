@@ -14,6 +14,7 @@
 
 #include "lldb/Host/Config.h"
 #include "lldb/Host/MainLoop.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 
 #include "llvm/Config/llvm-config.h"
@@ -53,9 +54,7 @@ static Status GetLastSocketError() {
   return EC;
 }
 
-namespace {
-const int kType = SOCK_STREAM;
-}
+static const int kType = SOCK_STREAM;
 
 TCPSocket::TCPSocket(bool should_close, bool child_processes_inherit)
     : Socket(ProtocolTcp, should_close, child_processes_inherit) {}
@@ -150,15 +149,16 @@ Status TCPSocket::CreateSocket(int domain) {
 
 Status TCPSocket::Connect(llvm::StringRef name) {
 
-  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_COMMUNICATION));
+  Log *log = GetLog(LLDBLog::Communication);
   LLDB_LOGF(log, "TCPSocket::%s (host/port = %s)", __FUNCTION__, name.data());
 
   Status error;
   std::string host_str;
   std::string port_str;
-  int32_t port = INT32_MIN;
-  if (!DecodeHostAndPort(name, host_str, port_str, port, &error))
-    return error;
+  uint16_t port;
+  if (llvm::Error decode_error =
+          DecodeHostAndPort(name, host_str, port_str, port))
+    return Status(std::move(decode_error));
 
   std::vector<SocketAddress> addresses = SocketAddress::GetAddressInfo(
       host_str.c_str(), nullptr, AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP);
@@ -186,15 +186,16 @@ Status TCPSocket::Connect(llvm::StringRef name) {
 }
 
 Status TCPSocket::Listen(llvm::StringRef name, int backlog) {
-  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_CONNECTION));
+  Log *log = GetLog(LLDBLog::Connection);
   LLDB_LOGF(log, "TCPSocket::%s (%s)", __FUNCTION__, name.data());
 
   Status error;
   std::string host_str;
   std::string port_str;
-  int32_t port = INT32_MIN;
-  if (!DecodeHostAndPort(name, host_str, port_str, port, &error))
-    return error;
+  uint16_t port;
+  if (llvm::Error decode_error =
+          DecodeHostAndPort(name, host_str, port_str, port))
+    return Status(std::move(decode_error));
 
   if (host_str == "*")
     host_str = "0.0.0.0";

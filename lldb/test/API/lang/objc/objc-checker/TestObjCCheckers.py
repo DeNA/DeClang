@@ -73,7 +73,7 @@ class ObjCCheckerTestCase(TestBase):
 
         # Make sure the error is helpful:
         err_string = expr_error.GetCString()
-        self.assertTrue("selector" in err_string)
+        self.assertIn("selector", err_string)
 
         #
         # Check that we correctly insert the checker for an
@@ -85,5 +85,5 @@ class ObjCCheckerTestCase(TestBase):
         expr_value = frame.EvaluateExpression("[my_simple getBigStruct]", False)
         expr_error = expr_value.GetError()
         
-        self.assertTrue(expr_error.Success())
+        self.assertSuccess(expr_error)
         

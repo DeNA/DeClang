@@ -22,8 +22,8 @@
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
 #include "lldb/Utility/UUID.h"
 #include "lldb/lldb-defines.h"
 
@@ -204,8 +204,7 @@ PathMappingList ModuleListProperties::GetSymlinkMappings() const {
   return m_symlink_paths;
 }
 
-ModuleList::ModuleList()
-    : m_modules(), m_modules_mutex(), m_notifier(nullptr) {}
+ModuleList::ModuleList() : m_modules(), m_modules_mutex() {}
 
 ModuleList::ModuleList(const ModuleList &rhs)
     : m_modules(), m_modules_mutex(), m_notifier(nullptr) {
@@ -418,10 +417,6 @@ void ModuleList::ClearImpl(bool use_notifier) {
 
 Module *ModuleList::GetModulePointerAtIndex(size_t idx) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
-  return GetModulePointerAtIndexUnlocked(idx);
-}
-
-Module *ModuleList::GetModulePointerAtIndexUnlocked(size_t idx) const {
   if (idx < m_modules.size())
     return m_modules[idx].get();
   return nullptr;
@@ -441,7 +436,7 @@ ModuleSP ModuleList::GetModuleAtIndexUnlocked(size_t idx) const {
 
 void ModuleList::FindFunctions(ConstString name,
                                FunctionNameType name_type_mask,
-                               bool include_symbols, bool include_inlines,
+                               const ModuleFunctionSearchOptions &options,
                                SymbolContextList &sc_list) const {
   const size_t old_size = sc_list.GetSize();
 
@@ -452,8 +447,7 @@ void ModuleList::FindFunctions(ConstString name,
     collection::const_iterator pos, end = m_modules.end();
     for (pos = m_modules.begin(); pos != end; ++pos) {
       (*pos)->FindFunctions(lookup_info.GetLookupName(), CompilerDeclContext(),
-                            lookup_info.GetNameTypeMask(), include_symbols,
-                            include_inlines, sc_list);
+                            lookup_info.GetNameTypeMask(), options, sc_list);
     }
 
     const size_t new_size = sc_list.GetSize();
@@ -465,7 +459,7 @@ void ModuleList::FindFunctions(ConstString name,
     collection::const_iterator pos, end = m_modules.end();
     for (pos = m_modules.begin(); pos != end; ++pos) {
       (*pos)->FindFunctions(name, CompilerDeclContext(), name_type_mask,
-                            include_symbols, include_inlines, sc_list);
+                            options, sc_list);
     }
   }
 }
@@ -499,7 +493,7 @@ void ModuleList::FindFunctionSymbols(ConstString name,
 }
 
 void ModuleList::FindFunctions(const RegularExpression &name,
-                               bool include_symbols, bool include_inlines,
+                               const ModuleFunctionSearchOptions &options,
                                SymbolContextList &sc_list) {
   // BEGIN SWIFT
   const size_t initial_size = sc_list.GetSize();
@@ -511,7 +505,7 @@ void ModuleList::FindFunctions(const RegularExpression &name,
   collection dylinker_modules;
   for (pos = m_modules.begin(); pos != end; ++pos) {
     if (!(*pos)->GetIsDynamicLinkEditor())
-      (*pos)->FindFunctions(name, include_symbols, include_inlines, sc_list);
+      (*pos)->FindFunctions(name, options, sc_list);
     else
       dylinker_modules.push_back(*pos);
   }
@@ -520,7 +514,7 @@ void ModuleList::FindFunctions(const RegularExpression &name,
   if (keep_looking) {
     end = dylinker_modules.end();
     for (pos = dylinker_modules.begin(); pos != end; pos++)
-      (*pos)->FindFunctions(name, include_symbols, include_inlines, sc_list);
+      (*pos)->FindFunctions(name, options, sc_list);
   }
   // END SWIFT
 }
@@ -944,7 +938,7 @@ ModuleList::GetSharedModule(const ModuleSpec &module_spec, ModuleSP &module_sp,
           if (old_modules)
             old_modules->push_back(module_sp);
 
-          Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_MODULES));
+          Log *log = GetLog(LLDBLog::Modules);
           if (log != nullptr)
             LLDB_LOGF(
                 log, "%p '%s' module changed: removing from global module list",

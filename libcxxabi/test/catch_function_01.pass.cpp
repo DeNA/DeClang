@@ -13,6 +13,9 @@
 // XFAIL: gcc
 // UNSUPPORTED: no-exceptions
 
+// 65ace9daa360 made it in the dylib in macOS 10.11
+// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10}}
+
 #include <cassert>
 
 template <class Tp>

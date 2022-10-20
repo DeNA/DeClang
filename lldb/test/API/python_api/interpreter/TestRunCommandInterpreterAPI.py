@@ -10,7 +10,6 @@ class CommandRunInterpreterLegacyAPICase(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
     mydir = TestBase.compute_mydir(__file__)
 
-    @skipIfReproducer # lldb::FileSP used in typemap cannot be instrumented.
     def setUp(self):
         TestBase.setUp(self)
 
@@ -30,7 +29,6 @@ class CommandRunInterpreterLegacyAPICase(TestBase):
         self.dbg.SetOutputFileHandle(self.devnull, False)
         self.dbg.SetErrorFileHandle (self.devnull, False)
 
-    @add_test_categories(['pyapi'])
     def test_run_session_with_error_and_quit_legacy(self):
         """Run non-existing and quit command returns appropriate values"""
 
@@ -48,7 +46,6 @@ class CommandRunInterpreterAPICase(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
     mydir = TestBase.compute_mydir(__file__)
 
-    @skipIfReproducer # lldb::FileSP used in typemap cannot be instrumented.
     def setUp(self):
         TestBase.setUp(self)
 
@@ -64,7 +61,6 @@ class CommandRunInterpreterAPICase(TestBase):
         self.dbg.SetOutputFile(devnull)
         self.dbg.SetErrorFile(devnull)
 
-    @add_test_categories(['pyapi'])
     def test_run_session_with_error_and_quit(self):
         """Run non-existing and quit command returns appropriate values"""
 

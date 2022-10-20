@@ -1,4 +1,4 @@
-//===- unittests/Frontend/PrintPreprocessedTest.cpp  FrontendAction tests--===//
+//===- unittests/Frontend/FrontendActionTest.cpp  FrontendAction tests-----===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,13 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "gtest/gtest.h"
 #include "flang/Frontend/CompilerInstance.h"
 #include "flang/Frontend/CompilerInvocation.h"
 #include "flang/Frontend/FrontendOptions.h"
 #include "flang/FrontendTool/Utils.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "gtest/gtest.h"
 
 using namespace Fortran::frontend;
 
@@ -40,7 +41,7 @@ protected:
     // Generate a unique test file name.
     const testing::TestInfo *const test_info =
         testing::UnitTest::GetInstance()->current_test_info();
-    inputFileName_ = std::string(test_info->name()) + "_test-file.f";
+    inputFileName_ = std::string(test_info->name()) + "_test-file.f90";
 
     // Create the input file stream. Note that this stream is populated
     // separately in every test (i.e. the input is test specific).
@@ -61,7 +62,7 @@ protected:
     invocation_ = std::make_shared<CompilerInvocation>();
 
     compInst_.set_invocation(std::move(invocation_));
-    compInst_.frontendOpts().inputs_.push_back(
+    compInst_.frontendOpts().inputs.push_back(
         FrontendInputFile(inputFilePath_, Language::Fortran));
   }
 
@@ -79,6 +80,31 @@ protected:
   }
 };
 
+TEST_F(FrontendActionTest, TestInputOutput) {
+  // Populate the input file with the pre-defined input and flush it.
+  *(inputFileOs_) << "End Program arithmetic";
+  inputFileOs_.reset();
+
+  // Set-up the action kind.
+  compInst_.invocation().frontendOpts().programAction = InputOutputTest;
+
+  // Set-up the output stream. Using output buffer wrapped as an output
+  // stream, as opposed to an actual file (or a file descriptor).
+  llvm::SmallVector<char, 256> outputFileBuffer;
+  std::unique_ptr<llvm::raw_pwrite_stream> outputFileStream(
+      new llvm::raw_svector_ostream(outputFileBuffer));
+  compInst_.set_outputStream(std::move(outputFileStream));
+
+  // Execute the action.
+  bool success = ExecuteCompilerInvocation(&compInst_);
+
+  // Validate the expected output.
+  EXPECT_TRUE(success);
+  EXPECT_TRUE(!outputFileBuffer.empty());
+  EXPECT_TRUE(llvm::StringRef(outputFileBuffer.data())
+                  .startswith("End Program arithmetic"));
+}
+
 TEST_F(FrontendActionTest, PrintPreprocessedInput) {
   // Populate the input file with the pre-defined input and flush it.
   *(inputFileOs_) << "#ifdef NEW\n"
@@ -89,7 +115,8 @@ TEST_F(FrontendActionTest, PrintPreprocessedInput) {
   inputFileOs_.reset();
 
   // Set-up the action kind.
-  compInst_.invocation().frontendOpts().programAction_ = PrintPreprocessedInput;
+  compInst_.invocation().frontendOpts().programAction = PrintPreprocessedInput;
+  compInst_.invocation().preprocessorOpts().noReformat = true;
 
   // Set-up the output stream. We are using output buffer wrapped as an output
   // stream, as opposed to an actual file (or a file descriptor).
@@ -115,7 +142,7 @@ TEST_F(FrontendActionTest, ParseSyntaxOnly) {
   inputFileOs_.reset();
 
   // Set-up the action kind.
-  compInst_.invocation().frontendOpts().programAction_ = ParseSyntaxOnly;
+  compInst_.invocation().frontendOpts().programAction = ParseSyntaxOnly;
 
   // Set-up the output stream for the semantic diagnostics.
   llvm::SmallVector<char, 256> outputDiagBuffer;
@@ -131,7 +158,7 @@ TEST_F(FrontendActionTest, ParseSyntaxOnly) {
   EXPECT_TRUE(!outputDiagBuffer.empty());
   EXPECT_TRUE(
       llvm::StringRef(outputDiagBuffer.data())
-          .startswith(
+          .contains(
               ":1:14: error: IF statement is not allowed in IF statement\n"));
 }
 } // namespace

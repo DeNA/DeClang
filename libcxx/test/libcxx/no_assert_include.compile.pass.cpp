@@ -1,4 +1,3 @@
-// -*- C++ -*-
 //===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -9,9 +8,6 @@
 
 // Ensure that none of the standard C++ headers implicitly include cassert or
 // assert.h (because assert() is implemented as a macro).
-
-// GCC 5 has incomplete support for C++17, so some headers fail when included.
-// UNSUPPORTED: gcc-5 && c++17
 
 // Prevent <ext/hash_map> from generating deprecated warnings for this test.
 #if defined(__DEPRECATED)
@@ -73,15 +69,24 @@
 #include <ctgmath>
 #include <ctime>
 #include <ctype.h>
-#include <cwchar>
-#include <cwctype>
+#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+#    include <cwchar>
+#endif
+#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+#    include <cwctype>
+#endif
 #include <deque>
 #include <errno.h>
 #include <exception>
 #include <execution>
 #include <fenv.h>
-#include <filesystem>
+#ifndef _LIBCPP_HAS_NO_FILESYSTEM_LIBRARY
+#    include <filesystem>
+#endif
 #include <float.h>
+#ifndef _LIBCPP_HAS_NO_INCOMPLETE_FORMAT
+#    include <format>
+#endif
 #include <forward_list>
 #ifndef _LIBCPP_HAS_NO_LOCALIZATION
 #    include <fstream>
@@ -133,6 +138,9 @@
 #endif
 #include <queue>
 #include <random>
+#ifndef _LIBCPP_HAS_NO_INCOMPLETE_RANGES
+#    include <ranges>
+#endif
 #include <ratio>
 #ifndef _LIBCPP_HAS_NO_LOCALIZATION
 #    include <regex>
@@ -182,8 +190,12 @@
 #include <variant>
 #include <vector>
 #include <version>
-#include <wchar.h>
-#include <wctype.h>
+#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+#    include <wchar.h>
+#endif
+#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+#    include <wctype.h>
+#endif
 
 // experimental headers
 #if __cplusplus >= 201103L
@@ -192,7 +204,9 @@
 #        include <experimental/coroutine>
 #    endif
 #    include <experimental/deque>
-#    include <experimental/filesystem>
+#    ifndef _LIBCPP_HAS_NO_FILESYSTEM_LIBRARY
+#        include <experimental/filesystem>
+#    endif
 #    include <experimental/forward_list>
 #    include <experimental/functional>
 #    include <experimental/iterator>

@@ -44,46 +44,24 @@ static PointerOrSP
 ExtractSomeIfAny(ValueObject *optional,
                  bool synthetic_value = false) {
   if (!optional)
-    return PointerOrSP("Can't get value from null optional");
+    return nullptr;
 
   static ConstString g_Some("some");
   static ConstString g_None("none");
-  
-  const char *name = optional->GetName().GetCString();
-  if (!name)
-    name = "<unknown>";
 
   ValueObjectSP non_synth_valobj = optional->GetNonSyntheticValue();
-  if (!non_synth_valobj) {
-    std::string err_msg("Can't get the underlying value object for '");
-    err_msg.append(optional->GetName().GetCString());
-    err_msg.append("'");
-    return PointerOrSP(err_msg);
-  }
-
-  ConstString value(non_synth_valobj->GetValueAsCString());
-  
-  if (!value) {
-    // FIXME: I can't see a way to get an error message from GetValueAsCString
-    std::string err_msg("Can't get the underlying value object's value '");
-    err_msg.append(name);
-    err_msg.append("'");
-    return PointerOrSP(err_msg);
-  }
-  
-  if (value == g_None)
+  if (!non_synth_valobj)
     return nullptr;
 
-  ValueObjectSP valobj_sp = non_synth_valobj->GetChildMemberWithName(g_Some, 
-                                                                     true);
-  if (!valobj_sp) {
-    std::string err_msg("Failed to get the 'some' field from optional '");
-    err_msg.append(name);
-    err_msg.append("'");
-    return PointerOrSP(err_msg);
-  }
+  ConstString value(non_synth_valobj->GetValueAsCString());
 
-  PointerOrSP value_sp(valobj_sp.get());
+  if (!value || value == g_None)
+    return nullptr;
+
+  PointerOrSP value_sp(
+      non_synth_valobj->GetChildMemberWithName(g_Some, true).get());
+  if (!value_sp)
+    return nullptr;
 
   auto process_sp = optional->GetProcessSP();
   auto *swift_runtime = SwiftLanguageRuntime::Get(process_sp);
@@ -108,13 +86,8 @@ ExtractSomeIfAny(ValueObject *optional,
         ExecutionContext exe_ctx(process_sp);
         value_sp = PointerOrSP(ValueObject::CreateValueObjectFromData(
             value_sp->GetName().AsCString(), extractor, exe_ctx, value_type));
-        if (!value_sp) {
-          std::string err_msg("Failed to extract the "
-                              "'some' field from data for '");
-          err_msg.append(name);
-          err_msg.append("'");
-          return PointerOrSP(err_msg);
-        }
+        if (!value_sp)
+          return nullptr;
         else
           value_sp->SetSyntheticChildrenGenerated(true);
       }
@@ -147,12 +120,6 @@ static bool
 SwiftOptional_SummaryProvider_Impl(ValueObject &valobj, Stream &stream,
                                    const TypeSummaryOptions &options) {
   PointerOrSP some = ExtractSomeIfAny(&valobj, true);
-  
-  if (!some.GetError().Success()) {
-    stream.PutCString(some.GetError().AsCString());
-    return false;
-  }
-  
   if (!some) {
     stream.Printf("nil");
     return true;
@@ -204,9 +171,6 @@ bool lldb_private::formatters::swift::SwiftOptionalSummaryProvider::
     return false;
 
   PointerOrSP some = ExtractSomeIfAny(target_valobj, true);
-
-  if (!some.GetError().Success())
-    return false;
 
   if (!some)
     return true;
@@ -269,7 +233,7 @@ bool lldb_private::formatters::swift::SwiftOptionalSyntheticFrontEnd::Update() {
 
   m_some = ExtractSomeIfAny(&m_backend, true);
 
-  if (!m_some || !m_some.GetError().Success()) {
+  if (!m_some) {
     m_is_none = true;
     m_children = false;
     return false;

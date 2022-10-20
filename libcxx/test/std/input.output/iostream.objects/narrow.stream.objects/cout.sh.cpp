@@ -6,11 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-// XFAIL: libcpp-has-no-stdout
-
 // <iostream>
 
 // istream cout;
+
+// XFAIL: LIBCXX-WINDOWS-FIXME
 
 // FILE_DEPENDENCIES: ../check-stdout.sh
 // RUN: %{build}

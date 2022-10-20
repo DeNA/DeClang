@@ -3,8 +3,9 @@
 
 // REQUIRES: system-darwin
 // REQUIRES: swift
-// XFAIL: system-darwin
-// rdar://79052960
+
+// rdar://83647328
+// XFAIL: *
 
 // RUN: %lldb --repl < %s | FileCheck %s
 
@@ -45,5 +46,5 @@ n
 // CHECK-NEXT:   name = "abc"
 // CHECK-NEXT:   object = 42
 
-// COM: let tinky : Optional<UUID> = nil
-// COM:  CHECK: {{tinky}}: UUID? = nil
+let tinky : Optional<UUID> = nil
+// CHECK: {{tinky}}: UUID? = nil

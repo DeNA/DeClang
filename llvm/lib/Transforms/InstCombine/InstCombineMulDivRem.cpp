@@ -31,7 +31,6 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
-#include "llvm/Transforms/InstCombine/InstCombineWorklist.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 #include "llvm/Transforms/Utils/BuildLibCalls.h"
 #include <cassert>
@@ -39,10 +38,11 @@
 #include <cstdint>
 #include <utility>
 
+#define DEBUG_TYPE "instcombine"
+#include "llvm/Transforms/Utils/InstructionWorklist.h"
+
 using namespace llvm;
 using namespace PatternMatch;
-
-#define DEBUG_TYPE "instcombine"
 
 /// The specific integer value is used in a context where it is known to be
 /// non-zero.  If this allows us to simplify the computation, do so and return
@@ -107,14 +107,19 @@ static Value *foldMulSelectToNegate(BinaryOperator &I,
   // mul (select Cond, 1, -1), OtherOp --> select Cond, OtherOp, -OtherOp
   // mul OtherOp, (select Cond, 1, -1) --> select Cond, OtherOp, -OtherOp
   if (match(&I, m_c_Mul(m_OneUse(m_Select(m_Value(Cond), m_One(), m_AllOnes())),
-                        m_Value(OtherOp))))
-    return Builder.CreateSelect(Cond, OtherOp, Builder.CreateNeg(OtherOp));
-
+                        m_Value(OtherOp)))) {
+    bool HasAnyNoWrap = I.hasNoSignedWrap() || I.hasNoUnsignedWrap();
+    Value *Neg = Builder.CreateNeg(OtherOp, "", false, HasAnyNoWrap);
+    return Builder.CreateSelect(Cond, OtherOp, Neg);
+  }
   // mul (select Cond, -1, 1), OtherOp --> select Cond, -OtherOp, OtherOp
   // mul OtherOp, (select Cond, -1, 1) --> select Cond, -OtherOp, OtherOp
   if (match(&I, m_c_Mul(m_OneUse(m_Select(m_Value(Cond), m_AllOnes(), m_One())),
-                        m_Value(OtherOp))))
-    return Builder.CreateSelect(Cond, Builder.CreateNeg(OtherOp), OtherOp);
+                        m_Value(OtherOp)))) {
+    bool HasAnyNoWrap = I.hasNoSignedWrap() || I.hasNoUnsignedWrap();
+    Value *Neg = Builder.CreateNeg(OtherOp, "", false, HasAnyNoWrap);
+    return Builder.CreateSelect(Cond, Neg, OtherOp);
+  }
 
   // fmul (select Cond, 1.0, -1.0), OtherOp --> select Cond, OtherOp, -OtherOp
   // fmul OtherOp, (select Cond, 1.0, -1.0) --> select Cond, OtherOp, -OtherOp
@@ -153,8 +158,10 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
   if (Value *V = SimplifyUsingDistributiveLaws(I))
     return replaceInstUsesWith(I, V);
 
-  // X * -1 == 0 - X
   Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+  unsigned BitWidth = I.getType()->getScalarSizeInBits();
+
+  // X * -1 == 0 - X
   if (match(Op1, m_AllOnes())) {
     BinaryOperator *BO = BinaryOperator::CreateNeg(Op0, I.getName());
     if (I.hasNoSignedWrap())
@@ -326,7 +333,7 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
   if (((match(Op0, m_ZExt(m_Value(X))) && match(Op1, m_ZExt(m_Value(Y)))) ||
        (match(Op0, m_SExt(m_Value(X))) && match(Op1, m_SExt(m_Value(Y))))) &&
       X->getType()->isIntOrIntVectorTy(1) && X->getType() == Y->getType() &&
-      (Op0->hasOneUse() || Op1->hasOneUse())) {
+      (Op0->hasOneUse() || Op1->hasOneUse() || X == Y)) {
     Value *And = Builder.CreateAnd(X, Y, "mulbool");
     return CastInst::Create(Instruction::ZExt, And, I.getType());
   }
@@ -359,6 +366,19 @@ Instruction *InstCombinerImpl::visitMul(BinaryOperator &I) {
     return BinaryOperator::CreateAnd(Builder.CreateAShr(X, *C), Op1);
   if (match(Op1, m_LShr(m_Value(X), m_APInt(C))) && *C == C->getBitWidth() - 1)
     return BinaryOperator::CreateAnd(Builder.CreateAShr(X, *C), Op0);
+
+  // ((ashr X, 31) | 1) * X --> abs(X)
+  // X * ((ashr X, 31) | 1) --> abs(X)
+  if (match(&I, m_c_BinOp(m_Or(m_AShr(m_Value(X),
+                                    m_SpecificIntAllowUndef(BitWidth - 1)),
+                             m_One()),
+                        m_Deferred(X)))) {
+    Value *Abs = Builder.CreateBinaryIntrinsic(
+        Intrinsic::abs, X,
+        ConstantInt::getBool(I.getContext(), I.hasNoSignedWrap()));
+    Abs->takeName(&I);
+    return replaceInstUsesWith(I, Abs);
+  }
 
   if (Instruction *Ext = narrowMathIfNoOverflow(I))
     return Ext;
@@ -540,24 +560,40 @@ Instruction *InstCombinerImpl::visitFMul(BinaryOperator &I) {
       }
     }
 
-    // exp(X) * exp(Y) -> exp(X + Y)
-    // Match as long as at least one of exp has only one use.
-    if (match(Op0, m_Intrinsic<Intrinsic::exp>(m_Value(X))) &&
-        match(Op1, m_Intrinsic<Intrinsic::exp>(m_Value(Y))) &&
-        (Op0->hasOneUse() || Op1->hasOneUse())) {
-      Value *XY = Builder.CreateFAddFMF(X, Y, &I);
-      Value *Exp = Builder.CreateUnaryIntrinsic(Intrinsic::exp, XY, &I);
-      return replaceInstUsesWith(I, Exp);
-    }
+    if (I.isOnlyUserOfAnyOperand()) {
+      // pow(x, y) * pow(x, z) -> pow(x, y + z)
+      if (match(Op0, m_Intrinsic<Intrinsic::pow>(m_Value(X), m_Value(Y))) &&
+          match(Op1, m_Intrinsic<Intrinsic::pow>(m_Specific(X), m_Value(Z)))) {
+        auto *YZ = Builder.CreateFAddFMF(Y, Z, &I);
+        auto *NewPow = Builder.CreateBinaryIntrinsic(Intrinsic::pow, X, YZ, &I);
+        return replaceInstUsesWith(I, NewPow);
+      }
 
-    // exp2(X) * exp2(Y) -> exp2(X + Y)
-    // Match as long as at least one of exp2 has only one use.
-    if (match(Op0, m_Intrinsic<Intrinsic::exp2>(m_Value(X))) &&
-        match(Op1, m_Intrinsic<Intrinsic::exp2>(m_Value(Y))) &&
-        (Op0->hasOneUse() || Op1->hasOneUse())) {
-      Value *XY = Builder.CreateFAddFMF(X, Y, &I);
-      Value *Exp2 = Builder.CreateUnaryIntrinsic(Intrinsic::exp2, XY, &I);
-      return replaceInstUsesWith(I, Exp2);
+      // powi(x, y) * powi(x, z) -> powi(x, y + z)
+      if (match(Op0, m_Intrinsic<Intrinsic::powi>(m_Value(X), m_Value(Y))) &&
+          match(Op1, m_Intrinsic<Intrinsic::powi>(m_Specific(X), m_Value(Z))) &&
+          Y->getType() == Z->getType()) {
+        auto *YZ = Builder.CreateAdd(Y, Z);
+        auto *NewPow = Builder.CreateIntrinsic(
+            Intrinsic::powi, {X->getType(), YZ->getType()}, {X, YZ}, &I);
+        return replaceInstUsesWith(I, NewPow);
+      }
+
+      // exp(X) * exp(Y) -> exp(X + Y)
+      if (match(Op0, m_Intrinsic<Intrinsic::exp>(m_Value(X))) &&
+          match(Op1, m_Intrinsic<Intrinsic::exp>(m_Value(Y)))) {
+        Value *XY = Builder.CreateFAddFMF(X, Y, &I);
+        Value *Exp = Builder.CreateUnaryIntrinsic(Intrinsic::exp, XY, &I);
+        return replaceInstUsesWith(I, Exp);
+      }
+
+      // exp2(X) * exp2(Y) -> exp2(X + Y)
+      if (match(Op0, m_Intrinsic<Intrinsic::exp2>(m_Value(X))) &&
+          match(Op1, m_Intrinsic<Intrinsic::exp2>(m_Value(Y)))) {
+        Value *XY = Builder.CreateFAddFMF(X, Y, &I);
+        Value *Exp2 = Builder.CreateUnaryIntrinsic(Intrinsic::exp2, XY, &I);
+        return replaceInstUsesWith(I, Exp2);
+      }
     }
 
     // (X*Y) * X => (X*X) * Y where Y != X
@@ -646,13 +682,12 @@ bool InstCombinerImpl::simplifyDivRemOfSelectWithZeroOp(BinaryOperator &I) {
       break;
 
     // Replace uses of the select or its condition with the known values.
-    for (Instruction::op_iterator I = BBI->op_begin(), E = BBI->op_end();
-         I != E; ++I) {
-      if (*I == SI) {
-        replaceUse(*I, SI->getOperand(NonNullOperand));
+    for (Use &Op : BBI->operands()) {
+      if (Op == SI) {
+        replaceUse(Op, SI->getOperand(NonNullOperand));
         Worklist.push(&*BBI);
-      } else if (*I == SelectCond) {
-        replaceUse(*I, NonNullOperand == 1 ? ConstantInt::getTrue(CondTy)
+      } else if (Op == SelectCond) {
+        replaceUse(Op, NonNullOperand == 1 ? ConstantInt::getTrue(CondTy)
                                            : ConstantInt::getFalse(CondTy));
         Worklist.push(&*BBI);
       }
@@ -686,11 +721,11 @@ static bool isMultiple(const APInt &C1, const APInt &C2, APInt &Quotient,
   assert(C1.getBitWidth() == C2.getBitWidth() && "Constant widths not equal");
 
   // Bail if we will divide by zero.
-  if (C2.isNullValue())
+  if (C2.isZero())
     return false;
 
   // Bail if we would divide INT_MIN by -1.
-  if (IsSigned && C1.isMinSignedValue() && C2.isAllOnesValue())
+  if (IsSigned && C1.isMinSignedValue() && C2.isAllOnes())
     return false;
 
   APInt Remainder(C1.getBitWidth(), /*val=*/0ULL, IsSigned);
@@ -758,11 +793,12 @@ Instruction *InstCombinerImpl::commonIDivTransforms(BinaryOperator &I) {
     }
 
     if ((IsSigned && match(Op0, m_NSWShl(m_Value(X), m_APInt(C1))) &&
-         *C1 != C1->getBitWidth() - 1) ||
-        (!IsSigned && match(Op0, m_NUWShl(m_Value(X), m_APInt(C1))))) {
+         C1->ult(C1->getBitWidth() - 1)) ||
+        (!IsSigned && match(Op0, m_NUWShl(m_Value(X), m_APInt(C1))) &&
+         C1->ult(C1->getBitWidth()))) {
       APInt Quotient(C1->getBitWidth(), /*val=*/0ULL, IsSigned);
       APInt C1Shifted = APInt::getOneBitSet(
-          C1->getBitWidth(), static_cast<unsigned>(C1->getLimitedValue()));
+          C1->getBitWidth(), static_cast<unsigned>(C1->getZExtValue()));
 
       // (X << C1) / C2 -> X / (C2 >> C1) if C2 is a multiple of 1 << C1.
       if (isMultiple(*C2, C1Shifted, Quotient, IsSigned)) {
@@ -783,7 +819,7 @@ Instruction *InstCombinerImpl::commonIDivTransforms(BinaryOperator &I) {
       }
     }
 
-    if (!C2->isNullValue()) // avoid X udiv 0
+    if (!C2->isZero()) // avoid X udiv 0
       if (Instruction *FoldedDiv = foldBinOpIntoSelectOrPhi(I))
         return FoldedDiv;
   }
@@ -1260,6 +1296,51 @@ static Instruction *foldFDivConstantDividend(BinaryOperator &I) {
   return BinaryOperator::CreateFDivFMF(NewC, X, &I);
 }
 
+/// Negate the exponent of pow/exp to fold division-by-pow() into multiply.
+static Instruction *foldFDivPowDivisor(BinaryOperator &I,
+                                       InstCombiner::BuilderTy &Builder) {
+  Value *Op0 = I.getOperand(0), *Op1 = I.getOperand(1);
+  auto *II = dyn_cast<IntrinsicInst>(Op1);
+  if (!II || !II->hasOneUse() || !I.hasAllowReassoc() ||
+      !I.hasAllowReciprocal())
+    return nullptr;
+
+  // Z / pow(X, Y) --> Z * pow(X, -Y)
+  // Z / exp{2}(Y) --> Z * exp{2}(-Y)
+  // In the general case, this creates an extra instruction, but fmul allows
+  // for better canonicalization and optimization than fdiv.
+  Intrinsic::ID IID = II->getIntrinsicID();
+  SmallVector<Value *> Args;
+  switch (IID) {
+  case Intrinsic::pow:
+    Args.push_back(II->getArgOperand(0));
+    Args.push_back(Builder.CreateFNegFMF(II->getArgOperand(1), &I));
+    break;
+  case Intrinsic::powi: {
+    // Require 'ninf' assuming that makes powi(X, -INT_MIN) acceptable.
+    // That is, X ** (huge negative number) is 0.0, ~1.0, or INF and so
+    // dividing by that is INF, ~1.0, or 0.0. Code that uses powi allows
+    // non-standard results, so this corner case should be acceptable if the
+    // code rules out INF values.
+    if (!I.hasNoInfs())
+      return nullptr;
+    Args.push_back(II->getArgOperand(0));
+    Args.push_back(Builder.CreateNeg(II->getArgOperand(1)));
+    Type *Tys[] = {I.getType(), II->getArgOperand(1)->getType()};
+    Value *Pow = Builder.CreateIntrinsic(IID, Tys, Args, &I);
+    return BinaryOperator::CreateFMulFMF(Op0, Pow, &I);
+  }
+  case Intrinsic::exp:
+  case Intrinsic::exp2:
+    Args.push_back(Builder.CreateFNegFMF(II->getArgOperand(0), &I));
+    break;
+  default:
+    return nullptr;
+  }
+  Value *Pow = Builder.CreateIntrinsic(IID, I.getType(), Args, &I);
+  return BinaryOperator::CreateFMulFMF(Op0, Pow, &I);
+}
+
 Instruction *InstCombinerImpl::visitFDiv(BinaryOperator &I) {
   if (Value *V = SimplifyFDivInst(I.getOperand(0), I.getOperand(1),
                                   I.getFastMathFlags(),
@@ -1358,6 +1439,10 @@ Instruction *InstCombinerImpl::visitFDiv(BinaryOperator &I) {
         Intrinsic::copysign, ConstantFP::get(I.getType(), 1.0), X, &I);
     return replaceInstUsesWith(I, V);
   }
+
+  if (Instruction *Mul = foldFDivPowDivisor(I, Builder))
+    return Mul;
+
   return nullptr;
 }
 

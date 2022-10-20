@@ -18,6 +18,8 @@
 #include "llvm-c/DebugInfo.h"
 #include "llvm-c/Target.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Hashing.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #include <stdio.h>
@@ -653,6 +655,7 @@ struct FunCloner {
         LLVMAtomicOrdering Ord = LLVMGetOrdering(Src);
         LLVMBool SingleThread = LLVMIsAtomicSingleThread(Src);
         Dst = LLVMBuildAtomicRMW(Builder, BinOp, Ptr, Val, Ord, SingleThread);
+        LLVMSetAlignment(Dst, LLVMGetAlignment(Src));
         LLVMSetVolatile(Dst, LLVMGetVolatile(Src));
         LLVMSetValueName2(Dst, Name, NameLen);
         break;
@@ -667,6 +670,7 @@ struct FunCloner {
 
         Dst = LLVMBuildAtomicCmpXchg(Builder, Ptr, Cmp, New, Succ, Fail,
                                      SingleThread);
+        LLVMSetAlignment(Dst, LLVMGetAlignment(Src));
         LLVMSetVolatile(Dst, LLVMGetVolatile(Src));
         LLVMSetWeak(Dst, LLVMGetWeak(Src));
         LLVMSetValueName2(Dst, Name, NameLen);
@@ -852,7 +856,7 @@ struct FunCloner {
       LLVMSetMetadata(Dst, Kind, LLVMMetadataAsValue(Ctx, MD));
     }
     LLVMDisposeValueMetadataEntries(AllMetadata);
-    LLVMSetInstDebugLocation(Builder, Dst);
+    LLVMAddMetadataToInst(Builder, Dst);
 
     check_value_kind(Dst, LLVMInstructionValueKind);
     return VMap[Src] = Dst;

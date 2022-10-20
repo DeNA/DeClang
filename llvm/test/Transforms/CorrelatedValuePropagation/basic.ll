@@ -377,6 +377,101 @@ unreachable:
   ret void
 }
 
+define i32 @switch_range(i32 %cond) {
+; CHECK-LABEL: @switch_range(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[S:%.*]] = urem i32 [[COND:%.*]], 3
+; CHECK-NEXT:    [[S1:%.*]] = add nuw nsw i32 [[S]], 1
+; CHECK-NEXT:    switch i32 [[S1]], label [[UNREACHABLE:%.*]] [
+; CHECK-NEXT:    i32 1, label [[EXIT1:%.*]]
+; CHECK-NEXT:    i32 2, label [[EXIT2:%.*]]
+; CHECK-NEXT:    i32 3, label [[EXIT1]]
+; CHECK-NEXT:    ]
+; CHECK:       exit1:
+; CHECK-NEXT:    ret i32 1
+; CHECK:       exit2:
+; CHECK-NEXT:    ret i32 2
+; CHECK:       unreachable:
+; CHECK-NEXT:    ret i32 0
+;
+entry:
+  %s = urem i32 %cond, 3
+  %s1 = add i32 %s, 1
+  switch i32 %s1, label %unreachable [
+  i32 1, label %exit1
+  i32 2, label %exit2
+  i32 3, label %exit1
+  ]
+
+exit1:
+  ret i32 1
+exit2:
+  ret i32 2
+unreachable:
+  ret i32 0
+}
+
+; If the cases do not cover the entire range of the
+; switch condition, we should not change the default.
+
+define i32 @switch_range_not_full(i32 %cond) {
+; CHECK-LABEL: @switch_range_not_full(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[S:%.*]] = urem i32 [[COND:%.*]], 3
+; CHECK-NEXT:    [[S1:%.*]] = add nuw nsw i32 [[S]], 1
+; CHECK-NEXT:    switch i32 [[S1]], label [[UNREACHABLE:%.*]] [
+; CHECK-NEXT:    i32 1, label [[EXIT1:%.*]]
+; CHECK-NEXT:    i32 3, label [[EXIT2:%.*]]
+; CHECK-NEXT:    ]
+; CHECK:       exit1:
+; CHECK-NEXT:    ret i32 1
+; CHECK:       exit2:
+; CHECK-NEXT:    ret i32 2
+; CHECK:       unreachable:
+; CHECK-NEXT:    ret i32 0
+;
+entry:
+  %s = urem i32 %cond, 3
+  %s1 = add i32 %s, 1
+  switch i32 %s1, label %unreachable [
+  i32 1, label %exit1
+  i32 3, label %exit2
+  ]
+
+exit1:
+  ret i32 1
+exit2:
+  ret i32 2
+unreachable:
+  ret i32 0
+}
+
+; PR51531
+
+define i8 @switch_defaultdest_multipleuse(i8 %t0) {
+; CHECK-LABEL: @switch_defaultdest_multipleuse(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[O:%.*]] = or i8 [[T0:%.*]], 1
+; CHECK-NEXT:    [[R:%.*]] = srem i8 1, [[O]]
+; CHECK-NEXT:    switch i8 [[R]], label [[EXIT:%.*]] [
+; CHECK-NEXT:    i8 0, label [[EXIT]]
+; CHECK-NEXT:    i8 1, label [[EXIT]]
+; CHECK-NEXT:    ]
+; CHECK:       exit:
+; CHECK-NEXT:    ret i8 0
+;
+entry:
+  %o = or i8 %t0, 1
+  %r = srem i8 1, %o
+  switch i8 %r, label %exit [
+  i8 0, label %exit
+  i8 1, label %exit
+  ]
+
+exit:
+  ret i8 0
+}
+
 define i1 @arg_attribute(i8* nonnull %a) {
 ; CHECK-LABEL: @arg_attribute(
 ; CHECK-NEXT:    ret i1 false
@@ -524,6 +619,64 @@ out:
   ret i1 false
 }
 
+define i1 @umin_lhs_overdefined_rhs_const(i32 %a) {
+; CHECK-LABEL: @umin_lhs_overdefined_rhs_const(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i32 [[A:%.*]], 42
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[CMP]], i32 [[A]], i32 42
+; CHECK-NEXT:    ret i1 true
+;
+  %cmp = icmp ult i32 %a, 42
+  %sel = select i1 %cmp, i32 %a, i32 42
+  %cmp2 = icmp ule i32 %sel, 42
+  ret i1 %cmp2
+}
+
+define i1 @umin_rhs_overdefined_lhs_const(i32 %a) {
+; CHECK-LABEL: @umin_rhs_overdefined_lhs_const(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp uge i32 [[A:%.*]], 42
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[CMP]], i32 42, i32 [[A]]
+; CHECK-NEXT:    ret i1 true
+;
+  %cmp = icmp uge i32 %a, 42
+  %sel = select i1 %cmp, i32 42, i32 %a
+  %cmp2 = icmp ule i32 %sel, 42
+  ret i1 %cmp2
+}
+
+define i1 @umin_lhs_overdefined_rhs_range(i32 %a, i32 %b) {
+; CHECK-LABEL: @umin_lhs_overdefined_rhs_range(
+; CHECK-NEXT:    [[ASSUME:%.*]] = icmp ult i32 [[B:%.*]], 42
+; CHECK-NEXT:    call void @llvm.assume(i1 [[ASSUME]])
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i32 [[A:%.*]], [[B]]
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[CMP]], i32 [[A]], i32 [[B]]
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp ult i32 [[SEL]], 42
+; CHECK-NEXT:    ret i1 [[CMP2]]
+;
+  %assume = icmp ult i32 %b, 42
+  call void @llvm.assume(i1 %assume)
+  %cmp = icmp ult i32 %a, %b
+  %sel = select i1 %cmp, i32 %a, i32 %b
+  %cmp2 = icmp ult i32 %sel, 42
+  ret i1 %cmp2
+}
+
+define i1 @umin_rhs_overdefined_lhs_range(i32 %a, i32 %b) {
+; CHECK-LABEL: @umin_rhs_overdefined_lhs_range(
+; CHECK-NEXT:    [[ASSUME:%.*]] = icmp ult i32 [[B:%.*]], 42
+; CHECK-NEXT:    call void @llvm.assume(i1 [[ASSUME]])
+; CHECK-NEXT:    [[CMP:%.*]] = icmp uge i32 [[A:%.*]], [[B]]
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[CMP]], i32 [[B]], i32 [[A]]
+; CHECK-NEXT:    [[CMP2:%.*]] = icmp ult i32 [[SEL]], 42
+; CHECK-NEXT:    ret i1 [[CMP2]]
+;
+  %assume = icmp ult i32 %b, 42
+  call void @llvm.assume(i1 %assume)
+  %cmp = icmp uge i32 %a, %b
+  %sel = select i1 %cmp, i32 %b, i32 %a
+  %cmp2 = icmp ult i32 %sel, 42
+  ret i1 %cmp2
+}
+
 define i1 @clamp_low1(i32 %a) {
 ; CHECK-LABEL: @clamp_low1(
 ; CHECK-NEXT:  entry:
@@ -532,7 +685,7 @@ define i1 @clamp_low1(i32 %a) {
 ; CHECK:       a_guard:
 ; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp eq i32 [[A]], 5
 ; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], -1
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 5, i32 [[A]]
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 5, i32 [[ADD]]
 ; CHECK-NEXT:    ret i1 false
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 false
@@ -544,7 +697,7 @@ entry:
 a_guard:
   %sel_cmp = icmp eq i32 %a, 5
   %add = add i32 %a, -1
-  %sel = select i1 %sel_cmp, i32 5, i32 %a
+  %sel = select i1 %sel_cmp, i32 5, i32 %add
   %res = icmp eq i32 %sel, 4
   ret i1 %res
 out:
@@ -559,7 +712,7 @@ define i1 @clamp_low2(i32 %a) {
 ; CHECK:       a_guard:
 ; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp ne i32 [[A]], 5
 ; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], -1
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[A]], i32 5
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[ADD]], i32 5
 ; CHECK-NEXT:    ret i1 false
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 false
@@ -571,7 +724,61 @@ entry:
 a_guard:
   %sel_cmp = icmp ne i32 %a, 5
   %add = add i32 %a, -1
-  %sel = select i1 %sel_cmp, i32 %a, i32 5
+  %sel = select i1 %sel_cmp, i32 %add, i32 5
+  %res = icmp eq i32 %sel, 4
+  ret i1 %res
+out:
+  ret i1 false
+}
+
+define i1 @clamp_low3(i32 %a) {
+; CHECK-LABEL: @clamp_low3(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sge i32 [[A:%.*]], 5
+; CHECK-NEXT:    br i1 [[CMP]], label [[A_GUARD:%.*]], label [[OUT:%.*]]
+; CHECK:       a_guard:
+; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp sgt i32 [[A]], 5
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], -1
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[ADD]], i32 5
+; CHECK-NEXT:    ret i1 false
+; CHECK:       out:
+; CHECK-NEXT:    ret i1 false
+;
+entry:
+  %cmp = icmp sge i32 %a, 5
+  br i1 %cmp, label %a_guard, label %out
+
+a_guard:
+  %sel_cmp = icmp sgt i32 %a, 5
+  %add = add i32 %a, -1
+  %sel = select i1 %sel_cmp, i32 %add, i32 5
+  %res = icmp eq i32 %sel, 4
+  ret i1 %res
+out:
+  ret i1 false
+}
+
+define i1 @clamp_low4(i32 %a) {
+; CHECK-LABEL: @clamp_low4(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sge i32 [[A:%.*]], 5
+; CHECK-NEXT:    br i1 [[CMP]], label [[A_GUARD:%.*]], label [[OUT:%.*]]
+; CHECK:       a_guard:
+; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp sle i32 [[A]], 5
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], -1
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 5, i32 [[ADD]]
+; CHECK-NEXT:    ret i1 false
+; CHECK:       out:
+; CHECK-NEXT:    ret i1 false
+;
+entry:
+  %cmp = icmp sge i32 %a, 5
+  br i1 %cmp, label %a_guard, label %out
+
+a_guard:
+  %sel_cmp = icmp sle i32 %a, 5
+  %add = add i32 %a, -1
+  %sel = select i1 %sel_cmp, i32 5, i32 %add
   %res = icmp eq i32 %sel, 4
   ret i1 %res
 out:
@@ -586,7 +793,7 @@ define i1 @clamp_high1(i32 %a) {
 ; CHECK:       a_guard:
 ; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp eq i32 [[A]], 5
 ; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], 1
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 5, i32 [[A]]
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 5, i32 [[ADD]]
 ; CHECK-NEXT:    ret i1 false
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 false
@@ -598,7 +805,7 @@ entry:
 a_guard:
   %sel_cmp = icmp eq i32 %a, 5
   %add = add i32 %a, 1
-  %sel = select i1 %sel_cmp, i32 5, i32 %a
+  %sel = select i1 %sel_cmp, i32 5, i32 %add
   %res = icmp eq i32 %sel, 6
   ret i1 %res
 out:
@@ -613,7 +820,7 @@ define i1 @clamp_high2(i32 %a) {
 ; CHECK:       a_guard:
 ; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp ne i32 [[A]], 5
 ; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], 1
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[A]], i32 5
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[ADD]], i32 5
 ; CHECK-NEXT:    ret i1 false
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 false
@@ -625,7 +832,61 @@ entry:
 a_guard:
   %sel_cmp = icmp ne i32 %a, 5
   %add = add i32 %a, 1
-  %sel = select i1 %sel_cmp, i32 %a, i32 5
+  %sel = select i1 %sel_cmp, i32 %add, i32 5
+  %res = icmp eq i32 %sel, 6
+  ret i1 %res
+out:
+  ret i1 false
+}
+
+define i1 @clamp_high3(i32 %a) {
+; CHECK-LABEL: @clamp_high3(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sle i32 [[A:%.*]], 5
+; CHECK-NEXT:    br i1 [[CMP]], label [[A_GUARD:%.*]], label [[OUT:%.*]]
+; CHECK:       a_guard:
+; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp slt i32 [[A]], 5
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], 1
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[ADD]], i32 5
+; CHECK-NEXT:    ret i1 false
+; CHECK:       out:
+; CHECK-NEXT:    ret i1 false
+;
+entry:
+  %cmp = icmp sle i32 %a, 5
+  br i1 %cmp, label %a_guard, label %out
+
+a_guard:
+  %sel_cmp = icmp slt i32 %a, 5
+  %add = add i32 %a, 1
+  %sel = select i1 %sel_cmp, i32 %add, i32 5
+  %res = icmp eq i32 %sel, 6
+  ret i1 %res
+out:
+  ret i1 false
+}
+
+define i1 @clamp_high4(i32 %a) {
+; CHECK-LABEL: @clamp_high4(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sle i32 [[A:%.*]], 5
+; CHECK-NEXT:    br i1 [[CMP]], label [[A_GUARD:%.*]], label [[OUT:%.*]]
+; CHECK:       a_guard:
+; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp sge i32 [[A]], 5
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], 1
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 5, i32 [[ADD]]
+; CHECK-NEXT:    ret i1 false
+; CHECK:       out:
+; CHECK-NEXT:    ret i1 false
+;
+entry:
+  %cmp = icmp sle i32 %a, 5
+  br i1 %cmp, label %a_guard, label %out
+
+a_guard:
+  %sel_cmp = icmp sge i32 %a, 5
+  %add = add i32 %a, 1
+  %sel = select i1 %sel_cmp, i32 5, i32 %add
   %res = icmp eq i32 %sel, 6
   ret i1 %res
 out:
@@ -633,15 +894,15 @@ out:
 }
 
 ; Just showing arbitrary constants work, not really a clamp
-define i1 @clamp_high3(i32 %a) {
-; CHECK-LABEL: @clamp_high3(
+define i1 @not_clamp_high(i32 %a) {
+; CHECK-LABEL: @not_clamp_high(
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp sle i32 [[A:%.*]], 5
 ; CHECK-NEXT:    br i1 [[CMP]], label [[A_GUARD:%.*]], label [[OUT:%.*]]
 ; CHECK:       a_guard:
 ; CHECK-NEXT:    [[SEL_CMP:%.*]] = icmp ne i32 [[A]], 5
 ; CHECK-NEXT:    [[ADD:%.*]] = add nsw i32 [[A]], 100
-; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[A]], i32 5
+; CHECK-NEXT:    [[SEL:%.*]] = select i1 [[SEL_CMP]], i32 [[ADD]], i32 5
 ; CHECK-NEXT:    ret i1 false
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 false
@@ -653,7 +914,7 @@ entry:
 a_guard:
   %sel_cmp = icmp ne i32 %a, 5
   %add = add i32 %a, 100
-  %sel = select i1 %sel_cmp, i32 %a, i32 5
+  %sel = select i1 %sel_cmp, i32 %add, i32 5
   %res = icmp eq i32 %sel, 105
   ret i1 %res
 out:

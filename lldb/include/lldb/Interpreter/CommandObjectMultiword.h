@@ -35,10 +35,18 @@ public:
   bool LoadSubCommand(llvm::StringRef cmd_name,
                       const lldb::CommandObjectSP &command_obj) override;
 
+  llvm::Error LoadUserSubcommand(llvm::StringRef cmd_name,
+                                 const lldb::CommandObjectSP &command_obj,
+                                 bool can_replace) override;
+
+  llvm::Error RemoveUserSubcommand(llvm::StringRef cmd_name, bool multiword_okay);
+
   void GenerateHelpText(Stream &output_stream) override;
 
   lldb::CommandObjectSP GetSubcommandSP(llvm::StringRef sub_cmd,
                                         StringList *matches = nullptr) override;
+
+  lldb::CommandObjectSP GetSubcommandSPExact(llvm::StringRef sub_cmd) override;
 
   CommandObject *GetSubcommandObject(llvm::StringRef sub_cmd,
                                      StringList *matches = nullptr) override;
@@ -52,8 +60,8 @@ public:
 
   void HandleCompletion(CompletionRequest &request) override;
 
-  const char *GetRepeatCommand(Args &current_command_args,
-                               uint32_t index) override;
+  llvm::Optional<std::string> GetRepeatCommand(Args &current_command_args,
+                                               uint32_t index) override;
 
   bool Execute(const char *args_string, CommandReturnObject &result) override;
 
@@ -122,8 +130,8 @@ public:
   HandleArgumentCompletion(CompletionRequest &request,
                            OptionElementVector &opt_element_vector) override;
 
-  const char *GetRepeatCommand(Args &current_command_args,
-                               uint32_t index) override;
+  llvm::Optional<std::string> GetRepeatCommand(Args &current_command_args,
+                                               uint32_t index) override;
 
   /// \return
   ///     An error message to be displayed when the command is executed (i.e.

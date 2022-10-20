@@ -33,7 +33,7 @@ late to capture initialization of the debugger.
 
 .. code-block:: bash
 
-  > lldb --capture
+  $ lldb --capture
 
 In capture mode, LLDB will keep track of all the information it needs to replay
 the current debug session. Most data is captured lazily to limit the impact on
@@ -70,7 +70,7 @@ were passed to LLDB during capture are already part of the reproducer.
 
 .. code-block:: bash
 
- > lldb --replay /path/to/reproducer
+  $ lldb --replay /path/to/reproducer
 
 
 During replay LLDB will behave similar to batch mode. The session should be
@@ -105,7 +105,7 @@ Active Replay
 ^^^^^^^^^^^^^
 
 No matter how a reproducer was captured, they can always be replayed with the
-command line driver. When a reproducer is passed with the `--replay` flag, the
+command line driver. When a reproducer is passed with the ``--replay`` flag, the
 driver short-circuits and passes off control to the reproducer infrastructure,
 effectively bypassing its normal operation. This works because the driver is
 implemented using the SB API and is therefore nothing more than a sequence of
@@ -181,13 +181,6 @@ Reproducers are tested in the following ways:
    output of the binary being debugged) and are skipped by marking them as
    unsupported by adding ``UNSUPPORTED: lldb-repro`` to the top of the shell
    test or adding the ``skipIfReproducer`` decorator for the API tests.
-
-Additional testing is possible:
-
- - It's possible to unconditionally capture reproducers while running the
-   entire test suite by setting the ``LLDB_CAPTURE_REPRODUCER`` environment
-   variable. Assuming no bugs in reproducers, this can also help to reproduce
-   and investigate test failures.
 
 Knows Issues
 ------------

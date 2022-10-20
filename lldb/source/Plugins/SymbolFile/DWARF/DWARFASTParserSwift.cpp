@@ -27,7 +27,7 @@
 
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
@@ -41,7 +41,9 @@
 using namespace lldb;
 using namespace lldb_private;
 
-DWARFASTParserSwift::DWARFASTParserSwift(SwiftASTContext &ast) : m_ast(ast) {}
+DWARFASTParserSwift::DWARFASTParserSwift(
+    TypeSystemSwiftTypeRef &swift_typesystem)
+    : m_swift_typesystem(swift_typesystem) {}
 
 DWARFASTParserSwift::~DWARFASTParserSwift() {}
 
@@ -51,7 +53,9 @@ static llvm::StringRef GetTypedefName(const DWARFDIE &die) {
   DWARFDIE type_die = die.GetAttributeValueAsReferenceDIE(DW_AT_type);
   if (!type_die.IsValid())
     return {};
-  return llvm::StringRef::withNullAsEmpty(type_die.GetName());
+  if (!type_die.GetName())
+    return {};
+  return llvm::StringRef(type_die.GetName());
 }
 
 lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
@@ -149,7 +153,7 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
   }
 
   if (mangled_name) {
-    type_sp = m_ast.GetCachedType(mangled_name);
+    type_sp = m_swift_typesystem.GetCachedType(mangled_name);
     if (type_sp)
       return type_sp;
 
@@ -159,7 +163,8 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
 
     // Try to import the type from one of the loaded Swift modules.
     if (SwiftLanguageRuntime::IsSwiftMangledName(mangled_name.GetCString()))
-      compiler_type = m_ast.GetTypeFromMangledTypename(mangled_name);
+      compiler_type =
+          m_swift_typesystem.GetTypeFromMangledTypename(mangled_name);
   }
 
   if (!compiler_type && name) {
@@ -167,8 +172,8 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
     llvm::StringRef typedef_name = GetTypedefName(die);
     if (typedef_name.startswith("$sBp")) {
       preferred_name = name;
-      compiler_type =
-          m_ast.GetTypeFromMangledTypename(ConstString(typedef_name));
+      compiler_type = m_swift_typesystem.GetTypeFromMangledTypename(
+          ConstString(typedef_name));
     }
   }
 
@@ -180,7 +185,7 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
       // Make sure we at least have some function type. The mangling for
       // the "top_level_code" is returning the empty tuple type "()",
       // which is not a function type.
-      compiler_type = m_ast.GetVoidFunctionType();
+      compiler_type = m_swift_typesystem.GetVoidFunctionType();
     }
     break;
   default:
@@ -200,14 +205,17 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
   // Cache this type.
   if (type_sp && mangled_name &&
       SwiftLanguageRuntime::IsSwiftMangledName(mangled_name.GetStringRef()))
-    m_ast.SetCachedType(mangled_name, type_sp);
+    m_swift_typesystem.SetCachedType(mangled_name, type_sp);
   die.GetDWARF()->GetDIEToType()[die.GetDIE()] = type_sp.get();
 
   return type_sp;
 }
 
 Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
-    lldb_private::CompileUnit &comp_unit, const DWARFDIE &die) {
+    lldb_private::CompileUnit &comp_unit, const DWARFDIE &die,
+    const lldb_private::AddressRange &func_range) {
+  assert(func_range.GetBaseAddress().IsValid());
+
   DWARFRangeList func_ranges;
   const char *name = NULL;
   const char *mangled = NULL;
@@ -227,63 +235,47 @@ Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
                                &frame_base)) {
     // Union of all ranges in the function DIE (if the function is
     // discontiguous)
-    SymbolFileDWARF *dwarf = die.GetDWARF();
-    AddressRange func_range;
-    lldb::addr_t lowest_func_addr = func_ranges.GetMinRangeBase(0);
-    lldb::addr_t highest_func_addr = func_ranges.GetMaxRangeEnd(0);
-    if (lowest_func_addr != LLDB_INVALID_ADDRESS &&
-        lowest_func_addr <= highest_func_addr) {
-      ModuleSP module_sp(dwarf->GetObjectFile()->GetModule());
-      func_range.GetBaseAddress().ResolveAddressUsingFileSections(
-          lowest_func_addr, module_sp->GetSectionList());
-      if (func_range.GetBaseAddress().IsValid())
-        func_range.SetByteSize(highest_func_addr - lowest_func_addr);
+
+    Mangled func_name;
+    if (mangled)
+      func_name.SetValue(ConstString(mangled), true);
+    else
+      func_name.SetValue(ConstString(name), false);
+
+    // See if this function can throw.  We can't get that from the
+    // mangled name (even though the information is often there)
+    // because Swift reserves the right to omit it from the name
+    // if it doesn't need it.  So instead we look for the
+    // DW_TAG_thrown_type:
+
+    bool can_throw = false;
+
+    DWARFDebugInfoEntry *child(die.GetFirstChild().GetDIE());
+    while (child) {
+      if (child->Tag() == DW_TAG_thrown_type) {
+        can_throw = true;
+        break;
+      }
+      child = child->GetSibling();
     }
 
-    if (func_range.GetBaseAddress().IsValid()) {
-      Mangled func_name;
-      if (mangled)
-        func_name.SetValue(ConstString(mangled), true);
-      else
-        func_name.SetValue(ConstString(name), false);
+    FunctionSP func_sp;
+    std::unique_ptr<Declaration> decl_ap;
+    if (decl_file != 0 || decl_line != 0 || decl_column != 0)
+      decl_ap.reset(new Declaration(
+          comp_unit.GetSupportFiles().GetFileSpecAtIndex(decl_file), decl_line,
+          decl_column));
 
-      // See if this function can throw.  We can't get that from the
-      // mangled name (even though the information is often there)
-      // because Swift reserves the right to omit it from the name
-      // if it doesn't need it.  So instead we look for the
-      // DW_TAG_thrown_type:
+    const user_id_t func_user_id = die.GetID();
+    func_sp.reset(new Function(&comp_unit, func_user_id, func_user_id,
+                               func_name, nullptr, func_range,
+                               can_throw)); // first address range
 
-      bool can_throw = false;
-
-      DWARFDebugInfoEntry *child(die.GetFirstChild().GetDIE());
-      while (child) {
-        if (child->Tag() == DW_TAG_thrown_type) {
-          can_throw = true;
-          break;
-        }
-        child = child->GetSibling();
-      }
-
-      FunctionSP func_sp;
-      std::unique_ptr<Declaration> decl_ap;
-      if (decl_file != 0 || decl_line != 0 || decl_column != 0)
-        decl_ap.reset(new Declaration(
-            comp_unit.GetSupportFiles().GetFileSpecAtIndex(decl_file),
-            decl_line, decl_column));
-
-      if (dwarf->FixupAddress(func_range.GetBaseAddress())) {
-        const user_id_t func_user_id = die.GetID();
-        func_sp.reset(new Function(&comp_unit, func_user_id, func_user_id,
-                                   func_name, nullptr, func_range,
-                                   can_throw)); // first address range
-
-        if (func_sp.get() != NULL) {
-          if (frame_base.IsValid())
-            func_sp->GetFrameBaseExpression() = frame_base;
-          comp_unit.AddFunction(func_sp);
-          return func_sp.get();
-        }
-      }
+    if (func_sp.get() != NULL) {
+      if (frame_base.IsValid())
+        func_sp->GetFrameBaseExpression() = frame_base;
+      comp_unit.AddFunction(func_sp);
+      return func_sp.get();
     }
   }
   return NULL;

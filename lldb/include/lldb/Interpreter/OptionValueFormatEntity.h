@@ -14,7 +14,8 @@
 
 namespace lldb_private {
 
-class OptionValueFormatEntity : public OptionValue {
+class OptionValueFormatEntity
+    : public Cloneable<OptionValueFormatEntity, OptionValue> {
 public:
   OptionValueFormatEntity(const char *default_format);
 
@@ -30,13 +31,8 @@ public:
   Status
   SetValueFromString(llvm::StringRef value,
                      VarSetOperationType op = eVarSetOperationAssign) override;
-  Status
-  SetValueFromString(const char *,
-                     VarSetOperationType = eVarSetOperationAssign) = delete;
 
   void Clear() override;
-
-  lldb::OptionValueSP DeepCopy() const override;
 
   void AutoComplete(CommandInterpreter &interpreter,
                     CompletionRequest &request) override;

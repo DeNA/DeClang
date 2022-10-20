@@ -14,16 +14,15 @@
 
 namespace lldb_private {
 
-class OptionValueUInt64 : public OptionValue {
+class OptionValueUInt64 : public Cloneable<OptionValueUInt64, OptionValue> {
 public:
   OptionValueUInt64() = default;
 
   OptionValueUInt64(uint64_t value)
-      : OptionValue(), m_current_value(value), m_default_value(value) {}
+      : m_current_value(value), m_default_value(value) {}
 
   OptionValueUInt64(uint64_t current_value, uint64_t default_value)
-      : OptionValue(), m_current_value(current_value),
-        m_default_value(default_value) {}
+      : m_current_value(current_value), m_default_value(default_value) {}
 
   ~OptionValueUInt64() override = default;
 
@@ -42,16 +41,11 @@ public:
   Status
   SetValueFromString(llvm::StringRef value,
                      VarSetOperationType op = eVarSetOperationAssign) override;
-  Status
-  SetValueFromString(const char *,
-                     VarSetOperationType = eVarSetOperationAssign) = delete;
 
   void Clear() override {
     m_current_value = m_default_value;
     m_value_was_set = false;
   }
-
-  lldb::OptionValueSP DeepCopy() const override;
 
   // Subclass specific functions
 

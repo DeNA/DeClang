@@ -82,9 +82,8 @@ ParseResult Parser::parseFusedLocation(LocationAttr &loc) {
     return success();
   };
 
-  if (parseToken(Token::l_square, "expected '[' in fused location") ||
-      parseCommaSeparatedList(parseElt) ||
-      parseToken(Token::r_square, "expected ']' in fused location"))
+  if (parseCommaSeparatedList(Delimiter::Square, parseElt,
+                              " in fused location"))
     return failure();
 
   // Return the fused location.
@@ -119,7 +118,7 @@ ParseResult Parser::parseNameOrFileLineColLocation(LocationAttr &loc) {
       return emitError("expected integer column number in FileLineColLoc");
     consumeToken(Token::integer);
 
-    loc = FileLineColLoc::get(str, line.getValue(), column.getValue(), ctx);
+    loc = FileLineColLoc::get(ctx, str, line.getValue(), column.getValue());
     return success();
   }
 
@@ -145,7 +144,7 @@ ParseResult Parser::parseNameOrFileLineColLocation(LocationAttr &loc) {
                    "expected ')' after child location of NameLoc"))
       return failure();
   } else {
-    loc = NameLoc::get(Identifier::get(str, ctx), ctx);
+    loc = NameLoc::get(Identifier::get(str, ctx));
   }
 
   return success();

@@ -226,7 +226,7 @@ INTERFACE WEAK int SCUDO_PREFIX(malloc_info)(UNUSED int options, FILE *stream) {
   fputs("<malloc version=\"scudo-1\">\n", stream);
   for (scudo::uptr i = 0; i != max_size; ++i)
     if (sizes[i])
-      fprintf(stream, "<alloc size=\"%lu\" count=\"%lu\"/>\n", i, sizes[i]);
+      fprintf(stream, "<alloc size=\"%zu\" count=\"%zu\"/>\n", i, sizes[i]);
   fputs("</malloc>\n", stream);
   SCUDO_PREFIX(free)(sizes);
   return 0;
@@ -258,6 +258,14 @@ INTERFACE WEAK void
 SCUDO_PREFIX(malloc_set_pattern_fill_contents)(int pattern_fill_contents) {
   SCUDO_ALLOCATOR.setFillContents(
       pattern_fill_contents ? scudo::PatternOrZeroFill : scudo::NoFill);
+}
+
+// Sets whether scudo adds a small amount of slack at the end of large
+// allocations, before the guard page. This can be enabled to work around buggy
+// applications that read a few bytes past the end of their allocation.
+INTERFACE WEAK void
+SCUDO_PREFIX(malloc_set_add_large_allocation_slack)(int add_slack) {
+  SCUDO_ALLOCATOR.setAddLargeAllocationSlack(add_slack);
 }
 
 } // extern "C"

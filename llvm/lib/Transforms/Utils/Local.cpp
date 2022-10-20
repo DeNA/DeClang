@@ -24,7 +24,6 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
-#include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
@@ -65,6 +64,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/IR/PseudoProbe.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
@@ -111,8 +111,8 @@ static cl::opt<unsigned> PHICSENumPHISmallSize(
         "perform a (faster!) exhaustive search instead of set-driven one."));
 
 // Max recursion depth for collectBitParts used when detecting bswap and
-// bitreverse idioms
-static const unsigned BitPartRecursionMaxDepth = 64;
+// bitreverse idioms.
+static const unsigned BitPartRecursionMaxDepth = 48;
 
 //===----------------------------------------------------------------------===//
 //  Local constant propagation.
@@ -134,26 +134,9 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
   // Branch - See if we are conditional jumping on constant
   if (auto *BI = dyn_cast<BranchInst>(T)) {
     if (BI->isUnconditional()) return false;  // Can't optimize uncond branch
+
     BasicBlock *Dest1 = BI->getSuccessor(0);
     BasicBlock *Dest2 = BI->getSuccessor(1);
-
-    if (auto *Cond = dyn_cast<ConstantInt>(BI->getCondition())) {
-      // Are we branching on constant?
-      // YES.  Change to unconditional branch...
-      BasicBlock *Destination = Cond->getZExtValue() ? Dest1 : Dest2;
-      BasicBlock *OldDest     = Cond->getZExtValue() ? Dest2 : Dest1;
-
-      // Let the basic block know that we are letting go of it.  Based on this,
-      // it will adjust it's PHI nodes.
-      OldDest->removePredecessor(BB);
-
-      // Replace the conditional branch with an unconditional one.
-      Builder.CreateBr(Destination);
-      BI->eraseFromParent();
-      if (DTU)
-        DTU->applyUpdatesPermissive({{DominatorTree::Delete, BB, OldDest}});
-      return true;
-    }
 
     if (Dest2 == Dest1) {       // Conditional branch to same location?
       // This branch matches something like this:
@@ -165,13 +148,42 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       Dest1->removePredecessor(BI->getParent());
 
       // Replace the conditional branch with an unconditional one.
-      Builder.CreateBr(Dest1);
+      BranchInst *NewBI = Builder.CreateBr(Dest1);
+
+      // Transfer the metadata to the new branch instruction.
+      NewBI->copyMetadata(*BI, {LLVMContext::MD_loop, LLVMContext::MD_dbg,
+                                LLVMContext::MD_annotation});
+
       Value *Cond = BI->getCondition();
       BI->eraseFromParent();
       if (DeleteDeadConditions)
         RecursivelyDeleteTriviallyDeadInstructions(Cond, TLI);
       return true;
     }
+
+    if (auto *Cond = dyn_cast<ConstantInt>(BI->getCondition())) {
+      // Are we branching on constant?
+      // YES.  Change to unconditional branch...
+      BasicBlock *Destination = Cond->getZExtValue() ? Dest1 : Dest2;
+      BasicBlock *OldDest = Cond->getZExtValue() ? Dest2 : Dest1;
+
+      // Let the basic block know that we are letting go of it.  Based on this,
+      // it will adjust it's PHI nodes.
+      OldDest->removePredecessor(BB);
+
+      // Replace the conditional branch with an unconditional one.
+      BranchInst *NewBI = Builder.CreateBr(Destination);
+
+      // Transfer the metadata to the new branch instruction.
+      NewBI->copyMetadata(*BI, {LLVMContext::MD_loop, LLVMContext::MD_dbg,
+                                LLVMContext::MD_annotation});
+
+      BI->eraseFromParent();
+      if (DTU)
+        DTU->applyUpdates({{DominatorTree::Delete, BB, OldDest}});
+      return true;
+    }
+
     return false;
   }
 
@@ -229,9 +241,6 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
         i = SI->removeCase(i);
         e = SI->case_end();
         Changed = true;
-        if (DTU)
-          DTU->applyUpdatesPermissive(
-              {{DominatorTree::Delete, ParentBB, DefaultDest}});
         continue;
       }
 
@@ -257,19 +266,19 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       // Insert the new branch.
       Builder.CreateBr(TheOnlyDest);
       BasicBlock *BB = SI->getParent();
-      std::vector <DominatorTree::UpdateType> Updates;
-      if (DTU)
-        Updates.reserve(SI->getNumSuccessors() - 1);
+
+      SmallSet<BasicBlock *, 8> RemovedSuccessors;
 
       // Remove entries from PHI nodes which we no longer branch to...
+      BasicBlock *SuccToKeep = TheOnlyDest;
       for (BasicBlock *Succ : successors(SI)) {
+        if (DTU && Succ != TheOnlyDest)
+          RemovedSuccessors.insert(Succ);
         // Found case matching a constant operand?
-        if (Succ == TheOnlyDest) {
-          TheOnlyDest = nullptr; // Don't modify the first branch to TheOnlyDest
+        if (Succ == SuccToKeep) {
+          SuccToKeep = nullptr; // Don't modify the first branch to TheOnlyDest
         } else {
           Succ->removePredecessor(BB);
-          if (DTU)
-            Updates.push_back({DominatorTree::Delete, BB, Succ});
         }
       }
 
@@ -278,8 +287,13 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       SI->eraseFromParent();
       if (DeleteDeadConditions)
         RecursivelyDeleteTriviallyDeadInstructions(Cond, TLI);
-      if (DTU)
-        DTU->applyUpdatesPermissive(Updates);
+      if (DTU) {
+        std::vector<DominatorTree::UpdateType> Updates;
+        Updates.reserve(RemovedSuccessors.size());
+        for (auto *RemovedSuccessor : RemovedSuccessors)
+          Updates.push_back({DominatorTree::Delete, BB, RemovedSuccessor});
+        DTU->applyUpdates(Updates);
+      }
       return true;
     }
 
@@ -325,22 +339,20 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
     if (auto *BA =
           dyn_cast<BlockAddress>(IBI->getAddress()->stripPointerCasts())) {
       BasicBlock *TheOnlyDest = BA->getBasicBlock();
-      std::vector <DominatorTree::UpdateType> Updates;
-      if (DTU)
-        Updates.reserve(IBI->getNumDestinations() - 1);
+      SmallSet<BasicBlock *, 8> RemovedSuccessors;
 
       // Insert the new branch.
       Builder.CreateBr(TheOnlyDest);
 
+      BasicBlock *SuccToKeep = TheOnlyDest;
       for (unsigned i = 0, e = IBI->getNumDestinations(); i != e; ++i) {
-        if (IBI->getDestination(i) == TheOnlyDest) {
-          TheOnlyDest = nullptr;
+        BasicBlock *DestBB = IBI->getDestination(i);
+        if (DTU && DestBB != TheOnlyDest)
+          RemovedSuccessors.insert(DestBB);
+        if (IBI->getDestination(i) == SuccToKeep) {
+          SuccToKeep = nullptr;
         } else {
-          BasicBlock *ParentBB = IBI->getParent();
-          BasicBlock *DestBB = IBI->getDestination(i);
-          DestBB->removePredecessor(ParentBB);
-          if (DTU)
-            Updates.push_back({DominatorTree::Delete, ParentBB, DestBB});
+          DestBB->removePredecessor(BB);
         }
       }
       Value *Address = IBI->getAddress();
@@ -357,13 +369,18 @@ bool llvm::ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions,
       // If we didn't find our destination in the IBI successor list, then we
       // have undefined behavior.  Replace the unconditional branch with an
       // 'unreachable' instruction.
-      if (TheOnlyDest) {
+      if (SuccToKeep) {
         BB->getTerminator()->eraseFromParent();
         new UnreachableInst(BB->getContext(), BB);
       }
 
-      if (DTU)
-        DTU->applyUpdatesPermissive(Updates);
+      if (DTU) {
+        std::vector<DominatorTree::UpdateType> Updates;
+        Updates.reserve(RemovedSuccessors.size());
+        for (auto *RemovedSuccessor : RemovedSuccessors)
+          Updates.push_back({DominatorTree::Delete, BB, RemovedSuccessor});
+        DTU->applyUpdates(Updates);
+      }
       return true;
     }
   }
@@ -403,7 +420,7 @@ bool llvm::wouldInstructionBeTriviallyDead(Instruction *I,
     return true;
   }
   if (DbgValueInst *DVI = dyn_cast<DbgValueInst>(I)) {
-    if (DVI->getValue())
+    if (DVI->hasArgList() || DVI->getValue(0))
       return false;
     return true;
   }
@@ -413,13 +430,8 @@ bool llvm::wouldInstructionBeTriviallyDead(Instruction *I,
     return true;
   }
 
-  if (auto *CB = dyn_cast<CallBase>(I)) {
-    // Treat calls that may not return as alive.
-    // TODO: Remove the intrinsic escape hatch once all intrinsics set
-    // willreturn properly.
-    if (!CB->willReturn() && !isa<IntrinsicInst>(I))
-      return false;
-  }
+  if (!I->willReturn())
+    return false;
 
   if (!I->mayHaveSideEffects())
     return true;
@@ -454,12 +466,17 @@ bool llvm::wouldInstructionBeTriviallyDead(Instruction *I,
     // sophisticated tradeoffs for guards considering potential for check
     // widening, but for now we keep things simple.
     if ((II->getIntrinsicID() == Intrinsic::assume &&
-         isAssumeWithEmptyBundle(*II)) ||
+         isAssumeWithEmptyBundle(cast<AssumeInst>(*II))) ||
         II->getIntrinsicID() == Intrinsic::experimental_guard) {
       if (ConstantInt *Cond = dyn_cast<ConstantInt>(II->getArgOperand(0)))
         return !Cond->isZero();
 
       return false;
+    }
+
+    if (auto *FPI = dyn_cast<ConstrainedFPIntrinsic>(I)) {
+      Optional<fp::ExceptionBehavior> ExBehavior = FPI->getExceptionBehavior();
+      return ExBehavior.getValue() != fp::ebStrict;
     }
   }
 
@@ -473,6 +490,16 @@ bool llvm::wouldInstructionBeTriviallyDead(Instruction *I,
   if (auto *Call = dyn_cast<CallBase>(I))
     if (isMathLibCallNoop(Call, TLI))
       return true;
+
+  // To express possible interaction with floating point environment constrained
+  // intrinsics are described as if they access memory. So they look like having
+  // side effect but actually do not have it unless they raise floating point
+  // exception. If FP exceptions are ignored, the intrinsic may be deleted.
+  if (auto *CI = dyn_cast<ConstrainedFPIntrinsic>(I)) {
+    Optional<fp::ExceptionBehavior> EB = CI->getExceptionBehavior();
+    if (!EB || *EB == fp::ExceptionBehavior::ebIgnore)
+      return true;
+  }
 
   return false;
 }
@@ -563,8 +590,7 @@ bool llvm::replaceDbgUsesWithUndef(Instruction *I) {
   findDbgUsers(DbgUsers, I);
   for (auto *DII : DbgUsers) {
     Value *Undef = UndefValue::get(I->getType());
-    DII->setOperand(0, MetadataAsValue::get(DII->getContext(),
-                                            ValueAsMetadata::get(Undef)));
+    DII->replaceVariableLocationOp(I, Undef);
   }
   return !DbgUsers.empty();
 }
@@ -727,22 +753,23 @@ void llvm::MergeBasicBlockIntoOnlyPred(BasicBlock *DestBB,
   BasicBlock *PredBB = DestBB->getSinglePredecessor();
   assert(PredBB && "Block doesn't have a single predecessor!");
 
-  bool ReplaceEntryBB = false;
-  if (PredBB == &DestBB->getParent()->getEntryBlock())
-    ReplaceEntryBB = true;
+  bool ReplaceEntryBB = PredBB->isEntryBlock();
 
   // DTU updates: Collect all the edges that enter
   // PredBB. These dominator edges will be redirected to DestBB.
   SmallVector<DominatorTree::UpdateType, 32> Updates;
 
   if (DTU) {
-    Updates.push_back({DominatorTree::Delete, PredBB, DestBB});
-    for (auto I = pred_begin(PredBB), E = pred_end(PredBB); I != E; ++I) {
-      Updates.push_back({DominatorTree::Delete, *I, PredBB});
+    SmallPtrSet<BasicBlock *, 2> PredsOfPredBB(pred_begin(PredBB),
+                                               pred_end(PredBB));
+    Updates.reserve(Updates.size() + 2 * PredsOfPredBB.size() + 1);
+    for (BasicBlock *PredOfPredBB : PredsOfPredBB)
       // This predecessor of PredBB may already have DestBB as a successor.
-      if (!llvm::is_contained(successors(*I), DestBB))
-        Updates.push_back({DominatorTree::Insert, *I, DestBB});
-    }
+      if (PredOfPredBB != PredBB)
+        Updates.push_back({DominatorTree::Insert, PredOfPredBB, DestBB});
+    for (BasicBlock *PredOfPredBB : PredsOfPredBB)
+      Updates.push_back({DominatorTree::Delete, PredOfPredBB, PredBB});
+    Updates.push_back({DominatorTree::Delete, PredBB, DestBB});
   }
 
   // Zap anything that took the address of DestBB.  Not doing this will give the
@@ -916,6 +943,7 @@ static void gatherIncomingValuesToPhi(PHINode *PN,
 /// \param IncomingValues A map from block to value.
 static void replaceUndefValuesInPhi(PHINode *PN,
                                     const IncomingValueMap &IncomingValues) {
+  SmallVector<unsigned> TrueUndefOps;
   for (unsigned i = 0, e = PN->getNumIncomingValues(); i != e; ++i) {
     Value *V = PN->getIncomingValue(i);
 
@@ -923,9 +951,30 @@ static void replaceUndefValuesInPhi(PHINode *PN,
 
     BasicBlock *BB = PN->getIncomingBlock(i);
     IncomingValueMap::const_iterator It = IncomingValues.find(BB);
-    if (It == IncomingValues.end()) continue;
 
+    // Keep track of undef/poison incoming values. Those must match, so we fix
+    // them up below if needed.
+    // Note: this is conservatively correct, but we could try harder and group
+    // the undef values per incoming basic block.
+    if (It == IncomingValues.end()) {
+      TrueUndefOps.push_back(i);
+      continue;
+    }
+
+    // There is a defined value for this incoming block, so map this undef
+    // incoming value to the defined value.
     PN->setIncomingValue(i, It->second);
+  }
+
+  // If there are both undef and poison values incoming, then convert those
+  // values to undef. It is invalid to have different values for the same
+  // incoming block.
+  unsigned PoisonCount = count_if(TrueUndefOps, [&](unsigned i) {
+    return isa<PoisonValue>(PN->getIncomingValue(i));
+  });
+  if (PoisonCount != 0 && PoisonCount != TrueUndefOps.size()) {
+    for (unsigned i : TrueUndefOps)
+      PN->setIncomingValue(i, UndefValue::get(PN->getType()));
   }
 }
 
@@ -1033,8 +1082,8 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB,
 
   // We cannot fold the block if it's a branch to an already present callbr
   // successor because that creates duplicate successors.
-  for (auto I = pred_begin(BB), E = pred_end(BB); I != E; ++I) {
-    if (auto *CBI = dyn_cast<CallBrInst>((*I)->getTerminator())) {
+  for (BasicBlock *PredBB : predecessors(BB)) {
+    if (auto *CBI = dyn_cast<CallBrInst>(PredBB->getTerminator())) {
       if (Succ == CBI->getDefaultDest())
         return false;
       for (unsigned i = 0, e = CBI->getNumIndirectDests(); i != e; ++i)
@@ -1047,14 +1096,17 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB,
 
   SmallVector<DominatorTree::UpdateType, 32> Updates;
   if (DTU) {
-    Updates.push_back({DominatorTree::Delete, BB, Succ});
     // All predecessors of BB will be moved to Succ.
-    for (auto I = pred_begin(BB), E = pred_end(BB); I != E; ++I) {
-      Updates.push_back({DominatorTree::Delete, *I, BB});
+    SmallPtrSet<BasicBlock *, 8> PredsOfBB(pred_begin(BB), pred_end(BB));
+    SmallPtrSet<BasicBlock *, 8> PredsOfSucc(pred_begin(Succ), pred_end(Succ));
+    Updates.reserve(Updates.size() + 2 * PredsOfBB.size() + 1);
+    for (auto *PredOfBB : PredsOfBB)
       // This predecessor of BB may already have Succ as a successor.
-      if (!llvm::is_contained(successors(*I), Succ))
-        Updates.push_back({DominatorTree::Insert, *I, Succ});
-    }
+      if (!PredsOfSucc.contains(PredOfBB))
+        Updates.push_back({DominatorTree::Insert, PredOfBB, Succ});
+    for (auto *PredOfBB : PredsOfBB)
+      Updates.push_back({DominatorTree::Delete, PredOfBB, BB});
+    Updates.push_back({DominatorTree::Delete, BB, Succ});
   }
 
   if (isa<PHINode>(Succ->begin())) {
@@ -1093,10 +1145,8 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB,
   Instruction *TI = BB->getTerminator();
   if (TI)
     if (MDNode *LoopMD = TI->getMetadata(LoopMDKind))
-      for (pred_iterator PI = pred_begin(BB), E = pred_end(BB); PI != E; ++PI) {
-        BasicBlock *Pred = *PI;
+      for (BasicBlock *Pred : predecessors(BB))
         Pred->getTerminator()->setMetadata(LoopMDKind, LoopMD);
-      }
 
   // Everything that jumped to BB now goes to Succ.
   BB->replaceAllUsesWith(Succ);
@@ -1109,12 +1159,11 @@ bool llvm::TryToSimplifyUncondBranchFromEmptyBlock(BasicBlock *BB,
   assert(succ_empty(BB) && "The successor list of BB isn't empty before "
                            "applying corresponding DTU updates.");
 
-  if (DTU) {
-    DTU->applyUpdatesPermissive(Updates);
-    DTU->deleteBB(BB);
-  } else {
-    BB->eraseFromParent(); // Delete the old basic block.
-  }
+  if (DTU)
+    DTU->applyUpdates(Updates);
+
+  DeleteDeadBlock(BB, DTU);
+
   return true;
 }
 
@@ -1330,7 +1379,7 @@ static bool PhiHasDebugValue(DILocalVariable *DIVar,
   SmallVector<DbgValueInst *, 1> DbgValues;
   findDbgValues(DbgValues, APN);
   for (auto *DVI : DbgValues) {
-    assert(DVI->getValue() == APN);
+    assert(is_contained(DVI->getValues(), APN));
     if ((DVI->getVariable() == DIVar) && (DVI->getExpression() == DIExpr))
       return true;
   }
@@ -1357,13 +1406,17 @@ static bool valueCoversEntireFragment(Type *ValTy, DbgVariableIntrinsic *DII) {
   // We can't always calculate the size of the DI variable (e.g. if it is a
   // VLA). Try to use the size of the alloca that the dbg intrinsic describes
   // intead.
-  if (DII->isAddressOfVariable())
-    if (auto *AI = dyn_cast_or_null<AllocaInst>(DII->getVariableLocation()))
+  if (DII->isAddressOfVariable()) {
+    // DII should have exactly 1 location when it is an address.
+    assert(DII->getNumVariableLocationOps() == 1 &&
+           "address of variable must have exactly 1 location operand.");
+    if (auto *AI =
+            dyn_cast_or_null<AllocaInst>(DII->getVariableLocationOp(0))) {
       if (Optional<TypeSize> FragmentSize = AI->getAllocationSizeInBits(DL)) {
-        assert(ValueSize.isScalable() == FragmentSize->isScalable() &&
-               "Both sizes should agree on the scalable flag.");
         return TypeSize::isKnownGE(ValueSize, *FragmentSize);
       }
+    }
+  }
   // Could not determine size of variable. Conservatively return false.
   return false;
 }
@@ -1374,7 +1427,7 @@ static bool valueCoversEntireFragment(Type *ValTy, DbgVariableIntrinsic *DII) {
 /// case this DebugLoc leaks into any adjacent instructions.
 static DebugLoc getDebugValueLoc(DbgVariableIntrinsic *DII, Instruction *Src) {
   // Original dbg.declare must have a location.
-  DebugLoc DeclareLoc = DII->getDebugLoc();
+  const DebugLoc &DeclareLoc = DII->getDebugLoc();
   MDNode *Scope = DeclareLoc.getScope();
   DILocation *InlinedAt = DeclareLoc.getInlinedAt();
   // Produce an unknown location with the correct scope / inlinedAt fields.
@@ -1566,93 +1619,56 @@ void llvm::insertDebugValuesForPHIs(BasicBlock *BB,
   ValueToValueMapTy DbgValueMap;
   for (auto &I : *BB) {
     if (auto DbgII = dyn_cast<DbgVariableIntrinsic>(&I)) {
-      if (auto *Loc = dyn_cast_or_null<PHINode>(DbgII->getVariableLocation()))
-        DbgValueMap.insert({Loc, DbgII});
+      for (Value *V : DbgII->location_ops())
+        if (auto *Loc = dyn_cast_or_null<PHINode>(V))
+          DbgValueMap.insert({Loc, DbgII});
     }
   }
   if (DbgValueMap.size() == 0)
     return;
 
+  // Map a pair of the destination BB and old dbg.value to the new dbg.value,
+  // so that if a dbg.value is being rewritten to use more than one of the
+  // inserted PHIs in the same destination BB, we can update the same dbg.value
+  // with all the new PHIs instead of creating one copy for each.
+  MapVector<std::pair<BasicBlock *, DbgVariableIntrinsic *>,
+            DbgVariableIntrinsic *>
+      NewDbgValueMap;
   // Then iterate through the new PHIs and look to see if they use one of the
-  // previously mapped PHIs. If so, insert a new dbg.value intrinsic that will
-  // propagate the info through the new PHI.
-  LLVMContext &C = BB->getContext();
+  // previously mapped PHIs. If so, create a new dbg.value intrinsic that will
+  // propagate the info through the new PHI. If we use more than one new PHI in
+  // a single destination BB with the same old dbg.value, merge the updates so
+  // that we get a single new dbg.value with all the new PHIs.
   for (auto PHI : InsertedPHIs) {
     BasicBlock *Parent = PHI->getParent();
     // Avoid inserting an intrinsic into an EH block.
     if (Parent->getFirstNonPHI()->isEHPad())
       continue;
-    auto PhiMAV = MetadataAsValue::get(C, ValueAsMetadata::get(PHI));
     for (auto VI : PHI->operand_values()) {
       auto V = DbgValueMap.find(VI);
       if (V != DbgValueMap.end()) {
         auto *DbgII = cast<DbgVariableIntrinsic>(V->second);
-        Instruction *NewDbgII = DbgII->clone();
-        NewDbgII->setOperand(0, PhiMAV);
-        auto InsertionPt = Parent->getFirstInsertionPt();
-        assert(InsertionPt != Parent->end() && "Ill-formed basic block");
-        NewDbgII->insertBefore(&*InsertionPt);
+        auto NewDI = NewDbgValueMap.find({Parent, DbgII});
+        if (NewDI == NewDbgValueMap.end()) {
+          auto *NewDbgII = cast<DbgVariableIntrinsic>(DbgII->clone());
+          NewDI = NewDbgValueMap.insert({{Parent, DbgII}, NewDbgII}).first;
+        }
+        DbgVariableIntrinsic *NewDbgII = NewDI->second;
+        // If PHI contains VI as an operand more than once, we may
+        // replaced it in NewDbgII; confirm that it is present.
+        if (is_contained(NewDbgII->location_ops(), VI))
+          NewDbgII->replaceVariableLocationOp(VI, PHI);
       }
     }
   }
-}
-
-/// Finds all intrinsics declaring local variables as living in the memory that
-/// 'V' points to. This may include a mix of dbg.declare and
-/// dbg.addr intrinsics.
-TinyPtrVector<DbgVariableIntrinsic *> llvm::FindDbgAddrUses(Value *V) {
-  // This function is hot. Check whether the value has any metadata to avoid a
-  // DenseMap lookup.
-  if (!V->isUsedByMetadata())
-    return {};
-  auto *L = LocalAsMetadata::getIfExists(V);
-  if (!L)
-    return {};
-  auto *MDV = MetadataAsValue::getIfExists(V->getContext(), L);
-  if (!MDV)
-    return {};
-
-  TinyPtrVector<DbgVariableIntrinsic *> Declares;
-  for (User *U : MDV->users()) {
-    if (auto *DII = dyn_cast<DbgVariableIntrinsic>(U))
-      if (DII->isAddressOfVariable())
-        Declares.push_back(DII);
+  // Insert thew new dbg.values into their destination blocks.
+  for (auto DI : NewDbgValueMap) {
+    BasicBlock *Parent = DI.first.first;
+    auto *NewDbgII = DI.second;
+    auto InsertionPt = Parent->getFirstInsertionPt();
+    assert(InsertionPt != Parent->end() && "Ill-formed basic block");
+    NewDbgII->insertBefore(&*InsertionPt);
   }
-
-  return Declares;
-}
-
-TinyPtrVector<DbgDeclareInst *> llvm::FindDbgDeclareUses(Value *V) {
-  TinyPtrVector<DbgDeclareInst *> DDIs;
-  for (DbgVariableIntrinsic *DVI : FindDbgAddrUses(V))
-    if (auto *DDI = dyn_cast<DbgDeclareInst>(DVI))
-      DDIs.push_back(DDI);
-  return DDIs;
-}
-
-void llvm::findDbgValues(SmallVectorImpl<DbgValueInst *> &DbgValues, Value *V) {
-  // This function is hot. Check whether the value has any metadata to avoid a
-  // DenseMap lookup.
-  if (!V->isUsedByMetadata())
-    return;
-  if (auto *L = LocalAsMetadata::getIfExists(V))
-    if (auto *MDV = MetadataAsValue::getIfExists(V->getContext(), L))
-      for (User *U : MDV->users())
-        if (DbgValueInst *DVI = dyn_cast<DbgValueInst>(U))
-          DbgValues.push_back(DVI);
-}
-
-void llvm::findDbgUsers(SmallVectorImpl<DbgVariableIntrinsic *> &DbgUsers,
-                        Value *V) {
-  // This function is hot. Check whether the value has any metadata to avoid a
-  // DenseMap lookup.
-  if (!V->isUsedByMetadata())
-    return;
-  if (auto *L = LocalAsMetadata::getIfExists(V))
-    if (auto *MDV = MetadataAsValue::getIfExists(V->getContext(), L))
-      for (User *U : MDV->users())
-        if (DbgVariableIntrinsic *DII = dyn_cast<DbgVariableIntrinsic>(U))
-          DbgUsers.push_back(DII);
 }
 
 bool llvm::replaceDbgDeclare(Value *Address, Value *NewAddress,
@@ -1660,7 +1676,7 @@ bool llvm::replaceDbgDeclare(Value *Address, Value *NewAddress,
                              int Offset) {
   auto DbgAddrs = FindDbgAddrUses(Address);
   for (DbgVariableIntrinsic *DII : DbgAddrs) {
-    DebugLoc Loc = DII->getDebugLoc();
+    const DebugLoc &Loc = DII->getDebugLoc();
     auto *DIVar = DII->getVariable();
     auto *DIExpr = DII->getExpression();
     assert(DIVar && "Missing variable");
@@ -1675,7 +1691,7 @@ bool llvm::replaceDbgDeclare(Value *Address, Value *NewAddress,
 
 static void replaceOneDbgValueForAlloca(DbgValueInst *DVI, Value *NewAddress,
                                         DIBuilder &Builder, int Offset) {
-  DebugLoc Loc = DVI->getDebugLoc();
+  const DebugLoc &Loc = DVI->getDebugLoc();
   auto *DIVar = DVI->getVariable();
   auto *DIExpr = DVI->getExpression();
   assert(DIVar && "Missing variable");
@@ -1700,16 +1716,9 @@ void llvm::replaceDbgValueForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
                                     DIBuilder &Builder, int Offset) {
   if (auto *L = LocalAsMetadata::getIfExists(AI))
     if (auto *MDV = MetadataAsValue::getIfExists(AI->getContext(), L))
-      for (auto UI = MDV->use_begin(), UE = MDV->use_end(); UI != UE;) {
-        Use &U = *UI++;
+      for (Use &U : llvm::make_early_inc_range(MDV->uses()))
         if (auto *DVI = dyn_cast<DbgValueInst>(U.getUser()))
           replaceOneDbgValueForAlloca(DVI, NewAllocaAddress, Builder, Offset);
-      }
-}
-
-/// Wrap \p V in a ValueAsMetadata instance.
-static MetadataAsValue *wrapValueInMetadata(LLVMContext &C, Value *V) {
-  return MetadataAsValue::get(C, ValueAsMetadata::get(V));
 }
 
 /// Where possible to salvage debug information for \p I do so
@@ -1722,26 +1731,62 @@ void llvm::salvageDebugInfo(Instruction &I) {
 
 void llvm::salvageDebugInfoForDbgValues(
     Instruction &I, ArrayRef<DbgVariableIntrinsic *> DbgUsers) {
-  auto &Ctx = I.getContext();
+  // These are arbitrary chosen limits on the maximum number of values and the
+  // maximum size of a debug expression we can salvage up to, used for
+  // performance reasons.
+  const unsigned MaxDebugArgs = 16;
+  const unsigned MaxExpressionSize = 128;
   bool Salvaged = false;
-  auto wrapMD = [&](Value *V) { return wrapValueInMetadata(Ctx, V); };
 
   for (auto *DII : DbgUsers) {
     // Do not add DW_OP_stack_value for DbgDeclare and DbgAddr, because they
     // are implicitly pointing out the value as a DWARF memory location
     // description.
     bool StackValue = isa<DbgValueInst>(DII);
-
-    DIExpression *DIExpr =
-        salvageDebugInfoImpl(I, DII->getExpression(), StackValue);
-
+    auto DIILocation = DII->location_ops();
+    assert(
+        is_contained(DIILocation, &I) &&
+        "DbgVariableIntrinsic must use salvaged instruction as its location");
+    SmallVector<Value *, 4> AdditionalValues;
+    // `I` may appear more than once in DII's location ops, and each use of `I`
+    // must be updated in the DIExpression and potentially have additional
+    // values added; thus we call salvageDebugInfoImpl for each `I` instance in
+    // DIILocation.
+    Value *Op0 = nullptr;
+    DIExpression *SalvagedExpr = DII->getExpression();
+    auto LocItr = find(DIILocation, &I);
+    while (SalvagedExpr && LocItr != DIILocation.end()) {
+      SmallVector<uint64_t, 16> Ops;
+      unsigned LocNo = std::distance(DIILocation.begin(), LocItr);
+      uint64_t CurrentLocOps = SalvagedExpr->getNumLocationOperands();
+      Op0 = salvageDebugInfoImpl(I, CurrentLocOps, Ops, AdditionalValues);
+      if (!Op0)
+        break;
+      SalvagedExpr =
+          DIExpression::appendOpsToArg(SalvagedExpr, Ops, LocNo, StackValue);
+      LocItr = std::find(++LocItr, DIILocation.end(), &I);
+    }
     // salvageDebugInfoImpl should fail on examining the first element of
     // DbgUsers, or none of them.
-    if (!DIExpr)
+    if (!Op0)
       break;
 
-    DII->setOperand(0, wrapMD(I.getOperand(0)));
-    DII->setOperand(2, MetadataAsValue::get(Ctx, DIExpr));
+    DII->replaceVariableLocationOp(&I, Op0);
+    bool IsValidSalvageExpr = SalvagedExpr->getNumElements() <= MaxExpressionSize;
+    if (AdditionalValues.empty() && IsValidSalvageExpr) {
+      DII->setExpression(SalvagedExpr);
+    } else if (isa<DbgValueInst>(DII) && IsValidSalvageExpr &&
+               DII->getNumVariableLocationOps() + AdditionalValues.size() <=
+                   MaxDebugArgs) {
+      DII->addVariableLocationOps(AdditionalValues, SalvagedExpr);
+    } else {
+      // Do not salvage using DIArgList for dbg.addr/dbg.declare, as it is
+      // currently only valid for stack value expressions.
+      // Also do not salvage if the resulting DIArgList would contain an
+      // unreasonably large number of values.
+      Value *Undef = UndefValue::get(I.getOperand(0)->getType());
+      DII->replaceVariableLocationOp(I.getOperand(0), Undef);
+    }
     LLVM_DEBUG(dbgs() << "SALVAGE: " << *DII << '\n');
     Salvaged = true;
   }
@@ -1751,106 +1796,153 @@ void llvm::salvageDebugInfoForDbgValues(
 
   for (auto *DII : DbgUsers) {
     Value *Undef = UndefValue::get(I.getType());
-    DII->setOperand(0, MetadataAsValue::get(DII->getContext(),
-                                            ValueAsMetadata::get(Undef)));
+    DII->replaceVariableLocationOp(&I, Undef);
   }
 }
 
-DIExpression *llvm::salvageDebugInfoImpl(Instruction &I,
-                                         DIExpression *SrcDIExpr,
-                                         bool WithStackValue) {
+Value *getSalvageOpsForGEP(GetElementPtrInst *GEP, const DataLayout &DL,
+                           uint64_t CurrentLocOps,
+                           SmallVectorImpl<uint64_t> &Opcodes,
+                           SmallVectorImpl<Value *> &AdditionalValues) {
+  unsigned BitWidth = DL.getIndexSizeInBits(GEP->getPointerAddressSpace());
+  // Rewrite a GEP into a DIExpression.
+  MapVector<Value *, APInt> VariableOffsets;
+  APInt ConstantOffset(BitWidth, 0);
+  if (!GEP->collectOffset(DL, BitWidth, VariableOffsets, ConstantOffset))
+    return nullptr;
+  if (!VariableOffsets.empty() && !CurrentLocOps) {
+    Opcodes.insert(Opcodes.begin(), {dwarf::DW_OP_LLVM_arg, 0});
+    CurrentLocOps = 1;
+  }
+  for (auto Offset : VariableOffsets) {
+    AdditionalValues.push_back(Offset.first);
+    assert(Offset.second.isStrictlyPositive() &&
+           "Expected strictly positive multiplier for offset.");
+    Opcodes.append({dwarf::DW_OP_LLVM_arg, CurrentLocOps++, dwarf::DW_OP_constu,
+                    Offset.second.getZExtValue(), dwarf::DW_OP_mul,
+                    dwarf::DW_OP_plus});
+  }
+  DIExpression::appendOffset(Opcodes, ConstantOffset.getSExtValue());
+  return GEP->getOperand(0);
+}
+
+uint64_t getDwarfOpForBinOp(Instruction::BinaryOps Opcode) {
+  switch (Opcode) {
+  case Instruction::Add:
+    return dwarf::DW_OP_plus;
+  case Instruction::Sub:
+    return dwarf::DW_OP_minus;
+  case Instruction::Mul:
+    return dwarf::DW_OP_mul;
+  case Instruction::SDiv:
+    return dwarf::DW_OP_div;
+  case Instruction::SRem:
+    return dwarf::DW_OP_mod;
+  case Instruction::Or:
+    return dwarf::DW_OP_or;
+  case Instruction::And:
+    return dwarf::DW_OP_and;
+  case Instruction::Xor:
+    return dwarf::DW_OP_xor;
+  case Instruction::Shl:
+    return dwarf::DW_OP_shl;
+  case Instruction::LShr:
+    return dwarf::DW_OP_shr;
+  case Instruction::AShr:
+    return dwarf::DW_OP_shra;
+  default:
+    // TODO: Salvage from each kind of binop we know about.
+    return 0;
+  }
+}
+
+Value *getSalvageOpsForBinOp(BinaryOperator *BI, uint64_t CurrentLocOps,
+                             SmallVectorImpl<uint64_t> &Opcodes,
+                             SmallVectorImpl<Value *> &AdditionalValues) {
+  // Handle binary operations with constant integer operands as a special case.
+  auto *ConstInt = dyn_cast<ConstantInt>(BI->getOperand(1));
+  // Values wider than 64 bits cannot be represented within a DIExpression.
+  if (ConstInt && ConstInt->getBitWidth() > 64)
+    return nullptr;
+
+  Instruction::BinaryOps BinOpcode = BI->getOpcode();
+  // Push any Constant Int operand onto the expression stack.
+  if (ConstInt) {
+    uint64_t Val = ConstInt->getSExtValue();
+    // Add or Sub Instructions with a constant operand can potentially be
+    // simplified.
+    if (BinOpcode == Instruction::Add || BinOpcode == Instruction::Sub) {
+      uint64_t Offset = BinOpcode == Instruction::Add ? Val : -int64_t(Val);
+      DIExpression::appendOffset(Opcodes, Offset);
+      return BI->getOperand(0);
+    }
+    Opcodes.append({dwarf::DW_OP_constu, Val});
+  } else {
+    if (!CurrentLocOps) {
+      Opcodes.append({dwarf::DW_OP_LLVM_arg, 0});
+      CurrentLocOps = 1;
+    }
+    Opcodes.append({dwarf::DW_OP_LLVM_arg, CurrentLocOps});
+    AdditionalValues.push_back(BI->getOperand(1));
+  }
+
+  // Add salvaged binary operator to expression stack, if it has a valid
+  // representation in a DIExpression.
+  uint64_t DwarfBinOp = getDwarfOpForBinOp(BinOpcode);
+  if (!DwarfBinOp)
+    return nullptr;
+  Opcodes.push_back(DwarfBinOp);
+  return BI->getOperand(0);
+}
+
+Value *llvm::salvageDebugInfoImpl(Instruction &I, uint64_t CurrentLocOps,
+                                  SmallVectorImpl<uint64_t> &Ops,
+                                  SmallVectorImpl<Value *> &AdditionalValues) {
   auto &M = *I.getModule();
   auto &DL = M.getDataLayout();
 
-  // Apply a vector of opcodes to the source DIExpression.
-  auto doSalvage = [&](SmallVectorImpl<uint64_t> &Ops) -> DIExpression * {
-    DIExpression *DIExpr = SrcDIExpr;
-    if (!Ops.empty()) {
-      DIExpr = DIExpression::prependOpcodes(DIExpr, Ops, WithStackValue);
-    }
-    return DIExpr;
-  };
-
-  // Apply the given offset to the source DIExpression.
-  auto applyOffset = [&](uint64_t Offset) -> DIExpression * {
-    SmallVector<uint64_t, 8> Ops;
-    DIExpression::appendOffset(Ops, Offset);
-    return doSalvage(Ops);
-  };
-
-  // initializer-list helper for applying operators to the source DIExpression.
-  auto applyOps = [&](ArrayRef<uint64_t> Opcodes) -> DIExpression * {
-    SmallVector<uint64_t, 8> Ops(Opcodes.begin(), Opcodes.end());
-    return doSalvage(Ops);
-  };
-
   if (auto *CI = dyn_cast<CastInst>(&I)) {
+    Value *FromValue = CI->getOperand(0);
     // No-op casts are irrelevant for debug info.
-    if (CI->isNoopCast(DL))
-      return SrcDIExpr;
+    if (CI->isNoopCast(DL)) {
+      return FromValue;
+    }
 
     Type *Type = CI->getType();
+    if (Type->isPointerTy())
+      Type = DL.getIntPtrType(Type);
     // Casts other than Trunc, SExt, or ZExt to scalar types cannot be salvaged.
     if (Type->isVectorTy() ||
-        !(isa<TruncInst>(&I) || isa<SExtInst>(&I) || isa<ZExtInst>(&I)))
+        !(isa<TruncInst>(&I) || isa<SExtInst>(&I) || isa<ZExtInst>(&I) ||
+          isa<IntToPtrInst>(&I) || isa<PtrToIntInst>(&I)))
       return nullptr;
 
-    Value *FromValue = CI->getOperand(0);
-    unsigned FromTypeBitSize = FromValue->getType()->getScalarSizeInBits();
+    llvm::Type *FromType = FromValue->getType();
+    if (FromType->isPointerTy())
+      FromType = DL.getIntPtrType(FromType);
+
+    unsigned FromTypeBitSize = FromType->getScalarSizeInBits();
     unsigned ToTypeBitSize = Type->getScalarSizeInBits();
 
-    return applyOps(DIExpression::getExtOps(FromTypeBitSize, ToTypeBitSize,
-                                            isa<SExtInst>(&I)));
+    auto ExtOps = DIExpression::getExtOps(FromTypeBitSize, ToTypeBitSize,
+                                          isa<SExtInst>(&I));
+    Ops.append(ExtOps.begin(), ExtOps.end());
+    return FromValue;
   }
 
-  if (auto *GEP = dyn_cast<GetElementPtrInst>(&I)) {
-    unsigned BitWidth =
-        M.getDataLayout().getIndexSizeInBits(GEP->getPointerAddressSpace());
-    // Rewrite a constant GEP into a DIExpression.
-    APInt Offset(BitWidth, 0);
-    if (GEP->accumulateConstantOffset(M.getDataLayout(), Offset)) {
-      return applyOffset(Offset.getSExtValue());
-    } else {
-      return nullptr;
-    }
-  } else if (auto *BI = dyn_cast<BinaryOperator>(&I)) {
-    // Rewrite binary operations with constant integer operands.
-    auto *ConstInt = dyn_cast<ConstantInt>(I.getOperand(1));
-    if (!ConstInt || ConstInt->getBitWidth() > 64)
-      return nullptr;
+  if (auto *GEP = dyn_cast<GetElementPtrInst>(&I))
+    return getSalvageOpsForGEP(GEP, DL, CurrentLocOps, Ops, AdditionalValues);
+  if (auto *BI = dyn_cast<BinaryOperator>(&I))
+    return getSalvageOpsForBinOp(BI, CurrentLocOps, Ops, AdditionalValues);
 
-    uint64_t Val = ConstInt->getSExtValue();
-    switch (BI->getOpcode()) {
-    case Instruction::Add:
-      return applyOffset(Val);
-    case Instruction::Sub:
-      return applyOffset(-int64_t(Val));
-    case Instruction::Mul:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_mul});
-    case Instruction::SDiv:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_div});
-    case Instruction::SRem:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_mod});
-    case Instruction::Or:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_or});
-    case Instruction::And:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_and});
-    case Instruction::Xor:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_xor});
-    case Instruction::Shl:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_shl});
-    case Instruction::LShr:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_shr});
-    case Instruction::AShr:
-      return applyOps({dwarf::DW_OP_constu, Val, dwarf::DW_OP_shra});
-    default:
-      // TODO: Salvage constants from each kind of binop we know about.
-      return nullptr;
-    }
-    // *Not* to do: we should not attempt to salvage load instructions,
-    // because the validity and lifetime of a dbg.value containing
-    // DW_OP_deref becomes difficult to analyze. See PR40628 for examples.
-  }
+  // *Not* to do: we should not attempt to salvage load instructions,
+  // because the validity and lifetime of a dbg.value containing
+  // DW_OP_deref becomes difficult to analyze. See PR40628 for examples.
+
+  if (auto *IInst = dyn_cast<llvm::IntrinsicInst>(&I))
+    if (IInst->getIntrinsicID() == Intrinsic::ptrauth_auth)
+      return IInst->getArgOperand(0);
+
   return nullptr;
 }
 
@@ -1896,13 +1988,12 @@ static bool rewriteDebugUsers(
     if (UndefOrSalvage.count(DII))
       continue;
 
-    LLVMContext &Ctx = DII->getContext();
     DbgValReplacement DVR = RewriteExpr(*DII);
     if (!DVR)
       continue;
 
-    DII->setOperand(0, wrapValueInMetadata(Ctx, &To));
-    DII->setOperand(2, MetadataAsValue::get(Ctx, *DVR));
+    DII->replaceVariableLocationOp(&From, &To);
+    DII->setExpression(*DVR);
     LLVM_DEBUG(dbgs() << "REWRITE:  " << *DII << '\n');
     Changed = true;
   }
@@ -2020,31 +2111,22 @@ llvm::removeAllNonTerminatorAndEHPadInstructions(BasicBlock *BB) {
   return {NumDeadInst, NumDeadDbgInst};
 }
 
-unsigned llvm::changeToUnreachable(Instruction *I, bool UseLLVMTrap,
-                                   bool PreserveLCSSA, DomTreeUpdater *DTU,
+unsigned llvm::changeToUnreachable(Instruction *I, bool PreserveLCSSA,
+                                   DomTreeUpdater *DTU,
                                    MemorySSAUpdater *MSSAU) {
   BasicBlock *BB = I->getParent();
-  std::vector <DominatorTree::UpdateType> Updates;
 
   if (MSSAU)
     MSSAU->changeToUnreachable(I);
 
+  SmallSet<BasicBlock *, 8> UniqueSuccessors;
+
   // Loop over all of the successors, removing BB's entry from any PHI
   // nodes.
-  if (DTU)
-    Updates.reserve(BB->getTerminator()->getNumSuccessors());
   for (BasicBlock *Successor : successors(BB)) {
     Successor->removePredecessor(BB, PreserveLCSSA);
     if (DTU)
-      Updates.push_back({DominatorTree::Delete, BB, Successor});
-  }
-  // Insert a call to llvm.trap right before this.  This turns the undefined
-  // behavior into a hard fail instead of falling through into random code.
-  if (UseLLVMTrap) {
-    Function *TrapFn =
-      Intrinsic::getDeclaration(BB->getParent()->getParent(), Intrinsic::trap);
-    CallInst *CallTrap = CallInst::Create(TrapFn, "", I);
-    CallTrap->setDebugLoc(I->getDebugLoc());
+      UniqueSuccessors.insert(Successor);
   }
   auto *UI = new UnreachableInst(I->getContext(), I);
   UI->setDebugLoc(I->getDebugLoc());
@@ -2058,8 +2140,13 @@ unsigned llvm::changeToUnreachable(Instruction *I, bool UseLLVMTrap,
     BB->getInstList().erase(BBI++);
     ++NumInstrsRemoved;
   }
-  if (DTU)
-    DTU->applyUpdatesPermissive(Updates);
+  if (DTU) {
+    SmallVector<DominatorTree::UpdateType, 8> Updates;
+    Updates.reserve(UniqueSuccessors.size());
+    for (BasicBlock *UniqueSuccessor : UniqueSuccessors)
+      Updates.push_back({DominatorTree::Delete, BB, UniqueSuccessor});
+    DTU->applyUpdates(Updates);
+  }
   return NumInstrsRemoved;
 }
 
@@ -2105,19 +2192,20 @@ void llvm::changeToCall(InvokeInst *II, DomTreeUpdater *DTU) {
   UnwindDestBB->removePredecessor(BB);
   II->eraseFromParent();
   if (DTU)
-    DTU->applyUpdatesPermissive({{DominatorTree::Delete, BB, UnwindDestBB}});
+    DTU->applyUpdates({{DominatorTree::Delete, BB, UnwindDestBB}});
 }
 
 BasicBlock *llvm::changeToInvokeAndSplitBasicBlock(CallInst *CI,
-                                                   BasicBlock *UnwindEdge) {
+                                                   BasicBlock *UnwindEdge,
+                                                   DomTreeUpdater *DTU) {
   BasicBlock *BB = CI->getParent();
 
   // Convert this function call into an invoke instruction.  First, split the
   // basic block.
-  BasicBlock *Split =
-      BB->splitBasicBlock(CI->getIterator(), CI->getName() + ".noexc");
+  BasicBlock *Split = SplitBlock(BB, CI, DTU, /*LI=*/nullptr, /*MSSAU*/ nullptr,
+                                 CI->getName() + ".noexc");
 
-  // Delete the unconditional branch inserted by splitBasicBlock
+  // Delete the unconditional branch inserted by SplitBlock
   BB->getInstList().pop_back();
 
   // Create the new invoke instruction.
@@ -2136,6 +2224,9 @@ BasicBlock *llvm::changeToInvokeAndSplitBasicBlock(CallInst *CI,
   II->setDebugLoc(CI->getDebugLoc());
   II->setCallingConv(CI->getCallingConv());
   II->setAttributes(CI->getAttributes());
+
+  if (DTU)
+    DTU->applyUpdates({{DominatorTree::Insert, BB, UnwindEdge}});
 
   // Make sure that anything using the call now uses the invoke!  This also
   // updates the CallGraph if present, because it uses a WeakTrackingVH.
@@ -2173,7 +2264,7 @@ static bool markAliveBlocks(Function &F,
           if (IntrinsicID == Intrinsic::assume) {
             if (match(CI->getArgOperand(0), m_CombineOr(m_Zero(), m_Undef()))) {
               // Don't insert a call to llvm.trap right before the unreachable.
-              changeToUnreachable(CI, false, false, DTU);
+              changeToUnreachable(CI, false, DTU);
               Changed = true;
               break;
             }
@@ -2189,8 +2280,7 @@ static bool markAliveBlocks(Function &F,
             // still be useful for widening.
             if (match(CI->getArgOperand(0), m_Zero()))
               if (!isa<UnreachableInst>(CI->getNextNode())) {
-                changeToUnreachable(CI->getNextNode(), /*UseLLVMTrap=*/false,
-                                    false, DTU);
+                changeToUnreachable(CI->getNextNode(), false, DTU);
                 Changed = true;
                 break;
               }
@@ -2198,7 +2288,7 @@ static bool markAliveBlocks(Function &F,
         } else if ((isa<ConstantPointerNull>(Callee) &&
                     !NullPointerIsDefined(CI->getFunction())) ||
                    isa<UndefValue>(Callee)) {
-          changeToUnreachable(CI, /*UseLLVMTrap=*/false, false, DTU);
+          changeToUnreachable(CI, false, DTU);
           Changed = true;
           break;
         }
@@ -2208,7 +2298,7 @@ static bool markAliveBlocks(Function &F,
           // though.
           if (!isa<UnreachableInst>(CI->getNextNode())) {
             // Don't insert a call to llvm.trap right before the unreachable.
-            changeToUnreachable(CI->getNextNode(), false, false, DTU);
+            changeToUnreachable(CI->getNextNode(), false, DTU);
             Changed = true;
           }
           break;
@@ -2227,7 +2317,7 @@ static bool markAliveBlocks(Function &F,
             (isa<ConstantPointerNull>(Ptr) &&
              !NullPointerIsDefined(SI->getFunction(),
                                    SI->getPointerAddressSpace()))) {
-          changeToUnreachable(SI, true, false, DTU);
+          changeToUnreachable(SI, false, DTU);
           Changed = true;
           break;
         }
@@ -2241,7 +2331,7 @@ static bool markAliveBlocks(Function &F,
       if ((isa<ConstantPointerNull>(Callee) &&
            !NullPointerIsDefined(BB->getParent())) ||
           isa<UndefValue>(Callee)) {
-        changeToUnreachable(II, true, false, DTU);
+        changeToUnreachable(II, false, DTU);
         Changed = true;
       } else if (II->doesNotThrow() && canSimplifyInvokeNoUnwind(&F)) {
         if (II->use_empty() && II->onlyReadsMemory()) {
@@ -2252,8 +2342,7 @@ static bool markAliveBlocks(Function &F,
           UnwindDestBB->removePredecessor(II->getParent());
           II->eraseFromParent();
           if (DTU)
-            DTU->applyUpdatesPermissive(
-                {{DominatorTree::Delete, BB, UnwindDestBB}});
+            DTU->applyUpdates({{DominatorTree::Delete, BB, UnwindDestBB}});
         } else
           changeToCall(II, DTU);
         Changed = true;
@@ -2282,6 +2371,7 @@ static bool markAliveBlocks(Function &F,
         }
       };
 
+      SmallDenseMap<BasicBlock *, int, 8> NumPerSuccessorCases;
       // Set of unique CatchPads.
       SmallDenseMap<CatchPadInst *, detail::DenseSetEmpty, 4,
                     CatchPadDenseMapInfo, detail::DenseSetPair<CatchPadInst *>>
@@ -2291,13 +2381,24 @@ static bool markAliveBlocks(Function &F,
                                              E = CatchSwitch->handler_end();
            I != E; ++I) {
         BasicBlock *HandlerBB = *I;
+        if (DTU)
+          ++NumPerSuccessorCases[HandlerBB];
         auto *CatchPad = cast<CatchPadInst>(HandlerBB->getFirstNonPHI());
         if (!HandlerSet.insert({CatchPad, Empty}).second) {
+          if (DTU)
+            --NumPerSuccessorCases[HandlerBB];
           CatchSwitch->removeHandler(I);
           --I;
           --E;
           Changed = true;
         }
+      }
+      if (DTU) {
+        std::vector<DominatorTree::UpdateType> Updates;
+        for (const std::pair<BasicBlock *, int> &I : NumPerSuccessorCases)
+          if (I.second == 0)
+            Updates.push_back({DominatorTree::Delete, BB, I.first});
+        DTU->applyUpdates(Updates);
       }
     }
 
@@ -2342,7 +2443,7 @@ void llvm::removeUnwindEdge(BasicBlock *BB, DomTreeUpdater *DTU) {
   TI->replaceAllUsesWith(NewTI);
   TI->eraseFromParent();
   if (DTU)
-    DTU->applyUpdatesPermissive({{DominatorTree::Delete, BB, UnwindDest}});
+    DTU->applyUpdates({{DominatorTree::Delete, BB, UnwindDest}});
 }
 
 /// removeUnreachableBlocks - Remove blocks that are not reachable, even
@@ -2358,62 +2459,31 @@ bool llvm::removeUnreachableBlocks(Function &F, DomTreeUpdater *DTU,
     return Changed;
 
   assert(Reachable.size() < F.size());
-  NumRemoved += F.size() - Reachable.size();
 
-  SmallSetVector<BasicBlock *, 8> DeadBlockSet;
+  // Are there any blocks left to actually delete?
+  SmallSetVector<BasicBlock *, 8> BlocksToRemove;
   for (BasicBlock &BB : F) {
     // Skip reachable basic blocks
     if (Reachable.count(&BB))
       continue;
-    DeadBlockSet.insert(&BB);
+    // Skip already-deleted blocks
+    if (DTU && DTU->isBBPendingDeletion(&BB))
+      continue;
+    BlocksToRemove.insert(&BB);
   }
+
+  if (BlocksToRemove.empty())
+    return Changed;
+
+  Changed = true;
+  NumRemoved += BlocksToRemove.size();
 
   if (MSSAU)
-    MSSAU->removeBlocks(DeadBlockSet);
+    MSSAU->removeBlocks(BlocksToRemove);
 
-  // Loop over all of the basic blocks that are not reachable, dropping all of
-  // their internal references. Update DTU if available.
-  std::vector<DominatorTree::UpdateType> Updates;
-  for (auto *BB : DeadBlockSet) {
-    for (BasicBlock *Successor : successors(BB)) {
-      if (!DeadBlockSet.count(Successor))
-        Successor->removePredecessor(BB);
-      if (DTU)
-        Updates.push_back({DominatorTree::Delete, BB, Successor});
-    }
-    BB->dropAllReferences();
-    if (DTU) {
-      Instruction *TI = BB->getTerminator();
-      assert(TI && "Basic block should have a terminator");
-      // Terminators like invoke can have users. We have to replace their users,
-      // before removing them.
-      if (!TI->use_empty())
-        TI->replaceAllUsesWith(UndefValue::get(TI->getType()));
-      TI->eraseFromParent();
-      new UnreachableInst(BB->getContext(), BB);
-      assert(succ_empty(BB) && "The successor list of BB isn't empty before "
-                               "applying corresponding DTU updates.");
-    }
-  }
+  DeleteDeadBlocks(BlocksToRemove.takeVector(), DTU);
 
-  if (DTU) {
-    DTU->applyUpdatesPermissive(Updates);
-    bool Deleted = false;
-    for (auto *BB : DeadBlockSet) {
-      if (DTU->isBBPendingDeletion(BB))
-        --NumRemoved;
-      else
-        Deleted = true;
-      DTU->deleteBB(BB);
-    }
-    if (!Deleted)
-      return false;
-  } else {
-    for (auto *BB : DeadBlockSet)
-      BB->eraseFromParent();
-  }
-
-  return true;
+  return Changed;
 }
 
 void llvm::combineMetadata(Instruction *K, const Instruction *J,
@@ -2600,9 +2670,7 @@ static unsigned replaceDominatedUsesWith(Value *From, Value *To,
   assert(From->getType() == To->getType());
 
   unsigned Count = 0;
-  for (Value::use_iterator UI = From->use_begin(), UE = From->use_end();
-       UI != UE;) {
-    Use &U = *UI++;
+  for (Use &U : llvm::make_early_inc_range(From->uses())) {
     if (!Dominates(Root, U))
       continue;
     U.set(To);
@@ -2618,9 +2686,7 @@ unsigned llvm::replaceNonLocalUsesWith(Instruction *From, Value *To) {
    auto *BB = From->getParent();
    unsigned Count = 0;
 
-  for (Value::use_iterator UI = From->use_begin(), UE = From->use_end();
-       UI != UE;) {
-    Use &U = *UI++;
+   for (Use &U : llvm::make_early_inc_range(From->uses())) {
     auto *I = cast<Instruction>(U.getUser());
     if (I->getParent() == BB)
       continue;
@@ -2642,11 +2708,10 @@ unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
 unsigned llvm::replaceDominatedUsesWith(Value *From, Value *To,
                                         DominatorTree &DT,
                                         const BasicBlock *BB) {
-  auto ProperlyDominates = [&DT](const BasicBlock *BB, const Use &U) {
-    auto *I = cast<Instruction>(U.getUser())->getParent();
-    return DT.properlyDominates(BB, I);
+  auto Dominates = [&DT](const BasicBlock *BB, const Use &U) {
+    return DT.dominates(BB, U);
   };
-  return ::replaceDominatedUsesWith(From, To, BB, ProperlyDominates);
+  return ::replaceDominatedUsesWith(From, To, BB, Dominates);
 }
 
 bool llvm::callsGCLeafFunction(const CallBase *Call,
@@ -2751,13 +2816,14 @@ void llvm::hoistAllInstructionsInto(BasicBlock *DomBlock, Instruction *InsertPt,
   // TODO: Extend llvm.dbg.value to take more than one SSA Value (PR39141) to
   // encode predicated DIExpressions that yield different results on different
   // code paths.
+
   for (BasicBlock::iterator II = BB->begin(), IE = BB->end(); II != IE;) {
     Instruction *I = &*II;
-    I->dropUnknownNonDebugMetadata();
+    I->dropUndefImplyingAttrsAndUnknownMetadata();
     if (I->isUsedByMetadata())
       dropDebugUsers(*I);
-    if (isa<DbgInfoIntrinsic>(I)) {
-      // Remove DbgInfo Intrinsics.
+    if (I->isDebugOrPseudoInst()) {
+      // Remove DbgInfo and pseudo probe Intrinsics.
       II = I->eraseFromParent();
       continue;
     }
@@ -2819,13 +2885,18 @@ struct BitPart {
 /// does not invalidate internal references (std::map instead of DenseMap).
 static const Optional<BitPart> &
 collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
-                std::map<Value *, Optional<BitPart>> &BPS, int Depth) {
+                std::map<Value *, Optional<BitPart>> &BPS, int Depth,
+                bool &FoundRoot) {
   auto I = BPS.find(V);
   if (I != BPS.end())
     return I->second;
 
   auto &Result = BPS[V] = None;
   auto BitWidth = V->getType()->getScalarSizeInBits();
+
+  // Can't do integer/elements > 128 bits.
+  if (BitWidth > 128)
+    return Result;
 
   // Prevent stack overflow by limiting the recursion depth
   if (Depth == BitPartRecursionMaxDepth) {
@@ -2839,17 +2910,18 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
 
     // If this is an or instruction, it may be an inner node of the bswap.
     if (match(V, m_Or(m_Value(X), m_Value(Y)))) {
-      const auto &A =
-          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
-      const auto &B =
-          collectBitParts(Y, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
-      if (!A || !B)
+      // Check we have both sources and they are from the same provider.
+      const auto &A = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                      Depth + 1, FoundRoot);
+      if (!A || !A->Provider)
+        return Result;
+
+      const auto &B = collectBitParts(Y, MatchBSwaps, MatchBitReversals, BPS,
+                                      Depth + 1, FoundRoot);
+      if (!B || A->Provider != B->Provider)
         return Result;
 
       // Try and merge the two together.
-      if (!A->Provider || A->Provider != B->Provider)
-        return Result;
-
       Result = BitPart(A->Provider, BitWidth);
       for (unsigned BitIdx = 0; BitIdx < BitWidth; ++BitIdx) {
         if (A->Provenance[BitIdx] != BitPart::Unset &&
@@ -2874,8 +2946,12 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
       if (BitShift.uge(BitWidth))
         return Result;
 
-      const auto &Res =
-          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
+      // For bswap-only, limit shift amounts to whole bytes, for an early exit.
+      if (!MatchBitReversals && (BitShift.getZExtValue() % 8) != 0)
+        return Result;
+
+      const auto &Res = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
       if (!Res)
         return Result;
       Result = Res;
@@ -2904,8 +2980,8 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
       if (!MatchBitReversals && (NumMaskedBits % 8) != 0)
         return Result;
 
-      const auto &Res =
-          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
+      const auto &Res = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
       if (!Res)
         return Result;
       Result = Res;
@@ -2919,8 +2995,8 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
 
     // If this is a zext instruction zero extend the result.
     if (match(V, m_ZExt(m_Value(X)))) {
-      const auto &Res =
-          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
+      const auto &Res = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
       if (!Res)
         return Result;
 
@@ -2933,11 +3009,24 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
       return Result;
     }
 
+    // If this is a truncate instruction, extract the lower bits.
+    if (match(V, m_Trunc(m_Value(X)))) {
+      const auto &Res = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
+      if (!Res)
+        return Result;
+
+      Result = BitPart(Res->Provider, BitWidth);
+      for (unsigned BitIdx = 0; BitIdx < BitWidth; ++BitIdx)
+        Result->Provenance[BitIdx] = Res->Provenance[BitIdx];
+      return Result;
+    }
+
     // BITREVERSE - most likely due to us previous matching a partial
     // bitreverse.
     if (match(V, m_BitReverse(m_Value(X)))) {
-      const auto &Res =
-          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
+      const auto &Res = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
       if (!Res)
         return Result;
 
@@ -2949,8 +3038,8 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
 
     // BSWAP - most likely due to us previous matching a partial bswap.
     if (match(V, m_BSwap(m_Value(X)))) {
-      const auto &Res =
-          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
+      const auto &Res = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
       if (!Res)
         return Result;
 
@@ -2976,13 +3065,19 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
       if (cast<IntrinsicInst>(I)->getIntrinsicID() == Intrinsic::fshr)
         ModAmt = BitWidth - ModAmt;
 
-      const auto &LHS =
-          collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
-      const auto &RHS =
-          collectBitParts(Y, MatchBSwaps, MatchBitReversals, BPS, Depth + 1);
+      // For bswap-only, limit shift amounts to whole bytes, for an early exit.
+      if (!MatchBitReversals && (ModAmt % 8) != 0)
+        return Result;
 
       // Check we have both sources and they are from the same provider.
-      if (!LHS || !RHS || !LHS->Provider || LHS->Provider != RHS->Provider)
+      const auto &LHS = collectBitParts(X, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
+      if (!LHS || !LHS->Provider)
+        return Result;
+
+      const auto &RHS = collectBitParts(Y, MatchBSwaps, MatchBitReversals, BPS,
+                                        Depth + 1, FoundRoot);
+      if (!RHS || LHS->Provider != RHS->Provider)
         return Result;
 
       unsigned StartBitRHS = BitWidth - ModAmt;
@@ -2995,8 +3090,14 @@ collectBitParts(Value *V, bool MatchBSwaps, bool MatchBitReversals,
     }
   }
 
-  // Okay, we got to something that isn't a shift, 'or' or 'and'.  This must be
-  // the input value to the bswap/bitreverse.
+  // If we've already found a root input value then we're never going to merge
+  // these back together.
+  if (FoundRoot)
+    return Result;
+
+  // Okay, we got to something that isn't a shift, 'or', 'and', etc. This must
+  // be the root input value to the bswap/bitreverse.
+  FoundRoot = true;
   Result = BitPart(V, BitWidth);
   for (unsigned BitIdx = 0; BitIdx < BitWidth; ++BitIdx)
     Result->Provenance[BitIdx] = BitIdx;
@@ -3022,7 +3123,9 @@ static bool bitTransformIsCorrectForBitReverse(unsigned From, unsigned To,
 bool llvm::recognizeBSwapOrBitReverseIdiom(
     Instruction *I, bool MatchBSwaps, bool MatchBitReversals,
     SmallVectorImpl<Instruction *> &InsertedInsts) {
-  if (Operator::getOpcode(I) != Instruction::Or)
+  if (!match(I, m_Or(m_Value(), m_Value())) &&
+      !match(I, m_FShl(m_Value(), m_Value(), m_Value())) &&
+      !match(I, m_FShr(m_Value(), m_Value(), m_Value())))
     return false;
   if (!MatchBSwaps && !MatchBitReversals)
     return false;
@@ -3036,8 +3139,10 @@ bool llvm::recognizeBSwapOrBitReverseIdiom(
       DemandedTy = Trunc->getType();
 
   // Try to find all the pieces corresponding to the bswap.
+  bool FoundRoot = false;
   std::map<Value *, Optional<BitPart>> BPS;
-  auto Res = collectBitParts(I, MatchBSwaps, MatchBitReversals, BPS, 0);
+  const auto &Res =
+      collectBitParts(I, MatchBSwaps, MatchBitReversals, BPS, 0, FoundRoot);
   if (!Res)
     return false;
   ArrayRef<int8_t> BitProvenance = Res->Provenance;
@@ -3063,7 +3168,7 @@ bool llvm::recognizeBSwapOrBitReverseIdiom(
 
   // Now, is the bit permutation correct for a bswap or a bitreverse? We can
   // only byteswap values with an even number of bytes.
-  APInt DemandedMask = APInt::getAllOnesValue(DemandedBW);
+  APInt DemandedMask = APInt::getAllOnes(DemandedBW);
   bool OKForBSwap = MatchBSwaps && (DemandedBW % 16) == 0;
   bool OKForBitReverse = MatchBitReversals;
   for (unsigned BitIdx = 0;
@@ -3100,7 +3205,7 @@ bool llvm::recognizeBSwapOrBitReverseIdiom(
   Instruction *Result = CallInst::Create(F, Provider, "rev", I);
   InsertedInsts.push_back(Result);
 
-  if (!DemandedMask.isAllOnesValue()) {
+  if (!DemandedMask.isAllOnes()) {
     auto *Mask = ConstantInt::get(DemandedTy, DemandedMask);
     Result = BinaryOperator::Create(Instruction::And, Result, Mask, "mask", I);
     InsertedInsts.push_back(Result);
@@ -3127,7 +3232,7 @@ void llvm::maybeMarkSanitizerLibraryCallNoBuiltin(
   if (F && !F->hasLocalLinkage() && F->hasName() &&
       TLI->getLibFunc(F->getName(), Func) && TLI->hasOptimizedCodeGen(Func) &&
       !F->doesNotAccessMemory())
-    CI->addAttribute(AttributeList::FunctionIndex, Attribute::NoBuiltin);
+    CI->addFnAttr(Attribute::NoBuiltin);
 }
 
 bool llvm::canReplaceOperandWithVariable(const Instruction *I, unsigned OpIdx) {
@@ -3155,7 +3260,7 @@ bool llvm::canReplaceOperandWithVariable(const Instruction *I, unsigned OpIdx) {
     if (CB.isBundleOperand(OpIdx))
       return false;
 
-    if (OpIdx < CB.getNumArgOperands()) {
+    if (OpIdx < CB.arg_size()) {
       // Some variadic intrinsics require constants in the variadic arguments,
       // which currently aren't markable as immarg.
       if (isa<IntrinsicInst>(CB) &&
@@ -3235,4 +3340,34 @@ Value *llvm::invertCondition(Value *Condition) {
   else
     Inverted->insertBefore(&*Parent->getFirstInsertionPt());
   return Inverted;
+}
+
+bool llvm::inferAttributesFromOthers(Function &F) {
+  // Note: We explicitly check for attributes rather than using cover functions
+  // because some of the cover functions include the logic being implemented.
+
+  bool Changed = false;
+  // readnone + not convergent implies nosync
+  if (!F.hasFnAttribute(Attribute::NoSync) &&
+      F.doesNotAccessMemory() && !F.isConvergent()) {
+    F.setNoSync();
+    Changed = true;
+  }
+
+  // readonly implies nofree
+  if (!F.hasFnAttribute(Attribute::NoFree) && F.onlyReadsMemory()) {
+    F.setDoesNotFreeMemory();
+    Changed = true;
+  }
+
+  // willreturn implies mustprogress
+  if (!F.hasFnAttribute(Attribute::MustProgress) && F.willReturn()) {
+    F.setMustProgress();
+    Changed = true;
+  }
+
+  // TODO: There are a bunch of cases of restrictive memory effects we
+  // can infer by inspecting arguments of argmemonly-ish functions.
+
+  return Changed;
 }

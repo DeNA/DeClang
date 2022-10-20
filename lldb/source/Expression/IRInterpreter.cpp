@@ -16,6 +16,7 @@
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
@@ -41,6 +42,7 @@
 #include <map>
 
 using namespace llvm;
+using lldb_private::LLDBLog;
 
 static std::string PrintValue(const Value *value, bool truncate = false) {
   std::string s;
@@ -122,7 +124,7 @@ public:
     m_stack_pointer = stack_frame_top;
   }
 
-  ~InterpreterStackFrame() {}
+  ~InterpreterStackFrame() = default;
 
   void Jump(const BasicBlock *bb) {
     m_prev_bb = m_bb;
@@ -325,8 +327,7 @@ public:
 
     m_values[value] = data_address;
 
-    lldb_private::Log *log(
-        lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+    lldb_private::Log *log(GetLog(LLDBLog::Expressions));
 
     if (log) {
       LLDB_LOGF(log, "Made an allocation for argument %s",
@@ -484,8 +485,7 @@ static bool CanResolveConstant(llvm::Constant *constant) {
 bool IRInterpreter::CanInterpret(llvm::Module &module, llvm::Function &function,
                                  lldb_private::Status &error,
                                  const bool support_function_calls) {
-  lldb_private::Log *log(
-      lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  lldb_private::Log *log(GetLog(LLDBLog::Expressions));
 
   bool saw_function_with_body = false;
   for (Function &f : module) {
@@ -637,8 +637,7 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
                               lldb::addr_t stack_frame_bottom,
                               lldb::addr_t stack_frame_top,
                               lldb_private::ExecutionContext &exe_ctx) {
-  lldb_private::Log *log(
-      lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+  lldb_private::Log *log(GetLog(LLDBLog::Expressions));
 
   if (log) {
     std::string s;
@@ -1241,7 +1240,7 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
       if (!write_error.Success()) {
         LLDB_LOGF(log, "Couldn't write to a region on behalf of a LoadInst");
         error.SetErrorToGenericError();
-        error.SetErrorString(memory_read_error);
+        error.SetErrorString(memory_write_error);
         return false;
       }
 
@@ -1398,7 +1397,7 @@ bool IRInterpreter::Interpret(llvm::Module &module, llvm::Function &function,
       }
 
       // Find number of arguments
-      const int numArgs = call_inst->getNumArgOperands();
+      const int numArgs = call_inst->arg_size();
 
       // We work with a fixed array of 16 arguments which is our upper limit
       static lldb_private::ABI::CallArgument rawArgs[16];

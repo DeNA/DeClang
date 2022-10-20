@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <stdlib.h>
+#include <cstdlib>
 
 #include "EmulateInstructionARM.h"
 #include "EmulationStateARM.h"
@@ -713,12 +713,7 @@ void EmulateInstructionARM::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-ConstString EmulateInstructionARM::GetPluginNameStatic() {
-  static ConstString g_name("arm");
-  return g_name;
-}
-
-const char *EmulateInstructionARM::GetPluginDescriptionStatic() {
+llvm::StringRef EmulateInstructionARM::GetPluginDescriptionStatic() {
   return "Emulate instructions for the ARM architecture.";
 }
 

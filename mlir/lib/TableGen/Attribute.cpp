@@ -65,7 +65,7 @@ StringRef Attribute::getStorageType() const {
   const auto *init = def->getValueInit("storageType");
   auto type = getValueAsString(init);
   if (type.empty())
-    return "Attribute";
+    return "::mlir::Attribute";
   return type;
 }
 
@@ -229,6 +229,18 @@ std::vector<EnumAttrCase> EnumAttr::getAllCases() const {
   }
 
   return cases;
+}
+
+bool EnumAttr::genSpecializedAttr() const {
+  return def->getValueAsBit("genSpecializedAttr");
+}
+
+llvm::Record *EnumAttr::getBaseAttrClass() const {
+  return def->getValueAsDef("baseAttrClass");
+}
+
+StringRef EnumAttr::getSpecializedAttrClassName() const {
+  return def->getValueAsString("specializedAttrClassName");
 }
 
 StructFieldAttr::StructFieldAttr(const llvm::Record *record) : def(record) {

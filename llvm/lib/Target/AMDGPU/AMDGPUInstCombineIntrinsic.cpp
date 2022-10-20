@@ -14,8 +14,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "AMDGPUInstrInfo.h"
 #include "AMDGPUTargetTransformInfo.h"
-#include "llvm/Support/KnownBits.h"
+#include "GCNSubtarget.h"
+#include "llvm/IR/IntrinsicsAMDGPU.h"
 #include "llvm/Transforms/InstCombine/InstCombiner.h"
 
 using namespace llvm;
@@ -146,7 +148,7 @@ simplifyAMDGCNImageIntrinsic(const GCNSubtarget *ST,
   Function *I =
       Intrinsic::getDeclaration(II.getModule(), II.getIntrinsicID(), ArgTys);
 
-  SmallVector<Value *, 8> Args(II.arg_operands());
+  SmallVector<Value *, 8> Args(II.args());
 
   unsigned EndIndex =
       OnlyDerivatives ? ImageDimIntr->CoordStart : ImageDimIntr->VAddrEnd;
@@ -437,7 +439,7 @@ GCNTTIImpl::instCombineIntrinsic(InstCombiner &IC, IntrinsicInst &II) const {
     if (!CWidth || !COffset)
       break;
 
-    // The case of Width == 0 is handled above, which makes this tranformation
+    // The case of Width == 0 is handled above, which makes this transformation
     // safe.  If Width == 0, then the ashr and lshr instructions become poison
     // value since the shift amount would be equal to the bit size.
     assert(Width != 0);
@@ -583,8 +585,7 @@ GCNTTIImpl::instCombineIntrinsic(InstCombiner &IC, IntrinsicInst &II) const {
         MDNode *MD = MDNode::get(II.getContext(), MDArgs);
         Value *Args[] = {MetadataAsValue::get(II.getContext(), MD)};
         CallInst *NewCall = IC.Builder.CreateCall(NewF, Args);
-        NewCall->addAttribute(AttributeList::FunctionIndex,
-                              Attribute::Convergent);
+        NewCall->addFnAttr(Attribute::Convergent);
         NewCall->takeName(&II);
         return IC.replaceInstUsesWith(II, NewCall);
       }
@@ -709,8 +710,7 @@ GCNTTIImpl::instCombineIntrinsic(InstCombiner &IC, IntrinsicInst &II) const {
         MDNode *MD = MDNode::get(II.getContext(), MDArgs);
         Value *Args[] = {MetadataAsValue::get(II.getContext(), MD)};
         CallInst *NewCall = IC.Builder.CreateCall(NewF, Args);
-        NewCall->addAttribute(AttributeList::FunctionIndex,
-                              Attribute::Convergent);
+        NewCall->addFnAttr(Attribute::Convergent);
         NewCall->takeName(&II);
         return IC.replaceInstUsesWith(II, NewCall);
       }

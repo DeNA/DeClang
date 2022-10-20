@@ -16,8 +16,10 @@ add_mlir_library(MLIRTransformUtils
 
   LINK_LIBS PUBLIC
   MLIRAffine
+  MLIRArithmetic
   MLIRAnalysis
   MLIRLoopAnalysis
+  MLIRMemRef
   MLIRSCF
   MLIRPass
   MLIRRewrite

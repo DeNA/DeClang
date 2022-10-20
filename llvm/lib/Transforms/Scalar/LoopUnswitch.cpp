@@ -232,10 +232,8 @@ namespace {
       AU.addPreserved<LazyBranchProbabilityInfoPass>();
       AU.addRequired<AssumptionCacheTracker>();
       AU.addRequired<TargetTransformInfoWrapperPass>();
-      if (EnableMSSALoopDependency) {
-        AU.addRequired<MemorySSAWrapperPass>();
-        AU.addPreserved<MemorySSAWrapperPass>();
-      }
+      AU.addRequired<MemorySSAWrapperPass>();
+      AU.addPreserved<MemorySSAWrapperPass>();
       if (HasBranchDivergence)
         AU.addRequired<LegacyDivergenceAnalysis>();
       getLoopAnalysisUsage(AU);
@@ -310,9 +308,8 @@ bool LUAnalysisCache::countLoop(const Loop *L, const TargetTransformInfo &TTI,
     // consideration code simplification opportunities and code that can
     // be shared by the resultant unswitched loops.
     CodeMetrics Metrics;
-    for (Loop::block_iterator I = L->block_begin(), E = L->block_end(); I != E;
-         ++I)
-      Metrics.analyzeBasicBlock(*I, TTI, EphValues);
+    for (BasicBlock *BB : L->blocks())
+      Metrics.analyzeBasicBlock(BB, TTI, EphValues);
 
     Props.SizeEstimation = Metrics.NumInsts;
     Props.CanBeUnswitchedCount = MaxSize / (Props.SizeEstimation);
@@ -388,8 +385,8 @@ void LUAnalysisCache::cloneData(const Loop *NewLoop, const Loop *OldLoop,
   // Clone unswitched values info:
   // for new loop switches we clone info about values that was
   // already unswitched and has redundant successors.
-  for (UnswitchedValsIt I = Insts.begin(); I != Insts.end(); ++I) {
-    const SwitchInst *OldInst = I->first;
+  for (const auto &I : Insts) {
+    const SwitchInst *OldInst = I.first;
     Value *NewI = VMap.lookup(OldInst);
     const SwitchInst *NewInst = cast_or_null<SwitchInst>(NewI);
     assert(NewInst && "All instructions that are in SrcBB must be in VMap.");
@@ -540,11 +537,8 @@ bool LoopUnswitch::runOnLoop(Loop *L, LPPassManager &LPMRef) {
   LPM = &LPMRef;
   DT = &getAnalysis<DominatorTreeWrapperPass>().getDomTree();
   AA = &getAnalysis<AAResultsWrapperPass>().getAAResults();
-  if (EnableMSSALoopDependency) {
-    MSSA = &getAnalysis<MemorySSAWrapperPass>().getMSSA();
-    MSSAU = std::make_unique<MemorySSAUpdater>(MSSA);
-    assert(DT && "Cannot update MemorySSA without a valid DomTree.");
-  }
+  MSSA = &getAnalysis<MemorySSAWrapperPass>().getMSSA();
+  MSSAU = std::make_unique<MemorySSAUpdater>(MSSA);
   CurrentLoop = L;
   Function *F = CurrentLoop->getHeader()->getParent();
 
@@ -552,19 +546,19 @@ bool LoopUnswitch::runOnLoop(Loop *L, LPPassManager &LPMRef) {
   if (SanitizeMemory)
     SafetyInfo.computeLoopSafetyInfo(L);
 
-  if (MSSA && VerifyMemorySSA)
+  if (VerifyMemorySSA)
     MSSA->verifyMemorySSA();
 
   bool Changed = false;
   do {
     assert(CurrentLoop->isLCSSAForm(*DT));
-    if (MSSA && VerifyMemorySSA)
+    if (VerifyMemorySSA)
       MSSA->verifyMemorySSA();
     RedoLoop = false;
     Changed |= processCurrentLoop();
   } while (RedoLoop);
 
-  if (MSSA && VerifyMemorySSA)
+  if (VerifyMemorySSA)
     MSSA->verifyMemorySSA();
 
   return Changed;
@@ -639,211 +633,6 @@ static bool equalityPropUnSafe(Value &LoopCond) {
   if ((LSI && HasUndefInSelect(*LSI)) || (RSI && HasUndefInSelect(*RSI)))
     return true;
   return false;
-}
-
-namespace {
-/// Struct to hold information about a partially invariant condition.
-struct IVConditionInfo {
-  /// Instructions that need to be duplicated and checked for the unswitching
-  /// condition.
-  SmallVector<Instruction *, 4> InstToDuplicate;
-
-  /// Constant to indicate for which value the condition is invariant.
-  Constant *KnownValue = nullptr;
-
-  /// True if the partially invariant path is no-op (=does not have any
-  /// side-effects and no loop value is used outside the loop).
-  bool PathIsNoop = true;
-
-  /// If the partially invariant path reaches a single exit block, ExitForPath
-  /// is set to that block. Otherwise it is nullptr.
-  BasicBlock *ExitForPath = nullptr;
-};
-} // namespace
-
-/// Check if the loop header has a conditional branch that is not
-/// loop-invariant, because it involves load instructions. If all paths from
-/// either the true or false successor to the header or loop exists do not
-/// modify the memory feeding the condition, perform 'partial unswitching'. That
-/// is, duplicate the instructions feeding the condition in the pre-header. Then
-/// unswitch on the duplicated condition. The condition is now known in the
-/// unswitched version for the 'invariant' path through the original loop.
-///
-/// If the branch condition of the header is partially invariant, return a pair
-/// containing the instructions to duplicate and a boolean Constant to update
-/// the condition in the loops created for the true or false successors.
-static Optional<IVConditionInfo> hasPartialIVCondition(Loop *L, MemorySSA &MSSA,
-                                                       AAResults *AA) {
-
-  auto *TI = dyn_cast<BranchInst>(L->getHeader()->getTerminator());
-  if (!TI || !TI->isConditional())
-    return {};
-
-  auto *CondI = dyn_cast<CmpInst>(TI->getCondition());
-  // The case with the condition outside the loop should already be handled
-  // earlier.
-  if (!CondI || !L->contains(CondI))
-    return {};
-
-  SmallVector<Instruction *, 4> InstToDuplicate;
-  InstToDuplicate.push_back(CondI);
-
-  SmallVector<Value *, 4> WorkList;
-  WorkList.append(CondI->op_begin(), CondI->op_end());
-
-  SmallVector<MemoryAccess *, 4> AccessesToCheck;
-  SmallVector<MemoryLocation, 4> AccessedLocs;
-  while (!WorkList.empty()) {
-    Instruction *I = dyn_cast<Instruction>(WorkList.pop_back_val());
-    if (!I || !L->contains(I))
-      continue;
-
-    // TODO: support additional instructions.
-    if (!isa<LoadInst>(I) && !isa<GetElementPtrInst>(I))
-      return {};
-
-    // Do not duplicate volatile and atomic loads.
-    if (auto *LI = dyn_cast<LoadInst>(I))
-      if (LI->isVolatile() || LI->isAtomic())
-        return {};
-
-    InstToDuplicate.push_back(I);
-    if (MemoryAccess *MA = MSSA.getMemoryAccess(I)) {
-      if (auto *MemUse = dyn_cast_or_null<MemoryUse>(MA)) {
-        // Queue the defining access to check for alias checks.
-        AccessesToCheck.push_back(MemUse->getDefiningAccess());
-        AccessedLocs.push_back(MemoryLocation::get(I));
-      } else {
-        // MemoryDefs may clobber the location or may be atomic memory
-        // operations. Bail out.
-        return {};
-      }
-    }
-    WorkList.append(I->op_begin(), I->op_end());
-  }
-
-  if (InstToDuplicate.size() <= 1)
-    return {};
-
-  SmallVector<BasicBlock *, 4> ExitingBlocks;
-  L->getExitingBlocks(ExitingBlocks);
-  auto HasNoClobbersOnPath =
-      [L, AA, &AccessedLocs, &ExitingBlocks,
-       &InstToDuplicate](BasicBlock *Succ, BasicBlock *Header,
-                         SmallVector<MemoryAccess *, 4> AccessesToCheck)
-      -> Optional<IVConditionInfo> {
-    IVConditionInfo Info;
-    // First, collect all blocks in the loop that are on a patch from Succ
-    // to the header.
-    SmallVector<BasicBlock *, 4> WorkList;
-    WorkList.push_back(Succ);
-    WorkList.push_back(Header);
-    SmallPtrSet<BasicBlock *, 4> Seen;
-    Seen.insert(Header);
-    Info.PathIsNoop &=
-        all_of(*Header, [](Instruction &I) { return !I.mayHaveSideEffects(); });
-
-    while (!WorkList.empty()) {
-      BasicBlock *Current = WorkList.pop_back_val();
-      if (!L->contains(Current))
-        continue;
-      const auto &SeenIns = Seen.insert(Current);
-      if (!SeenIns.second)
-        continue;
-
-      Info.PathIsNoop &= all_of(
-          *Current, [](Instruction &I) { return !I.mayHaveSideEffects(); });
-      WorkList.append(succ_begin(Current), succ_end(Current));
-    }
-
-    // Require at least 2 blocks on a path through the loop. This skips
-    // paths that directly exit the loop.
-    if (Seen.size() < 2)
-      return {};
-
-    // Next, check if there are any MemoryDefs that are on the path through
-    // the loop (in the Seen set) and they may-alias any of the locations in
-    // AccessedLocs. If that is the case, they may modify the condition and
-    // partial unswitching is not possible.
-    SmallPtrSet<MemoryAccess *, 4> SeenAccesses;
-    while (!AccessesToCheck.empty()) {
-      MemoryAccess *Current = AccessesToCheck.pop_back_val();
-      auto SeenI = SeenAccesses.insert(Current);
-      if (!SeenI.second || !Seen.contains(Current->getBlock()))
-        continue;
-
-      // Bail out if exceeded the threshold.
-      if (SeenAccesses.size() >= MSSAThreshold)
-        return {};
-
-      // MemoryUse are read-only accesses.
-      if (isa<MemoryUse>(Current))
-        continue;
-
-      // For a MemoryDef, check if is aliases any of the location feeding
-      // the original condition.
-      if (auto *CurrentDef = dyn_cast<MemoryDef>(Current)) {
-        if (any_of(AccessedLocs, [AA, CurrentDef](MemoryLocation &Loc) {
-              return isModSet(
-                  AA->getModRefInfo(CurrentDef->getMemoryInst(), Loc));
-            }))
-          return {};
-      }
-
-      for (Use &U : Current->uses())
-        AccessesToCheck.push_back(cast<MemoryAccess>(U.getUser()));
-    }
-
-    // We could also allow loops with known trip counts without mustprogress,
-    // but ScalarEvolution may not be available.
-    Info.PathIsNoop &=
-        L->getHeader()->getParent()->mustProgress() || hasMustProgress(L);
-
-    // If the path is considered a no-op so far, check if it reaches a
-    // single exit block without any phis. This ensures no values from the
-    // loop are used outside of the loop.
-    if (Info.PathIsNoop) {
-      for (auto *Exiting : ExitingBlocks) {
-        if (!Seen.contains(Exiting))
-          continue;
-        for (auto *Succ : successors(Exiting)) {
-          if (L->contains(Succ))
-            continue;
-
-          Info.PathIsNoop &= llvm::empty(Succ->phis()) &&
-                             (!Info.ExitForPath || Info.ExitForPath == Succ);
-          if (!Info.PathIsNoop)
-            break;
-          assert((!Info.ExitForPath || Info.ExitForPath == Succ) &&
-                 "cannot have multiple exit blocks");
-          Info.ExitForPath = Succ;
-        }
-      }
-    }
-    if (!Info.ExitForPath)
-      Info.PathIsNoop = false;
-
-    Info.InstToDuplicate = InstToDuplicate;
-    return Info;
-  };
-
-  // If we branch to the same successor, partial unswitching will not be
-  // beneficial.
-  if (TI->getSuccessor(0) == TI->getSuccessor(1))
-    return {};
-
-  if (auto Info = HasNoClobbersOnPath(TI->getSuccessor(0), L->getHeader(),
-                                      AccessesToCheck)) {
-    Info->KnownValue = ConstantInt::getTrue(TI->getContext());
-    return Info;
-  }
-  if (auto Info = HasNoClobbersOnPath(TI->getSuccessor(1), L->getHeader(),
-                                      AccessesToCheck)) {
-    Info->KnownValue = ConstantInt::getFalse(TI->getContext());
-    return Info;
-  }
-
-  return {};
 }
 
 /// Do actual work and unswitch loop if possible and profitable.
@@ -1053,7 +842,8 @@ bool LoopUnswitch::processCurrentLoop() {
   // metadata, to avoid unswitching the same loop multiple times.
   if (MSSA &&
       !findOptionMDForLoop(CurrentLoop, "llvm.loop.unswitch.partial.disable")) {
-    if (auto Info = hasPartialIVCondition(CurrentLoop, *MSSA, AA)) {
+    if (auto Info =
+            hasPartialIVCondition(*CurrentLoop, MSSAThreshold, *MSSA, *AA)) {
       assert(!Info->InstToDuplicate.empty() &&
              "need at least a partially invariant condition");
       LLVM_DEBUG(dbgs() << "loop-unswitch: Found partially invariant condition "
@@ -1132,9 +922,9 @@ static bool isTrivialLoopExitBlockHelper(Loop *L, BasicBlock *BB,
   }
 
   // Otherwise, this is an unvisited intra-loop node.  Check all successors.
-  for (succ_iterator SI = succ_begin(BB), E = succ_end(BB); SI != E; ++SI) {
+  for (BasicBlock *Succ : successors(BB)) {
     // Check to see if the successor is a trivial loop exit.
-    if (!isTrivialLoopExitBlockHelper(L, *SI, ExitBB, Visited))
+    if (!isTrivialLoopExitBlockHelper(L, Succ, ExitBB, Visited))
       return false;
   }
 
@@ -1517,8 +1307,7 @@ void LoopUnswitch::splitExitEdges(
 
   for (unsigned I = 0, E = ExitBlocks.size(); I != E; ++I) {
     BasicBlock *ExitBlock = ExitBlocks[I];
-    SmallVector<BasicBlock *, 4> Preds(pred_begin(ExitBlock),
-                                       pred_end(ExitBlock));
+    SmallVector<BasicBlock *, 4> Preds(predecessors(ExitBlock));
 
     // Although SplitBlockPredecessors doesn't preserve loop-simplify in
     // general, if we call it on all predecessors of all exits then it does.
@@ -1628,9 +1417,7 @@ void LoopUnswitch::unswitchNontrivialCondition(
       PHINode *PN = PHINode::Create(LPad->getType(), 0, "",
                                     &*ExitSucc->getFirstInsertionPt());
 
-      for (pred_iterator I = pred_begin(ExitSucc), E = pred_end(ExitSucc);
-           I != E; ++I) {
-        BasicBlock *BB = *I;
+      for (BasicBlock *BB : predecessors(ExitSucc)) {
         LandingPadInst *LPI = BB->getLandingPadInst();
         LPI->replaceAllUsesWith(PN);
         PN->addIncoming(LPI, BB);
@@ -1643,9 +1430,8 @@ void LoopUnswitch::unswitchNontrivialCondition(
     for (Instruction &I : *NewBlocks[NBI]) {
       RemapInstruction(&I, VMap,
                        RF_NoModuleLevelChanges | RF_IgnoreMissingLocals);
-      if (auto *II = dyn_cast<IntrinsicInst>(&I))
-        if (II->getIntrinsicID() == Intrinsic::assume)
-          AC->registerAssumption(II);
+      if (auto *II = dyn_cast<AssumeInst>(&I))
+        AC->registerAssumption(II);
     }
   }
 

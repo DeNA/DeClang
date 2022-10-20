@@ -15,10 +15,10 @@
 #include "AMDGPU.h"
 #include "AMDGPUTargetMachine.h"
 #include "Utils/AMDGPUBaseInfo.h"
-#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/PassManager.h"
-#include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
 
@@ -55,12 +55,9 @@ char AMDGPUAlwaysInline::ID = 0;
 static void
 recursivelyVisitUsers(GlobalValue &GV,
                       SmallPtrSetImpl<Function *> &FuncsToAlwaysInline) {
-  SmallVector<User *, 16> Stack;
+  SmallVector<User *, 16> Stack(GV.users());
 
   SmallPtrSet<const Value *, 8> Visited;
-
-  for (User *U : GV.users())
-    Stack.push_back(U);
 
   while (!Stack.empty()) {
     User *U = Stack.pop_back_val();
@@ -74,7 +71,7 @@ recursivelyVisitUsers(GlobalValue &GV,
         // and just let us hit the error when we can't handle this.
         //
         // Unfortunately, clang adds noinline to all functions at -O0. We have
-        // to override this here. until that's fixed.
+        // to override this here until that's fixed.
         F->removeFnAttr(Attribute::NoInline);
 
         FuncsToAlwaysInline.insert(F);
@@ -85,8 +82,7 @@ recursivelyVisitUsers(GlobalValue &GV,
       continue;
     }
 
-    for (User *UU : U->users())
-      Stack.push_back(UU);
+    append_range(Stack, U->users());
   }
 }
 
@@ -95,9 +91,13 @@ static bool alwaysInlineImpl(Module &M, bool GlobalOpt) {
 
   SmallPtrSet<Function *, 8> FuncsToAlwaysInline;
   SmallPtrSet<Function *, 8> FuncsToNoInline;
+  Triple TT(M.getTargetTriple());
 
   for (GlobalAlias &A : M.aliases()) {
     if (Function* F = dyn_cast<Function>(A.getAliasee())) {
+      if (TT.getArch() == Triple::amdgcn &&
+          A.getLinkage() != GlobalValue::InternalLinkage)
+        continue;
       A.replaceAllUsesWith(F);
       AliasesToRemove.push_back(&A);
     }
@@ -125,10 +125,10 @@ static bool alwaysInlineImpl(Module &M, bool GlobalOpt) {
   for (GlobalVariable &GV : M.globals()) {
     // TODO: Region address
     unsigned AS = GV.getAddressSpace();
-    if (AS != AMDGPUAS::LOCAL_ADDRESS && AS != AMDGPUAS::REGION_ADDRESS)
-      continue;
-
-    recursivelyVisitUsers(GV, FuncsToAlwaysInline);
+    if ((AS == AMDGPUAS::REGION_ADDRESS) ||
+        (AS == AMDGPUAS::LOCAL_ADDRESS &&
+         (!AMDGPUTargetMachine::EnableLowerModuleLDS || !GV.hasInitializer())))
+      recursivelyVisitUsers(GV, FuncsToAlwaysInline);
   }
 
   if (!AMDGPUTargetMachine::EnableFunctionCalls || StressCalls) {

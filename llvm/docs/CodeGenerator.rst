@@ -728,6 +728,9 @@ description (``*.td``) files.  Our goal is for the entire instruction selector
 to be generated from these ``.td`` files, though currently there are still
 things that require custom C++ code.
 
+`GlobalISel <https://llvm.org/docs/GlobalISel/index.html>`_ is another
+instruction selection framework.
+
 .. _SelectionDAG:
 
 Introduction to SelectionDAGs
@@ -2094,10 +2097,6 @@ PowerPC constraints:
 * On ppc32/64 GOT/PIC only module-local calls (visibility = hidden or protected)
   are supported.
 
-AArch64 constraints:
-
-* No variable argument lists are used.
-
 WebAssembly constraints:
 
 * No variable argument lists are used
@@ -2121,7 +2120,7 @@ Call as ``llc -tailcallopt test.ll``.
 
   define fastcc i32 @tailcaller(i32 %in1, i32 %in2) {
     %l1 = add i32 %in1, %in2
-    %tmp = tail call fastcc i32 @tailcallee(i32 %in1 inreg, i32 %in2 inreg, i32 %in1, i32 %l1)
+    %tmp = tail call fastcc i32 @tailcallee(i32 inreg %in1, i32 inreg %in2, i32 %in1, i32 %l1)
     ret i32 %tmp
   }
 

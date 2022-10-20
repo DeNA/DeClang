@@ -1,7 +1,7 @@
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W32 %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W64 %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W32-ERR --implicit-check-not=error: %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W64-ERR --implicit-check-not=error: %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 -show-encoding %s | FileCheck --check-prefix=GFX10 %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 -show-encoding %s | FileCheck --check-prefix=GFX10 %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 %s 2>&1 | FileCheck --check-prefix=GFX10-ERR --implicit-check-not=error: %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 %s 2>&1 | FileCheck --check-prefix=GFX10-ERR --implicit-check-not=error: %s
 
 //===----------------------------------------------------------------------===//
 // ENC_VOP1.
@@ -366,6 +366,12 @@ v_cvt_i32_f64_e64 v5, |v[1:2]|
 
 v_cvt_i32_f64_e64 v5, v[1:2] clamp
 // GFX10: encoding: [0x05,0x80,0x83,0xd5,0x01,0x01,0x00,0x00]
+
+v_cvt_i32_f64_e64 v5, s[4:5] mul:2
+// GFX10: encoding: [0x05,0x00,0x83,0xd5,0x04,0x00,0x00,0x08]
+
+v_cvt_i32_f64_e64 v5, v[1:2] clamp div:2
+// GFX10: encoding: [0x05,0x80,0x83,0xd5,0x01,0x01,0x00,0x18]
 
 v_cvt_f64_i32_e32 v[5:6], v1
 // GFX10: encoding: [0x01,0x09,0x0a,0x7e]
@@ -1126,6 +1132,12 @@ v_cvt_u32_f32_e64 v5, |v1|
 v_cvt_u32_f32_e64 v5, v1 clamp
 // GFX10: encoding: [0x05,0x80,0x87,0xd5,0x01,0x01,0x00,0x00]
 
+v_cvt_u32_f32_e64 v5, s1 mul:2
+// GFX10: encoding: [0x05,0x00,0x87,0xd5,0x01,0x00,0x00,0x08]
+
+v_cvt_u32_f32_e64 v5, v1 clamp div:2
+// GFX10: encoding: [0x05,0x80,0x87,0xd5,0x01,0x01,0x00,0x18]
+
 v_cvt_u32_f32_sdwa v5, v1 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD
 // GFX10: encoding: [0xf9,0x0e,0x0a,0x7e,0x01,0x06,0x06,0x00]
 
@@ -1392,6 +1404,12 @@ v_cvt_i32_f32_e64 v5, |v1|
 
 v_cvt_i32_f32_e64 v5, v1 clamp
 // GFX10: encoding: [0x05,0x80,0x88,0xd5,0x01,0x01,0x00,0x00]
+
+v_cvt_i32_f32_e64 v5, v1 mul:2
+// GFX10: encoding: [0x05,0x00,0x88,0xd5,0x01,0x01,0x00,0x08]
+
+v_cvt_i32_f32_e64 v5, v1 clamp div:2
+// GFX10: encoding: [0x05,0x80,0x88,0xd5,0x01,0x01,0x00,0x18]
 
 v_cvt_i32_f32_sdwa v5, v1 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD
 // GFX10: encoding: [0xf9,0x10,0x0a,0x7e,0x01,0x06,0x06,0x00]
@@ -4329,6 +4347,12 @@ v_cvt_u32_f64_e64 v5, |v[1:2]|
 
 v_cvt_u32_f64_e64 v5, v[1:2] clamp
 // GFX10: encoding: [0x05,0x80,0x95,0xd5,0x01,0x01,0x00,0x00]
+
+v_cvt_u32_f64_e64 v5, s[4:5] mul:2
+// GFX10: encoding: [0x05,0x00,0x95,0xd5,0x04,0x00,0x00,0x08]
+
+v_cvt_u32_f64_e64 v5, v[1:2] clamp div:2
+// GFX10: encoding: [0x05,0x80,0x95,0xd5,0x01,0x01,0x00,0x18]
 
 v_cvt_f64_u32 v[5:6], v1
 // GFX10: encoding: [0x01,0x2d,0x0a,0x7e]
@@ -11719,6 +11743,12 @@ v_cvt_u16_f16_e64 v5, |v1|
 v_cvt_u16_f16_e64 v5, v1 clamp
 // GFX10: encoding: [0x05,0x80,0xd2,0xd5,0x01,0x01,0x00,0x00]
 
+v_cvt_u16_f16_e64 v5, s1 mul:2
+// GFX10: encoding: [0x05,0x00,0xd2,0xd5,0x01,0x00,0x00,0x08]
+
+v_cvt_u16_f16_e64 v5, v1 clamp div:2
+// GFX10: encoding: [0x05,0x80,0xd2,0xd5,0x01,0x01,0x00,0x18]
+
 v_cvt_u16_f16_sdwa v5, v1 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD
 // GFX10: encoding: [0xf9,0xa4,0x0a,0x7e,0x01,0x06,0x06,0x00]
 
@@ -11973,6 +12003,12 @@ v_cvt_i16_f16_e64 v5, |v1|
 
 v_cvt_i16_f16_e64 v5, v1 clamp
 // GFX10: encoding: [0x05,0x80,0xd3,0xd5,0x01,0x01,0x00,0x00]
+
+v_cvt_i16_f16_e64 v5, v1 mul:2
+// GFX10: encoding: [0x05,0x00,0xd3,0xd5,0x01,0x01,0x00,0x08]
+
+v_cvt_i16_f16_e64 v5, v1 clamp div:2
+// GFX10: encoding: [0x05,0x80,0xd3,0xd5,0x01,0x01,0x00,0x18]
 
 v_cvt_i16_f16_sdwa v5, v1 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD
 // GFX10: encoding: [0xf9,0xa6,0x0a,0x7e,0x01,0x06,0x06,0x00]

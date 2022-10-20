@@ -81,9 +81,10 @@ public:
   void ConsumeAllOutput();
 
 private:
-  static bool IsInputComplete(lldb_private::Editline *editline,
-                              lldb_private::StringList &lines, void *baton);
+  bool IsInputComplete(lldb_private::Editline *editline,
+                       lldb_private::StringList &lines);
 
+  std::recursive_mutex output_mutex;
   std::unique_ptr<lldb_private::Editline> _editline_sp;
 
   PseudoTerminal _pty;
@@ -118,11 +119,14 @@ EditlineAdapter::EditlineAdapter()
   // Create an Editline instance.
   _editline_sp.reset(new lldb_private::Editline(
       "gtest editor", *_el_secondary_file, *_el_secondary_file,
-      *_el_secondary_file, false));
+      *_el_secondary_file, output_mutex, false));
   _editline_sp->SetPrompt("> ");
 
   // Hookup our input complete callback.
-  _editline_sp->SetIsInputCompleteCallback(IsInputComplete, this);
+  auto input_complete_cb = [this](Editline *editline, StringList &lines) {
+    return this->IsInputComplete(editline, lines);
+  };
+  _editline_sp->SetIsInputCompleteCallback(input_complete_cb);
 }
 
 void EditlineAdapter::CloseInput() {
@@ -183,8 +187,7 @@ bool EditlineAdapter::GetLines(lldb_private::StringList &lines,
 }
 
 bool EditlineAdapter::IsInputComplete(lldb_private::Editline *editline,
-                                      lldb_private::StringList &lines,
-                                      void *baton) {
+                                      lldb_private::StringList &lines) {
   // We'll call ourselves complete if we've received a balanced set of braces.
   int start_block_count = 0;
   int brace_balance = 0;

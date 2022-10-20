@@ -29,9 +29,9 @@
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCValue.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -166,7 +166,8 @@ public:
 
   bool allowAutoPadding() const override;
   bool allowEnhancedRelaxation() const override;
-  void emitInstructionBegin(MCObjectStreamer &OS, const MCInst &Inst) override;
+  void emitInstructionBegin(MCObjectStreamer &OS, const MCInst &Inst,
+                            const MCSubtargetInfo &STI) override;
   void emitInstructionEnd(MCObjectStreamer &OS, const MCInst &Inst) override;
 
   unsigned getNumFixupKinds() const override {
@@ -207,9 +208,10 @@ public:
 
   void finishLayout(MCAssembler const &Asm, MCAsmLayout &Layout) const override;
 
-  unsigned getMaximumNopSize() const override;
+  unsigned getMaximumNopSize(const MCSubtargetInfo &STI) const override;
 
-  bool writeNopData(raw_ostream &OS, uint64_t Count) const override;
+  bool writeNopData(raw_ostream &OS, uint64_t Count,
+                    const MCSubtargetInfo *STI) const override;
 };
 } // end anonymous namespace
 
@@ -598,7 +600,7 @@ bool X86AsmBackend::needAlign(const MCInst &Inst) const {
 
 /// Insert BoundaryAlignFragment before instructions to align branches.
 void X86AsmBackend::emitInstructionBegin(MCObjectStreamer &OS,
-                                         const MCInst &Inst) {
+                                         const MCInst &Inst, const MCSubtargetInfo &STI) {
   CanPadInst = canPadInst(Inst, OS);
 
   if (!canPadBranches(OS))
@@ -637,7 +639,7 @@ void X86AsmBackend::emitInstructionBegin(MCObjectStreamer &OS,
                           isFirstMacroFusibleInst(Inst, *MCII))) {
     // If we meet a unfused branch or the first instuction in a fusiable pair,
     // insert a BoundaryAlign fragment.
-    OS.insert(PendingBA = new MCBoundaryAlignFragment(AlignBoundary));
+    OS.insert(PendingBA = new MCBoundaryAlignFragment(AlignBoundary, STI));
   }
 }
 
@@ -680,12 +682,21 @@ Optional<MCFixupKind> X86AsmBackend::getFixupKind(StringRef Name) const {
 #define ELF_RELOC(X, Y) .Case(#X, Y)
 #include "llvm/BinaryFormat/ELFRelocs/x86_64.def"
 #undef ELF_RELOC
+                 .Case("BFD_RELOC_NONE", ELF::R_X86_64_NONE)
+                 .Case("BFD_RELOC_8", ELF::R_X86_64_8)
+                 .Case("BFD_RELOC_16", ELF::R_X86_64_16)
+                 .Case("BFD_RELOC_32", ELF::R_X86_64_32)
+                 .Case("BFD_RELOC_64", ELF::R_X86_64_64)
                  .Default(-1u);
     } else {
       Type = llvm::StringSwitch<unsigned>(Name)
 #define ELF_RELOC(X, Y) .Case(#X, Y)
 #include "llvm/BinaryFormat/ELFRelocs/i386.def"
 #undef ELF_RELOC
+                 .Case("BFD_RELOC_NONE", ELF::R_386_NONE)
+                 .Case("BFD_RELOC_8", ELF::R_386_8)
+                 .Case("BFD_RELOC_16", ELF::R_386_16)
+                 .Case("BFD_RELOC_32", ELF::R_386_32)
                  .Default(-1u);
     }
     if (Type == -1u)
@@ -1072,14 +1083,16 @@ void X86AsmBackend::finishLayout(MCAssembler const &Asm,
   }
 }
 
-unsigned X86AsmBackend::getMaximumNopSize() const {
+unsigned X86AsmBackend::getMaximumNopSize(const MCSubtargetInfo &STI) const {
+  if (STI.hasFeature(X86::Mode16Bit))
+    return 4;
   if (!STI.hasFeature(X86::FeatureNOPL) && !STI.hasFeature(X86::Mode64Bit))
     return 1;
-  if (STI.getFeatureBits()[X86::FeatureFast7ByteNOP])
+  if (STI.getFeatureBits()[X86::TuningFast7ByteNOP])
     return 7;
-  if (STI.getFeatureBits()[X86::FeatureFast15ByteNOP])
+  if (STI.getFeatureBits()[X86::TuningFast15ByteNOP])
     return 15;
-  if (STI.getFeatureBits()[X86::FeatureFast11ByteNOP])
+  if (STI.getFeatureBits()[X86::TuningFast11ByteNOP])
     return 11;
   // FIXME: handle 32-bit mode
   // 15-bytes is the longest single NOP instruction, but 10-bytes is
@@ -1090,31 +1103,47 @@ unsigned X86AsmBackend::getMaximumNopSize() const {
 /// Write a sequence of optimal nops to the output, covering \p Count
 /// bytes.
 /// \return - true on success, false on failure
-bool X86AsmBackend::writeNopData(raw_ostream &OS, uint64_t Count) const {
-  static const char Nops[10][11] = {
-    // nop
-    "\x90",
-    // xchg %ax,%ax
-    "\x66\x90",
-    // nopl (%[re]ax)
-    "\x0f\x1f\x00",
-    // nopl 0(%[re]ax)
-    "\x0f\x1f\x40\x00",
-    // nopl 0(%[re]ax,%[re]ax,1)
-    "\x0f\x1f\x44\x00\x00",
-    // nopw 0(%[re]ax,%[re]ax,1)
-    "\x66\x0f\x1f\x44\x00\x00",
-    // nopl 0L(%[re]ax)
-    "\x0f\x1f\x80\x00\x00\x00\x00",
-    // nopl 0L(%[re]ax,%[re]ax,1)
-    "\x0f\x1f\x84\x00\x00\x00\x00\x00",
-    // nopw 0L(%[re]ax,%[re]ax,1)
-    "\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",
-    // nopw %cs:0L(%[re]ax,%[re]ax,1)
-    "\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
+bool X86AsmBackend::writeNopData(raw_ostream &OS, uint64_t Count,
+                                 const MCSubtargetInfo *STI) const {
+  static const char Nops32Bit[10][11] = {
+      // nop
+      "\x90",
+      // xchg %ax,%ax
+      "\x66\x90",
+      // nopl (%[re]ax)
+      "\x0f\x1f\x00",
+      // nopl 0(%[re]ax)
+      "\x0f\x1f\x40\x00",
+      // nopl 0(%[re]ax,%[re]ax,1)
+      "\x0f\x1f\x44\x00\x00",
+      // nopw 0(%[re]ax,%[re]ax,1)
+      "\x66\x0f\x1f\x44\x00\x00",
+      // nopl 0L(%[re]ax)
+      "\x0f\x1f\x80\x00\x00\x00\x00",
+      // nopl 0L(%[re]ax,%[re]ax,1)
+      "\x0f\x1f\x84\x00\x00\x00\x00\x00",
+      // nopw 0L(%[re]ax,%[re]ax,1)
+      "\x66\x0f\x1f\x84\x00\x00\x00\x00\x00",
+      // nopw %cs:0L(%[re]ax,%[re]ax,1)
+      "\x66\x2e\x0f\x1f\x84\x00\x00\x00\x00\x00",
   };
 
-  uint64_t MaxNopLength = (uint64_t)getMaximumNopSize();
+  // 16-bit mode uses different nop patterns than 32-bit.
+  static const char Nops16Bit[4][11] = {
+      // nop
+      "\x90",
+      // xchg %eax,%eax
+      "\x66\x90",
+      // lea 0(%si),%si
+      "\x8d\x74\x00",
+      // lea 0w(%si),%si
+      "\x8d\xb4\x00\x00",
+  };
+
+  const char(*Nops)[11] =
+      STI->getFeatureBits()[X86::Mode16Bit] ? Nops16Bit : Nops32Bit;
+
+  uint64_t MaxNopLength = (uint64_t)getMaximumNopSize(*STI);
 
   // Emit as many MaxNopLength NOPs as needed, then emit a NOP of the remaining
   // length.
@@ -1605,7 +1634,7 @@ MCAsmBackend *llvm::createX86_64AsmBackend(const Target &T,
 
   uint8_t OSABI = MCELFObjectTargetWriter::getOSABI(TheTriple.getOS());
 
-  if (TheTriple.getEnvironment() == Triple::GNUX32)
+  if (TheTriple.isX32())
     return new ELFX86_X32AsmBackend(T, OSABI, STI);
   return new ELFX86_64AsmBackend(T, OSABI, STI);
 }

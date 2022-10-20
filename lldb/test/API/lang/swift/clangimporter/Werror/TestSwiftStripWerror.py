@@ -3,10 +3,10 @@ from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
 
-class TestSwiftW(TestBase):
+class TestSwiftWerror(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
-    NO_DEBUG_INFO_TEST = True
+    NO_DEBUG_INFO_TESTCASE = True
 
     def setUp(self):
         TestBase.setUp(self)
@@ -30,10 +30,12 @@ class TestSwiftW(TestBase):
         
         self.expect("p foo", DATA_TYPES_DISPLAYED_CORRECTLY, substrs=["42"])
         sanity = 0
-        logfile = open(log, "r")
+        import io
+        logfile = io.open(log, "r", encoding='utf-8')
         for line in logfile:
             self.assertFalse("-Werror" in line)
             if "-DCONFLICT" in line:
                 sanity += 1
-        # We see it twice, once in the module, once in the expression context.
-        self.assertEqual(sanity, 2)
+        # We see -DCONFLICT twice in the expression context and once in each of
+        # the two Module contexts.
+        self.assertEqual(sanity, 2+2)

@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 
 #----------------------------------------------------------------------
 # This module is designed to live inside the "lldb" python package
@@ -129,7 +129,7 @@ typedef struct malloc_zone_t {
     void *reserved1[12];
     struct malloc_introspection_t	*introspect;
 } malloc_zone_t;
-kern_return_t malloc_get_all_zones(task_t task, memory_reader_t reader, vm_address_t **addresses, unsigned *count);
+kern_return_t malloc_get_all_zones(task_t, memory_reader_t, vm_address_t **, unsigned *);
 memory_reader_t task_peek = [](task_t, vm_address_t remote_address, vm_size_t, void **local_memory) -> kern_return_t {
     *local_memory = (void*) remote_address;
     return KERN_SUCCESS;

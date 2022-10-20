@@ -353,7 +353,6 @@ public:
   /// ClaimAllArgs - Claim all arguments.
   ///
   void ClaimAllArgs() const;
-
   /// @}
   /// @name Arg Synthesis
   /// @{

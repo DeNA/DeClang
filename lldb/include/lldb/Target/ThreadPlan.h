@@ -81,7 +81,7 @@ namespace lldb_private {
 //
 //  Cleaning up after your plans:
 //
-//  When the plan is moved from the plan stack its WillPop method is always
+//  When the plan is moved from the plan stack its DidPop method is always
 //  called, no matter why.  Once it is moved off the plan stack it is done, and
 //  won't get a chance to run again.  So you should undo anything that affects
 //  target state in this method.  But be sure to leave the plan able to
@@ -260,8 +260,8 @@ namespace lldb_private {
 //  One other little detail here, sometimes a plan will push another plan onto
 //  the plan stack to do some part of the first plan's job, and it would be
 //  convenient to tell that plan how it should respond to ShouldReportStop.
-//  You can do that by setting the stop_vote in the child plan when you create
-//  it.
+//  You can do that by setting the report_stop_vote in the child plan when you
+//  create it.
 //
 //  Suppressing the initial eStateRunning event:
 //
@@ -275,14 +275,13 @@ namespace lldb_private {
 //  eVoteNo from ShouldReportStop, to force a running event to be reported
 //  return eVoteYes, in general though you should return eVoteNoOpinion which
 //  will allow the ThreadList to figure out the right thing to do.  The
-//  run_vote argument to the constructor works like stop_vote, and is a way for
-//  a plan to instruct a sub-plan on how to respond to ShouldReportStop.
+//  report_run_vote argument to the constructor works like report_stop_vote, and
+//  is a way for a plan to instruct a sub-plan on how to respond to
+//  ShouldReportStop.
 
 class ThreadPlan : public std::enable_shared_from_this<ThreadPlan>,
                    public UserID {
 public:
-  enum ThreadScope { eAllThreads, eSomeThreads, eThisThread };
-
   // We use these enums so that we can cast a base thread plan to it's real
   // type without having to resort to dynamic casting.
   enum ThreadPlanKind {
@@ -298,14 +297,8 @@ public:
     eKindStepInRange,
     eKindRunToAddress,
     eKindStepThrough,
-    eKindStepUntil,
-    eKindTestCondition
-
+    eKindStepUntil
   };
-
-  // Constructors and Destructors
-  ThreadPlan(ThreadPlanKind kind, const char *name, Thread &thread,
-             Vote stop_vote, Vote run_vote);
 
   virtual ~ThreadPlan();
 
@@ -324,6 +317,12 @@ public:
   Target &GetTarget();
 
   const Target &GetTarget() const;
+
+  /// Clear the Thread* cache.
+  ///
+  /// This is useful in situations like when a new Thread list is being
+  /// generated.
+  void ClearThreadCache();
 
   /// Print a description of this thread to the stream \a s.
   /// \a thread.  Don't expect that the result of GetThread is valid in
@@ -375,7 +374,7 @@ public:
 
   virtual Vote ShouldReportStop(Event *event_ptr);
 
-  virtual Vote ShouldReportRun(Event *event_ptr);
+  Vote ShouldReportRun(Event *event_ptr);
 
   virtual void SetStopOthers(bool new_value);
 
@@ -414,16 +413,7 @@ public:
 
   virtual void DidPush();
 
-  virtual void WillPop();
-
-  // This pushes a plan onto the plan stack of the current plan's thread.
-  // Also sets the plans to private and not master plans.  A plan pushed by 
-  // another thread plan is never either of the above.
-  void PushPlan(lldb::ThreadPlanSP &thread_plan_sp) {
-    GetThread().PushPlan(thread_plan_sp);
-    thread_plan_sp->SetPrivate(false);
-    thread_plan_sp->SetIsMasterPlan(false);
-  }
+  virtual void DidPop();
 
   ThreadPlanKind GetKind() const { return m_kind; }
 
@@ -446,15 +436,6 @@ public:
   void DoTraceLog() {
     if (m_tracer_sp && m_tracer_sp->TracingEnabled())
       m_tracer_sp->Log();
-  }
-
-  // Some thread plans hide away the actual stop info which caused any
-  // particular stop.  For instance the ThreadPlanCallFunction restores the
-  // original stop reason so that stopping and calling a few functions won't
-  // lose the history of the run. This call can be implemented to get you back
-  // to the real stop info.
-  virtual lldb::StopInfoSP GetRealStopInfo() { 
-    return GetThread().GetStopInfo();
   }
 
   // If the completion of the thread plan stepped out of a function, the return
@@ -483,14 +464,11 @@ public:
   // to restore the state when it is done.  This will do that job. This is
   // mostly useful for artificial plans like CallFunction plans.
 
-  virtual bool RestoreThreadState() {
-    // Nothing to do in general.
-    return true;
-  }
+  virtual void RestoreThreadState() {}
 
   virtual bool IsVirtualStep() { return false; }
 
-  virtual bool SetIterationCount(size_t count) {
+  bool SetIterationCount(size_t count) {
     if (m_takes_iteration_count) {
       // Don't tell me to do something 0 times...
       if (count == 0)
@@ -500,22 +478,31 @@ public:
     return m_takes_iteration_count;
   }
 
-  virtual size_t GetIterationCount() {
-    if (!m_takes_iteration_count)
-      return 0;
-    else
-      return m_iteration_count;
+  bool IsTID(lldb::tid_t tid) { return tid == m_tid; }
+  bool HasTID() { return m_tid != LLDB_INVALID_THREAD_ID; }
+  lldb::tid_t GetTID() { return m_tid; }
+
+  void SetTID(lldb::tid_t tid) {
+    if (m_tid != tid) {
+      m_tid = tid;
+      ClearThreadCache();
+    }
   }
 
-  bool HasTID() { return m_tid != LLDB_INVALID_THREAD_ID; }
-  void ClearTID() { m_tid = LLDB_INVALID_THREAD_ID; }
-  lldb::tid_t GetTID() { return m_tid; }
-  void SetTID(lldb::tid_t tid) { m_tid = tid; }
+  void ClearTID() {
+    m_tid = LLDB_INVALID_THREAD_ID;
+    ClearThreadCache();
+  }
 
   friend lldb::ThreadPlanSP
-  Process::FindDetachedPlanExplainingStop(Thread &thread, Event *event_ptr);
+  Process::DoesStackExplainStopNoLock(ThreadPlanStack &stack, Thread &thread,
+                                      Event *event_ptr);
 
 protected:
+  // Constructors and Destructors
+  ThreadPlan(ThreadPlanKind kind, const char *name, Thread &thread,
+             Vote report_stop_vote, Vote report_run_vote);
+
   // Classes that inherit from ThreadPlan can see and modify these
 
   virtual bool DoWillResume(lldb::StateType resume_state, bool current_plan) {
@@ -523,6 +510,15 @@ protected:
   }
 
   virtual bool DoPlanExplainsStop(Event *event_ptr) = 0;
+
+  // This pushes a plan onto the plan stack of the current plan's thread.
+  // Also sets the plans to private and not master plans.  A plan pushed by
+  // another thread plan is never either of the above.
+  void PushPlan(lldb::ThreadPlanSP &thread_plan_sp) {
+    GetThread().PushPlan(thread_plan_sp);
+    thread_plan_sp->SetPrivate(true);
+    thread_plan_sp->SetIsMasterPlan(false);
+  }
 
   // This gets the previous plan to the current plan (for forwarding requests).
   // This is mostly a formal requirement, it allows us to make the Thread's
@@ -541,13 +537,11 @@ protected:
     GetThread().SetStopInfo(stop_reason_sp);
   }
 
-  void CachePlanExplainsStop(bool does_explain) {
-    m_cached_plan_explains_stop = does_explain ? eLazyBoolYes : eLazyBoolNo;
-  }
-
+  // BEGIN SWIFT MOD
   LazyBool GetCachedPlanExplainsStop() const {
     return m_cached_plan_explains_stop;
   }
+  // END SWIFT MOD
 
   virtual lldb::StateType GetPlanRunState() = 0;
 
@@ -556,13 +550,17 @@ protected:
   Status m_status;
   Process &m_process;
   lldb::tid_t m_tid;
-  Vote m_stop_vote;
-  Vote m_run_vote;
+  Vote m_report_stop_vote;
+  Vote m_report_run_vote;
   bool m_takes_iteration_count;
   bool m_could_not_resolve_hw_bp;
   int32_t m_iteration_count = 1;
 
 private:
+  void CachePlanExplainsStop(bool does_explain) {
+    m_cached_plan_explains_stop = does_explain ? eLazyBoolYes : eLazyBoolNo;
+  }
+
   // For ThreadPlan only
   static lldb::user_id_t GetNextID();
 

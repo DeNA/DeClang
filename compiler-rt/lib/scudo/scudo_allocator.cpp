@@ -300,15 +300,8 @@ struct Allocator {
 
   // Allocates a chunk.
   void *allocate(uptr Size, uptr Alignment, AllocType Type,
-                 bool ForceZeroContents = false) {
+                 bool ForceZeroContents = false) NO_THREAD_SAFETY_ANALYSIS {
     initThreadMaybe();
-
-#ifdef GWP_ASAN_HOOKS
-    if (UNLIKELY(GuardedAlloc.shouldSample())) {
-      if (void *Ptr = GuardedAlloc.allocate(Size))
-        return Ptr;
-    }
-#endif // GWP_ASAN_HOOKS
 
     if (UNLIKELY(Alignment > MaxAlignment)) {
       if (AllocatorMayReturnNull())
@@ -317,6 +310,16 @@ struct Allocator {
     }
     if (UNLIKELY(Alignment < MinAlignment))
       Alignment = MinAlignment;
+
+#ifdef GWP_ASAN_HOOKS
+    if (UNLIKELY(GuardedAlloc.shouldSample())) {
+      if (void *Ptr = GuardedAlloc.allocate(Size, Alignment)) {
+        if (SCUDO_CAN_USE_HOOKS && &__sanitizer_malloc_hook)
+          __sanitizer_malloc_hook(Ptr, Size);
+        return Ptr;
+      }
+    }
+#endif // GWP_ASAN_HOOKS
 
     const uptr NeededSize = RoundUpTo(Size ? Size : 1, MinAlignment) +
         Chunk::getHeaderSize();
@@ -402,7 +405,7 @@ struct Allocator {
   // a zero-sized quarantine, or if the size of the chunk is greater than the
   // quarantine chunk size threshold.
   void quarantineOrDeallocateChunk(void *Ptr, UnpackedHeader *Header,
-                                   uptr Size) {
+                                   uptr Size) NO_THREAD_SAFETY_ANALYSIS {
     const bool BypassQuarantine = !Size || (Size > QuarantineChunksUpToSize);
     if (BypassQuarantine) {
       UnpackedHeader NewHeader = *Header;
@@ -672,16 +675,17 @@ static BackendT &getBackend() {
 void initScudo() {
   Instance.init();
 #ifdef GWP_ASAN_HOOKS
-  gwp_asan::options::initOptions();
+  gwp_asan::options::initOptions(__sanitizer::GetEnv("GWP_ASAN_OPTIONS"),
+                                 Printf);
   gwp_asan::options::Options &Opts = gwp_asan::options::getOptions();
-  Opts.Backtrace = gwp_asan::options::getBacktraceFunction();
+  Opts.Backtrace = gwp_asan::backtrace::getBacktraceFunction();
   GuardedAlloc.init(Opts);
 
   if (Opts.InstallSignalHandlers)
-    gwp_asan::crash_handler::installSignalHandlers(
+    gwp_asan::segv_handler::installSignalHandlers(
         &GuardedAlloc, __sanitizer::Printf,
-        gwp_asan::options::getPrintBacktraceFunction(),
-        gwp_asan::crash_handler::getSegvBacktraceFunction());
+        gwp_asan::backtrace::getPrintBacktraceFunction(),
+        gwp_asan::backtrace::getSegvBacktraceFunction());
 #endif // GWP_ASAN_HOOKS
 }
 

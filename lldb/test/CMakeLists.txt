@@ -12,6 +12,11 @@ if(LLDB_BUILT_STANDALONE)
 endif()
 
 # Configure the build directory.
+# The .noindex suffix is a marker for Spotlight to never index the
+# build directory.  LLDB queries Spotlight to locate .dSYM bundles
+# based on the UUID embedded in a binary, and because the UUID is a
+# hash of filename and .text section, there *will* be conflicts inside
+# the build directory.
 set(LLDB_TEST_BUILD_DIRECTORY "${PROJECT_BINARY_DIR}/lldb-test-build.noindex" CACHE PATH "The build root for building tests.")
 
 # Configure and create module cache directories.
@@ -31,12 +36,16 @@ string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} LLDB_LIBS_DIR ${LLVM_LIBRA
 string(REPLACE ${CMAKE_CFG_INTDIR} ${LLVM_BUILD_MODE} LLDB_TOOLS_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
 
 # Create a custom target to track test dependencies.
+add_custom_target(lldb-test-depends)
+set_target_properties(lldb-test-depends PROPERTIES FOLDER "lldb misc")
+
+# Create an alias for the legacy name of lldb-test-depends
 add_custom_target(lldb-test-deps)
-set_target_properties(lldb-test-deps PROPERTIES FOLDER "lldb misc")
+add_dependencies(lldb-test-deps lldb-test-depends)
 
 function(add_lldb_test_dependency)
   foreach(dependency ${ARGN})
-    add_dependencies(lldb-test-deps ${dependency})
+    add_dependencies(lldb-test-depends ${dependency})
   endforeach()
 endfunction(add_lldb_test_dependency)
 
@@ -49,16 +58,15 @@ if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
   add_lldb_test_dependency(darwin-debug)
 endif()
 
+if(TARGET debugserver)
+  add_lldb_test_dependency(debugserver)
+endif()
 if(TARGET lldb-server)
   add_lldb_test_dependency(lldb-server)
 endif()
 
 if(TARGET lldb-vscode)
   add_lldb_test_dependency(lldb-vscode)
-endif()
-
-if(TARGET lldb-instr)
-  add_lldb_test_dependency(lldb-instr)
 endif()
 
 if(TARGET liblldb)
@@ -106,7 +114,7 @@ if(TARGET clang)
     else()
       # We require libcxx for the test suite, so if we aren't building it,
       # try to provide a helpful error about how to resolve the situation.
-      if(NOT TARGET cxx)
+      if(NOT TARGET cxx AND NOT libcxx IN_LIST LLVM_ENABLE_RUNTIMES)
         if(LLVM_ENABLE_PROJECTS STREQUAL "")
           # If `LLVM_ENABLE_PROJECTS` is not being used (implying that we are
           # using the old layout), suggest checking it out.
@@ -118,13 +126,21 @@ if(TARGET clang)
           # If `LLVM_ENABLE_PROJECTS` is being used, suggest adding it.
           message(FATAL_ERROR
             "LLDB test suite requires libc++, but it is currently disabled. "
-            "Please add `libcxx` to `LLVM_ENABLE_PROJECTS` or disable tests "
-            "via `LLDB_INCLUDE_TESTS=OFF`.")
+            "Please add `libcxx` to `LLVM_ENABLE_PROJECTS` or "
+            "`LLVM_ENABLE_RUNTIMES`, or disable tests via "
+            "`LLDB_INCLUDE_TESTS=OFF`.")
         endif()
       endif()
-      add_lldb_test_dependency(cxx)
     endif()
   endif()
+
+  # Add libc++ dependency for libc++-specific tests. This is an optional
+  # dependency as it's also possible to run the libc++ tests against the libc++
+  # installed on the system.
+  if (TARGET cxx)
+    add_lldb_test_dependency(cxx)
+  endif()
+
 endif()
 
 # BEGIN Swift Mods
@@ -219,7 +235,7 @@ add_lit_testsuite(check-lldb-reproducers-capture
   ${CMAKE_CURRENT_BINARY_DIR}/Shell
   PARAMS "lldb-run-with-repro=capture"
   EXCLUDE_FROM_CHECK_ALL
-  DEPENDS lldb-test-deps)
+  DEPENDS lldb-test-depends)
 
 # Add a lit test suite that runs the API & shell test by replaying a
 # reproducer.
@@ -229,7 +245,7 @@ add_lit_testsuite(check-lldb-reproducers
   ${CMAKE_CURRENT_BINARY_DIR}/Shell
   PARAMS "lldb-run-with-repro=replay"
   EXCLUDE_FROM_CHECK_ALL
-  DEPENDS lldb-test-deps)
+  DEPENDS lldb-test-depends)
 add_dependencies(check-lldb-reproducers check-lldb-reproducers-capture)
 
 if(LLDB_BUILT_STANDALONE)

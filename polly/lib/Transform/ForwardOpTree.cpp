@@ -306,6 +306,9 @@ private:
     // { Domain[] -> Element[] }
     isl::map Result;
 
+    // Make irrelevant elements not interfere.
+    Domain = Domain.intersect_params(S->getContext());
+
     // MemoryAccesses can read only elements from a single array
     // (i.e. not: { Dom[0] -> A[0]; Dom[1] -> B[1] }).
     // Look through all spaces until we find one that contains at least the
@@ -360,11 +363,11 @@ public:
       Translator = makeIdentityMap(Known.range(), false);
     }
 
-    if (!Known || !Translator || !NormalizeMap) {
+    if (Known.is_null() || Translator.is_null() || NormalizeMap.is_null()) {
       assert(isl_ctx_last_error(IslCtx.get()) == isl_error_quota);
-      Known = nullptr;
-      Translator = nullptr;
-      NormalizeMap = nullptr;
+      Known = {};
+      Translator = {};
+      NormalizeMap = {};
       LLVM_DEBUG(dbgs() << "Known analysis exceeded max_operations\n");
       return false;
     }
@@ -522,7 +525,7 @@ public:
     isl::union_map Candidates = findSameContentElements(TranslatedExpectedVal);
 
     isl::map SameVal = singleLocation(Candidates, getDomainFor(TargetStmt));
-    if (!SameVal)
+    if (SameVal.is_null())
       return ForwardingAction::notApplicable();
 
     LLVM_DEBUG(dbgs() << "      expected values where " << TargetExpectedVal
@@ -568,7 +571,7 @@ public:
       LLVM_DEBUG(dbgs() << "      local translator is " << LocalTranslator
                         << "\n");
 
-      if (!LocalTranslator)
+      if (LocalTranslator.is_null())
         return ForwardingAction::notApplicable();
     }
 
@@ -580,8 +583,8 @@ public:
                         << Access << "\n");
       (void)Access;
 
-      if (LocalTranslator)
-        Translator = Translator.add_map(LocalTranslator);
+      if (!LocalTranslator.is_null())
+        Translator = Translator.unite(LocalTranslator);
 
       NumKnownLoadsForwarded++;
       TotalKnownLoadsForwarded++;
@@ -631,7 +634,7 @@ public:
 
     isl::map SameVal = singleLocation(Candidates, getDomainFor(TargetStmt));
     simplify(SameVal);
-    if (!SameVal)
+    if (SameVal.is_null())
       return ForwardingAction::notApplicable();
 
     auto ExecAction = [this, TargetStmt, Inst, SameVal]() {
@@ -1021,7 +1024,74 @@ public:
 
     printStatements(OS, Indent);
   }
+
+  bool isModified() const { return Modified; }
 };
+
+static std::unique_ptr<ForwardOpTreeImpl> runForwardOpTree(Scop &S,
+                                                           LoopInfo &LI) {
+  std::unique_ptr<ForwardOpTreeImpl> Impl;
+  {
+    IslMaxOperationsGuard MaxOpGuard(S.getIslCtx().get(), MaxOps, false);
+    Impl = std::make_unique<ForwardOpTreeImpl>(&S, &LI, MaxOpGuard);
+
+    if (AnalyzeKnown) {
+      LLVM_DEBUG(dbgs() << "Prepare forwarders...\n");
+      Impl->computeKnownValues();
+    }
+
+    LLVM_DEBUG(dbgs() << "Forwarding operand trees...\n");
+    Impl->forwardOperandTrees();
+
+    if (MaxOpGuard.hasQuotaExceeded()) {
+      LLVM_DEBUG(dbgs() << "Not all operations completed because of "
+                           "max_operations exceeded\n");
+      KnownOutOfQuota++;
+    }
+  }
+
+  LLVM_DEBUG(dbgs() << "\nFinal Scop:\n");
+  LLVM_DEBUG(dbgs() << S);
+
+  // Update statistics
+  Scop::ScopStatistics ScopStats = S.getStatistics();
+  NumValueWrites += ScopStats.NumValueWrites;
+  NumValueWritesInLoops += ScopStats.NumValueWritesInLoops;
+  NumPHIWrites += ScopStats.NumPHIWrites;
+  NumPHIWritesInLoops += ScopStats.NumPHIWritesInLoops;
+  NumSingletonWrites += ScopStats.NumSingletonWrites;
+  NumSingletonWritesInLoops += ScopStats.NumSingletonWritesInLoops;
+
+  return Impl;
+}
+
+static PreservedAnalyses
+runForwardOpTreeUsingNPM(Scop &S, ScopAnalysisManager &SAM,
+                         ScopStandardAnalysisResults &SAR, SPMUpdater &U,
+                         raw_ostream *OS) {
+  LoopInfo &LI = SAR.LI;
+
+  std::unique_ptr<ForwardOpTreeImpl> Impl = runForwardOpTree(S, LI);
+  if (OS) {
+    *OS << "Printing analysis 'Polly - Forward operand tree' for region: '"
+        << S.getName() << "' in function '" << S.getFunction().getName()
+        << "':\n";
+    if (Impl) {
+      assert(Impl->getScop() == &S);
+
+      Impl->print(*OS);
+    }
+  }
+
+  if (!Impl->isModified())
+    return PreservedAnalyses::all();
+
+  PreservedAnalyses PA;
+  PA.preserveSet<AllAnalysesOn<Module>>();
+  PA.preserveSet<AllAnalysesOn<Function>>();
+  PA.preserveSet<AllAnalysesOn<Loop>>();
+  return PA;
+}
 
 /// Pass that redirects scalar reads to array elements that are known to contain
 /// the same value.
@@ -1031,7 +1101,7 @@ public:
 /// scalar definition are redirected (We currently do not care about removing
 /// the write in this case).  This is also useful for the main DeLICM pass as
 /// there are less scalars to be mapped.
-class ForwardOpTree : public ScopPass {
+class ForwardOpTreeWrapperPass : public ScopPass {
 private:
   /// The pass implementation, also holding per-scop data.
   std::unique_ptr<ForwardOpTreeImpl> Impl;
@@ -1039,9 +1109,10 @@ private:
 public:
   static char ID;
 
-  explicit ForwardOpTree() : ScopPass(ID) {}
-  ForwardOpTree(const ForwardOpTree &) = delete;
-  ForwardOpTree &operator=(const ForwardOpTree &) = delete;
+  explicit ForwardOpTreeWrapperPass() : ScopPass(ID) {}
+  ForwardOpTreeWrapperPass(const ForwardOpTreeWrapperPass &) = delete;
+  ForwardOpTreeWrapperPass &
+  operator=(const ForwardOpTreeWrapperPass &) = delete;
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequiredTransitive<ScopInfoRegionPass>();
@@ -1055,36 +1126,7 @@ public:
 
     LoopInfo &LI = getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
 
-    {
-      IslMaxOperationsGuard MaxOpGuard(S.getIslCtx().get(), MaxOps, false);
-      Impl = std::make_unique<ForwardOpTreeImpl>(&S, &LI, MaxOpGuard);
-
-      if (AnalyzeKnown) {
-        LLVM_DEBUG(dbgs() << "Prepare forwarders...\n");
-        Impl->computeKnownValues();
-      }
-
-      LLVM_DEBUG(dbgs() << "Forwarding operand trees...\n");
-      Impl->forwardOperandTrees();
-
-      if (MaxOpGuard.hasQuotaExceeded()) {
-        LLVM_DEBUG(dbgs() << "Not all operations completed because of "
-                             "max_operations exceeded\n");
-        KnownOutOfQuota++;
-      }
-    }
-
-    LLVM_DEBUG(dbgs() << "\nFinal Scop:\n");
-    LLVM_DEBUG(dbgs() << S);
-
-    // Update statistics
-    auto ScopStats = S.getStatistics();
-    NumValueWrites += ScopStats.NumValueWrites;
-    NumValueWritesInLoops += ScopStats.NumValueWritesInLoops;
-    NumPHIWrites += ScopStats.NumPHIWrites;
-    NumPHIWritesInLoops += ScopStats.NumPHIWritesInLoops;
-    NumSingletonWrites += ScopStats.NumSingletonWrites;
-    NumSingletonWritesInLoops += ScopStats.NumSingletonWritesInLoops;
+    Impl = runForwardOpTree(S, LI);
 
     return false;
   }
@@ -1100,13 +1142,28 @@ public:
   void releaseMemory() override { Impl.reset(); }
 }; // class ForwardOpTree
 
-char ForwardOpTree::ID;
+char ForwardOpTreeWrapperPass::ID;
 } // namespace
 
-ScopPass *polly::createForwardOpTreePass() { return new ForwardOpTree(); }
+Pass *polly::createForwardOpTreeWrapperPass() {
+  return new ForwardOpTreeWrapperPass();
+}
 
-INITIALIZE_PASS_BEGIN(ForwardOpTree, "polly-optree",
+INITIALIZE_PASS_BEGIN(ForwardOpTreeWrapperPass, "polly-optree",
                       "Polly - Forward operand tree", false, false)
 INITIALIZE_PASS_DEPENDENCY(LoopInfoWrapperPass)
-INITIALIZE_PASS_END(ForwardOpTree, "polly-optree",
+INITIALIZE_PASS_END(ForwardOpTreeWrapperPass, "polly-optree",
                     "Polly - Forward operand tree", false, false)
+
+llvm::PreservedAnalyses ForwardOpTreePass::run(Scop &S,
+                                               ScopAnalysisManager &SAM,
+                                               ScopStandardAnalysisResults &SAR,
+                                               SPMUpdater &U) {
+  return runForwardOpTreeUsingNPM(S, SAM, SAR, U, nullptr);
+}
+
+llvm::PreservedAnalyses
+ForwardOpTreePrinterPass::run(Scop &S, ScopAnalysisManager &SAM,
+                              ScopStandardAnalysisResults &SAR, SPMUpdater &U) {
+  return runForwardOpTreeUsingNPM(S, SAM, SAR, U, &OS);
+}

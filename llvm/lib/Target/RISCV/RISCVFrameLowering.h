@@ -65,6 +65,11 @@ public:
   bool canUseAsPrologue(const MachineBasicBlock &MBB) const override;
   bool canUseAsEpilogue(const MachineBasicBlock &MBB) const override;
 
+  bool enableShrinkWrapping(const MachineFunction &MF) const override;
+
+  bool isSupportedStackID(TargetStackID::Value ID) const override;
+  TargetStackID::Value getStackIDForScalableVectors() const override;
+
 protected:
   const RISCVSubtarget &STI;
 
@@ -73,6 +78,10 @@ private:
   void adjustReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator MBBI,
                  const DebugLoc &DL, Register DestReg, Register SrcReg,
                  int64_t Val, MachineInstr::MIFlag Flag) const;
+  void adjustStackForRVV(MachineFunction &MF, MachineBasicBlock &MBB,
+                         MachineBasicBlock::iterator MBBI, const DebugLoc &DL,
+                         int64_t Amount, MachineInstr::MIFlag Flag) const;
+  int64_t assignRVVStackObjectOffsets(MachineFrameInfo &MFI) const;
 };
 }
 #endif

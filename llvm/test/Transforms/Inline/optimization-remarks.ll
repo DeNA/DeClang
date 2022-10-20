@@ -19,17 +19,17 @@
 ; RUN:       -pass-remarks-analysis=inline -pass-remarks-with-hotness -S 2>&1 | \
 ; RUN:       FileCheck -check-prefixes=CHECK,HOTNESS,ALWAYS %s
 
-; RUN: opt < %s -passes=inliner-wrapper -pass-remarks=inline -pass-remarks-missed=inline \
+; RUN: opt < %s -passes=inliner-wrapper-no-mandatory-first -pass-remarks=inline -pass-remarks-missed=inline \
 ; RUN:       -pass-remarks-analysis=inline -S 2>&1 | \
 ; RUN:       FileCheck -check-prefixes=CHECK,NO_HOTNESS,ALWAYS %s
-; RUN: opt < %s -passes=inliner-wrapper -pass-remarks=inline -pass-remarks-missed=inline \
+; RUN: opt < %s -passes=inliner-wrapper-no-mandatory-first -pass-remarks=inline -pass-remarks-missed=inline \
 ; RUN:       -pass-remarks-analysis=inline -pass-remarks-with-hotness -S 2>&1 | \
 ; RUN:       FileCheck -check-prefixes=CHECK,HOTNESS,ALWAYS %s
 
 ; HOTNESS-DAG: fox will not be inlined into bar because its definition is unavailable
 ; NO_HOTNESS-NOT: fox will not be inlined into bar because its definition is unavailable
-; ALWAYS-DAG: foo inlined into bar with (cost=always): always inline attribute
-; CHECK-DAG: foz not inlined into bar because it should never be inlined (cost=never): noinline function attribute
+; ALWAYS-DAG: 'foo' inlined into 'bar' with (cost=always): always inline attribute
+; CHECK-DAG: 'foz' not inlined into 'bar' because it should never be inlined (cost=never): noinline function attribute
 
 ; Function Attrs: alwaysinline nounwind uwtable
 define i32 @foo(i32 %x, i32 %y) #0 !prof !1 {

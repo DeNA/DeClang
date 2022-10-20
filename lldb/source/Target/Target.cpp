@@ -7,9 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Target/Target.h"
-#include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
-#include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
-#include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "lldb/Breakpoint/BreakpointIDList.h"
 #include "lldb/Breakpoint/BreakpointPrecondition.h"
 #include "lldb/Breakpoint/BreakpointResolver.h"
@@ -46,6 +43,7 @@
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/SymbolVendor.h"
+#include "lldb/Target/ABI.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/Process.h"
@@ -58,12 +56,14 @@
 #include "lldb/Utility/Event.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/LLDBAssert.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/Timer.h"
 
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/ADT/SetVector.h"
 
 #include <memory>
 #include <mutex>
@@ -103,13 +103,10 @@ Target::Target(Debugger &debugger, const ArchSpec &target_arch,
       m_watchpoint_list(), m_process_sp(), m_search_filter_sp(),
       m_image_search_paths(ImageSearchPathsChanged, this),
       m_source_manager_up(), m_stop_hooks(), m_stop_hook_next_id(0),
-      m_valid(true), m_suppress_stop_hooks(false),
+      m_latest_stop_hook_id(0), m_valid(true), m_suppress_stop_hooks(false),
       m_is_dummy_target(is_dummy_target),
       m_frame_recognizer_manager_up(
-          std::make_unique<StackFrameRecognizerManager>()),
-      m_stats_storage(static_cast<int>(StatisticKind::StatisticMax))
-
-{
+          std::make_unique<StackFrameRecognizerManager>()) {
   SetEventName(eBroadcastBitBreakpointChanged, "breakpoint-changed");
   SetEventName(eBroadcastBitModulesLoaded, "modules-loaded");
   SetEventName(eBroadcastBitModulesUnloaded, "modules-unloaded");
@@ -118,10 +115,10 @@ Target::Target(Debugger &debugger, const ArchSpec &target_arch,
 
   CheckInWithManager();
 
-  LLDB_LOG(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT),
-           "{0} Target::Target()", static_cast<void *>(this));
+  LLDB_LOG(GetLog(LLDBLog::Object), "{0} Target::Target()",
+           static_cast<void *>(this));
   if (target_arch.IsValid()) {
-    LLDB_LOG(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET),
+    LLDB_LOG(GetLog(LLDBLog::Target),
              "Target::Target created with architecture {0} ({1})",
              target_arch.GetArchitectureName(),
              target_arch.GetTriple().getTriple().c_str());
@@ -131,7 +128,7 @@ Target::Target(Debugger &debugger, const ArchSpec &target_arch,
 }
 
 Target::~Target() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_OBJECT));
+  Log *log = GetLog(LLDBLog::Object);
   LLDB_LOG(log, "{0} Target::~Target()", static_cast<void *>(this));
   DeleteCurrentProcess();
 }
@@ -189,6 +186,7 @@ void Target::CleanupProcess() {
   DisableAllWatchpoints(false);
   ClearAllWatchpointHitCounts();
   ClearAllWatchpointHistoricValues();
+  m_latest_stop_hook_id = 0;
 }
 
 void Target::DeleteCurrentProcess() {
@@ -221,12 +219,8 @@ const lldb::ProcessSP &Target::GetProcessSP() const { return m_process_sp; }
 
 lldb::REPLSP Target::GetREPL(Status &err, lldb::LanguageType language,
                              const char *repl_options, bool can_create) {
-  err.Clear();
-
-  if (!GetProcessSP()) {
-    err.SetErrorStringWithFormat("Can't run the REPL without a live process.");
-    return REPLSP();
-  }
+  if (language == eLanguageTypeUnknown)
+    language = m_debugger.GetREPLLanguage();
 
   if (language == eLanguageTypeUnknown) {
     LanguageSet repl_languages = Language::GetLanguagesSupportingREPLs();
@@ -234,11 +228,11 @@ lldb::REPLSP Target::GetREPL(Status &err, lldb::LanguageType language,
     if (auto single_lang = repl_languages.GetSingularLanguage()) {
       language = *single_lang;
     } else if (repl_languages.Empty()) {
-      err.SetErrorStringWithFormat(
+      err.SetErrorString(
           "LLDB isn't configured with REPL support for any languages.");
       return REPLSP();
     } else {
-      err.SetErrorStringWithFormat(
+      err.SetErrorString(
           "Multiple possible REPL languages.  Please specify a language.");
       return REPLSP();
     }
@@ -648,12 +642,8 @@ lldb::BreakpointSP Target::CreateScriptedBreakpoint(
         shared_from_this());
   }
 
-  StructuredDataImpl *extra_args_impl = new StructuredDataImpl();
-  if (extra_args_sp)
-    extra_args_impl->SetObjectSP(extra_args_sp);
-
   BreakpointResolverSP resolver_sp(new BreakpointResolverScripted(
-      nullptr, class_name, depth, extra_args_impl));
+      nullptr, class_name, depth, StructuredDataImpl(extra_args_sp)));
   return CreateBreakpoint(filter_sp, resolver_sp, internal, false, true);
 }
 
@@ -680,7 +670,7 @@ void Target::AddBreakpoint(lldb::BreakpointSP bp_sp, bool internal) {
   else
     m_breakpoint_list.Add(bp_sp, true);
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   if (log) {
     StreamString s;
     bp_sp->GetDescription(&s, lldb::eDescriptionLevelVerbose);
@@ -776,8 +766,7 @@ void Target::ApplyNameToBreakpoints(BreakpointName &bp_name) {
       m_breakpoint_list.FindBreakpointsByName(bp_name.GetName().AsCString());
 
   if (!expected_vector) {
-    LLDB_LOG(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS),
-             "invalid breakpoint name: {}",
+    LLDB_LOG(GetLog(LLDBLog::Breakpoints), "invalid breakpoint name: {}",
              llvm::toString(expected_vector.takeError()));
     return;
   }
@@ -822,7 +811,7 @@ static bool CheckIfWatchpointsSupported(Target *target, Status &error) {
 WatchpointSP Target::CreateWatchpoint(lldb::addr_t addr, size_t size,
                                       const CompilerType *type, uint32_t kind,
                                       Status &error) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log,
             "Target::%s (addr = 0x%8.8" PRIx64 " size = %" PRIu64
             " type = %u)\n",
@@ -855,6 +844,11 @@ WatchpointSP Target::CreateWatchpoint(lldb::addr_t addr, size_t size,
   // Grab the list mutex while doing operations.
   const bool notify = false; // Don't notify about all the state changes we do
                              // on creating the watchpoint.
+
+  // Mask off ignored bits from watchpoint address.
+  if (ABISP abi = m_process_sp->GetABI())
+    addr = abi->FixDataAddress(addr);
+
   std::unique_lock<std::recursive_mutex> lock;
   this->GetWatchpointList().GetListMutex(lock);
   WatchpointSP matched_sp = m_watchpoint_list.FindByAddress(addr);
@@ -901,7 +895,7 @@ WatchpointSP Target::CreateWatchpoint(lldb::addr_t addr, size_t size,
 }
 
 void Target::RemoveAllowedBreakpoints() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s \n", __FUNCTION__);
 
   m_breakpoint_list.RemoveAllowed(true);
@@ -910,7 +904,7 @@ void Target::RemoveAllowedBreakpoints() {
 }
 
 void Target::RemoveAllBreakpoints(bool internal_also) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s (internal_also = %s)\n", __FUNCTION__,
             internal_also ? "yes" : "no");
 
@@ -922,7 +916,7 @@ void Target::RemoveAllBreakpoints(bool internal_also) {
 }
 
 void Target::DisableAllBreakpoints(bool internal_also) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s (internal_also = %s)\n", __FUNCTION__,
             internal_also ? "yes" : "no");
 
@@ -932,14 +926,14 @@ void Target::DisableAllBreakpoints(bool internal_also) {
 }
 
 void Target::DisableAllowedBreakpoints() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s", __FUNCTION__);
 
   m_breakpoint_list.SetEnabledAllowed(false);
 }
 
 void Target::EnableAllBreakpoints(bool internal_also) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s (internal_also = %s)\n", __FUNCTION__,
             internal_also ? "yes" : "no");
 
@@ -949,14 +943,14 @@ void Target::EnableAllBreakpoints(bool internal_also) {
 }
 
 void Target::EnableAllowedBreakpoints() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s", __FUNCTION__);
 
   m_breakpoint_list.SetEnabledAllowed(true);
 }
 
 bool Target::RemoveBreakpointByID(break_id_t break_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s (break_id = %i, internal = %s)\n", __FUNCTION__,
             break_id, LLDB_BREAK_ID_IS_INTERNAL(break_id) ? "yes" : "no");
 
@@ -976,7 +970,7 @@ bool Target::RemoveBreakpointByID(break_id_t break_id) {
 }
 
 bool Target::DisableBreakpointByID(break_id_t break_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s (break_id = %i, internal = %s)\n", __FUNCTION__,
             break_id, LLDB_BREAK_ID_IS_INTERNAL(break_id) ? "yes" : "no");
 
@@ -994,7 +988,7 @@ bool Target::DisableBreakpointByID(break_id_t break_id) {
 }
 
 bool Target::EnableBreakpointByID(break_id_t break_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS));
+  Log *log = GetLog(LLDBLog::Breakpoints);
   LLDB_LOGF(log, "Target::%s (break_id = %i, internal = %s)\n", __FUNCTION__,
             break_id, LLDB_BREAK_ID_IS_INTERNAL(break_id) ? "yes" : "no");
 
@@ -1046,7 +1040,7 @@ Status Target::SerializeBreakpointsToFile(const FileSpec &file,
   }
 
   StreamFile out_file(path.c_str(),
-                      File::eOpenOptionTruncate | File::eOpenOptionWrite |
+                      File::eOpenOptionTruncate | File::eOpenOptionWriteOnly |
                           File::eOpenOptionCanCreate |
                           File::eOpenOptionCloseOnExec,
                       lldb::eFilePermissionsFileDefault);
@@ -1172,7 +1166,7 @@ Status Target::CreateBreakpointsFromFile(const FileSpec &file,
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list for end
 // to end operations.
 bool Target::RemoveAllWatchpoints(bool end_to_end) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s\n", __FUNCTION__);
 
   if (!end_to_end) {
@@ -1185,9 +1179,7 @@ bool Target::RemoveAllWatchpoints(bool end_to_end) {
   if (!ProcessIsValid())
     return false;
 
-  size_t num_watchpoints = m_watchpoint_list.GetSize();
-  for (size_t i = 0; i < num_watchpoints; ++i) {
-    WatchpointSP wp_sp = m_watchpoint_list.GetByIndex(i);
+  for (WatchpointSP wp_sp : m_watchpoint_list.Watchpoints()) {
     if (!wp_sp)
       return false;
 
@@ -1203,7 +1195,7 @@ bool Target::RemoveAllWatchpoints(bool end_to_end) {
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list for end
 // to end operations.
 bool Target::DisableAllWatchpoints(bool end_to_end) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s\n", __FUNCTION__);
 
   if (!end_to_end) {
@@ -1216,9 +1208,7 @@ bool Target::DisableAllWatchpoints(bool end_to_end) {
   if (!ProcessIsValid())
     return false;
 
-  size_t num_watchpoints = m_watchpoint_list.GetSize();
-  for (size_t i = 0; i < num_watchpoints; ++i) {
-    WatchpointSP wp_sp = m_watchpoint_list.GetByIndex(i);
+  for (WatchpointSP wp_sp : m_watchpoint_list.Watchpoints()) {
     if (!wp_sp)
       return false;
 
@@ -1232,7 +1222,7 @@ bool Target::DisableAllWatchpoints(bool end_to_end) {
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list for end
 // to end operations.
 bool Target::EnableAllWatchpoints(bool end_to_end) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s\n", __FUNCTION__);
 
   if (!end_to_end) {
@@ -1245,9 +1235,7 @@ bool Target::EnableAllWatchpoints(bool end_to_end) {
   if (!ProcessIsValid())
     return false;
 
-  size_t num_watchpoints = m_watchpoint_list.GetSize();
-  for (size_t i = 0; i < num_watchpoints; ++i) {
-    WatchpointSP wp_sp = m_watchpoint_list.GetByIndex(i);
+  for (WatchpointSP wp_sp : m_watchpoint_list.Watchpoints()) {
     if (!wp_sp)
       return false;
 
@@ -1260,12 +1248,10 @@ bool Target::EnableAllWatchpoints(bool end_to_end) {
 
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list.
 bool Target::ClearAllWatchpointHitCounts() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s\n", __FUNCTION__);
 
-  size_t num_watchpoints = m_watchpoint_list.GetSize();
-  for (size_t i = 0; i < num_watchpoints; ++i) {
-    WatchpointSP wp_sp = m_watchpoint_list.GetByIndex(i);
+  for (WatchpointSP wp_sp : m_watchpoint_list.Watchpoints()) {
     if (!wp_sp)
       return false;
 
@@ -1276,12 +1262,10 @@ bool Target::ClearAllWatchpointHitCounts() {
 
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list.
 bool Target::ClearAllWatchpointHistoricValues() {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s\n", __FUNCTION__);
 
-  size_t num_watchpoints = m_watchpoint_list.GetSize();
-  for (size_t i = 0; i < num_watchpoints; ++i) {
-    WatchpointSP wp_sp = m_watchpoint_list.GetByIndex(i);
+  for (WatchpointSP wp_sp : m_watchpoint_list.Watchpoints()) {
     if (!wp_sp)
       return false;
 
@@ -1293,15 +1277,13 @@ bool Target::ClearAllWatchpointHistoricValues() {
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list during
 // these operations.
 bool Target::IgnoreAllWatchpoints(uint32_t ignore_count) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s\n", __FUNCTION__);
 
   if (!ProcessIsValid())
     return false;
 
-  size_t num_watchpoints = m_watchpoint_list.GetSize();
-  for (size_t i = 0; i < num_watchpoints; ++i) {
-    WatchpointSP wp_sp = m_watchpoint_list.GetByIndex(i);
+  for (WatchpointSP wp_sp : m_watchpoint_list.Watchpoints()) {
     if (!wp_sp)
       return false;
 
@@ -1312,7 +1294,7 @@ bool Target::IgnoreAllWatchpoints(uint32_t ignore_count) {
 
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list.
 bool Target::DisableWatchpointByID(lldb::watch_id_t watch_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s (watch_id = %i)\n", __FUNCTION__, watch_id);
 
   if (!ProcessIsValid())
@@ -1331,7 +1313,7 @@ bool Target::DisableWatchpointByID(lldb::watch_id_t watch_id) {
 
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list.
 bool Target::EnableWatchpointByID(lldb::watch_id_t watch_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s (watch_id = %i)\n", __FUNCTION__, watch_id);
 
   if (!ProcessIsValid())
@@ -1350,7 +1332,7 @@ bool Target::EnableWatchpointByID(lldb::watch_id_t watch_id) {
 
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list.
 bool Target::RemoveWatchpointByID(lldb::watch_id_t watch_id) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s (watch_id = %i)\n", __FUNCTION__, watch_id);
 
   WatchpointSP watch_to_remove_sp = m_watchpoint_list.FindByID(watch_id);
@@ -1367,7 +1349,7 @@ bool Target::RemoveWatchpointByID(lldb::watch_id_t watch_id) {
 // Assumption: Caller holds the list mutex lock for m_watchpoint_list.
 bool Target::IgnoreWatchpointByID(lldb::watch_id_t watch_id,
                                   uint32_t ignore_count) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_WATCHPOINTS));
+  Log *log = GetLog(LLDBLog::Watchpoints);
   LLDB_LOGF(log, "Target::%s (watch_id = %i)\n", __FUNCTION__, watch_id);
 
   if (!ProcessIsValid())
@@ -1432,10 +1414,11 @@ void Target::DidExec() {
 
 void Target::SetExecutableModule(ModuleSP &executable_sp,
                                  LoadDependentFiles load_dependent_files) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET));
+  Log *log = GetLog(LLDBLog::Target);
   ClearModules(false);
 
   if (executable_sp) {
+    ElapsedTime elapsed(m_stats.GetCreateTime());
     LLDB_SCOPED_TIMERF("Target::SetExecutableModule (executable = '%s')",
                        executable_sp->GetFileSpec().GetPath().c_str());
 
@@ -1496,7 +1479,7 @@ void Target::SetExecutableModule(ModuleSP &executable_sp,
 }
 
 bool Target::SetArchitecture(const ArchSpec &arch_spec, bool set_platform) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET));
+  Log *log = GetLog(LLDBLog::Target);
   bool missing_local_arch = !m_arch.GetSpec().IsValid();
   bool replace_local_arch = true;
   bool compatible_local_arch = false;
@@ -1509,10 +1492,10 @@ bool Target::SetArchitecture(const ArchSpec &arch_spec, bool set_platform) {
     if (other.IsValid()) {
       auto platform_sp = GetPlatform();
       if (!platform_sp ||
-          !platform_sp->IsCompatibleArchitecture(other, false, nullptr)) {
+          !platform_sp->IsCompatibleArchitecture(other, {}, false, nullptr)) {
         ArchSpec platform_arch;
         auto arch_platform_sp =
-            Platform::GetPlatformForArchitecture(other, &platform_arch);
+            Platform::GetPlatformForArchitecture(other, {}, &platform_arch);
         if (arch_platform_sp) {
           SetPlatform(arch_platform_sp);
           if (platform_arch.IsValid())
@@ -1584,7 +1567,7 @@ bool Target::SetArchitecture(const ArchSpec &arch_spec, bool set_platform) {
 }
 
 bool Target::MergeArchitecture(const ArchSpec &arch_spec) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET));
+  Log *log = GetLog(LLDBLog::Target);
   if (arch_spec.IsValid()) {
     if (m_arch.GetSpec().IsCompatibleMatch(arch_spec)) {
       // The current target arch is compatible with "arch_spec", see if we can
@@ -1661,8 +1644,14 @@ void Target::ModulesDidLoad(ModuleList &module_list) {
     // Notify all the ASTContext(s).
     auto notify_callback = [&](TypeSystem *type_system) {
 #ifdef LLDB_ENABLE_SWIFT
+      auto *swift_scratch_ctx =
+          llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
+              type_system);
+      if (!swift_scratch_ctx)
+        return true;
       auto *swift_ast_ctx =
-          llvm::dyn_cast_or_null<SwiftASTContext>(type_system);
+          llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
+              swift_scratch_ctx->GetSwiftASTContextOrNull());
       if (!swift_ast_ctx)
         return true;
       swift_ast_ctx->ModulesDidLoad(module_list);
@@ -1888,13 +1877,14 @@ size_t Target::ReadMemory(const Address &addr, void *dst, size_t dst_len,
 }
 
 size_t Target::ReadCStringFromMemory(const Address &addr, std::string &out_str,
-                                     Status &error) {
+                                     Status &error, bool force_live_memory) {
   char buf[256];
   out_str.clear();
   addr_t curr_addr = addr.GetLoadAddress(this);
   Address address(addr);
   while (true) {
-    size_t length = ReadCStringFromMemory(address, buf, sizeof(buf), error);
+    size_t length = ReadCStringFromMemory(address, buf, sizeof(buf), error,
+                                          force_live_memory);
     if (length == 0)
       break;
     out_str.append(buf, length);
@@ -1910,7 +1900,8 @@ size_t Target::ReadCStringFromMemory(const Address &addr, std::string &out_str,
 }
 
 size_t Target::ReadCStringFromMemory(const Address &addr, char *dst,
-                                     size_t dst_max_len, Status &result_error) {
+                                     size_t dst_max_len, Status &result_error,
+                                     bool force_live_memory) {
   size_t total_cstr_len = 0;
   if (dst && dst_max_len) {
     result_error.Clear();
@@ -1933,8 +1924,8 @@ size_t Target::ReadCStringFromMemory(const Address &addr, char *dst,
           cache_line_size - (curr_addr % cache_line_size);
       addr_t bytes_to_read =
           std::min<addr_t>(bytes_left, cache_line_bytes_left);
-      size_t bytes_read =
-          ReadMemory(address, curr_dst, bytes_to_read, error, true);
+      size_t bytes_read = ReadMemory(address, curr_dst, bytes_to_read, error,
+                                     force_live_memory);
 
       if (bytes_read == 0) {
         result_error = error;
@@ -2182,8 +2173,7 @@ ModuleSP Target::GetOrCreateModule(const ModuleSpec &module_spec, bool notify,
           // In the meantime, just log that this has happened; just
           // above we called ReplaceModule on the first one, and Remove
           // on the rest.
-          if (Log *log = GetLogIfAnyCategoriesSet(LIBLLDB_LOG_TARGET |
-                                                  LIBLLDB_LOG_MODULES)) {
+          if (Log *log = GetLog(LLDBLog::Target | LLDBLog::Modules)) {
             StreamString message;
             auto dump = [&message](Module &dump_module) -> void {
               UUID dump_uuid = dump_module.GetUUID();
@@ -2291,16 +2281,24 @@ Target::GetScratchTypeSystemForLanguage(lldb::LanguageType language,
 
 #ifdef LLDB_ENABLE_SWIFT
   if (language == eLanguageTypeSwift) {
-    if (auto *swift_ast_ctx =
-            llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
+    if (auto *swift_scratch_ctx =
+            llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
                 &*type_system_or_err)) {
-      if (swift_ast_ctx->CheckProcessChanged() ||
-          swift_ast_ctx->HasFatalErrors()) {
+      auto *swift_ast_ctx =
+          llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
+              swift_scratch_ctx->GetSwiftASTContextOrNull());
+      // Replace the scratch context if it contains fatal errors or
+      // needs to be replaced because new lldb::Modules were loaded.
+      if (swift_ast_ctx && (swift_ast_ctx->CheckProcessChanged() ||
+                            swift_ast_ctx->HasFatalErrors())) {
         // If it is safe to replace the scratch context, do so. If
         // try_lock() fails, then higher stack frame (or another
         // thread) is holding a read lock to the scratch context and
         // replacing it could cause a use-after-free later on.
         if (GetSwiftScratchContextLock().try_lock()) {
+          auto unlock = llvm::make_scope_exit([this] {
+            GetSwiftScratchContextLock().unlock();
+          });
           if (m_use_scratch_typesystem_per_module)
             DisplayFallbackSwiftContextErrors(swift_ast_ctx);
           else if (StreamSP errs = GetDebugger().GetAsyncErrorStream()) {
@@ -2320,37 +2318,36 @@ Target::GetScratchTypeSystemForLanguage(lldb::LanguageType language,
               errs->Flush();
             }
           }
+        }
 
-          m_scratch_type_system_map.RemoveTypeSystemsForLanguage(language);
-          type_system_or_err = m_scratch_type_system_map.GetTypeSystemForLanguage(
-              language, this, create_on_demand, compiler_options);
-          if (!type_system_or_err)
-            return type_system_or_err.takeError();
+        m_scratch_type_system_map.RemoveTypeSystemsForLanguage(language);
+        type_system_or_err = m_scratch_type_system_map.GetTypeSystemForLanguage(
+            language, this, create_on_demand, compiler_options);
+        if (!type_system_or_err)
+          return type_system_or_err.takeError();
 
-          if (auto *new_swift_ast_ctx =
-                  llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
-                      &*type_system_or_err)) {
-            if (new_swift_ast_ctx->HasFatalErrors()) {
-              if (StreamSP error_stream_sp =
-                      GetDebugger().GetAsyncErrorStream()) {
-                error_stream_sp->PutCString(
-                    "Can't construct shared Swift state "
-                    "for this process after repeated "
-                    "attempts.\n");
-                error_stream_sp->PutCString("Giving up.  Fatal errors:\n");
-                DiagnosticManager diag_mgr;
-                new_swift_ast_ctx->PrintDiagnostics(diag_mgr);
-                error_stream_sp->PutCString(diag_mgr.GetString().c_str());
-                error_stream_sp->Flush();
-              }
-
-              m_cant_make_scratch_type_system[language] = true;
-              m_scratch_type_system_map.RemoveTypeSystemsForLanguage(language);
-              type_system_or_err =
-                  llvm::make_error<llvm::StringError>("DIAF", llvm::inconvertibleErrorCode());
+        if (auto *new_swift_scratch_ctx =
+                llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
+                    &*type_system_or_err)) {
+          auto *new_swift_ast_ctx = new_swift_scratch_ctx->GetSwiftASTContext();
+          if (!new_swift_ast_ctx || new_swift_ast_ctx->HasFatalErrors()) {
+            if (StreamSP error_stream_sp =
+                    GetDebugger().GetAsyncErrorStream()) {
+              error_stream_sp->PutCString("Can't construct shared Swift state "
+                                          "for this process after repeated "
+                                          "attempts.\n");
+              error_stream_sp->PutCString("Giving up.  Fatal errors:\n");
+              DiagnosticManager diag_mgr;
+              new_swift_ast_ctx->PrintDiagnostics(diag_mgr);
+              error_stream_sp->PutCString(diag_mgr.GetString().c_str());
+              error_stream_sp->Flush();
             }
+
+            m_cant_make_scratch_type_system[language] = true;
+            m_scratch_type_system_map.RemoveTypeSystemsForLanguage(language);
+            type_system_or_err = llvm::make_error<llvm::StringError>(
+                "DIAF", llvm::inconvertibleErrorCode());
           }
-          GetSwiftScratchContextLock().unlock();
         }
       }
     } else if (create_on_demand) {
@@ -2383,7 +2380,10 @@ std::vector<TypeSystem *> Target::GetScratchTypeSystems(bool create_on_demand) {
   if (!m_valid)
     return {};
 
-  std::vector<TypeSystem *> scratch_type_systems;
+  // Some TypeSystem instances are associated with several LanguageTypes so
+  // they will show up several times in the loop below. The SetVector filters
+  // out all duplicates as they serve no use for the caller.
+  llvm::SetVector<TypeSystem *> scratch_type_systems;
 
   LanguageSet languages_for_expressions =
       Language::GetLanguagesSupportingTypeSystemsForExpressions();
@@ -2393,16 +2393,15 @@ std::vector<TypeSystem *> Target::GetScratchTypeSystems(bool create_on_demand) {
     auto type_system_or_err =
         GetScratchTypeSystemForLanguage(language, create_on_demand);
     if (!type_system_or_err)
-      LLDB_LOG_ERROR(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_TARGET),
-                     type_system_or_err.takeError(),
+      LLDB_LOG_ERROR(GetLog(LLDBLog::Target), type_system_or_err.takeError(),
                      "Language '{}' has expression support but no scratch type "
                      "system available",
                      Language::GetNameForLanguageType(language));
     else
-      scratch_type_systems.emplace_back(&type_system_or_err.get());
+      scratch_type_systems.insert(&type_system_or_err.get());
   }
 
-  return scratch_type_systems;
+  return scratch_type_systems.takeVector();
 }
 
 PersistentExpressionState *
@@ -2410,8 +2409,7 @@ Target::GetPersistentExpressionStateForLanguage(lldb::LanguageType language) {
   auto type_system_or_err = GetScratchTypeSystemForLanguage(language, true);
 
   if (auto err = type_system_or_err.takeError()) {
-    LLDB_LOG_ERROR(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_TARGET),
-                   std::move(err),
+    LLDB_LOG_ERROR(GetLog(LLDBLog::Target), std::move(err),
                    "Unable to get persistent expression state for language {}",
                    Language::GetNameForLanguageType(language));
     return nullptr;
@@ -2425,7 +2423,7 @@ SwiftPersistentExpressionState *
 Target::GetSwiftPersistentExpressionState(ExecutionContextScope &exe_scope) {
   Status error;
   auto maybe_swift_ast_context =
-      GetScratchSwiftASTContext(error, exe_scope, true);
+      GetSwiftScratchContext(error, exe_scope, true);
   if (!maybe_swift_ast_context)
     return nullptr;
   return (SwiftPersistentExpressionState *)
@@ -2506,9 +2504,9 @@ Target::CreateUtilityFunction(std::string expression, std::string name,
 }
 
 #ifdef LLDB_ENABLE_SWIFT
-llvm::Optional<SwiftASTContextReader> Target::GetScratchSwiftASTContext(
+llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
     Status &error, ExecutionContextScope &exe_scope, bool create_on_demand) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET));
+  Log *log = GetLog(LLDBLog::Target);
   LLDB_SCOPED_TIMER();
 
   Module *lldb_module = nullptr;
@@ -2518,16 +2516,22 @@ llvm::Optional<SwiftASTContextReader> Target::GetScratchSwiftASTContext(
       lldb_module = sc.module_sp.get();
     }
 
-  auto get_or_create_fallback_context = [&]() -> SwiftASTContextForExpressions * {
+  auto get_or_create_fallback_context =
+      [&]() -> TypeSystemSwiftTypeRefForExpressions * {
     if (!lldb_module || !m_use_scratch_typesystem_per_module)
       return nullptr;
 
     ModuleLanguage idx = {lldb_module, lldb::eLanguageTypeSwift};
     auto cached = m_scratch_typesystem_for_module.find(idx);
     if (cached != m_scratch_typesystem_for_module.end()) {
+      auto *cached_ts =
+          llvm::cast<TypeSystemSwiftTypeRefForExpressions>(cached->second.get());
+      if (!cached_ts)
+        return nullptr;
       auto *cached_ast_ctx =
-          llvm::cast<SwiftASTContextForExpressions>(cached->second.get());
-      if (cached_ast_ctx->HasFatalErrors() &&
+          llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
+              cached_ts->GetSwiftASTContext());
+      if (cached_ast_ctx && cached_ast_ctx->HasFatalErrors() &&
           !m_cant_make_scratch_type_system.count(lldb::eLanguageTypeSwift)) {
         DisplayFallbackSwiftContextErrors(cached_ast_ctx);
         // Try again.
@@ -2536,11 +2540,14 @@ llvm::Optional<SwiftASTContextReader> Target::GetScratchSwiftASTContext(
       }
       if (log)
         log->Printf("returned cached module-wide scratch context\n");
-      return cached_ast_ctx;
+      return cached_ts;
     }
 
     if (!create_on_demand || !GetSwiftScratchContextLock().try_lock())
       return nullptr;
+
+    auto unlock = llvm::make_scope_exit(
+        [this] { GetSwiftScratchContextLock().unlock(); });
 
     auto type_system_or_err = GetScratchTypeSystemForLanguage(eLanguageTypeSwift, false);
     if (!type_system_or_err) {
@@ -2551,44 +2558,44 @@ llvm::Optional<SwiftASTContextReader> Target::GetScratchSwiftASTContext(
     if (auto *global_scratch_ctx =
             llvm::cast_or_null<SwiftASTContextForExpressions>(
                 &*type_system_or_err))
-      DisplayFallbackSwiftContextErrors(global_scratch_ctx);
+      if (auto *swift_ast_ctx =
+              llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
+                  global_scratch_ctx->GetSwiftASTContext()))
+        DisplayFallbackSwiftContextErrors(swift_ast_ctx);
 
-    bool fallback = true;
-    auto typesystem_sp = SwiftASTContext::CreateInstance(
-        lldb::eLanguageTypeSwift, *lldb_module, this, fallback);
-    auto *swift_ast_ctx =
-        llvm::cast<SwiftASTContextForExpressions>(typesystem_sp.get());
+    auto typesystem_sp = std::make_shared<TypeSystemSwiftTypeRefForExpressions>(
+        lldb::eLanguageTypeSwift, *this, *lldb_module);
+    typesystem_sp->GetSwiftASTContext();
     m_scratch_typesystem_for_module.insert({idx, typesystem_sp});
-    GetSwiftScratchContextLock().unlock();
     if (log)
       log->Printf("created module-wide scratch context\n");
-    return swift_ast_ctx;
+    return typesystem_sp.get();
   };
 
-  auto *swift_ast_ctx = get_or_create_fallback_context();
-  if (!swift_ast_ctx) {
+  auto *swift_scratch_ctx = get_or_create_fallback_context();
+  if (!swift_scratch_ctx) {
     if (log)
       log->Printf("returned project-wide scratch context\n");
     auto type_system_or_err =
         GetScratchTypeSystemForLanguage(eLanguageTypeSwift, create_on_demand);
     if (type_system_or_err)
-      swift_ast_ctx = llvm::cast_or_null<SwiftASTContextForExpressions>(
-          &*type_system_or_err);
+      swift_scratch_ctx =
+          llvm::cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
+              &*type_system_or_err);
     else
       llvm::consumeError(type_system_or_err.takeError());
   }
 
   StackFrameSP frame_sp = exe_scope.CalculateStackFrame();
-  if (frame_sp && frame_sp.get() && swift_ast_ctx &&
-      !swift_ast_ctx->HasFatalErrors()) {
-    StackFrameWP frame_wp(frame_sp);
-    SymbolContext sc = frame_sp->GetSymbolContext(lldb::eSymbolContextEverything);
-    swift_ast_ctx->PerformCompileUnitImports(sc, frame_wp, error);
+  if (frame_sp && frame_sp.get() && swift_scratch_ctx) {
+    SymbolContext sc =
+        frame_sp->GetSymbolContext(lldb::eSymbolContextEverything);
+    swift_scratch_ctx->PerformCompileUnitImports(sc);
   }
 
-  if (!swift_ast_ctx)
+  if (!swift_scratch_ctx)
     return llvm::None;
-  return SwiftASTContextReader(GetSwiftScratchContextLock(), *swift_ast_ctx);
+  return SwiftScratchContextReader(GetSwiftScratchContextLock(), *swift_scratch_ctx);
 }
 
 static SharedMutex *
@@ -2601,7 +2608,8 @@ GetSwiftScratchContextMutex(const ExecutionContext *exe_ctx) {
   return nullptr;
 }
 
-SwiftASTContextLock::SwiftASTContextLock(const ExecutionContext *exe_ctx)
+SwiftScratchContextLock::SwiftScratchContextLock(
+    const ExecutionContext *exe_ctx)
     : ScopedSharedMutexReader(GetSwiftScratchContextMutex(exe_ctx)) {}
 
 static SharedMutex *
@@ -2612,7 +2620,8 @@ GetSwiftScratchContextMutex(const ExecutionContextRef *exe_ctx_ref) {
   return GetSwiftScratchContextMutex(&exe_ctx);
 }
 
-SwiftASTContextLock::SwiftASTContextLock(const ExecutionContextRef *exe_ctx_ref)
+SwiftScratchContextLock::SwiftScratchContextLock(
+    const ExecutionContextRef *exe_ctx_ref)
     : ScopedSharedMutexReader(GetSwiftScratchContextMutex(exe_ctx_ref)) {}
 
 void Target::DisplayFallbackSwiftContextErrors(
@@ -2647,35 +2656,22 @@ void Target::SettingsInitialize() { Process::SettingsInitialize(); }
 void Target::SettingsTerminate() { Process::SettingsTerminate(); }
 
 FileSpecList Target::GetDefaultExecutableSearchPaths() {
-  TargetPropertiesSP properties_sp(Target::GetGlobalProperties());
-  if (properties_sp)
-    return properties_sp->GetExecutableSearchPaths();
-  return FileSpecList();
+  return Target::GetGlobalProperties().GetExecutableSearchPaths();
 }
 
 FileSpecList Target::GetDefaultDebugFileSearchPaths() {
-  TargetPropertiesSP properties_sp(Target::GetGlobalProperties());
-  if (properties_sp)
-    return properties_sp->GetDebugFileSearchPaths();
-  return FileSpecList();
+  return Target::GetGlobalProperties().GetDebugFileSearchPaths();
 }
 
 ArchSpec Target::GetDefaultArchitecture() {
-  TargetPropertiesSP properties_sp(Target::GetGlobalProperties());
-  if (properties_sp)
-    return properties_sp->GetDefaultArchitecture();
-  return ArchSpec();
+  return Target::GetGlobalProperties().GetDefaultArchitecture();
 }
 
 void Target::SetDefaultArchitecture(const ArchSpec &arch) {
-  TargetPropertiesSP properties_sp(Target::GetGlobalProperties());
-  if (properties_sp) {
-    LLDB_LOG(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET),
-             "Target::SetDefaultArchitecture setting target's "
-             "default architecture to  {0} ({1})",
-             arch.GetArchitectureName(), arch.GetTriple().getTriple());
-    return properties_sp->SetDefaultArchitecture(arch);
-  }
+  LLDB_LOG(GetLog(LLDBLog::Target),
+           "setting target's default architecture to  {0} ({1})",
+           arch.GetArchitectureName(), arch.GetTriple().getTriple());
+  Target::GetGlobalProperties().SetDefaultArchitecture(arch);
 }
 
 Target *Target::GetTargetFromContexts(const ExecutionContext *exe_ctx_ptr,
@@ -2701,8 +2697,10 @@ ExpressionResults Target::EvaluateExpression(
 
   ExpressionResults execution_results = eExpressionSetupError;
 
-  if (expr.empty())
+  if (expr.empty()) {
+    m_stats.GetExpressionStats().NotifyFailure();
     return execution_results;
+  }
 
   // We shouldn't run stop hooks in expressions.
   bool old_suppress_value = m_suppress_stop_hooks;
@@ -2729,8 +2727,8 @@ ExpressionResults Target::EvaluateExpression(
     auto type_system_or_err =
             GetScratchTypeSystemForLanguage(eLanguageTypeC);
     if (auto err = type_system_or_err.takeError()) {
-      LLDB_LOG_ERROR(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_TARGET),
-                     std::move(err), "Unable to get scratch type system");
+      LLDB_LOG_ERROR(GetLog(LLDBLog::Target), std::move(err),
+                     "Unable to get scratch type system");
     } else {
       persistent_var_sp =
           type_system_or_err->GetPersistentExpressionState()->GetVariable(expr);
@@ -2747,6 +2745,10 @@ ExpressionResults Target::EvaluateExpression(
                                                  fixed_expression, ctx_obj);
   }
 
+  if (execution_results == eExpressionCompleted)
+    m_stats.GetExpressionStats().NotifySuccess();
+  else
+    m_stats.GetExpressionStats().NotifyFailure();
   return execution_results;
 }
 
@@ -2844,23 +2846,6 @@ SourceManager &Target::GetSourceManager() {
   return *m_source_manager_up;
 }
 
-ClangModulesDeclVendor *Target::GetClangModulesDeclVendor() {
-  static std::mutex s_clang_modules_decl_vendor_mutex; // If this is contended
-                                                       // we can make it
-                                                       // per-target
-
-  {
-    std::lock_guard<std::mutex> guard(s_clang_modules_decl_vendor_mutex);
-
-    if (!m_clang_modules_decl_vendor_up) {
-      m_clang_modules_decl_vendor_up.reset(
-          ClangModulesDeclVendor::Create(*this));
-    }
-  }
-
-  return m_clang_modules_decl_vendor_up.get();
-}
-
 Target::StopHookSP Target::CreateStopHook(StopHook::StopHookKind kind) {
   lldb::user_id_t new_uid = ++m_stop_hook_next_id;
   Target::StopHookSP stop_hook_sp;
@@ -2930,12 +2915,6 @@ bool Target::RunStopHooks() {
   if (m_process_sp->GetState() != eStateStopped)
     return false;
 
-  // <rdar://problem/12027563> make sure we check that we are not stopped
-  // because of us running a user expression since in that case we do not want
-  // to run the stop-hooks
-  if (m_process_sp->GetModIDRef().IsLastResumeForUserExpression())
-    return false;
-
   if (m_stop_hooks.empty())
     return false;
 
@@ -2949,6 +2928,18 @@ bool Target::RunStopHooks() {
   }
   if (!any_active_hooks)
     return false;
+
+  // <rdar://problem/12027563> make sure we check that we are not stopped
+  // because of us running a user expression since in that case we do not want
+  // to run the stop-hooks.  Note, you can't just check whether the last stop
+  // was for a User Expression, because breakpoint commands get run before
+  // stop hooks, and one of them might have run an expression.  You have
+  // to ensure you run the stop hooks once per natural stop.
+  uint32_t last_natural_stop = m_process_sp->GetModIDRef().GetLastNaturalStopID();
+  if (last_natural_stop != 0 && m_latest_stop_hook_id == last_natural_stop)
+    return false;
+
+  m_latest_stop_hook_id = last_natural_stop;
 
   std::vector<ExecutionContext> exc_ctx_with_reasons;
 
@@ -3067,7 +3058,7 @@ bool Target::RunStopHooks() {
   // We only compute should_stop against the hook results if a hook got to run
   // which is why we have to do this conjoint test.
   if ((hooks_ran && !should_stop) || auto_continue) {
-    Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS));
+    Log *log = GetLog(LLDBLog::Process);
     Status error = m_process_sp->PrivateResume();
     if (error.Success()) {
       LLDB_LOG(log, "Resuming from RunStopHooks");
@@ -3081,12 +3072,12 @@ bool Target::RunStopHooks() {
   return false;
 }
 
-const TargetPropertiesSP &Target::GetGlobalProperties() {
+TargetProperties &Target::GetGlobalProperties() {
   // NOTE: intentional leak so we don't crash if global destructor chain gets
   // called as other threads still use the result of this function
-  static TargetPropertiesSP *g_settings_sp_ptr =
-      new TargetPropertiesSP(new TargetProperties(nullptr));
-  return *g_settings_sp_ptr;
+  static TargetProperties *g_settings_ptr =
+      new TargetProperties(nullptr);
+  return *g_settings_ptr;
 }
 
 Status Target::Install(ProcessLaunchInfo *launch_info) {
@@ -3267,8 +3258,9 @@ lldb::addr_t Target::FindLoadAddrForNameInSymbolsAndPersistentVariables(
 }
 
 Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
+  m_stats.SetLaunchOrAttachTime();
   Status error;
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TARGET));
+  Log *log = GetLog(LLDBLog::Target);
 
   LLDB_LOGF(log, "Target::%s() called for %s", __FUNCTION__,
             launch_info.GetExecutableFile().GetPath().c_str());
@@ -3293,6 +3285,20 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
   }
 
   launch_info.GetFlags().Set(eLaunchFlagDebug);
+
+  if (launch_info.IsScriptedProcess()) {
+    // Only copy scripted process launch options.
+    ProcessLaunchInfo &default_launch_info = const_cast<ProcessLaunchInfo &>(
+        GetGlobalProperties().GetProcessLaunchInfo());
+
+    default_launch_info.SetProcessPluginName("ScriptedProcess");
+    default_launch_info.SetScriptedProcessClassName(
+        launch_info.GetScriptedProcessClassName());
+    default_launch_info.SetScriptedProcessDictionarySP(
+        launch_info.GetScriptedProcessDictionarySP());
+
+    SetProcessLaunchInfo(launch_info);
+  }
 
   // Get the value of synchronous execution here.  If you wait till after you
   // have started to run, then you could have hit a breakpoint, whose command
@@ -3319,7 +3325,7 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
   // If we're not already connected to the process, and if we have a platform
   // that can launch a process for debugging, go ahead and do that here.
   if (state != eStateConnected && platform_sp &&
-      platform_sp->CanDebugProcess()) {
+      platform_sp->CanDebugProcess() && !launch_info.IsScriptedProcess()) {
     LLDB_LOGF(log, "Target::%s asking the platform to debug the process",
               __FUNCTION__);
 
@@ -3330,7 +3336,7 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
     DeleteCurrentProcess();
 
     m_process_sp =
-        GetPlatform()->DebugProcess(launch_info, debugger, this, error);
+        GetPlatform()->DebugProcess(launch_info, debugger, *this, error);
 
   } else {
     LLDB_LOGF(log,
@@ -3422,9 +3428,41 @@ Status Target::Launch(ProcessLaunchInfo &launch_info, Stream *stream) {
 
 void Target::SetTrace(const TraceSP &trace_sp) { m_trace_sp = trace_sp; }
 
-const TraceSP &Target::GetTrace() { return m_trace_sp; }
+TraceSP Target::GetTrace() { return m_trace_sp; }
+
+llvm::Expected<TraceSP> Target::CreateTrace() {
+  if (!m_process_sp)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "A process is required for tracing");
+  if (m_trace_sp)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "A trace already exists for the target");
+
+  llvm::Expected<TraceSupportedResponse> trace_type =
+      m_process_sp->TraceSupported();
+  if (!trace_type)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(), "Tracing is not supported. %s",
+        llvm::toString(trace_type.takeError()).c_str());
+  if (llvm::Expected<TraceSP> trace_sp =
+          Trace::FindPluginForLiveProcess(trace_type->name, *m_process_sp))
+    m_trace_sp = *trace_sp;
+  else
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        "Couldn't create a Trace object for the process. %s",
+        llvm::toString(trace_sp.takeError()).c_str());
+  return m_trace_sp;
+}
+
+llvm::Expected<TraceSP> Target::GetTraceOrCreate() {
+  if (m_trace_sp)
+    return m_trace_sp;
+  return CreateTrace();
+}
 
 Status Target::Attach(ProcessAttachInfo &attach_info, Stream *stream) {
+  m_stats.SetLaunchOrAttachTime();
   auto state = eStateInvalid;
   auto process_sp = GetProcessSP();
   if (process_sp) {
@@ -3507,7 +3545,7 @@ Status Target::Attach(ProcessAttachInfo &attach_info, Stream *stream) {
 }
 
 void Target::FinalizeFileActions(ProcessLaunchInfo &info) {
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_PROCESS));
+  Log *log = GetLog(LLDBLog::Process);
 
   // Finalize the file actions, and if none were given, default to opening up a
   // pseudo terminal
@@ -3718,7 +3756,7 @@ Target::StopHookCommandLine::HandleStop(ExecutionContext &exc_ctx,
   // Force Async:
   bool old_async = debugger.GetAsyncExecution();
   debugger.SetAsyncExecution(true);
-  debugger.GetCommandInterpreter().HandleCommands(GetCommands(), &exc_ctx,
+  debugger.GetCommandInterpreter().HandleCommands(GetCommands(), exc_ctx,
                                                   options, result);
   debugger.SetAsyncExecution(old_async);
   lldb::ReturnStatus status = result.GetStatus();
@@ -3741,11 +3779,7 @@ Status Target::StopHookScripted::SetScriptCallback(
   }
 
   m_class_name = class_name;
-
-  m_extra_args = new StructuredDataImpl();
-
-  if (extra_args_sp)
-    m_extra_args->SetObjectSP(extra_args_sp);
+  m_extra_args.SetObjectSP(extra_args_sp);
 
   m_implementation_sp = script_interp->CreateScriptedStopHook(
       GetTarget(), m_class_name.c_str(), m_extra_args, error);
@@ -3783,9 +3817,9 @@ void Target::StopHookScripted::GetSubclassDescription(
   // Now print the extra args:
   // FIXME: We should use StructuredData.GetDescription on the m_extra_args
   // but that seems to rely on some printing plugin that doesn't exist.
-  if (!m_extra_args->IsValid())
+  if (!m_extra_args.IsValid())
     return;
-  StructuredData::ObjectSP object_sp = m_extra_args->GetObjectSP();
+  StructuredData::ObjectSP object_sp = m_extra_args.GetObjectSP();
   if (!object_sp || !object_sp->IsValid())
     return;
 
@@ -3905,6 +3939,22 @@ static constexpr OptionEnumValueElement g_import_std_module_value_types[] = {
     },
 };
 
+static constexpr OptionEnumValueElement
+    g_dynamic_class_info_helper_value_types[] = {
+        {
+            eDynamicClassInfoHelperAuto,
+            "auto",
+            "Automatically determine the most appropriate method for the "
+            "target OS.",
+        },
+        {eDynamicClassInfoHelperRealizedClassesStruct, "RealizedClassesStruct",
+         "Prefer using the realized classes struct."},
+        {eDynamicClassInfoHelperCopyRealizedClassList, "CopyRealizedClassList",
+         "Prefer using the CopyRealizedClassList API."},
+        {eDynamicClassInfoHelperGetRealizedClassList, "GetRealizedClassList",
+         "Prefer using the GetRealizedClassList API."},
+};
+
 static constexpr OptionEnumValueElement g_hex_immediate_style_values[] = {
     {
         Disassembler::eHexStyleC,
@@ -3985,15 +4035,10 @@ enum {
   ePropertyExperimental,
 };
 
-class TargetOptionValueProperties : public OptionValueProperties {
+class TargetOptionValueProperties
+    : public Cloneable<TargetOptionValueProperties, OptionValueProperties> {
 public:
-  TargetOptionValueProperties(ConstString name) : OptionValueProperties(name) {}
-
-  // This constructor is used when creating TargetOptionValueProperties when it
-  // is part of a new lldb_private::Target instance. It will copy all current
-  // global property values as needed
-  TargetOptionValueProperties(const TargetPropertiesSP &target_properties_sp)
-      : OptionValueProperties(*target_properties_sp->GetValueProperties()) {}
+  TargetOptionValueProperties(ConstString name) : Cloneable(name) {}
 
   const Property *GetPropertyAtIndex(const ExecutionContext *exe_ctx,
                                      bool will_modify,
@@ -4024,11 +4069,12 @@ enum {
 #include "TargetPropertiesEnum.inc"
 };
 
-class TargetExperimentalOptionValueProperties : public OptionValueProperties {
+class TargetExperimentalOptionValueProperties
+    : public Cloneable<TargetExperimentalOptionValueProperties,
+                       OptionValueProperties> {
 public:
   TargetExperimentalOptionValueProperties()
-      : OptionValueProperties(
-            ConstString(Properties::GetExperimentalSettingsName())) {}
+      : Cloneable(ConstString(Properties::GetExperimentalSettingsName())) {}
 };
 
 TargetExperimentalProperties::TargetExperimentalProperties()
@@ -4041,8 +4087,8 @@ TargetExperimentalProperties::TargetExperimentalProperties()
 TargetProperties::TargetProperties(Target *target)
     : Properties(), m_launch_info(), m_target(target) {
   if (target) {
-    m_collection_sp = std::make_shared<TargetOptionValueProperties>(
-        Target::GetGlobalProperties());
+    m_collection_sp =
+        OptionValueProperties::CreateLocalCopy(Target::GetGlobalProperties());
 
     // Set callbacks to update launch_info whenever "settins set" updated any
     // of these properties
@@ -4092,7 +4138,7 @@ TargetProperties::TargetProperties(Target *target)
         true, m_experimental_properties_up->GetValueProperties());
     m_collection_sp->AppendProperty(
         ConstString("process"), ConstString("Settings specific to processes."),
-        true, Process::GetGlobalProperties()->GetValueProperties());
+        true, Process::GetGlobalProperties().GetValueProperties());
   }
 }
 
@@ -4145,6 +4191,71 @@ bool TargetProperties::GetSwiftCreateModuleContextsInParallel() const {
         nullptr, ePropertySwiftCreateModuleContextsInParallel, true);
   else
     return true;
+}
+
+bool TargetProperties::GetSwiftReadMetadataFromFileCache() const {
+  const Property *exp_property = m_collection_sp->GetPropertyAtIndex(
+      nullptr, false, ePropertyExperimental);
+  OptionValueProperties *exp_values =
+      exp_property->GetValue()->GetAsProperties();
+  if (exp_values)
+    return exp_values->GetPropertyAtIndexAsBoolean(
+        nullptr, ePropertySwiftReadMetadataFromFileCache, true);
+
+  return true;
+}
+
+bool TargetProperties::GetSwiftUseReflectionSymbols() const {
+  const Property *exp_property = m_collection_sp->GetPropertyAtIndex(
+      nullptr, false, ePropertyExperimental);
+  OptionValueProperties *exp_values =
+      exp_property->GetValue()->GetAsProperties();
+  if (exp_values)
+    return exp_values->GetPropertyAtIndexAsBoolean(
+        nullptr, ePropertySwiftUseReflectionSymbols, true);
+  else
+    return true;
+}
+
+bool TargetProperties::GetSwiftReadMetadataFromDSYM() const {
+  const Property *exp_property = m_collection_sp->GetPropertyAtIndex(
+      nullptr, false, ePropertyExperimental);
+  OptionValueProperties *exp_values =
+      exp_property->GetValue()->GetAsProperties();
+  if (exp_values)
+    return exp_values->GetPropertyAtIndexAsBoolean(
+        nullptr, ePropertySwiftReadMetadataFromDSYM, true);
+
+  return true;
+}
+
+bool TargetProperties::GetSwiftDiscoverImplicitSearchPaths() const {
+  const Property *exp_property = m_collection_sp->GetPropertyAtIndex(
+      nullptr, false, ePropertyExperimental);
+  OptionValueProperties *exp_values =
+      exp_property->GetValue()->GetAsProperties();
+  if (exp_values)
+    return exp_values->GetPropertyAtIndexAsBoolean(
+        nullptr, ePropertySwiftDiscoverImplicitSearchPaths, true);
+
+  return true;
+}
+
+bool TargetProperties::GetSwiftEnableBareSlashRegex() const {
+  const Property *exp_property = m_collection_sp->GetPropertyAtIndex(
+      nullptr, false, ePropertyExperimental);
+  OptionValueProperties *exp_values =
+      exp_property->GetValue()->GetAsProperties();
+  if (exp_values)
+    return exp_values->GetPropertyAtIndexAsBoolean(
+        nullptr, ePropertySwiftEnableBareSlashRegex, true);
+
+  return true;
+}
+bool TargetProperties::GetSwiftAutoImportFrameworks() const {
+  const uint32_t idx = ePropertySwiftAutoImportFrameworks;
+  return m_collection_sp->GetPropertyAtIndexAsBoolean(
+      nullptr, idx, g_target_properties[idx].default_uint_value != 0);
 }
 
 ArchSpec TargetProperties::GetDefaultArchitecture() const {
@@ -4308,6 +4419,45 @@ Environment TargetProperties::GetEnvironment() const {
   return ComputeEnvironment();
 }
 
+Environment TargetProperties::GetInheritedEnvironment() const {
+  Environment environment;
+
+  if (m_target == nullptr)
+    return environment;
+
+  if (!m_collection_sp->GetPropertyAtIndexAsBoolean(
+          nullptr, ePropertyInheritEnv,
+          g_target_properties[ePropertyInheritEnv].default_uint_value != 0))
+    return environment;
+
+  PlatformSP platform_sp = m_target->GetPlatform();
+  if (platform_sp == nullptr)
+    return environment;
+
+  Environment platform_environment = platform_sp->GetEnvironment();
+  for (const auto &KV : platform_environment)
+    environment[KV.first()] = KV.second;
+
+  Args property_unset_environment;
+  m_collection_sp->GetPropertyAtIndexAsArgs(nullptr, ePropertyUnsetEnvVars,
+                                            property_unset_environment);
+  for (const auto &var : property_unset_environment)
+    environment.erase(var.ref());
+
+  return environment;
+}
+
+Environment TargetProperties::GetTargetEnvironment() const {
+  Args property_environment;
+  m_collection_sp->GetPropertyAtIndexAsArgs(nullptr, ePropertyEnvVars,
+                                            property_environment);
+  Environment environment;
+  for (const auto &KV : Environment(property_environment))
+    environment[KV.first()] = KV.second;
+
+  return environment;
+}
+
 void TargetProperties::SetEnvironment(Environment env) {
   // TODO: Get rid of the Args intermediate step
   const uint32_t idx = ePropertyEnvVars;
@@ -4410,10 +4560,22 @@ bool TargetProperties::GetUseAllCompilerFlags() const {
       NULL, idx, g_target_properties[idx].default_uint_value != 0);
 }
 
+void TargetProperties::SetUseAllCompilerFlags(bool b) {
+  const uint32_t idx = ePropertyUseAllCompilerFlags;
+  m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, b);
+}
+
 ImportStdModule TargetProperties::GetImportStdModule() const {
   const uint32_t idx = ePropertyImportStdModule;
   return (ImportStdModule)m_collection_sp->GetPropertyAtIndexAsEnumeration(
       nullptr, idx, g_target_properties[idx].default_uint_value);
+}
+
+DynamicClassInfoHelper TargetProperties::GetDynamicClassInfoHelper() const {
+  const uint32_t idx = ePropertyDynamicClassInfoHelper;
+  return (DynamicClassInfoHelper)
+      m_collection_sp->GetPropertyAtIndexAsEnumeration(
+          nullptr, idx, g_target_properties[idx].default_uint_value);
 }
 
 bool TargetProperties::GetEnableAutoApplyFixIts() const {
@@ -4456,6 +4618,15 @@ uint32_t TargetProperties::GetMaximumNumberOfChildrenToDisplay() const {
   const uint32_t idx = ePropertyMaxChildrenCount;
   return m_collection_sp->GetPropertyAtIndexAsSInt64(
       nullptr, idx, g_target_properties[idx].default_uint_value);
+}
+
+std::pair<uint32_t, bool>
+TargetProperties::GetMaximumDepthOfChildrenToDisplay() const {
+  const uint32_t idx = ePropertyMaxChildrenDepth;
+  auto *option_value =
+      m_collection_sp->GetPropertyAtIndexAsOptionValueUInt64(nullptr, idx);
+  bool is_default = !option_value->OptionWasSet();
+  return {option_value->GetCurrentValue(), is_default};
 }
 
 uint32_t TargetProperties::GetMaximumSizeOfStringSummary() const {
@@ -4611,18 +4782,7 @@ void TargetProperties::SetDisplayRecognizedArguments(bool b) {
   m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, b);
 }
 
-bool TargetProperties::GetNonStopModeEnabled() const {
-  const uint32_t idx = ePropertyNonStopModeEnabled;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(nullptr, idx, false);
-}
-
-void TargetProperties::SetNonStopModeEnabled(bool b) {
-  const uint32_t idx = ePropertyNonStopModeEnabled;
-  m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, b);
-}
-
-const ProcessLaunchInfo &TargetProperties::GetProcessLaunchInfo() {
-  m_launch_info.SetArg0(GetArg0()); // FIXME: Arg0 callback doesn't work
+const ProcessLaunchInfo &TargetProperties::GetProcessLaunchInfo() const {
   return m_launch_info;
 }
 
@@ -4807,7 +4967,5 @@ std::recursive_mutex &Target::GetAPIMutex() {
     return m_mutex;
 }
 
-bool Target::RegisterSwiftContextMessageKey(std::string Key) {
-  std::unique_lock<std::mutex> guard{m_swift_messages_mutex};
-  return m_swift_messages_issued.insert(std::move(Key)).second;
-}
+/// Get metrics associated with this target in JSON format.
+llvm::json::Value Target::ReportStatistics() { return m_stats.ToJSON(*this); }

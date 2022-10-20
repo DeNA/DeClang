@@ -277,17 +277,16 @@ bool lldb_private::formatters::swift::StringGuts_SummaryProvider(
       return false;
 
     uint64_t buffer[2] = {raw0, raw1};
-    DataExtractor data(buffer, count, process->GetByteOrder(), ptrSize);
 
     StringPrinter::ReadBufferAndDumpToStreamOptions options(read_options);
-    options.SetData(data);
+    options.SetData(
+        DataExtractor(buffer, count, process->GetByteOrder(), ptrSize));
     options.SetStream(&stream);
     options.SetSourceSize(count);
     options.SetBinaryZeroIsTerminator(false);
     options.SetEscapeStyle(StringPrinter::EscapeStyle::Swift);
     return StringPrinter::ReadBufferAndDumpToStream<
         StringPrinter::StringElementType::UTF8>(options);
-
   }
 
   uint64_t count = raw0 & 0x0000FFFFFFFFFFFF;
@@ -841,7 +840,7 @@ bool lldb_private::formatters::swift::TypePreservingNSNumber_SummaryProvider(
   if (read_error.Fail())
     return false;
 
-  DataBufferSP buffer_sp(new DataBufferHeap(size_of_payload, 0));
+  WritableDataBufferSP buffer_sp(new DataBufferHeap(size_of_payload, 0));
   process_sp->ReadMemoryFromInferior(addr_of_payload, buffer_sp->GetBytes(),
                                      size_of_payload, read_error);
   if (read_error.Fail())

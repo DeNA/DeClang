@@ -10,13 +10,16 @@
 
 #include "PassDetail.h"
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
+#include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/StandardOps/Utils/Utils.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 using namespace mlir;
 
 static bool isElementwiseMappableOpOnRankedTensors(Operation *op) {
-  if (!op->hasTrait<OpTrait::ElementwiseMappable>())
+  if (!OpTrait::hasElementwiseMappableTraits(op))
     return false;
 
   // TODO: The conversion pattern can be made to work for `any_of` here, but
@@ -62,18 +65,9 @@ getOrCreateOperandsMatchingResultTypes(OpBuilder &b, Operation *op) {
     // Extract static / dynamic shape mix from the first operand.
     Value firstOperand = operands.front();
     auto rankedTensorType = t.cast<RankedTensorType>();
-    SmallVector<Value, 8> dynamicShape;
-    SmallVector<int64_t, 8> staticShape;
-    dynamicShape.reserve(rankedTensorType.getRank());
-    staticShape.reserve(rankedTensorType.getRank());
-    unsigned idx = 0;
-    for (auto shape : rankedTensorType.getShape()) {
-      staticShape.push_back(shape);
-      if (rankedTensorType.isDynamicDim(idx))
-        dynamicShape.push_back(b.create<DimOp>(loc, firstOperand, idx));
-      ++idx;
-    }
-    // Create init tensor.
+    auto staticShape = llvm::to_vector<4>(rankedTensorType.getShape());
+    auto dynamicShape = linalg::getDynOperands(loc, firstOperand, b);
+
     res.push_back(b.create<linalg::InitTensorOp>(
         loc, dynamicShape, staticShape, rankedTensorType.getElementType()));
   }
@@ -82,8 +76,8 @@ getOrCreateOperandsMatchingResultTypes(OpBuilder &b, Operation *op) {
 
 namespace {
 struct ConvertAnyElementwiseMappableOpOnRankedTensors : public RewritePattern {
-  ConvertAnyElementwiseMappableOpOnRankedTensors()
-      : RewritePattern(/*benefit=*/1, MatchAnyOpTypeTag()) {}
+  ConvertAnyElementwiseMappableOpOnRankedTensors(MLIRContext *context)
+      : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context) {}
   LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const final {
     if (!isElementwiseMappableOpOnRankedTensors(op))
@@ -122,9 +116,10 @@ struct ConvertAnyElementwiseMappableOpOnRankedTensors : public RewritePattern {
 };
 } // namespace
 
-void mlir::populateElementwiseToLinalgConversionPatterns(
-    OwningRewritePatternList &patterns, MLIRContext *) {
-  patterns.insert<ConvertAnyElementwiseMappableOpOnRankedTensors>();
+void mlir::linalg::populateElementwiseToLinalgConversionPatterns(
+    RewritePatternSet &patterns) {
+  patterns.add<ConvertAnyElementwiseMappableOpOnRankedTensors>(
+      patterns.getContext());
 }
 
 namespace {
@@ -135,9 +130,9 @@ class ConvertElementwiseToLinalgPass
     auto func = getOperation();
     auto *context = &getContext();
     ConversionTarget target(*context);
-    OwningRewritePatternList patterns;
+    RewritePatternSet patterns(context);
 
-    populateElementwiseToLinalgConversionPatterns(patterns, context);
+    mlir::linalg::populateElementwiseToLinalgConversionPatterns(patterns);
     target.markUnknownOpDynamicallyLegal([](Operation *op) {
       return !isElementwiseMappableOpOnRankedTensors(op);
     });

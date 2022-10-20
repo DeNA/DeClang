@@ -19,15 +19,8 @@ namespace llvm {
 
 void PassInstrumentationCallbacks::addClassToPassName(StringRef ClassName,
                                                       StringRef PassName) {
-  ClassToPassName[ClassName] = PassName.str();
-}
-
-bool PassInstrumentationCallbacks::hasPassName(StringRef PassName) {
-  for (const auto &E : ClassToPassName) {
-    if (E.getValue() == PassName)
-      return true;
-  }
-  return false;
+  if (ClassToPassName[ClassName].empty())
+    ClassToPassName[ClassName] = PassName.str();
 }
 
 StringRef

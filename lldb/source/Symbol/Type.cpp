@@ -6,11 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <stdio.h>
+#include <cstdio>
 
 #include "lldb/Core/Module.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/StreamString.h"
@@ -161,10 +162,8 @@ Type::Type(lldb::user_id_t uid, SymbolFile *symbol_file, ConstString name,
 }
 
 Type::Type()
-    : std::enable_shared_from_this<Type>(), UserID(0), m_name("<INVALID TYPE>"),
-      m_symbol_file(nullptr), m_context(nullptr), m_encoding_type(nullptr),
-      m_encoding_uid(LLDB_INVALID_UID), m_encoding_uid_type(eEncodingInvalid),
-      m_compiler_type_resolve_state(ResolveState::Unresolved) {
+    : std::enable_shared_from_this<Type>(), UserID(0),
+      m_name("<INVALID TYPE>") {
   m_byte_size = 0;
   m_byte_size_has_value = false;
 }
@@ -193,7 +192,8 @@ void Type::GetDescription(Stream *s, lldb::DescriptionLevel level,
 
   if (m_compiler_type.IsValid()) {
     *s << ", compiler_type = \"";
-    GetForwardCompilerType().DumpTypeDescription(s);
+    GetForwardCompilerType().DumpTypeDescription(s, eDescriptionLevelFull,
+                                                 exe_scope);
     *s << '"';
   } else if (m_encoding_uid != LLDB_INVALID_UID) {
     s->Printf(", type_uid = 0x%8.8" PRIx64, m_encoding_uid);
@@ -537,10 +537,8 @@ bool Type::ResolveCompilerType(ResolveState compiler_type_resolve_state) {
       auto type_system_or_err =
           m_symbol_file->GetTypeSystemForLanguage(eLanguageTypeC);
       if (auto err = type_system_or_err.takeError()) {
-        LLDB_LOG_ERROR(
-            lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_SYMBOLS),
-            std::move(err),
-            "Unable to construct void type from TypeSystemClang");
+        LLDB_LOG_ERROR(GetLog(LLDBLog::Symbols), std::move(err),
+                       "Unable to construct void type from TypeSystemClang");
       } else {
         CompilerType void_compiler_type =
             type_system_or_err->GetBasicTypeFromAST(eBasicTypeVoid);

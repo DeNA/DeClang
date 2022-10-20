@@ -8,18 +8,18 @@ func @launch() {
   %0 = "op"() : () -> (f32)
   // CHECK: %[[ARG1:.*]] = "op"() : () -> memref<?xf32, 1>
   %1 = "op"() : () -> (memref<?xf32, 1>)
-  // CHECK: %[[GDIMX:.*]] = constant 8
-  %gDimX = constant 8 : index
-  // CHECK: %[[GDIMY:.*]] = constant 12
-  %gDimY = constant 12 : index
-  // CHECK: %[[GDIMZ:.*]] = constant 16
-  %gDimZ = constant 16 : index
-  // CHECK: %[[BDIMX:.*]] = constant 20
-  %bDimX = constant 20 : index
-  // CHECK: %[[BDIMY:.*]] = constant 24
-  %bDimY = constant 24 : index
-  // CHECK: %[[BDIMZ:.*]] = constant 28
-  %bDimZ = constant 28 : index
+  // CHECK: %[[GDIMX:.*]] = arith.constant 8
+  %gDimX = arith.constant 8 : index
+  // CHECK: %[[GDIMY:.*]] = arith.constant 12
+  %gDimY = arith.constant 12 : index
+  // CHECK: %[[GDIMZ:.*]] = arith.constant 16
+  %gDimZ = arith.constant 16 : index
+  // CHECK: %[[BDIMX:.*]] = arith.constant 20
+  %bDimX = arith.constant 20 : index
+  // CHECK: %[[BDIMY:.*]] = arith.constant 24
+  %bDimY = arith.constant 24 : index
+  // CHECK: %[[BDIMZ:.*]] = arith.constant 28
+  %bDimZ = arith.constant 28 : index
 
   // CHECK: gpu.launch_func @launch_kernel::@launch_kernel blocks in (%[[GDIMX]], %[[GDIMY]], %[[GDIMZ]]) threads in (%[[BDIMX]], %[[BDIMY]], %[[BDIMZ]]) args(%[[ARG0]] : f32, %[[ARG1]] : memref<?xf32, 1>)
   // CHECK-NOT: gpu.launch blocks
@@ -29,7 +29,7 @@ func @launch() {
                                         %block_z = %bDimZ) {
     "use"(%0): (f32) -> ()
     "some_op"(%bx, %block_x) : (index, index) -> ()
-    %42 = load %1[%tx] : memref<?xf32, 1>
+    %42 = memref.load %1[%tx] : memref<?xf32, 1>
     gpu.terminator
   }
   return
@@ -55,15 +55,15 @@ func @launch() {
 // CHECK-NEXT: ^[[BLOCK]]:
 // CHECK-NEXT: "use"(%[[KERNEL_ARG0]]) : (f32) -> ()
 // CHECK-NEXT: "some_op"(%[[BID]], %[[BDIM]]) : (index, index) -> ()
-// CHECK-NEXT: = load %[[KERNEL_ARG1]][%[[TID]]] : memref<?xf32, 1>
+// CHECK-NEXT: = memref.load %[[KERNEL_ARG1]][%[[TID]]] : memref<?xf32, 1>
 
 // -----
 
 // CHECK: module attributes {gpu.container_module}
 // CHECK-LABEL: @multiple_launches
 func @multiple_launches() {
-  // CHECK: %[[CST:.*]] = constant 8 : index
-  %cst = constant 8 : index
+  // CHECK: %[[CST:.*]] = arith.constant 8 : index
+  %cst = arith.constant 8 : index
   // CHECK: gpu.launch_func @multiple_launches_kernel::@multiple_launches_kernel blocks in (%[[CST]], %[[CST]], %[[CST]]) threads in (%[[CST]], %[[CST]], %[[CST]])
   gpu.launch blocks(%bx, %by, %bz) in (%grid_x = %cst, %grid_y = %cst,
                                        %grid_z = %cst)
@@ -90,10 +90,10 @@ func @multiple_launches() {
 
 // CHECK-LABEL: @extra_constants_not_inlined
 func @extra_constants_not_inlined(%arg0: memref<?xf32>) {
-  // CHECK: %[[CST:.*]] = constant 8 : index
-  %cst = constant 8 : index
-  %cst2 = constant 2 : index
-  %c0 = constant 0 : index
+  // CHECK: %[[CST:.*]] = arith.constant 8 : index
+  %cst = arith.constant 8 : index
+  %cst2 = arith.constant 2 : index
+  %c0 = arith.constant 0 : index
   %cst3 = "secret_constant"() : () -> index
   // CHECK: gpu.launch_func @extra_constants_not_inlined_kernel::@extra_constants_not_inlined_kernel blocks in (%[[CST]], %[[CST]], %[[CST]]) threads in (%[[CST]], %[[CST]], %[[CST]]) args({{.*}} : memref<?xf32>, {{.*}} : index)
   gpu.launch blocks(%bx, %by, %bz) in (%grid_x = %cst, %grid_y = %cst,
@@ -107,18 +107,18 @@ func @extra_constants_not_inlined(%arg0: memref<?xf32>) {
 }
 
 // CHECK-LABEL: func @extra_constants_not_inlined_kernel(%{{.*}}: memref<?xf32>, %{{.*}}: index)
-// CHECK: constant 2
+// CHECK: arith.constant 2
 
 // -----
 
 // CHECK-LABEL: @extra_constants
 // CHECK-SAME: %[[ARG0:.*]]: memref<?xf32>
 func @extra_constants(%arg0: memref<?xf32>) {
-  // CHECK: %[[CST:.*]] = constant 8 : index
-  %cst = constant 8 : index
-  %cst2 = constant 2 : index
-  %c0 = constant 0 : index
-  %cst3 = dim %arg0, %c0 : memref<?xf32>
+  // CHECK: %[[CST:.*]] = arith.constant 8 : index
+  %cst = arith.constant 8 : index
+  %cst2 = arith.constant 2 : index
+  %c0 = arith.constant 0 : index
+  %cst3 = memref.dim %arg0, %c0 : memref<?xf32>
   // CHECK: gpu.launch_func @extra_constants_kernel::@extra_constants_kernel blocks in (%[[CST]], %[[CST]], %[[CST]]) threads in (%[[CST]], %[[CST]], %[[CST]]) args(%[[ARG0]] : memref<?xf32>)
   gpu.launch blocks(%bx, %by, %bz) in (%grid_x = %cst, %grid_y = %cst,
                                        %grid_z = %cst)
@@ -132,21 +132,21 @@ func @extra_constants(%arg0: memref<?xf32>) {
 
 // CHECK-LABEL: func @extra_constants_kernel(
 // CHECK-SAME: %[[KARG0:.*]]: memref<?xf32>
-// CHECK: constant 2
-// CHECK: constant 0
-// CHECK: dim %[[KARG0]]
+// CHECK: arith.constant 2
+// CHECK: arith.constant 0
+// CHECK: memref.dim %[[KARG0]]
 
 // -----
 
 // CHECK-LABEL: @extra_constants_noarg
 // CHECK-SAME: %[[ARG0:.*]]: memref<?xf32>, %[[ARG1:.*]]: memref<?xf32>
 func @extra_constants_noarg(%arg0: memref<?xf32>, %arg1: memref<?xf32>) {
-  // CHECK: %[[CST:.*]] = constant 8 : index
-  %cst = constant 8 : index
-  %cst2 = constant 2 : index
-  %c0 = constant 0 : index
-  // CHECK: dim %[[ARG1]]
-  %cst3 = dim %arg1, %c0 : memref<?xf32>
+  // CHECK: %[[CST:.*]] = arith.constant 8 : index
+  %cst = arith.constant 8 : index
+  %cst2 = arith.constant 2 : index
+  %c0 = arith.constant 0 : index
+  // CHECK: memref.dim %[[ARG1]]
+  %cst3 = memref.dim %arg1, %c0 : memref<?xf32>
   // CHECK: gpu.launch_func @extra_constants_noarg_kernel::@extra_constants_noarg_kernel blocks in (%[[CST]], %[[CST]], %[[CST]]) threads in (%[[CST]], %[[CST]], %[[CST]]) args(%[[ARG0]] : memref<?xf32>, {{.*}} : index)
   gpu.launch blocks(%bx, %by, %bz) in (%grid_x = %cst, %grid_y = %cst,
                                        %grid_z = %cst)
@@ -160,17 +160,17 @@ func @extra_constants_noarg(%arg0: memref<?xf32>, %arg1: memref<?xf32>) {
 
 // CHECK-LABEL: func @extra_constants_noarg_kernel(
 // CHECK-SAME: %[[KARG0:.*]]: memref<?xf32>, %[[KARG1:.*]]: index
-// CHECK: %[[KCST:.*]] = constant 2
+// CHECK: %[[KCST:.*]] = arith.constant 2
 // CHECK: "use"(%[[KCST]], %[[KARG0]], %[[KARG1]])
 
 // -----
 
 // CHECK-LABEL: @multiple_uses
 func @multiple_uses(%arg0 : memref<?xf32>) {
-  %c1 = constant 1 : index
-  %c2 = constant 2 : index
+  %c1 = arith.constant 1 : index
+  %c2 = arith.constant 2 : index
   // CHECK: gpu.func {{.*}} {
-  // CHECK:   %[[C2:.*]] = constant 2 : index
+  // CHECK:   %[[C2:.*]] = arith.constant 2 : index
   // CHECK:   "use1"(%[[C2]], %[[C2]])
   // CHECK:   "use2"(%[[C2]])
   // CHECK:   gpu.return
@@ -190,12 +190,12 @@ func @multiple_uses(%arg0 : memref<?xf32>) {
 
 // CHECK-LABEL: @multiple_uses2
 func @multiple_uses2(%arg0 : memref<*xf32>) {
-  %c1 = constant 1 : index
-  %c2 = constant 2 : index
-  %d = dim %arg0, %c2 : memref<*xf32>
+  %c1 = arith.constant 1 : index
+  %c2 = arith.constant 2 : index
+  %d = memref.dim %arg0, %c2 : memref<*xf32>
   // CHECK: gpu.func {{.*}} {
-  // CHECK:   %[[C2:.*]] = constant 2 : index
-  // CHECK:   %[[D:.*]] = dim %[[ARG:.*]], %[[C2]]
+  // CHECK:   %[[C2:.*]] = arith.constant 2 : index
+  // CHECK:   %[[D:.*]] = memref.dim %[[ARG:.*]], %[[C2]]
   // CHECK:   "use1"(%[[D]])
   // CHECK:   "use2"(%[[C2]], %[[C2]])
   // CHECK:   "use3"(%[[ARG]])
@@ -215,11 +215,11 @@ func @multiple_uses2(%arg0 : memref<*xf32>) {
 
 // -----
 
-llvm.mlir.global internal @global(42 : i64) : !llvm.i64
+llvm.mlir.global internal @global(42 : i64) : i64
 
 //CHECK-LABEL: @function_call
 func @function_call(%arg0 : memref<?xf32>) {
-  %cst = constant 8 : index
+  %cst = arith.constant 8 : index
   gpu.launch blocks(%bx, %by, %bz) in (%grid_x = %cst, %grid_y = %cst,
                                        %grid_z = %cst)
              threads(%tx, %ty, %tz) in (%block_x = %cst, %block_y = %cst,
@@ -249,7 +249,7 @@ func @recursive_device_function() {
 // CHECK:     llvm.mlir.addressof @global : !llvm.ptr<i64>
 // CHECK:     gpu.return
 //
-// CHECK:   llvm.mlir.global internal @global(42 : i64) : !llvm.i64
+// CHECK:   llvm.mlir.global internal @global(42 : i64) : i64
 //
 // CHECK:   func @device_function()
 // CHECK:   func @recursive_device_function()

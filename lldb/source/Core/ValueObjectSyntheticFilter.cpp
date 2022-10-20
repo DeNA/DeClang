@@ -12,8 +12,8 @@
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
 #include "lldb/Target/ExecutionContext.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
 #include "lldb/Utility/Status.h"
 
 #include "llvm/ADT/STLExtras.h"
@@ -81,7 +81,7 @@ ConstString ValueObjectSynthetic::GetDisplayTypeName() {
 }
 
 size_t ValueObjectSynthetic::CalculateNumChildren(uint32_t max) {
-  Log *log = GetLogIfAllCategoriesSet(LIBLLDB_LOG_DATAFORMATTERS);
+  Log *log = GetLog(LLDBLog::DataFormatters);
 
   UpdateValueIfNeeded();
   if (m_synthetic_children_count < UINT32_MAX)
@@ -148,7 +148,7 @@ void ValueObjectSynthetic::CreateSynthFilter() {
 }
 
 bool ValueObjectSynthetic::UpdateValue() {
-  Log *log = GetLogIfAllCategoriesSet(LIBLLDB_LOG_DATAFORMATTERS);
+  Log *log = GetLog(LLDBLog::DataFormatters);
 
   SetValueIsValid(false);
   m_error.Clear();
@@ -190,7 +190,7 @@ bool ValueObjectSynthetic::UpdateValue() {
     // children count for a synthetic VO that might indeed happen, so we need
     // to tell the upper echelons that they need to come back to us asking for
     // children
-    m_children_count_valid = false;
+    m_flags.m_children_count_valid = false;
     {
       std::lock_guard<std::mutex> guard(m_child_mutex);
       m_synthetic_children_cache.clear();
@@ -234,7 +234,7 @@ bool ValueObjectSynthetic::UpdateValue() {
 
 lldb::ValueObjectSP ValueObjectSynthetic::GetChildAtIndex(size_t idx,
                                                           bool can_create) {
-  Log *log = GetLogIfAllCategoriesSet(LIBLLDB_LOG_DATAFORMATTERS);
+  Log *log = GetLog(LLDBLog::DataFormatters);
 
   LLDB_LOGF(log,
             "[ValueObjectSynthetic::GetChildAtIndex] name=%s, retrieving "

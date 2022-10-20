@@ -187,10 +187,31 @@ public:
   uint32_t getSize() override {
     return BTFTypeBase::getSize() + BTF::BTFDataSecVarSize * Vars.size();
   }
-  void addVar(uint32_t Id, const MCSymbol *Sym, uint32_t Size) {
+  void addDataSecEntry(uint32_t Id, const MCSymbol *Sym, uint32_t Size) {
     Vars.push_back(std::make_tuple(Id, Sym, Size));
   }
   std::string getName() { return Name; }
+  void completeType(BTFDebug &BDebug) override;
+  void emitType(MCStreamer &OS) override;
+};
+
+/// Handle binary floating point type.
+class BTFTypeFloat : public BTFTypeBase {
+  StringRef Name;
+
+public:
+  BTFTypeFloat(uint32_t SizeInBits, StringRef TypeName);
+  void completeType(BTFDebug &BDebug) override;
+};
+
+/// Handle decl tags.
+class BTFTypeDeclTag : public BTFTypeBase {
+  uint32_t Info;
+  StringRef Tag;
+
+public:
+  BTFTypeDeclTag(uint32_t BaseTypeId, int ComponentId, StringRef Tag);
+  uint32_t getSize() override { return BTFTypeBase::getSize() + 4; }
   void completeType(BTFDebug &BDebug) override;
   void emitType(MCStreamer &OS) override;
 };
@@ -304,6 +325,10 @@ class BTFDebug : public DebugHandlerBase {
   /// Generate types for function prototypes.
   void processFuncPrototypes(const Function *);
 
+  /// Generate types for decl annotations.
+  void processDeclAnnotations(DINodeArray Annotations, uint32_t BaseTypeId,
+                              int ComponentId);
+
   /// Generate one field relocation record.
   void generatePatchImmReloc(const MCSymbol *ORSym, uint32_t RootId,
                              const GlobalVariable *, bool IsAma);
@@ -311,8 +336,9 @@ class BTFDebug : public DebugHandlerBase {
   /// Populating unprocessed type on demand.
   unsigned populateType(const DIType *Ty);
 
-  /// Process relocation instructions.
-  void processReloc(const MachineOperand &MO);
+  /// Process global variables referenced by relocation instructions
+  /// and extern function references.
+  void processGlobalValue(const MachineOperand &MO);
 
   /// Emit common header of .BTF and .BTF.ext sections.
   void emitCommonHeader();

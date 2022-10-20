@@ -31,6 +31,8 @@ const char *ARMArch[] = {
     "armv8.5a",    "armv8.6-a",    "armv8.6a",    "armv8.7-a",    "armv8.7a",
     "armv8-r",     "armv8r",       "armv8-m.base","armv8m.base",  "armv8-m.main",
     "armv8m.main", "iwmmxt",       "iwmmxt2",     "xscale",       "armv8.1-m.main",
+    "armv9-a",     "armv9",        "armv9a",      "armv9.1-a",    "armv9.1a",
+    "armv9.2-a",   "armv9.2a",
 };
 
 template <ARM::ISAKind ISAKind>
@@ -118,16 +120,12 @@ TEST_P(ARMCPUTestFixture, ARMCPUTests) {
 // we expect. This is because the default extensions for a CPU are the sum
 // of the default extensions for its architecture and for the CPU.
 // So if a CPU has no extra extensions, it adds AEK_NONE.
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ARMCPUTestsPart1, ARMCPUTestFixture,
     ::testing::Values(
         ARMCPUTestParams("invalid", "invalid", "invalid", ARM::AEK_NONE, ""),
         ARMCPUTestParams("generic", "invalid", "none", ARM::AEK_NONE, ""),
 
-        ARMCPUTestParams("arm2", "armv2", "none", ARM::AEK_NONE, "2"),
-        ARMCPUTestParams("arm3", "armv2a", "none", ARM::AEK_NONE, "2A"),
-        ARMCPUTestParams("arm6", "armv3", "none", ARM::AEK_NONE, "3"),
-        ARMCPUTestParams("arm7m", "armv3m", "none", ARM::AEK_NONE, "3M"),
         ARMCPUTestParams("arm8", "armv4", "none", ARM::AEK_NONE, "4"),
         ARMCPUTestParams("arm810", "armv4", "none", ARM::AEK_NONE, "4"),
         ARMCPUTestParams("strongarm", "armv4", "none", ARM::AEK_NONE, "4"),
@@ -143,7 +141,6 @@ INSTANTIATE_TEST_CASE_P(
         ARMCPUTestParams("arm920", "armv4t", "none", ARM::AEK_NONE, "4T"),
         ARMCPUTestParams("arm920t", "armv4t", "none", ARM::AEK_NONE, "4T"),
         ARMCPUTestParams("arm922t", "armv4t", "none", ARM::AEK_NONE, "4T"),
-        ARMCPUTestParams("arm9312", "armv4t", "none", ARM::AEK_NONE, "4T"),
         ARMCPUTestParams("arm940t", "armv4t", "none", ARM::AEK_NONE, "4T"),
         ARMCPUTestParams("ep9312", "armv4t", "none", ARM::AEK_NONE, "4T"),
         ARMCPUTestParams("arm10tdmi", "armv5t", "none", ARM::AEK_NONE, "5T"),
@@ -167,8 +164,6 @@ INSTANTIATE_TEST_CASE_P(
         ARMCPUTestParams("arm1136j-s", "armv6", "none",
                          ARM::AEK_NONE | ARM::AEK_DSP, "6"),
         ARMCPUTestParams("arm1136jf-s", "armv6", "vfpv2",
-                         ARM::AEK_NONE | ARM::AEK_DSP, "6"),
-        ARMCPUTestParams("arm1136jz-s", "armv6", "none",
                          ARM::AEK_NONE | ARM::AEK_DSP, "6"),
         ARMCPUTestParams("arm1176jz-s", "armv6kz", "none",
                          ARM::AEK_NONE | ARM::AEK_SEC | ARM::AEK_DSP, "6KZ"),
@@ -194,11 +189,11 @@ INSTANTIATE_TEST_CASE_P(
                              ARM::AEK_SEC | ARM::AEK_VIRT | ARM::AEK_DSP,
                          "7-A"),
         ARMCPUTestParams("cortex-a8", "armv7-a", "neon",
-                         ARM::AEK_SEC | ARM::AEK_DSP, "7-A")), );
+                         ARM::AEK_SEC | ARM::AEK_DSP, "7-A")));
 
 // gtest in llvm has a limit of 50 test cases when using ::Values so we split
 // them into 2 blocks
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ARMCPUTestsPart2, ARMCPUTestFixture,
     ::testing::Values(
         ARMCPUTestParams("cortex-a9", "armv7-a", "neon-fp16",
@@ -309,10 +304,9 @@ INSTANTIATE_TEST_CASE_P(
                              ARM::AEK_FP16 | ARM::AEK_RAS | ARM::AEK_DOTPROD,
                          "8.2-A"),
         ARMCPUTestParams("cortex-a78c", "armv8.2-a", "crypto-neon-fp-armv8",
-                         ARM::AEK_SEC | ARM::AEK_MP |
-                             ARM::AEK_VIRT | ARM::AEK_HWDIVARM |
-                             ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP |
-                             ARM::AEK_CRC | ARM::AEK_RAS |
+                         ARM::AEK_SEC | ARM::AEK_MP | ARM::AEK_VIRT |
+                             ARM::AEK_HWDIVARM | ARM::AEK_HWDIVTHUMB |
+                             ARM::AEK_DSP | ARM::AEK_CRC | ARM::AEK_RAS |
                              ARM::AEK_FP16 | ARM::AEK_DOTPROD,
                          "8.2-A"),
         ARMCPUTestParams("cortex-a77", "armv8.2-a", "crypto-neon-fp-armv8",
@@ -390,9 +384,9 @@ INSTANTIATE_TEST_CASE_P(
         ARMCPUTestParams("xscale", "xscale", "none", ARM::AEK_NONE, "xscale"),
         ARMCPUTestParams("swift", "armv7s", "neon-vfpv4",
                          ARM::AEK_HWDIVARM | ARM::AEK_HWDIVTHUMB | ARM::AEK_DSP,
-                         "7-S")), );
+                         "7-S")));
 
-static constexpr unsigned NumARMCPUArchs = 92;
+static constexpr unsigned NumARMCPUArchs = 86;
 
 TEST(TargetParserTest, testARMCPUArchList) {
   SmallVector<StringRef, NumARMCPUArchs> List;
@@ -424,17 +418,13 @@ bool testARMArch(StringRef Arch, StringRef DefaultCPU, StringRef SubArch,
 
 TEST(TargetParserTest, testARMArch) {
   EXPECT_TRUE(
-      testARMArch("armv2", "arm2", "v2",
-                          ARMBuildAttrs::CPUArch::Pre_v4));
+      testARMArch("armv2", "generic", "v2", ARMBuildAttrs::CPUArch::Pre_v4));
   EXPECT_TRUE(
-      testARMArch("armv2a", "arm3", "v2a",
-                          ARMBuildAttrs::CPUArch::Pre_v4));
+      testARMArch("armv2a", "generic", "v2a", ARMBuildAttrs::CPUArch::Pre_v4));
   EXPECT_TRUE(
-      testARMArch("armv3", "arm6", "v3",
-                          ARMBuildAttrs::CPUArch::Pre_v4));
+      testARMArch("armv3", "generic", "v3", ARMBuildAttrs::CPUArch::Pre_v4));
   EXPECT_TRUE(
-      testARMArch("armv3m", "arm7m", "v3m",
-                          ARMBuildAttrs::CPUArch::Pre_v4));
+      testARMArch("armv3m", "generic", "v3m", ARMBuildAttrs::CPUArch::Pre_v4));
   EXPECT_TRUE(
       testARMArch("armv4", "strongarm", "v4",
                           ARMBuildAttrs::CPUArch::v4));
@@ -505,6 +495,15 @@ TEST(TargetParserTest, testARMArch) {
       testARMArch("armv8.7-a", "generic", "v8.7a",
                           ARMBuildAttrs::CPUArch::v8_A));
   EXPECT_TRUE(
+      testARMArch("armv9-a", "generic", "v9a",
+                          ARMBuildAttrs::CPUArch::v8_A));
+  EXPECT_TRUE(
+      testARMArch("armv9.1-a", "generic", "v9.1a",
+                          ARMBuildAttrs::CPUArch::v8_A));
+  EXPECT_TRUE(
+      testARMArch("armv9.2-a", "generic", "v9.2a",
+                          ARMBuildAttrs::CPUArch::v8_A));
+  EXPECT_TRUE(
       testARMArch("armv8-r", "cortex-r52", "v8r",
                           ARMBuildAttrs::CPUArch::v8_R));
   EXPECT_TRUE(
@@ -539,10 +538,6 @@ bool testARMExtension(StringRef CPUName,ARM::ArchKind ArchKind, StringRef ArchEx
 }
 
 TEST(TargetParserTest, testARMExtension) {
-  EXPECT_FALSE(testARMExtension("arm2", ARM::ArchKind::INVALID, "thumb"));
-  EXPECT_FALSE(testARMExtension("arm3", ARM::ArchKind::INVALID, "thumb"));
-  EXPECT_FALSE(testARMExtension("arm6", ARM::ArchKind::INVALID, "thumb"));
-  EXPECT_FALSE(testARMExtension("arm7m", ARM::ArchKind::INVALID, "thumb"));
   EXPECT_FALSE(testARMExtension("strongarm", ARM::ArchKind::INVALID, "dsp"));
   EXPECT_FALSE(testARMExtension("arm7tdmi", ARM::ArchKind::INVALID, "dsp"));
   EXPECT_FALSE(testARMExtension("arm10tdmi",
@@ -551,8 +546,6 @@ TEST(TargetParserTest, testARMExtension) {
   EXPECT_FALSE(testARMExtension("arm926ej-s",
                                 ARM::ArchKind::INVALID, "simd"));
   EXPECT_FALSE(testARMExtension("arm1136jf-s",
-                                ARM::ArchKind::INVALID, "crypto"));
-  EXPECT_FALSE(testARMExtension("arm1176j-s",
                                 ARM::ArchKind::INVALID, "crypto"));
   EXPECT_FALSE(testARMExtension("arm1156t2-s",
                                 ARM::ArchKind::INVALID, "crypto"));
@@ -839,6 +832,9 @@ TEST(TargetParserTest, ARMparseArchProfile) {
     case ARM::ArchKind::ARMV8_5A:
     case ARM::ArchKind::ARMV8_6A:
     case ARM::ArchKind::ARMV8_7A:
+    case ARM::ArchKind::ARMV9A:
+    case ARM::ArchKind::ARMV9_1A:
+    case ARM::ArchKind::ARMV9_2A:
       EXPECT_EQ(ARM::ProfileKind::A, ARM::parseArchProfile(ARMArch[i]));
       break;
     default:
@@ -876,7 +872,7 @@ TEST_P(AArch64CPUTestFixture, testAArch64CPU) {
   EXPECT_EQ(params.CPUAttr, AArch64::getCPUAttr(AK));
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     AArch64CPUTests, AArch64CPUTestFixture,
     ::testing::Values(
         ARMCPUTestParams("invalid", "invalid", "invalid", AArch64::AEK_NONE,
@@ -902,6 +898,17 @@ INSTANTIATE_TEST_CASE_P(
                              AArch64::AEK_RDM | AArch64::AEK_FP16 |
                              AArch64::AEK_DOTPROD | AArch64::AEK_RCPC,
                          "8.2-A"),
+        ARMCPUTestParams("cortex-a510", "armv9-a", "neon-fp-armv8",
+                         AArch64::AEK_CRC | AArch64::AEK_FP |
+                             AArch64::AEK_SIMD | AArch64::AEK_RAS |
+                             AArch64::AEK_LSE | AArch64::AEK_RDM |
+                             AArch64::AEK_RCPC | AArch64::AEK_DOTPROD |
+                             AArch64::AEK_SVE2 | AArch64::AEK_BF16 |
+                             AArch64::AEK_I8MM | AArch64::AEK_SVE2BITPERM |
+                             AArch64::AEK_PAUTH | AArch64::AEK_MTE |
+                             AArch64::AEK_SSBS | AArch64::AEK_FP16FML |
+                             AArch64::AEK_SB,
+                         "9-A"),
         ARMCPUTestParams("cortex-a57", "armv8-a", "crypto-neon-fp-armv8",
                          AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
                              AArch64::AEK_FP | AArch64::AEK_SIMD,
@@ -1005,21 +1012,6 @@ INSTANTIATE_TEST_CASE_P(
                          AArch64::AEK_NONE | AArch64::AEK_CRYPTO |
                              AArch64::AEK_FP | AArch64::AEK_SIMD,
                          "8-A"),
-        ARMCPUTestParams("vortex", "armv8.3-a", "crypto-neon-fp-armv8",
-                         AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
-                             AArch64::AEK_FP | AArch64::AEK_SIMD |
-                             AArch64::AEK_LSE | AArch64::AEK_RAS |
-                             AArch64::AEK_RDM | AArch64::AEK_RCPC |
-                             AArch64::AEK_FP16,
-                         "8.3-A"),
-        ARMCPUTestParams("lightning", "armv8.4-a", "crypto-neon-fp-armv8",
-                         AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
-                             AArch64::AEK_FP | AArch64::AEK_SIMD |
-                             AArch64::AEK_LSE | AArch64::AEK_RAS |
-                             AArch64::AEK_RDM | AArch64::AEK_RCPC |
-                             AArch64::AEK_DOTPROD | AArch64::AEK_FP16 |
-                             AArch64::AEK_FP16FML,
-                         "8.4-A"),
         ARMCPUTestParams("apple-a7", "armv8-a", "crypto-neon-fp-armv8",
                          AArch64::AEK_NONE | AArch64::AEK_CRYPTO |
                              AArch64::AEK_FP | AArch64::AEK_SIMD,
@@ -1038,10 +1030,10 @@ INSTANTIATE_TEST_CASE_P(
                              AArch64::AEK_SIMD,
                          "8-A"),
         ARMCPUTestParams("apple-a11", "armv8.2-a", "crypto-neon-fp-armv8",
-                         AArch64::AEK_NONE | AArch64::AEK_CRC |
-                             AArch64::AEK_CRYPTO | AArch64::AEK_FP |
-                             AArch64::AEK_LSE | AArch64::AEK_RAS |
-                             AArch64::AEK_RDM | AArch64::AEK_SIMD,
+                         AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
+                             AArch64::AEK_FP | AArch64::AEK_LSE |
+                             AArch64::AEK_RAS | AArch64::AEK_RDM |
+                             AArch64::AEK_SIMD | AArch64::AEK_FP16,
                          "8.2-A"),
         ARMCPUTestParams("apple-a12", "armv8.3-a", "crypto-neon-fp-armv8",
                          AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
@@ -1058,6 +1050,22 @@ INSTANTIATE_TEST_CASE_P(
                              AArch64::AEK_DOTPROD | AArch64::AEK_FP16 |
                              AArch64::AEK_FP16FML,
                          "8.4-A"),
+        ARMCPUTestParams("apple-a14", "armv8.5-a", "crypto-neon-fp-armv8",
+                         AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
+                             AArch64::AEK_FP | AArch64::AEK_SIMD |
+                             AArch64::AEK_LSE | AArch64::AEK_RAS |
+                             AArch64::AEK_RDM | AArch64::AEK_RCPC |
+                             AArch64::AEK_DOTPROD | AArch64::AEK_FP16 |
+                             AArch64::AEK_FP16FML,
+                         "8.5-A"),
+        ARMCPUTestParams("apple-m1", "armv8.5-a", "crypto-neon-fp-armv8",
+                         AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
+                             AArch64::AEK_FP | AArch64::AEK_SIMD |
+                             AArch64::AEK_LSE | AArch64::AEK_RAS |
+                             AArch64::AEK_RDM | AArch64::AEK_RCPC |
+                             AArch64::AEK_DOTPROD | AArch64::AEK_FP16 |
+                             AArch64::AEK_FP16FML,
+                         "8.5-A"),
         ARMCPUTestParams("apple-s4", "armv8.3-a", "crypto-neon-fp-armv8",
                          AArch64::AEK_CRC | AArch64::AEK_CRYPTO |
                              AArch64::AEK_FP | AArch64::AEK_SIMD |
@@ -1179,9 +1187,9 @@ INSTANTIATE_TEST_CASE_P(
                              AArch64::AEK_FP | AArch64::AEK_SIMD |
                              AArch64::AEK_FP16 | AArch64::AEK_RAS |
                              AArch64::AEK_LSE | AArch64::AEK_RDM,
-                         "8.2-A")), );
+                         "8.2-A")));
 
-static constexpr unsigned NumAArch64CPUArchs = 48;
+static constexpr unsigned NumAArch64CPUArchs = 49;
 
 TEST(TargetParserTest, testAArch64CPUArchList) {
   SmallVector<StringRef, NumAArch64CPUArchs> List;
@@ -1198,9 +1206,9 @@ TEST(TargetParserTest, testAArch64CPUArchList) {
 bool testAArch64Arch(StringRef Arch, StringRef DefaultCPU, StringRef SubArch,
                      unsigned ArchAttr) {
   AArch64::ArchKind AK = AArch64::parseArch(Arch);
-  return (AK != AArch64::ArchKind::INVALID) &
-         AArch64::getDefaultCPU(Arch).equals(DefaultCPU) &
-         AArch64::getSubArch(AK).equals(SubArch) &
+  return (AK != AArch64::ArchKind::INVALID) &&
+         AArch64::getDefaultCPU(Arch).equals(DefaultCPU) &&
+         AArch64::getSubArch(AK).equals(SubArch) &&
          (AArch64::getArchAttr(AK) == ArchAttr);
 }
 
@@ -1220,6 +1228,12 @@ TEST(TargetParserTest, testAArch64Arch) {
   EXPECT_TRUE(testAArch64Arch("armv8.6-a", "generic", "v8.6a",
                               ARMBuildAttrs::CPUArch::v8_A));
   EXPECT_TRUE(testAArch64Arch("armv8.7-a", "generic", "v8.7a",
+                              ARMBuildAttrs::CPUArch::v8_A));
+  EXPECT_TRUE(testAArch64Arch("armv9-a", "generic", "v9a",
+                              ARMBuildAttrs::CPUArch::v8_A));
+  EXPECT_TRUE(testAArch64Arch("armv9.1-a", "generic", "v9.1a",
+                              ARMBuildAttrs::CPUArch::v8_A));
+  EXPECT_TRUE(testAArch64Arch("armv9.2-a", "generic", "v9.2a",
                               ARMBuildAttrs::CPUArch::v8_A));
 }
 
@@ -1377,7 +1391,9 @@ TEST(TargetParserTest, AArch64ExtensionFeatures) {
     AArch64::AEK_SVE,      AArch64::AEK_SVE2,
     AArch64::AEK_SVE2AES,  AArch64::AEK_SVE2SM4,
     AArch64::AEK_SVE2SHA3, AArch64::AEK_SVE2BITPERM,
-    AArch64::AEK_RCPC,     AArch64::AEK_FP16FML };
+    AArch64::AEK_RCPC,     AArch64::AEK_FP16FML,
+    AArch64::AEK_SME,      AArch64::AEK_SMEF64,
+    AArch64::AEK_SMEI64 };
 
   std::vector<StringRef> Features;
 
@@ -1409,6 +1425,9 @@ TEST(TargetParserTest, AArch64ExtensionFeatures) {
   EXPECT_TRUE(llvm::is_contained(Features, "+sve2-sm4"));
   EXPECT_TRUE(llvm::is_contained(Features, "+sve2-sha3"));
   EXPECT_TRUE(llvm::is_contained(Features, "+sve2-bitperm"));
+  EXPECT_TRUE(llvm::is_contained(Features, "+sme"));
+  EXPECT_TRUE(llvm::is_contained(Features, "+sme-f64"));
+  EXPECT_TRUE(llvm::is_contained(Features, "+sme-i64"));
 }
 
 TEST(TargetParserTest, AArch64ArchFeatures) {
@@ -1423,6 +1442,7 @@ TEST(TargetParserTest, AArch64ArchFeatures) {
 TEST(TargetParserTest, AArch64ArchExtFeature) {
   const char *ArchExt[][4] = {{"crc", "nocrc", "+crc", "-crc"},
                               {"crypto", "nocrypto", "+crypto", "-crypto"},
+                              {"flagm", "noflagm", "+flagm", "-flagm"},
                               {"fp", "nofp", "+fp-armv8", "-fp-armv8"},
                               {"simd", "nosimd", "+neon", "-neon"},
                               {"fp16", "nofp16", "+fullfp16", "-fullfp16"},
@@ -1446,12 +1466,16 @@ TEST(TargetParserTest, AArch64ArchExtFeature) {
                               {"rng", "norng", "+rand", "-rand"},
                               {"memtag", "nomemtag", "+mte", "-mte"},
                               {"tme", "notme", "+tme", "-tme"},
+                              {"pauth", "nopauth", "+pauth", "-pauth"},
                               {"ssbs", "nossbs", "+ssbs", "-ssbs"},
                               {"sb", "nosb", "+sb", "-sb"},
                               {"predres", "nopredres", "+predres", "-predres"},
                               {"i8mm", "noi8mm", "+i8mm", "-i8mm"},
                               {"f32mm", "nof32mm", "+f32mm", "-f32mm"},
                               {"f64mm", "nof64mm", "+f64mm", "-f64mm"},
+                              {"sme", "nosme", "+sme", "-sme"},
+                              {"sme-f64", "nosme-f64", "+sme-f64", "-sme-f64"},
+                              {"sme-i64", "nosme-i64", "+sme-i64", "-sme-i64"},
 };
 
   for (unsigned i = 0; i < array_lengthof(ArchExt); i++) {

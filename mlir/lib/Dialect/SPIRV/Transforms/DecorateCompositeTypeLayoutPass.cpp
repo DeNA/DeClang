@@ -43,7 +43,7 @@ public:
         spirv::PointerType::get(structType, ptrType.getStorageClass());
 
     // Save all named attributes except "type" attribute.
-    for (const auto &attr : op.getAttrs()) {
+    for (const auto &attr : op->getAttrs()) {
       if (attr.first == "type") {
         continue;
       }
@@ -64,20 +64,19 @@ public:
   LogicalResult matchAndRewrite(spirv::AddressOfOp op,
                                 PatternRewriter &rewriter) const override {
     auto spirvModule = op->getParentOfType<spirv::ModuleOp>();
-    auto varName = op.variable();
+    auto varName = op.variableAttr();
     auto varOp = spirvModule.lookupSymbol<spirv::GlobalVariableOp>(varName);
 
     rewriter.replaceOpWithNewOp<spirv::AddressOfOp>(
-        op, varOp.type(), rewriter.getSymbolRefAttr(varName));
+        op, varOp.type(), SymbolRefAttr::get(varName.getAttr()));
     return success();
   }
 };
 } // namespace
 
-static void populateSPIRVLayoutInfoPatterns(OwningRewritePatternList &patterns,
-                                            MLIRContext *ctx) {
-  patterns.insert<SPIRVGlobalVariableOpLayoutInfoDecoration,
-                  SPIRVAddressOfOpLayoutInfoDecoration>(ctx);
+static void populateSPIRVLayoutInfoPatterns(RewritePatternSet &patterns) {
+  patterns.add<SPIRVGlobalVariableOpLayoutInfoDecoration,
+               SPIRVAddressOfOpLayoutInfoDecoration>(patterns.getContext());
 }
 
 namespace {
@@ -90,8 +89,8 @@ class DecorateSPIRVCompositeTypeLayoutPass
 
 void DecorateSPIRVCompositeTypeLayoutPass::runOnOperation() {
   auto module = getOperation();
-  OwningRewritePatternList patterns;
-  populateSPIRVLayoutInfoPatterns(patterns, module.getContext());
+  RewritePatternSet patterns(module.getContext());
+  populateSPIRVLayoutInfoPatterns(patterns);
   ConversionTarget target(*(module.getContext()));
   target.addLegalDialect<spirv::SPIRVDialect>();
   target.addLegalOp<FuncOp>();
@@ -107,7 +106,7 @@ void DecorateSPIRVCompositeTypeLayoutPass::runOnOperation() {
 
   // TODO: Change the type for the indirect users such as spv.Load, spv.Store,
   // spv.FunctionCall and so on.
-  FrozenRewritePatternList frozenPatterns(std::move(patterns));
+  FrozenRewritePatternSet frozenPatterns(std::move(patterns));
   for (auto spirvModule : module.getOps<spirv::ModuleOp>())
     if (failed(applyFullConversion(spirvModule, target, frozenPatterns)))
       signalPassFailure();

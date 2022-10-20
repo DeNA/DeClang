@@ -21,8 +21,8 @@
 #include <memory>
 #include <vector>
 
-#include <stddef.h>
-#include <stdint.h>
+#include <cstddef>
+#include <cstdint>
 
 namespace lldb_private {
 class Address;
@@ -89,6 +89,12 @@ public:
 
   void Clear() { m_sections.clear(); }
 
+  /// Get the debug information size from all sections that contain debug
+  /// information. Symbol tables are not considered part of the debug
+  /// information for this call, just known sections that contain debug
+  /// information.
+  uint64_t GetDebugInfoSize() const;
+
 protected:
   collection m_sections;
 };
@@ -117,7 +123,12 @@ public:
           lldb::offset_t file_size, uint32_t log2align, uint32_t flags,
           uint32_t target_byte_size = 1);
 
-  ~Section();
+  virtual ~Section();
+
+  // LLVM RTTI support
+  static char ID;
+  virtual bool isA(const void *ClassID) const { return ClassID == &ID; }
+  static bool classof(const Section *obj) { return obj->isA(&ID); }
 
   static int Compare(const Section &a, const Section &b);
 
@@ -190,6 +201,8 @@ public:
   ObjectFile *GetObjectFile() { return m_obj_file; }
   const ObjectFile *GetObjectFile() const { return m_obj_file; }
 
+  bool CanContainSwiftReflectionData() const;
+
   /// Read the section data from the object file that the section
   /// resides in.
   ///
@@ -235,6 +248,13 @@ public:
   bool IsRelocated() const { return m_relocated; }
 
   void SetIsRelocated(bool b) { m_relocated = b; }
+
+  /// Returns true if this section contains debug information. Symbol tables
+  /// are not considered debug information since some symbols might contain
+  /// debug information (STABS, COFF) but not all symbols do, so to keep this
+  /// fast and simple only sections that contains only debug information should
+  /// return true.
+  bool ContainsOnlyDebugInfo() const;
 
 protected:
   ObjectFile *m_obj_file;   // The object file that data for this section should

@@ -9,6 +9,7 @@
 #include "lldb/Host/HostNativeThreadBase.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Host/ThreadLauncher.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 
 #include "llvm/ADT/StringExtras.h"
@@ -16,9 +17,6 @@
 
 using namespace lldb;
 using namespace lldb_private;
-
-HostNativeThreadBase::HostNativeThreadBase()
-    : m_thread(LLDB_INVALID_HOST_THREAD), m_result(0) {}
 
 HostNativeThreadBase::HostNativeThreadBase(thread_t thread)
     : m_thread(thread), m_result(0) {}
@@ -61,7 +59,7 @@ HostNativeThreadBase::ThreadCreateTrampoline(lldb::thread_arg_t arg) {
   thread_func_t thread_fptr = info->thread_fptr;
   thread_arg_t thread_arg = info->thread_arg;
 
-  Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_THREAD));
+  Log *log = GetLog(LLDBLog::Thread);
   LLDB_LOGF(log, "thread created");
 
   delete info;

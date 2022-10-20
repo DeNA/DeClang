@@ -24,12 +24,13 @@ namespace llvm {
   class RegScavenger;
 
 namespace TargetStackID {
-  enum Value {
-    Default = 0,
-    SGPRSpill = 1,
-    SVEVector = 2,
-    NoAlloc = 255
-  };
+enum Value {
+  Default = 0,
+  SGPRSpill = 1,
+  ScalableVector = 2,
+  WasmLocal = 3,
+  NoAlloc = 255
+};
 }
 
 /// Information about stack frame layout on the target.  It holds the direction
@@ -110,14 +111,6 @@ public:
     return SPAdj;
   }
 
-  /// getTransientStackAlignment - This method returns the number of bytes to
-  /// which the stack pointer must be aligned at all times, even between
-  /// calls.
-  ///
-  LLVM_ATTRIBUTE_DEPRECATED(unsigned getTransientStackAlignment() const,
-                            "Use getTransientStackAlign instead") {
-    return TransientStackAlignment.value();
-  }
   /// getTransientStackAlignment - This method returns the number of bytes to
   /// which the stack pointer must be aligned at all times, even between
   /// calls.
@@ -222,11 +215,6 @@ public:
   virtual void
   emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
                             MachineBasicBlock::iterator MBBI) const {}
-
-  virtual void emitCalleeSavedFrameMoves(MachineBasicBlock &MBB,
-                                         MachineBasicBlock::iterator MBBI,
-                                         const DebugLoc &DL,
-                                         bool IsPrologue) const {}
 
   /// Replace a StackProbe stub (if any) with the actual probe code inline
   virtual void inlineStackProbe(MachineFunction &MF,

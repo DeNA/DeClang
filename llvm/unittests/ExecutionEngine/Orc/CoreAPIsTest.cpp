@@ -9,7 +9,7 @@
 #include "OrcTestCommon.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/ExecutionEngine/Orc/Core.h"
-#include "llvm/ExecutionEngine/Orc/OrcError.h"
+#include "llvm/ExecutionEngine/Orc/Shared/OrcError.h"
 #include "llvm/Testing/Support/Error.h"
 
 #include <set>
@@ -110,7 +110,7 @@ TEST_F(CoreAPIsStandardTest, MaterializationSideEffctsOnlyBasic) {
 
   ES.lookup(
       LookupKind::Static, makeJITDylibSearchOrder(&JD),
-      SymbolLookupSet({Foo}, SymbolLookupFlags::WeaklyReferencedSymbol),
+      SymbolLookupSet(Foo, SymbolLookupFlags::WeaklyReferencedSymbol),
       SymbolState::Ready,
       [&](Expected<SymbolMap> LookupResult) {
         if (LookupResult)
@@ -1019,13 +1019,11 @@ TEST_F(CoreAPIsStandardTest, TestBasicWeakSymbolMaterialization) {
 
 TEST_F(CoreAPIsStandardTest, DefineMaterializingSymbol) {
   bool ExpectNoMoreMaterialization = false;
-  ES.setDispatchMaterialization(
-      [&](std::unique_ptr<MaterializationUnit> MU,
-          std::unique_ptr<MaterializationResponsibility> MR) {
-        if (ExpectNoMoreMaterialization)
-          ADD_FAILURE() << "Unexpected materialization";
-        MU->materialize(std::move(MR));
-      });
+  ES.setDispatchTask([&](std::unique_ptr<Task> T) {
+    if (ExpectNoMoreMaterialization && isa<MaterializationTask>(*T))
+      ADD_FAILURE() << "Unexpected materialization";
+    T->run();
+  });
 
   auto MU = std::make_unique<SimpleMaterializationUnit>(
       SymbolFlagsMap({{Foo, FooSym.getFlags()}}),
@@ -1086,6 +1084,53 @@ TEST_F(CoreAPIsStandardTest, GeneratorTest) {
   EXPECT_EQ(Result.count(Bar), 1U) << "Expected to find fallback def for 'bar'";
   EXPECT_EQ(Result[Bar].getAddress(), BarSym.getAddress())
       << "Expected fallback def for Bar to be equal to BarSym";
+}
+
+TEST_F(CoreAPIsStandardTest, AsynchronousGeneratorTest) {
+  class TestGenerator : public DefinitionGenerator {
+  public:
+    TestGenerator(LookupState &TLS) : TLS(TLS) {}
+    Error tryToGenerate(LookupState &LS, LookupKind K, JITDylib &JD,
+                        JITDylibLookupFlags JDLookupFlags,
+                        const SymbolLookupSet &Name) override {
+      TLS = std::move(LS);
+      return Error::success();
+    }
+
+  private:
+    LookupState &TLS;
+  };
+
+  LookupState LS;
+  JD.addGenerator(std::make_unique<TestGenerator>(LS));
+
+  bool LookupCompleted = false;
+
+  ES.lookup(
+      LookupKind::Static, makeJITDylibSearchOrder(&JD), SymbolLookupSet(Foo),
+      SymbolState::Ready,
+      [&](Expected<SymbolMap> Result) {
+        LookupCompleted = true;
+        if (!Result) {
+          ADD_FAILURE() << "Lookup failed unexpected";
+          logAllUnhandledErrors(Result.takeError(), errs(), "");
+          return;
+        }
+
+        EXPECT_EQ(Result->size(), 1U) << "Unexpected number of results";
+        EXPECT_EQ(Result->count(Foo), 1U) << "Expected result for Foo";
+        EXPECT_EQ((*Result)[Foo].getAddress(), FooSym.getAddress())
+            << "Bad result for Foo";
+      },
+      NoDependenciesToRegister);
+
+  EXPECT_FALSE(LookupCompleted);
+
+  cantFail(JD.define(absoluteSymbols({{Foo, FooSym}})));
+
+  LS.continueLookup(Error::success());
+
+  EXPECT_TRUE(LookupCompleted);
 }
 
 TEST_F(CoreAPIsStandardTest, FailResolution) {
@@ -1204,15 +1249,18 @@ TEST_F(CoreAPIsStandardTest, TestLookupWithUnthreadedMaterialization) {
 TEST_F(CoreAPIsStandardTest, TestLookupWithThreadedMaterialization) {
 #if LLVM_ENABLE_THREADS
 
-  std::thread MaterializationThread;
-  ES.setDispatchMaterialization(
-      [&](std::unique_ptr<MaterializationUnit> MU,
-          std::unique_ptr<MaterializationResponsibility> MR) {
-        MaterializationThread =
-            std::thread([MU = std::move(MU), MR = std::move(MR)]() mutable {
-              MU->materialize(std::move(MR));
-            });
-      });
+  std::mutex WorkThreadsMutex;
+  std::vector<std::thread> WorkThreads;
+  ES.setDispatchTask([&](std::unique_ptr<Task> T) {
+    std::promise<void> WaitP;
+    std::lock_guard<std::mutex> Lock(WorkThreadsMutex);
+    WorkThreads.push_back(
+        std::thread([T = std::move(T), WaitF = WaitP.get_future()]() mutable {
+          WaitF.get();
+          T->run();
+        }));
+    WaitP.set_value();
+  });
 
   cantFail(JD.define(absoluteSymbols({{Foo, FooSym}})));
 
@@ -1222,7 +1270,9 @@ TEST_F(CoreAPIsStandardTest, TestLookupWithThreadedMaterialization) {
       << "lookup returned an incorrect address";
   EXPECT_EQ(FooLookupResult.getFlags(), FooSym.getFlags())
       << "lookup returned incorrect flags";
-  MaterializationThread.join();
+
+  for (auto &WT : WorkThreads)
+    WT.join();
 #endif
 }
 
@@ -1359,7 +1409,7 @@ TEST(JITDylibTest, GetDFSLinkOrderTree) {
   // Test that DFS ordering behaves as expected when the linkage relationships
   // form a tree.
 
-  ExecutionSession ES;
+  ExecutionSession ES{std::make_unique<UnsupportedExecutorProcessControl>()};
 
   auto &LibA = ES.createBareJITDylib("A");
   auto &LibB = ES.createBareJITDylib("B");
@@ -1400,7 +1450,7 @@ TEST(JITDylibTest, GetDFSLinkOrderDiamond) {
   // Test that DFS ordering behaves as expected when the linkage relationships
   // contain a diamond.
 
-  ExecutionSession ES;
+  ExecutionSession ES{std::make_unique<UnsupportedExecutorProcessControl>()};
   auto &LibA = ES.createBareJITDylib("A");
   auto &LibB = ES.createBareJITDylib("B");
   auto &LibC = ES.createBareJITDylib("C");
@@ -1422,7 +1472,7 @@ TEST(JITDylibTest, GetDFSLinkOrderCycle) {
   // Test that DFS ordering behaves as expected when the linkage relationships
   // contain a cycle.
 
-  ExecutionSession ES;
+  ExecutionSession ES{std::make_unique<UnsupportedExecutorProcessControl>()};
   auto &LibA = ES.createBareJITDylib("A");
   auto &LibB = ES.createBareJITDylib("B");
   auto &LibC = ES.createBareJITDylib("C");

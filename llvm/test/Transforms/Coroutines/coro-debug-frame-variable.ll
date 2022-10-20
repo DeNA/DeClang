@@ -1,4 +1,3 @@
-; RUN: opt < %s -O0 -enable-coroutines -S | FileCheck %s
 ; RUN: opt < %s -passes='default<O0>' -enable-coroutines -S | FileCheck %s
 
 ; Define a function 'f' that resembles the Clang frontend's output for the
@@ -32,12 +31,9 @@
 ; CHECK:       entry:
 ; CHECK:         %j = alloca i32, align 4
 ; CHECK:         call void @llvm.dbg.declare(metadata i32* %j, metadata ![[JVAR:[0-9]+]], metadata !DIExpression()), !dbg ![[JDBGLOC:[0-9]+]]
-; CHECK:         %memory = call i8* @new(i64 72)
-; CHECK:         call void @llvm.dbg.declare(metadata i8* %memory, metadata ![[XVAR:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst{{.*}})), !dbg ![[IDBGLOC:[0-9]+]]
-; CHECK:         call void @llvm.dbg.declare(metadata i8* %memory, metadata ![[IVAR:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst{{.*}})), !dbg ![[IDBGLOC]]
-; CHECK:         [[IGEP:%.+]] = getelementptr inbounds %f.Frame, %f.Frame* %FramePtr, i32 0, i32 4
-; CHECK:         [[XGEP:%.+]] = getelementptr inbounds %f.Frame, %f.Frame* %FramePtr, i32 0, i32 6
-; CHECK:       init.ready:
+; CHECK:         %[[MEMORY:.*]] = call i8* @new
+; CHECK:         call void @llvm.dbg.declare(metadata i8* %[[MEMORY]], metadata ![[XVAR:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 32)), !dbg ![[IDBGLOC:[0-9]+]]
+; CHECK:         call void @llvm.dbg.declare(metadata i8* %[[MEMORY]], metadata ![[IVAR:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 20)), !dbg ![[IDBGLOC]]
 ; CHECK:       await.ready:
 ;
 ; CHECK-LABEL: define internal fastcc void @f.resume({{.*}}) {
@@ -51,19 +47,19 @@
 ; CHECK:       init.ready:
 ; CHECK:       await.ready:
 ;
-; CHECK: ![[JVAR]] = !DILocalVariable(name: "j"
-; CHECK: ![[SCOPE:[0-9]+]] = distinct !DILexicalBlock(scope: !8, file: !1, line: 23, column: 12)
-; CHECK: ![[JDBGLOC]] = !DILocation(line: 32, column: 7, scope: ![[SCOPE]])
-; CHECK: ![[XVAR]] = !DILocalVariable(name: "x"
-; CHECK: ![[IDBGLOC]] = !DILocation(line: 24, column: 7, scope: ![[SCOPE]])
-; CHECK: ![[IVAR]] = !DILocalVariable(name: "i"
+; CHECK-DAG: ![[IVAR]] = !DILocalVariable(name: "i"
+; CHECK-DAG: ![[SCOPE:[0-9]+]] = distinct !DILexicalBlock(scope: !8, file: !1, line: 23, column: 12)
+; CHECK-DAG: ![[IDBGLOC]] = !DILocation(line: 24, column: 7, scope: ![[SCOPE]])
+; CHECK-DAG: ![[XVAR]] = !DILocalVariable(name: "x"
+; CHECK-DAG: ![[JVAR]] = !DILocalVariable(name: "j"
+; CHECK-DAG: ![[JDBGLOC]] = !DILocation(line: 32, column: 7, scope: ![[SCOPE]])
 
-; CHECK: ![[XVAR_RESUME]] = !DILocalVariable(name: "x"
-; CHECK: ![[IDBGLOC_RESUME]] = !DILocation(line: 24, column: 7, scope: ![[RESUME_SCOPE:[0-9]+]])
-; CHECK: ![[RESUME_SCOPE]] = distinct !DILexicalBlock(scope: !8, file: !1, line: 23, column: 12)
-; CHECK: ![[IVAR_RESUME]] = !DILocalVariable(name: "i"
-; CHECK: ![[JVAR_RESUME]] = !DILocalVariable(name: "j"
-; CHECK: ![[JDBGLOC_RESUME]] = !DILocation(line: 32, column: 7, scope: ![[RESUME_SCOPE]])
+; CHECK-DAG: ![[XVAR_RESUME]] = !DILocalVariable(name: "x"
+; CHECK-DAG: ![[IDBGLOC_RESUME]] = !DILocation(line: 24, column: 7, scope: ![[RESUME_SCOPE:[0-9]+]])
+; CHECK-DAG: ![[RESUME_SCOPE]] = distinct !DILexicalBlock(scope: !8, file: !1, line: 23, column: 12)
+; CHECK-DAG: ![[IVAR_RESUME]] = !DILocalVariable(name: "i"
+; CHECK-DAG: ![[JVAR_RESUME]] = !DILocalVariable(name: "j"
+; CHECK-DAG: ![[JDBGLOC_RESUME]] = !DILocation(line: 32, column: 7, scope: ![[RESUME_SCOPE]])
 define void @f() {
 entry:
   %__promise = alloca i8, align 8

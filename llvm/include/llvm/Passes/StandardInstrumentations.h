@@ -15,6 +15,7 @@
 #ifndef LLVM_PASSES_STANDARDINSTRUMENTATIONS_H
 #define LLVM_PASSES_STANDARDINSTRUMENTATIONS_H
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/BasicBlock.h"
@@ -22,6 +23,7 @@
 #include "llvm/IR/PassTimingInfo.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/IPO/SampleProfileProbe.h"
 
 #include <string>
 #include <utility>
@@ -59,7 +61,6 @@ private:
   /// Stack of Module description, enough to print the module after a given
   /// pass.
   SmallVector<PrintModuleDesc, 2> ModuleDescStack;
-  bool StoreModuleDesc = false;
 };
 
 class OptNoneInstrumentation {
@@ -78,18 +79,41 @@ public:
   void registerCallbacks(PassInstrumentationCallbacks &PIC);
 };
 
+struct PrintPassOptions {
+  /// Print adaptors and pass managers.
+  bool Verbose = false;
+  /// Don't print information for analyses.
+  bool SkipAnalyses = false;
+  /// Indent based on hierarchy.
+  bool Indent = false;
+};
+
 // Debug logging for transformation and analysis passes.
 class PrintPassInstrumentation {
+  raw_ostream &print();
+
 public:
-  PrintPassInstrumentation(bool DebugLogging) : DebugLogging(DebugLogging) {}
+  PrintPassInstrumentation(bool Enabled, PrintPassOptions Opts)
+      : Enabled(Enabled), Opts(Opts) {}
   void registerCallbacks(PassInstrumentationCallbacks &PIC);
 
 private:
-  bool DebugLogging;
+  bool Enabled;
+  PrintPassOptions Opts;
+  int Indent = 0;
 };
 
 class PreservedCFGCheckerInstrumentation {
-private:
+public:
+  // Keeps sticky poisoned flag for the given basic block once it has been
+  // deleted or RAUWed.
+  struct BBGuard final : public CallbackVH {
+    BBGuard(const BasicBlock *BB) : CallbackVH(BB) {}
+    void deleted() override { CallbackVH::deleted(); }
+    void allUsesReplacedWith(Value *) override { CallbackVH::deleted(); }
+    bool isPoisoned() const { return !getValPtr(); }
+  };
+
   // CFG is a map BB -> {(Succ, Multiplicity)}, where BB is a non-leaf basic
   // block, {(Succ, Multiplicity)} set of all pairs of the block's successors
   // and the multiplicity of the edge (BB->Succ). As the mapped sets are
@@ -99,40 +123,34 @@ private:
   // in the Graph (BBGuard). That is if any of the block is deleted or RAUWed
   // then the CFG is treated poisoned and no block pointer of the Graph is used.
   struct CFG {
-    struct BBGuard final : public CallbackVH {
-      BBGuard(const BasicBlock *BB) : CallbackVH(BB) {}
-      void deleted() override { CallbackVH::deleted(); }
-      void allUsesReplacedWith(Value *) override { CallbackVH::deleted(); }
-      bool isPoisoned() const { return !getValPtr(); }
-    };
-
     Optional<DenseMap<intptr_t, BBGuard>> BBGuards;
     DenseMap<const BasicBlock *, DenseMap<const BasicBlock *, unsigned>> Graph;
 
-    CFG(const Function *F, bool TrackBBLifetime = false);
+    CFG(const Function *F, bool TrackBBLifetime);
 
     bool operator==(const CFG &G) const {
       return !isPoisoned() && !G.isPoisoned() && Graph == G.Graph;
     }
 
     bool isPoisoned() const {
-      if (BBGuards)
-        for (auto &BB : *BBGuards) {
-          if (BB.second.isPoisoned())
-            return true;
-        }
-      return false;
+      return BBGuards &&
+             std::any_of(BBGuards->begin(), BBGuards->end(),
+                         [](const auto &BB) { return BB.second.isPoisoned(); });
     }
 
     static void printDiff(raw_ostream &out, const CFG &Before,
                           const CFG &After);
+    bool invalidate(Function &F, const PreservedAnalyses &PA,
+                    FunctionAnalysisManager::Invalidator &);
   };
 
-  SmallVector<std::pair<StringRef, Optional<CFG>>, 8> GraphStackBefore;
+#ifdef LLVM_ENABLE_ABI_BREAKING_CHECKS
+  SmallVector<StringRef, 8> PassStack;
+#endif
 
-public:
   static cl::opt<bool> VerifyPreservedCFG;
-  void registerCallbacks(PassInstrumentationCallbacks &PIC);
+  void registerCallbacks(PassInstrumentationCallbacks &PIC,
+                         FunctionAnalysisManager &FAM);
 };
 
 // Base class for classes that report changes to the IR.
@@ -152,7 +170,7 @@ public:
 // 8.  To compare two IR representations (of type \p T).
 template <typename IRUnitT> class ChangeReporter {
 protected:
-  ChangeReporter() {}
+  ChangeReporter(bool RunInVerboseMode) : VerboseMode(RunInVerboseMode) {}
 
 public:
   virtual ~ChangeReporter();
@@ -197,13 +215,14 @@ protected:
   virtual void handleFiltered(StringRef PassID, std::string &Name) = 0;
   // Called when an ignored pass is encountered.
   virtual void handleIgnored(StringRef PassID, std::string &Name) = 0;
-  // Called to compare the before and after representations of the IR.
-  virtual bool same(const IRUnitT &Before, const IRUnitT &After) = 0;
 
   // Stack of IRs before passes.
   std::vector<IRUnitT> BeforeStack;
   // Is this the first IR seen?
   bool InitialIR = true;
+
+  // Run in verbose mode, printing everything?
+  const bool VerboseMode;
 };
 
 // An abstract template base class that handles printing banners and
@@ -211,7 +230,7 @@ protected:
 template <typename IRUnitT>
 class TextChangeReporter : public ChangeReporter<IRUnitT> {
 protected:
-  TextChangeReporter();
+  TextChangeReporter(bool Verbose);
 
   // Print a module dump of the first IR that is changed.
   void handleInitialIR(Any IR) override;
@@ -235,7 +254,8 @@ protected:
 // included in this representation but it is massaged before reporting.
 class IRChangedPrinter : public TextChangeReporter<std::string> {
 public:
-  IRChangedPrinter() {}
+  IRChangedPrinter(bool VerboseMode)
+      : TextChangeReporter<std::string>(VerboseMode) {}
   ~IRChangedPrinter() override;
   void registerCallbacks(PassInstrumentationCallbacks &PIC);
 
@@ -247,8 +267,137 @@ protected:
   void handleAfter(StringRef PassID, std::string &Name,
                    const std::string &Before, const std::string &After,
                    Any) override;
-  // Called to compare the before and after representations of the IR.
-  bool same(const std::string &Before, const std::string &After) override;
+};
+
+// Information that needs to be saved for a basic block in order to compare
+// before and after the pass to determine if it was changed by a pass.
+template <typename T> class BlockDataT {
+public:
+  BlockDataT(const BasicBlock &B) : Label(B.getName().str()), Data(B) {
+    raw_string_ostream SS(Body);
+    B.print(SS, nullptr, true, true);
+  }
+
+  bool operator==(const BlockDataT &That) const { return Body == That.Body; }
+  bool operator!=(const BlockDataT &That) const { return Body != That.Body; }
+
+  // Return the label of the represented basic block.
+  StringRef getLabel() const { return Label; }
+  // Return the string representation of the basic block.
+  StringRef getBody() const { return Body; }
+
+  // Return the associated data
+  const T &getData() const { return Data; }
+
+protected:
+  std::string Label;
+  std::string Body;
+
+  // Extra data associated with a basic block
+  T Data;
+};
+
+template <typename T> class OrderedChangedData {
+public:
+  // Return the names in the order they were saved
+  std::vector<std::string> &getOrder() { return Order; }
+  const std::vector<std::string> &getOrder() const { return Order; }
+
+  // Return a map of names to saved representations
+  StringMap<T> &getData() { return Data; }
+  const StringMap<T> &getData() const { return Data; }
+
+  bool operator==(const OrderedChangedData<T> &That) const {
+    return Data == That.getData();
+  }
+
+  // Call the lambda \p HandlePair on each corresponding pair of data from
+  // \p Before and \p After.  The order is based on the order in \p After
+  // with ones that are only in \p Before interspersed based on where they
+  // occur in \p Before.  This is used to present the output in an order
+  // based on how the data is ordered in LLVM.
+  static void report(const OrderedChangedData &Before,
+                     const OrderedChangedData &After,
+                     function_ref<void(const T *, const T *)> HandlePair);
+
+protected:
+  std::vector<std::string> Order;
+  StringMap<T> Data;
+};
+
+// Do not need extra information for patch-style change reporter.
+class EmptyData {
+public:
+  EmptyData(const BasicBlock &) {}
+};
+
+// The data saved for comparing functions.
+template <typename T>
+class FuncDataT : public OrderedChangedData<BlockDataT<T>> {};
+
+// The data saved for comparing IRs.
+template <typename T>
+class IRDataT : public OrderedChangedData<FuncDataT<T>> {};
+
+// Abstract template base class for a class that compares two IRs.  The
+// class is created with the 2 IRs to compare and then compare is called.
+// The static function analyzeIR is used to build up the IR representation.
+template <typename T> class IRComparer {
+public:
+  IRComparer(const IRDataT<T> &Before, const IRDataT<T> &After)
+      : Before(Before), After(After) {}
+
+  // Compare the 2 IRs. \p handleFunctionCompare is called to handle the
+  // compare of a function. When \p InModule is set,
+  // this function is being handled as part of comparing a module.
+
+  void compare(
+      bool CompareModule,
+      std::function<void(bool InModule, unsigned Minor,
+                         const FuncDataT<T> &Before, const FuncDataT<T> &After)>
+          CompareFunc);
+
+  // Analyze \p IR and build the IR representation in \p Data.
+  static void analyzeIR(Any IR, IRDataT<T> &Data);
+
+protected:
+  // Generate the data for \p F into \p Data.
+  static bool generateFunctionData(IRDataT<T> &Data, const Function &F);
+
+  const IRDataT<T> &Before;
+  const IRDataT<T> &After;
+};
+
+// A change printer that prints out in-line differences in the basic
+// blocks.  It uses an InlineComparer to do the comparison so it shows
+// the differences prefixed with '-' and '+' for code that is removed
+// and added, respectively.  Changes to the IR that do not affect basic
+// blocks are not reported as having changed the IR.  The option
+// -print-module-scope does not affect this change reporter.
+class InLineChangePrinter : public TextChangeReporter<IRDataT<EmptyData>> {
+public:
+  InLineChangePrinter(bool VerboseMode, bool ColourMode)
+      : TextChangeReporter<IRDataT<EmptyData>>(VerboseMode),
+        UseColour(ColourMode) {}
+  ~InLineChangePrinter() override;
+  void registerCallbacks(PassInstrumentationCallbacks &PIC);
+
+protected:
+  // Create a representation of the IR.
+  virtual void generateIRRepresentation(Any IR, StringRef PassID,
+                                        IRDataT<EmptyData> &Output) override;
+
+  // Called when an interesting IR has changed.
+  virtual void handleAfter(StringRef PassID, std::string &Name,
+                           const IRDataT<EmptyData> &Before,
+                           const IRDataT<EmptyData> &After, Any) override;
+
+  void handleFunctionCompare(StringRef Name, StringRef Prefix, StringRef PassID,
+                             StringRef Divider, bool InModule, unsigned Minor,
+                             const FuncDataT<EmptyData> &Before,
+                             const FuncDataT<EmptyData> &After);
+
+  bool UseColour;
 };
 
 class VerifyInstrumentation {
@@ -269,22 +418,33 @@ class StandardInstrumentations {
   OptBisectInstrumentation OptBisect;
   PreservedCFGCheckerInstrumentation PreservedCFGChecker;
   IRChangedPrinter PrintChangedIR;
+  PseudoProbeVerifier PseudoProbeVerification;
+  InLineChangePrinter PrintChangedDiff;
   VerifyInstrumentation Verify;
 
   bool VerifyEach;
 
 public:
-  StandardInstrumentations(bool DebugLogging, bool VerifyEach = false)
-      : PrintPass(DebugLogging), OptNone(DebugLogging), Verify(DebugLogging),
-        VerifyEach(VerifyEach) {}
+  StandardInstrumentations(bool DebugLogging, bool VerifyEach = false,
+                           PrintPassOptions PrintPassOpts = PrintPassOptions());
 
-  void registerCallbacks(PassInstrumentationCallbacks &PIC);
+  // Register all the standard instrumentation callbacks. If \p FAM is nullptr
+  // then PreservedCFGChecker is not enabled.
+  void registerCallbacks(PassInstrumentationCallbacks &PIC,
+                         FunctionAnalysisManager *FAM = nullptr);
 
   TimePassesHandler &getTimePasses() { return TimePasses; }
 };
 
 extern template class ChangeReporter<std::string>;
 extern template class TextChangeReporter<std::string>;
+
+extern template class BlockDataT<EmptyData>;
+extern template class FuncDataT<EmptyData>;
+extern template class IRDataT<EmptyData>;
+extern template class ChangeReporter<IRDataT<EmptyData>>;
+extern template class TextChangeReporter<IRDataT<EmptyData>>;
+extern template class IRComparer<EmptyData>;
 
 } // namespace llvm
 

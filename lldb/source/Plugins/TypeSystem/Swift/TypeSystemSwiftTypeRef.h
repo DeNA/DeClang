@@ -15,6 +15,7 @@
 
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
 #include "lldb/Core/SwiftForward.h"
+#include "lldb/Core/ThreadSafeDenseMap.h"
 
 #include "swift/AST/Type.h"
 
@@ -23,6 +24,7 @@
 #include "clang/Basic/Module.h"
 
 namespace swift {
+class DWARFImporterDelegate;
 namespace Demangle {
 class Node;
 using NodePointer = Node *;
@@ -32,7 +34,9 @@ class Demangler;
 
 namespace lldb_private {
 class ClangExternalASTSourceCallbacks;
+class ClangNameImporter;
 class SwiftASTContext;
+class SwiftASTContextForExpressions;
 
 /// A Swift TypeSystem that does not own a swift::ASTContext.
 class TypeSystemSwiftTypeRef : public TypeSystemSwift {
@@ -48,11 +52,25 @@ public:
   static bool classof(const TypeSystem *ts) { return ts->isA(&ID); }
   /// \}
 
-  TypeSystemSwiftTypeRef(SwiftASTContext *swift_ast_context);
-  SwiftASTContext *GetSwiftASTContext() override { return m_swift_ast_context; }
+  /// Provided only for unit tests.
+  TypeSystemSwiftTypeRef();
+  ~TypeSystemSwiftTypeRef();
+  TypeSystemSwiftTypeRef(Module &module);
+  /// Get the corresponding SwiftASTContext, and create one if necessary.
+  SwiftASTContext *GetSwiftASTContext() const override;
+  /// Return SwiftASTContext, iff one has already been created.
+  SwiftASTContext *GetSwiftASTContextOrNull() const;
   TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() override { return *this; }
+  const TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() const override {
+    return *this;
+  }
+  swift::DWARFImporterDelegate &GetDWARFImporterDelegate();
+  ClangNameImporter *GetNameImporter() const;
+  llvm::Triple GetTriple() const;
+  void SetTriple(const llvm::Triple triple) override;
+  void ClearModuleDependentCaches() override;
+  lldb::TargetWP GetTargetWP() const override { return {}; }
 
-  Module *GetModule() const override;
   swift::CanType GetCanonicalSwiftType(CompilerType compiler_type);
   swift::Type GetSwiftType(CompilerType compiler_type);
   CompilerType ReconstructType(CompilerType type);
@@ -63,8 +81,7 @@ public:
                                       size_t idx) override;
 
   // PluginInterface functions
-  ConstString GetPluginName() override;
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override { return "TypeSystemSwiftTypeRef"; }
 
   bool SupportsLanguage(lldb::LanguageType language) override;
   Status IsCompatible() override;
@@ -89,6 +106,8 @@ public:
       return true;
     return false;
   }
+
+  Module *GetModule() const { return m_module; }
 
   // Tests
 #ifndef NDEBUG
@@ -138,6 +157,9 @@ public:
   CompilerType GetPointeeType(lldb::opaque_compiler_type_t type) override;
   CompilerType GetPointerType(lldb::opaque_compiler_type_t type) override;
 
+  /// Get a function type that returns nothing and take no parameters.
+  CompilerType GetVoidFunctionType();
+
   // Exploring the type
   llvm::Optional<uint64_t>
   GetBitSize(lldb::opaque_compiler_type_t type,
@@ -147,7 +169,6 @@ public:
                 ExecutionContextScope *exe_scope) override;
   lldb::Encoding GetEncoding(lldb::opaque_compiler_type_t type,
                              uint64_t &count) override;
-  lldb::Format GetFormat(lldb::opaque_compiler_type_t type) override;
   uint32_t GetNumChildren(lldb::opaque_compiler_type_t type,
                           bool omit_empty_base_classes,
                           const ExecutionContext *exe_ctx) override;
@@ -193,13 +214,23 @@ public:
 
   void DumpTypeDescription(
       lldb::opaque_compiler_type_t type,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) override;
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) override;
   void DumpTypeDescription(
       lldb::opaque_compiler_type_t type, Stream *s,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) override;
-  void DumpSummary(lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx,
-                   Stream *s, const DataExtractor &data,
-                   lldb::offset_t data_offset, size_t data_byte_size) override;
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) override;
+  void DumpTypeDescription(
+      lldb::opaque_compiler_type_t type, bool print_help_if_available,
+      bool print_extensions_if_available,
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) override;
+  void DumpTypeDescription(
+      lldb::opaque_compiler_type_t type, Stream *s,
+      bool print_help_if_available, bool print_extensions_if_available,
+      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
+      ExecutionContextScope *exe_scope = nullptr) override;
+
   bool IsPointerOrReferenceType(lldb::opaque_compiler_type_t type,
                                 CompilerType *pointee_type) override;
   llvm::Optional<size_t>
@@ -213,11 +244,6 @@ public:
   CompilerType GetTypedefedType(lldb::opaque_compiler_type_t type) override;
   CompilerType
   GetFullyUnqualifiedType(lldb::opaque_compiler_type_t type) override;
-  CompilerType GetNonReferenceType(lldb::opaque_compiler_type_t type) override;
-  CompilerType
-  GetLValueReferenceType(lldb::opaque_compiler_type_t type) override;
-  CompilerType
-  GetRValueReferenceType(lldb::opaque_compiler_type_t type) override;
   uint32_t GetNumDirectBaseClasses(lldb::opaque_compiler_type_t type) override;
   CompilerType GetDirectBaseClassAtIndex(lldb::opaque_compiler_type_t type,
                                          size_t idx,
@@ -226,8 +252,9 @@ public:
                        CompilerType *pointee_type, bool *is_rvalue) override;
 
   // Swift-specific methods.
-  lldb::TypeSP GetCachedType(ConstString mangled) override;
-  void SetCachedType(ConstString mangled, const lldb::TypeSP &type_sp) override;
+  lldb::TypeSP GetCachedType(ConstString mangled);
+  lldb::TypeSP GetCachedType(lldb::opaque_compiler_type_t type);
+  void SetCachedType(ConstString mangled, const lldb::TypeSP &type_sp);
   bool IsImportedType(lldb::opaque_compiler_type_t type,
                       CompilerType *original_type) override;
   /// Like \p IsImportedType(), but even returns Clang types that are also Swift
@@ -236,19 +263,9 @@ public:
   CompilerType GetErrorType() override;
   CompilerType GetReferentType(lldb::opaque_compiler_type_t type) override;
   CompilerType GetInstanceType(lldb::opaque_compiler_type_t type) override;
-  TypeAllocationStrategy
-  GetAllocationStrategy(lldb::opaque_compiler_type_t type) override;
   CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) override;
-  void DumpTypeDescription(
-      lldb::opaque_compiler_type_t type, bool print_help_if_available,
-      bool print_extensions_if_available,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) override;
-  void DumpTypeDescription(
-      lldb::opaque_compiler_type_t type, Stream *s,
-      bool print_help_if_available, bool print_extensions_if_available,
-      lldb::DescriptionLevel level = lldb::eDescriptionLevelFull) override;
-
+  bool IsTupleType(lldb::opaque_compiler_type_t type) override;
 
   /// Return the nth tuple element's type and name, if it has one.
   llvm::Optional<TupleElement>
@@ -274,10 +291,11 @@ public:
                     swift::Demangle::NodePointer node);
 
   /// Return the canonicalized Demangle tree for a Swift mangled type name.
-  static swift::Demangle::NodePointer
-  GetCanonicalDemangleTree(SwiftASTContext *module_holder,
-                           swift::Demangle::Demangler &dem,
+  swift::Demangle::NodePointer
+  GetCanonicalDemangleTree(swift::Demangle::Demangler &dem,
                            llvm::StringRef mangled_name);
+  /// Return the base name of the topmost nominal type.
+  static llvm::StringRef GetBaseName(swift::Demangle::NodePointer node);
 
   /// Use API notes to determine the swiftified name of \p clang_decl.
   std::string GetSwiftName(const clang::Decl *clang_decl,
@@ -288,14 +306,18 @@ public:
   CompilerType RemangleAsType(swift::Demangle::Demangler &dem,
                               swift::Demangle::NodePointer node);
 
-private:
+  /// Search the debug info for a Clang type with the specified name and cache
+  /// the result.
+  lldb::TypeSP LookupClangType(llvm::StringRef name);
+
+protected:
   /// Helper that creates an AST type from \p type.
   void *ReconstructType(lldb::opaque_compiler_type_t type);
   /// Cast \p opaque_type as a mangled name.
   const char *AsMangledName(lldb::opaque_compiler_type_t type);
 
   /// Lookup a type in the debug info.
-  lldb::TypeSP LookupTypeInModule(lldb::opaque_compiler_type_t type);
+  lldb::TypeSP FindTypeInModule(lldb::opaque_compiler_type_t type);
 
   /// Demangle the mangled name of the canonical type of \p type and
   /// drill into the Global(TypeMangling(Type())).
@@ -318,7 +340,7 @@ private:
   swift::Demangle::NodePointer
   GetNodeForPrintingImpl(swift::Demangle::Demangler &dem,
                          swift::Demangle::NodePointer node,
-                         bool resolve_objc_module, bool desugar = true);
+                         bool resolve_objc_module);
 
   /// Return the demangle tree representation with all "__C" module
   /// names with their actual Clang module names.
@@ -332,14 +354,108 @@ private:
   clang::api_notes::APINotesManager *
   GetAPINotesManager(ClangExternalASTSourceCallbacks *source, unsigned id);
 
+  CompilerType LookupClangForwardType(llvm::StringRef name);
+
+  std::pair<swift::Demangle::NodePointer, CompilerType>
+  ResolveTypeAlias(swift::Demangle::Demangler &dem,
+                   swift::Demangle::NodePointer node,
+                   bool prefer_clang_types = false);
+
+  swift::Demangle::NodePointer
+  GetCanonicalNode(swift::Demangle::Demangler &dem,
+                   swift::Demangle::NodePointer node);
+
+  uint32_t CollectTypeInfo(swift::Demangle::Demangler &dem,
+                           swift::Demangle::NodePointer node,
+                           bool &unresolved_typealias,
+                           bool generic_walk = false);
+
+  swift::Demangle::NodePointer
+  GetClangTypeNode(CompilerType clang_type, swift::Demangle::Demangler &dem);
+
+  swift::Demangle::NodePointer
+  GetClangTypeTypeNode(swift::Demangle::Demangler &dem,
+                       CompilerType clang_type);
+#ifndef NDEBUG
+  /// Check whether the type being dealt with is tricky to validate due to
+  /// discrepancies between TypeSystemSwiftTypeRef and SwiftASTContext.
+  bool ShouldSkipValidation(lldb::opaque_compiler_type_t type);
+#endif
+
   /// The sibling SwiftASTContext.
-  SwiftASTContext *m_swift_ast_context = nullptr;
+  mutable bool m_swift_ast_context_initialized = false;
+  mutable lldb::TypeSystemSP m_swift_ast_context_sp;
+  mutable SwiftASTContext *m_swift_ast_context = nullptr;
+  mutable std::unique_ptr<swift::DWARFImporterDelegate>
+      m_dwarf_importer_delegate_up;
+  mutable std::unique_ptr<ClangNameImporter> m_name_importer_up;
+  std::unique_ptr<DWARFASTParser> m_dwarf_ast_parser_up;
 
   /// The APINotesManager responsible for each Clang module.
   llvm::DenseMap<clang::Module *,
                  std::unique_ptr<clang::api_notes::APINotesManager>>
       m_apinotes_manager;
-  };
 
+  /// All lldb::Type pointers produced by DWARFASTParser Swift go here.
+  ThreadSafeDenseMap<const char *, lldb::TypeSP> m_swift_type_map;
+  /// Map ConstString Clang type identifiers to Clang types.
+  ThreadSafeDenseMap<const char *, lldb::TypeSP> m_clang_type_cache;
+};
+
+/// This one owns a SwiftASTContextForExpressions.
+class TypeSystemSwiftTypeRefForExpressions : public TypeSystemSwiftTypeRef {
+  // LLVM RTTI support
+  static char ID;
+
+public:
+  /// LLVM RTTI support.
+  /// \{
+  bool isA(const void *ClassID) const override {
+    return ClassID == &ID || TypeSystemSwiftTypeRef::isA(ClassID);
+  }
+  static bool classof(const TypeSystem *ts) { return ts->isA(&ID); }
+  /// \}
+
+  TypeSystemSwiftTypeRefForExpressions(lldb::LanguageType language,
+                                       Target &target,
+                                       const char *extra_options);
+
+  /// For per-module fallback contexts.
+  TypeSystemSwiftTypeRefForExpressions(lldb::LanguageType language,
+                                       Target &target, Module &module);
+
+  SwiftASTContext *GetSwiftASTContext() const override;
+  lldb::TargetWP GetTargetWP() const override { return m_target_wp; }
+
+  /// Forwards to SwiftASTContext.
+  UserExpression *GetUserExpression(llvm::StringRef expr,
+                                    llvm::StringRef prefix,
+                                    lldb::LanguageType language,
+                                    Expression::ResultType desired_type,
+                                    const EvaluateExpressionOptions &options,
+                                    ValueObject *ctx_obj) override;
+
+  /// Forwards to SwiftASTContext.
+  PersistentExpressionState *GetPersistentExpressionState() override;
+  void PerformCompileUnitImports(SymbolContext &sc);
+
+  friend class SwiftASTContextForExpressions;
+protected:
+  lldb::TargetWP m_target_wp;
+
+  /// This exists to implement the PerformCompileUnitImports
+  /// mechanism.
+  ///
+  /// FIXME: The mechanism's implementation is unreliable since it
+  ///        depends on where the scratch context is first
+  ///        initialized. It should be replaced by something more
+  ///        deterministic.
+  /// Perform all the implicit imports for the current frame.
+  mutable std::unique_ptr<SymbolContext> m_initial_symbol_context;
+};
+
+swift::DWARFImporterDelegate *
+CreateSwiftDWARFImporterDelegate(TypeSystemSwiftTypeRef &ts);
+  
 } // namespace lldb_private
 #endif

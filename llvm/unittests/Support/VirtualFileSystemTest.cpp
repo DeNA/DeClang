@@ -1279,6 +1279,26 @@ TEST_F(InMemoryFileSystemTest, RecursiveIterationWithHardLink) {
   EXPECT_THAT(Nodes, testing::UnorderedElementsAre("/a", "/a/b", "/c", "/c/d"));
 }
 
+TEST_F(InMemoryFileSystemTest, UniqueID) {
+  ASSERT_TRUE(FS.addFile("/a/b", 0, MemoryBuffer::getMemBuffer("text")));
+  ASSERT_TRUE(FS.addFile("/c/d", 0, MemoryBuffer::getMemBuffer("text")));
+  ASSERT_TRUE(FS.addHardLink("/e/f", "/a/b"));
+
+  EXPECT_EQ(FS.status("/a/b")->getUniqueID(), FS.status("/a/b")->getUniqueID());
+  EXPECT_NE(FS.status("/a/b")->getUniqueID(), FS.status("/c/d")->getUniqueID());
+  EXPECT_EQ(FS.status("/a/b")->getUniqueID(), FS.status("/e/f")->getUniqueID());
+  EXPECT_EQ(FS.status("/a")->getUniqueID(), FS.status("/a")->getUniqueID());
+  EXPECT_NE(FS.status("/a")->getUniqueID(), FS.status("/c")->getUniqueID());
+  EXPECT_NE(FS.status("/a")->getUniqueID(), FS.status("/e")->getUniqueID());
+
+  // Recreating the "same" FS yields the same UniqueIDs.
+  vfs::InMemoryFileSystem FS2;
+  ASSERT_TRUE(FS2.addFile("/a/b", 0, MemoryBuffer::getMemBuffer("text")));
+  EXPECT_EQ(FS.status("/a/b")->getUniqueID(),
+            FS2.status("/a/b")->getUniqueID());
+  EXPECT_EQ(FS.status("/a")->getUniqueID(), FS2.status("/a")->getUniqueID());
+}
+
 // NOTE: in the tests below, we use '//root/' as our root directory, since it is
 // a legal *absolute* path on Windows as well as *nix.
 class VFSFromYAMLTest : public ::testing::Test {
@@ -1372,11 +1392,13 @@ TEST_F(VFSFromYAMLTest, MappedFiles) {
   ASSERT_FALSE(S.getError());
   EXPECT_EQ("//root/foo/bar/a", S->getName());
   EXPECT_TRUE(S->IsVFSMapped);
+  EXPECT_TRUE(S->ExposesExternalVFSPath);
 
   ErrorOr<vfs::Status> SLower = O->status("//root/foo/bar/a");
   EXPECT_EQ("//root/foo/bar/a", SLower->getName());
   EXPECT_TRUE(S->equivalent(*SLower));
   EXPECT_FALSE(SLower->IsVFSMapped);
+  EXPECT_FALSE(SLower->ExposesExternalVFSPath);
 
   // file after opening
   auto OpenedF = O->openFileForRead("//root/file1");
@@ -1385,6 +1407,7 @@ TEST_F(VFSFromYAMLTest, MappedFiles) {
   ASSERT_FALSE(OpenedS.getError());
   EXPECT_EQ("//root/foo/bar/a", OpenedS->getName());
   EXPECT_TRUE(OpenedS->IsVFSMapped);
+  EXPECT_TRUE(OpenedS->ExposesExternalVFSPath);
 
   // directory
   S = O->status("//root/");
@@ -1397,26 +1420,30 @@ TEST_F(VFSFromYAMLTest, MappedFiles) {
   ASSERT_FALSE(S.getError());
   EXPECT_TRUE(S->isDirectory());
   EXPECT_TRUE(S->IsVFSMapped);
+  EXPECT_TRUE(S->ExposesExternalVFSPath);
   EXPECT_TRUE(S->equivalent(*O->status("//root/foo/bar")));
 
   SLower = O->status("//root/foo/bar");
   EXPECT_EQ("//root/foo/bar", SLower->getName());
   EXPECT_TRUE(S->equivalent(*SLower));
   EXPECT_FALSE(SLower->IsVFSMapped);
+  EXPECT_FALSE(SLower->ExposesExternalVFSPath);
 
   // file in remapped directory
   S = O->status("//root/mappeddir/a");
   ASSERT_FALSE(S.getError());
-  ASSERT_FALSE(S->isDirectory());
-  ASSERT_TRUE(S->IsVFSMapped);
-  ASSERT_EQ("//root/foo/bar/a", S->getName());
+  EXPECT_FALSE(S->isDirectory());
+  EXPECT_TRUE(S->IsVFSMapped);
+  EXPECT_TRUE(S->ExposesExternalVFSPath);
+  EXPECT_EQ("//root/foo/bar/a", S->getName());
 
   // file in remapped directory, with use-external-name=false
   S = O->status("//root/mappeddir2/a");
   ASSERT_FALSE(S.getError());
-  ASSERT_FALSE(S->isDirectory());
-  ASSERT_TRUE(S->IsVFSMapped);
-  ASSERT_EQ("//root/mappeddir2/a", S->getName());
+  EXPECT_FALSE(S->isDirectory());
+  EXPECT_TRUE(S->IsVFSMapped);
+  EXPECT_FALSE(S->ExposesExternalVFSPath);
+  EXPECT_EQ("//root/mappeddir2/a", S->getName());
 
   // file contents in remapped directory
   OpenedF = O->openFileForRead("//root/mappeddir/a");
@@ -1425,6 +1452,7 @@ TEST_F(VFSFromYAMLTest, MappedFiles) {
   ASSERT_FALSE(OpenedS.getError());
   EXPECT_EQ("//root/foo/bar/a", OpenedS->getName());
   EXPECT_TRUE(OpenedS->IsVFSMapped);
+  EXPECT_TRUE(OpenedS->ExposesExternalVFSPath);
 
   // file contents in remapped directory, with use-external-name=false
   OpenedF = O->openFileForRead("//root/mappeddir2/a");
@@ -1433,6 +1461,7 @@ TEST_F(VFSFromYAMLTest, MappedFiles) {
   ASSERT_FALSE(OpenedS.getError());
   EXPECT_EQ("//root/mappeddir2/a", OpenedS->getName());
   EXPECT_TRUE(OpenedS->IsVFSMapped);
+  EXPECT_FALSE(OpenedS->ExposesExternalVFSPath);
 
   // broken mapping
   EXPECT_EQ(O->status("//root/file2").getError(),
@@ -1465,11 +1494,13 @@ TEST_F(VFSFromYAMLTest, MappedRoot) {
   ASSERT_FALSE(S.getError());
   EXPECT_EQ("//root/foo/bar/a", S->getName());
   EXPECT_TRUE(S->IsVFSMapped);
+  EXPECT_TRUE(S->ExposesExternalVFSPath);
 
   ErrorOr<vfs::Status> SLower = O->status("//root/foo/bar/a");
   EXPECT_EQ("//root/foo/bar/a", SLower->getName());
   EXPECT_TRUE(S->equivalent(*SLower));
   EXPECT_FALSE(SLower->IsVFSMapped);
+  EXPECT_FALSE(SLower->ExposesExternalVFSPath);
 
   // file after opening
   auto OpenedF = O->openFileForRead("//mappedroot/a");
@@ -1478,6 +1509,7 @@ TEST_F(VFSFromYAMLTest, MappedRoot) {
   ASSERT_FALSE(OpenedS.getError());
   EXPECT_EQ("//root/foo/bar/a", OpenedS->getName());
   EXPECT_TRUE(OpenedS->IsVFSMapped);
+  EXPECT_TRUE(OpenedS->ExposesExternalVFSPath);
 
   EXPECT_EQ(0, NumDiagnostics);
 }
@@ -1603,6 +1635,120 @@ TEST_F(VFSFromYAMLTest, RemappedDirectoryOverlayNoFallthrough) {
   Lower->addRegularFile("//root/foo/b");
   checkContents(FS->dir_begin("//root/bar", EC),
                 {"//root/foo/a", "//root/foo/b"});
+
+  EXPECT_EQ(0, NumDiagnostics);
+}
+
+TEST_F(VFSFromYAMLTest, ReturnsRequestedPathVFSMiss) {
+  IntrusiveRefCntPtr<vfs::InMemoryFileSystem> BaseFS(
+      new vfs::InMemoryFileSystem);
+  BaseFS->addFile("//root/foo/a", 0,
+                  MemoryBuffer::getMemBuffer("contents of a"));
+  ASSERT_FALSE(BaseFS->setCurrentWorkingDirectory("//root/foo"));
+  auto RemappedFS = vfs::RedirectingFileSystem::create(
+      {}, /*UseExternalNames=*/false, *BaseFS);
+
+  auto OpenedF = RemappedFS->openFileForRead("a");
+  ASSERT_FALSE(OpenedF.getError());
+  llvm::ErrorOr<std::string> Name = (*OpenedF)->getName();
+  ASSERT_FALSE(Name.getError());
+  EXPECT_EQ("a", Name.get());
+
+  auto OpenedS = (*OpenedF)->status();
+  ASSERT_FALSE(OpenedS.getError());
+  EXPECT_EQ("a", OpenedS->getName());
+  EXPECT_FALSE(OpenedS->IsVFSMapped);
+  EXPECT_FALSE(OpenedS->ExposesExternalVFSPath);
+
+  auto DirectS = RemappedFS->status("a");
+  ASSERT_FALSE(DirectS.getError());
+  EXPECT_EQ("a", DirectS->getName());
+  EXPECT_FALSE(DirectS->IsVFSMapped);
+  EXPECT_FALSE(DirectS->ExposesExternalVFSPath);
+
+  EXPECT_EQ(0, NumDiagnostics);
+}
+
+TEST_F(VFSFromYAMLTest, ReturnsExternalPathVFSHit) {
+  IntrusiveRefCntPtr<vfs::InMemoryFileSystem> BaseFS(
+      new vfs::InMemoryFileSystem);
+  BaseFS->addFile("//root/foo/realname", 0,
+                  MemoryBuffer::getMemBuffer("contents of a"));
+  auto FS =
+      getFromYAMLString("{ 'use-external-names': true,\n"
+                        "  'roots': [\n"
+                        "{\n"
+                        "  'type': 'directory',\n"
+                        "  'name': '//root/foo',\n"
+                        "  'contents': [ {\n"
+                        "                  'type': 'file',\n"
+                        "                  'name': 'vfsname',\n"
+                        "                  'external-contents': 'realname'\n"
+                        "                }\n"
+                        "              ]\n"
+                        "}]}",
+                        BaseFS);
+  ASSERT_FALSE(FS->setCurrentWorkingDirectory("//root/foo"));
+
+  auto OpenedF = FS->openFileForRead("vfsname");
+  ASSERT_FALSE(OpenedF.getError());
+  llvm::ErrorOr<std::string> Name = (*OpenedF)->getName();
+  ASSERT_FALSE(Name.getError());
+  EXPECT_EQ("realname", Name.get());
+
+  auto OpenedS = (*OpenedF)->status();
+  ASSERT_FALSE(OpenedS.getError());
+  EXPECT_EQ("realname", OpenedS->getName());
+  EXPECT_TRUE(OpenedS->IsVFSMapped);
+  EXPECT_TRUE(OpenedS->ExposesExternalVFSPath);
+
+  auto DirectS = FS->status("vfsname");
+  ASSERT_FALSE(DirectS.getError());
+  EXPECT_EQ("realname", DirectS->getName());
+  EXPECT_TRUE(DirectS->IsVFSMapped);
+  EXPECT_TRUE(DirectS->ExposesExternalVFSPath);
+
+  EXPECT_EQ(0, NumDiagnostics);
+}
+
+TEST_F(VFSFromYAMLTest, ReturnsInternalPathVFSHit) {
+  IntrusiveRefCntPtr<vfs::InMemoryFileSystem> BaseFS(
+      new vfs::InMemoryFileSystem);
+  BaseFS->addFile("//root/foo/realname", 0,
+                  MemoryBuffer::getMemBuffer("contents of a"));
+  auto FS =
+      getFromYAMLString("{ 'use-external-names': false,\n"
+                        "  'roots': [\n"
+                        "{\n"
+                        "  'type': 'directory',\n"
+                        "  'name': '//root/foo',\n"
+                        "  'contents': [ {\n"
+                        "                  'type': 'file',\n"
+                        "                  'name': 'vfsname',\n"
+                        "                  'external-contents': 'realname'\n"
+                        "                }\n"
+                        "              ]\n"
+                        "}]}",
+                        BaseFS);
+  ASSERT_FALSE(FS->setCurrentWorkingDirectory("//root/foo"));
+
+  auto OpenedF = FS->openFileForRead("vfsname");
+  ASSERT_FALSE(OpenedF.getError());
+  llvm::ErrorOr<std::string> Name = (*OpenedF)->getName();
+  ASSERT_FALSE(Name.getError());
+  EXPECT_EQ("vfsname", Name.get());
+
+  auto OpenedS = (*OpenedF)->status();
+  ASSERT_FALSE(OpenedS.getError());
+  EXPECT_EQ("vfsname", OpenedS->getName());
+  EXPECT_TRUE(OpenedS->IsVFSMapped);
+  EXPECT_FALSE(OpenedS->ExposesExternalVFSPath);
+
+  auto DirectS = FS->status("vfsname");
+  ASSERT_FALSE(DirectS.getError());
+  EXPECT_EQ("vfsname", DirectS->getName());
+  EXPECT_TRUE(DirectS->IsVFSMapped);
+  EXPECT_FALSE(DirectS->ExposesExternalVFSPath);
 
   EXPECT_EQ(0, NumDiagnostics);
 }
@@ -1780,7 +1926,25 @@ TEST_F(VFSFromYAMLTest, IllegalVFSFile) {
       Lower);
   EXPECT_EQ(nullptr, FS.get());
 
-  EXPECT_EQ(26, NumDiagnostics);
+  // invalid redirect kind
+  FS = getFromYAMLString("{ 'redirecting-with': 'none', 'roots': [{\n"
+                         "  'type': 'directory-remap',\n"
+                         "  'name': '//root/A',\n"
+                         "  'external-contents': '//root/B' }]}",
+                         Lower);
+  EXPECT_EQ(nullptr, FS.get());
+
+  // redirect and fallthrough passed
+  FS = getFromYAMLString("{ 'redirecting-with': 'fallthrough',\n"
+                         "  'fallthrough': true,\n"
+                         "  'roots': [{\n"
+                         "    'type': 'directory-remap',\n"
+                         "    'name': '//root/A',\n"
+                         "    'external-contents': '//root/B' }]}",
+                         Lower);
+  EXPECT_EQ(nullptr, FS.get());
+
+  EXPECT_EQ(28, NumDiagnostics);
 }
 
 TEST_F(VFSFromYAMLTest, UseExternalName) {
@@ -2558,6 +2722,121 @@ TEST_F(VFSFromYAMLTest, YAMLVFSWriterTestHandleDirs) {
   EXPECT_FALSE(FS->exists(_a.path("a")));
   EXPECT_FALSE(FS->exists(_b.path("b")));
   EXPECT_FALSE(FS->exists(_c.path("c")));
+}
+
+TEST_F(VFSFromYAMLTest, RedirectingWith) {
+  IntrusiveRefCntPtr<DummyFileSystem> Both(new DummyFileSystem());
+  Both->addDirectory("//root/a");
+  Both->addRegularFile("//root/a/f");
+  Both->addDirectory("//root/b");
+  Both->addRegularFile("//root/b/f");
+
+  IntrusiveRefCntPtr<DummyFileSystem> AOnly(new DummyFileSystem());
+  AOnly->addDirectory("//root/a");
+  AOnly->addRegularFile("//root/a/f");
+
+  IntrusiveRefCntPtr<DummyFileSystem> BOnly(new DummyFileSystem());
+  BOnly->addDirectory("//root/b");
+  BOnly->addRegularFile("//root/b/f");
+
+  auto BaseStr = std::string("  'roots': [\n"
+                             "    {\n"
+                             "      'type': 'directory-remap',\n"
+                             "      'name': '//root/a',\n"
+                             "      'external-contents': '//root/b'\n"
+                             "    }\n"
+                             "  ]\n"
+                             "}");
+  auto FallthroughStr = "{ 'redirecting-with': 'fallthrough',\n" + BaseStr;
+  auto FallbackStr = "{ 'redirecting-with': 'fallback',\n" + BaseStr;
+  auto RedirectOnlyStr = "{ 'redirecting-with': 'redirect-only',\n" + BaseStr;
+
+  auto ExpectPath = [&](vfs::FileSystem &FS, StringRef Expected,
+                        StringRef Message) {
+    auto AF = FS.openFileForRead("//root/a/f");
+    ASSERT_FALSE(AF.getError()) << Message;
+    auto AFName = (*AF)->getName();
+    ASSERT_FALSE(AFName.getError()) << Message;
+    EXPECT_EQ(Expected.str(), AFName.get()) << Message;
+
+    auto AS = FS.status("//root/a/f");
+    ASSERT_FALSE(AS.getError()) << Message;
+    EXPECT_EQ(Expected.str(), AS->getName()) << Message;
+  };
+
+  auto ExpectFailure = [&](vfs::FileSystem &FS, StringRef Message) {
+    EXPECT_TRUE(FS.openFileForRead("//root/a/f").getError()) << Message;
+    EXPECT_TRUE(FS.status("//root/a/f").getError()) << Message;
+  };
+
+  {
+    // `f` in both `a` and `b`
+
+    // `fallthrough` tries `external-name` first, so should be `b`
+    IntrusiveRefCntPtr<vfs::FileSystem> Fallthrough =
+        getFromYAMLString(FallthroughStr, Both);
+    ASSERT_TRUE(Fallthrough.get() != nullptr);
+    ExpectPath(*Fallthrough, "//root/b/f", "fallthrough, both exist");
+
+    // `fallback` tries the original name first, so should be `a`
+    IntrusiveRefCntPtr<vfs::FileSystem> Fallback =
+        getFromYAMLString(FallbackStr, Both);
+    ASSERT_TRUE(Fallback.get() != nullptr);
+    ExpectPath(*Fallback, "//root/a/f", "fallback, both exist");
+
+    // `redirect-only` is the same as `fallthrough` but doesn't try the
+    // original on failure, so no change here (ie. `b`)
+    IntrusiveRefCntPtr<vfs::FileSystem> Redirect =
+        getFromYAMLString(RedirectOnlyStr, Both);
+    ASSERT_TRUE(Redirect.get() != nullptr);
+    ExpectPath(*Redirect, "//root/b/f", "redirect-only, both exist");
+  }
+
+  {
+    // `f` in `a` only
+
+    // Fallthrough to the original path, `a`
+    IntrusiveRefCntPtr<vfs::FileSystem> Fallthrough =
+        getFromYAMLString(FallthroughStr, AOnly);
+    ASSERT_TRUE(Fallthrough.get() != nullptr);
+    ExpectPath(*Fallthrough, "//root/a/f", "fallthrough, a only");
+
+    // Original first, so still `a`
+    IntrusiveRefCntPtr<vfs::FileSystem> Fallback =
+        getFromYAMLString(FallbackStr, AOnly);
+    ASSERT_TRUE(Fallback.get() != nullptr);
+    ExpectPath(*Fallback, "//root/a/f", "fallback, a only");
+
+    // Fails since no fallthrough
+    IntrusiveRefCntPtr<vfs::FileSystem> Redirect =
+        getFromYAMLString(RedirectOnlyStr, AOnly);
+    ASSERT_TRUE(Redirect.get() != nullptr);
+    ExpectFailure(*Redirect, "redirect-only, a only");
+  }
+
+  {
+    // `f` in `b` only
+
+    // Tries `b` first (no fallthrough)
+    IntrusiveRefCntPtr<vfs::FileSystem> Fallthrough =
+        getFromYAMLString(FallthroughStr, BOnly);
+    ASSERT_TRUE(Fallthrough.get() != nullptr);
+    ExpectPath(*Fallthrough, "//root/b/f", "fallthrough, b only");
+
+    // Tries original first but then fallsback to `b`
+    IntrusiveRefCntPtr<vfs::FileSystem> Fallback =
+        getFromYAMLString(FallbackStr, BOnly);
+    ASSERT_TRUE(Fallback.get() != nullptr);
+    ExpectPath(*Fallback, "//root/b/f", "fallback, b only");
+
+    // Redirect exists, so uses it (`b`)
+    IntrusiveRefCntPtr<vfs::FileSystem> Redirect =
+        getFromYAMLString(RedirectOnlyStr, BOnly);
+    ASSERT_TRUE(Redirect.get() != nullptr);
+    ExpectPath(*Redirect, "//root/b/f", "redirect-only, b only");
+  }
+
+  EXPECT_EQ(0, NumDiagnostics);
 }
 
 TEST(VFSFromRemappedFilesTest, Basic) {

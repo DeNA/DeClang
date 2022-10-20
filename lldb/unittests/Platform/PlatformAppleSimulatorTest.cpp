@@ -30,10 +30,7 @@ static void testSimPlatformArchHasSimEnvironment(llvm::StringRef name) {
   ASSERT_TRUE(platform_sp);
   int num_arches = 0;
 
-  while (true) {
-    ArchSpec arch;
-    if (!platform_sp->GetSupportedArchitectureAtIndex(num_arches, arch))
-      break;
+  for (auto arch : platform_sp->GetSupportedArchitectures({})) {
     EXPECT_EQ(arch.GetTriple().getEnvironment(), llvm::Triple::Simulator);
     num_arches++;
   }
@@ -63,7 +60,7 @@ TEST_F(PlatformAppleSimulatorTest, TestHostPlatformToSim) {
     arch.GetTriple().setEnvironment(llvm::Triple::Simulator);
 
     Status error;
-    auto platform_sp = Platform::Create(arch, nullptr, error);
+    auto platform_sp = Platform::Create(arch, {}, nullptr, error);
     EXPECT_TRUE(platform_sp);
   }
 }

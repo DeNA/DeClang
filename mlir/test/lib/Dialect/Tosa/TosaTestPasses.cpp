@@ -11,7 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
-#include "mlir/Dialect/Tosa/IR//TosaOps.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Tosa/IR/TosaOps.h"
 #include "mlir/Dialect/Tosa/Transforms/PassDetail.h"
 #include "mlir/Dialect/Tosa/Transforms/Passes.h"
 #include "mlir/Dialect/Tosa/Utils/QuantUtils.h"
@@ -179,24 +180,27 @@ namespace {
 
 struct TosaTestQuantUtilAPI
     : public PassWrapper<TosaTestQuantUtilAPI, FunctionPass> {
+  StringRef getArgument() const final { return PASS_NAME; }
+  StringRef getDescription() const final {
+    return "TOSA Test: Exercise the APIs in QuantUtils.cpp.";
+  }
   void runOnFunction() override;
 };
 
 void TosaTestQuantUtilAPI::runOnFunction() {
-  OwningRewritePatternList patterns;
   auto *ctx = &getContext();
+  RewritePatternSet patterns(ctx);
   auto func = getFunction();
 
-  patterns.insert<ConvertTosaNegateOp>(ctx);
-  patterns.insert<ConvertTosaConv2DOp>(ctx);
-  applyPatternsAndFoldGreedily(func, std::move(patterns));
+  patterns.add<ConvertTosaNegateOp>(ctx);
+  patterns.add<ConvertTosaConv2DOp>(ctx);
+  (void)applyPatternsAndFoldGreedily(func, std::move(patterns));
 }
 
 } // anonymous namespace
 
 namespace mlir {
 void registerTosaTestQuantUtilAPIPass() {
-  PassRegistration<TosaTestQuantUtilAPI>(
-      PASS_NAME, "TOSA Test: Exercise the APIs in QuantUtils.cpp.");
+  PassRegistration<TosaTestQuantUtilAPI>();
 }
 } // namespace mlir

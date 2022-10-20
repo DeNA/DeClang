@@ -255,7 +255,7 @@ static struct {
 // stack if we remove our signal handlers; that can't be done reliably if
 // someone else is also trying to do the same thing.
 static stack_t OldAltStack;
-static void* NewAltStackPointer;
+LLVM_ATTRIBUTE_USED static void *NewAltStackPointer;
 
 static void CreateSigAltStack() {
   const size_t AltStackSize = MINSIGSTKSZ + 64 * 1024;
@@ -382,13 +382,15 @@ static RETSIGTYPE SignalHandler(int Sig) {
               OneShotPipeSignalFunction.exchange(nullptr))
         return OldOneShotPipeFunction();
 
-    if (llvm::is_contained(IntSigs, Sig)) {
+    bool IsIntSig = llvm::is_contained(IntSigs, Sig);
+    if (IsIntSig)
       if (auto OldInterruptFunction = InterruptFunction.exchange(nullptr))
         return OldInterruptFunction();
 
-      raise(Sig);   // Execute the default handler.
+    if (Sig == SIGPIPE || IsIntSig) {
+      raise(Sig); // Execute the default handler.
       return;
-   }
+    }
   }
 
   // Otherwise if it is a fault (like SEGV) run any handler.

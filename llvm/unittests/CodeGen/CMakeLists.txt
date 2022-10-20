@@ -5,6 +5,7 @@ set(LLVM_LINK_COMPONENTS
   AsmPrinter
   CodeGen
   Core
+  FileCheck
   MC
   MIRParser
   Passes
@@ -19,6 +20,7 @@ add_llvm_unittest(CodeGenTests
   AsmPrinterDwarfTest.cpp
   DIEHashTest.cpp
   DIETest.cpp
+  InstrRefLDVTest.cpp
   LowLevelTypeTest.cpp
   LexicalScopesTest.cpp
   MachineInstrBundleIteratorTest.cpp

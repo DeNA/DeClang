@@ -24,9 +24,9 @@ add_lldb_library(lldbCore
   AddressRange.cpp
   AddressResolver.cpp
   AddressResolverFileLine.cpp
-  AddressResolverName.cpp
   Communication.cpp
   Debugger.cpp
+  DebuggerEvents.cpp
   Declaration.cpp
   Disassembler.cpp
   DumpDataExtractor.cpp
@@ -39,12 +39,14 @@ add_lldb_library(lldbCore
   Highlighter.cpp
   IOHandler.cpp
   IOHandlerCursesGUI.cpp
+  JITSection.cpp
   Mangled.cpp
   Module.cpp
   ModuleChild.cpp
   ModuleList.cpp
   Opcode.cpp
   PluginManager.cpp
+  Progress.cpp
   RichManglingContext.cpp
   SearchFilter.cpp
   Section.cpp
@@ -66,6 +68,7 @@ add_lldb_library(lldbCore
   ValueObjectMemory.cpp
   ValueObjectRegister.cpp
   ValueObjectSyntheticFilter.cpp
+  ValueObjectUpdater.cpp
   ValueObjectVariable.cpp
 
   DEPENDS

@@ -23,7 +23,7 @@ static Error dumpObject(const ObjectFile &Obj) {
     return errorCodeToError(coff2yaml(outs(), cast<COFFObjectFile>(Obj)));
 
   if (Obj.isXCOFF())
-    return errorCodeToError(xcoff2yaml(outs(), cast<XCOFFObjectFile>(Obj)));
+    return xcoff2yaml(outs(), cast<XCOFFObjectFile>(Obj));
 
   if (Obj.isELF())
     return elf2yaml(outs(), Obj);
@@ -36,7 +36,7 @@ static Error dumpObject(const ObjectFile &Obj) {
 
 static Error dumpInput(StringRef File) {
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
-      MemoryBuffer::getFileOrSTDIN(File, /*FileSize=*/-1,
+      MemoryBuffer::getFileOrSTDIN(File, /*IsText=*/false,
                                    /*RequiresNullTerminator=*/false);
   if (std::error_code EC = FileOrErr.getError())
     return errorCodeToError(EC);

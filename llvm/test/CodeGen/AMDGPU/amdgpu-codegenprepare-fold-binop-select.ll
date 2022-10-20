@@ -360,7 +360,6 @@ define i32 @select_mul_lhs_const_i32(i1 %cond) {
 ; IR-LABEL: @select_mul_lhs_const_i32(
 ; IR-NEXT:    [[OP:%.*]] = select i1 [[COND:%.*]], i32 5000, i32 8000
 ; IR-NEXT:    ret i32 [[OP]]
-;
   %select = select i1 %cond, i32 5, i32 8
   %op = mul i32 1000, %select
   ret i32 %op
@@ -380,7 +379,6 @@ define i32 @select_mul_rhs_const_i32(i1 %cond) {
 ; IR-LABEL: @select_mul_rhs_const_i32(
 ; IR-NEXT:    [[OP:%.*]] = select i1 [[COND:%.*]], i32 5000, i32 8000
 ; IR-NEXT:    ret i32 [[OP]]
-;
   %select = select i1 %cond, i32 5, i32 8
   %op = mul i32 %select, 1000
   ret i32 %op
@@ -398,8 +396,8 @@ define amdgpu_kernel void @select_add_lhs_const_i16(i1 %cond) {
 ; GCN-NEXT:    v_mov_b32_e32 v0, 0x83
 ; GCN-NEXT:    v_mov_b32_e32 v1, 0x80
 ; GCN-NEXT:    s_waitcnt lgkmcnt(0)
-; GCN-NEXT:    s_and_b32 s0, 1, s0
-; GCN-NEXT:    v_cmp_eq_u32_e64 vcc, s0, 1
+; GCN-NEXT:    s_bitcmp1_b32 s0, 0
+; GCN-NEXT:    s_cselect_b64 vcc, -1, 0
 ; GCN-NEXT:    v_cndmask_b32_e32 v0, v0, v1, vcc
 ; GCN-NEXT:    flat_store_short v[0:1], v0
 ; GCN-NEXT:    s_endpgm
@@ -420,7 +418,6 @@ define i16 @select_add_trunc_select(i1 %cond) {
 ; IR-LABEL: @select_add_trunc_select(
 ; IR-NEXT:    [[OP:%.*]] = select i1 [[COND:%.*]], i16 47, i16 50
 ; IR-NEXT:    ret i16 [[OP]]
-;
   %select = select i1 %cond, i32 5, i32 8
   %trunc = trunc i32 %select to i16
   %op = add i16 %trunc, 42

@@ -81,39 +81,51 @@ def read_packet(f, verbose=False, trace_file=None):
         # Decode the JSON bytes into a python dictionary
         return json.loads(json_str)
 
-    return None
+    raise Exception("unexpected malformed message from lldb-vscode: " + line)
 
 
 def packet_type_is(packet, packet_type):
     return 'type' in packet and packet['type'] == packet_type
 
+def dump_dap_log(log_file):
+    print("========= DEBUG ADAPTER PROTOCOL LOGS =========")
+    if log_file is None:
+        print("no log file available")
+    else:
+        with open(log_file, "r") as file:
+            print(file.read())
+    print("========= END =========")
 
-def read_packet_thread(vs_comm):
+
+def read_packet_thread(vs_comm, log_file):
     done = False
-    while not done:
-        packet = read_packet(vs_comm.recv, trace_file=vs_comm.trace_file)
-        # `packet` will be `None` on EOF. We want to pass it down to
-        # handle_recv_packet anyway so the main thread can handle unexpected
-        # termination of lldb-vscode and stop waiting for new packets.
-        done = not vs_comm.handle_recv_packet(packet)
+    try:
+        while not done:
+            packet = read_packet(vs_comm.recv, trace_file=vs_comm.trace_file)
+            # `packet` will be `None` on EOF. We want to pass it down to
+            # handle_recv_packet anyway so the main thread can handle unexpected
+            # termination of lldb-vscode and stop waiting for new packets.
+            done = not vs_comm.handle_recv_packet(packet)
+    finally:
+        dump_dap_log(log_file)
 
 
 class DebugCommunication(object):
 
-    def __init__(self, recv, send, init_commands):
+    def __init__(self, recv, send, init_commands, log_file=None):
         self.trace_file = None
         self.send = send
         self.recv = recv
         self.recv_packets = []
         self.recv_condition = threading.Condition()
         self.recv_thread = threading.Thread(target=read_packet_thread,
-                                            args=(self,))
+                                            args=(self, log_file))
         self.process_event_body = None
         self.exit_status = None
         self.initialize_body = None
         self.thread_stop_reasons = {}
         self.breakpoint_events = []
-        self.module_events = {}
+        self.progress_events = []
         self.sequence = 1
         self.threads = None
         self.recv_thread.start()
@@ -134,9 +146,13 @@ class DebugCommunication(object):
         if command['seq'] != response['request_seq']:
             raise ValueError('seq mismatch in response')
 
-    def get_active_modules(self):
-        return self.module_events
-        
+    def get_modules(self):
+        module_list = self.request_modules()['body']['modules']
+        modules = {}
+        for module in module_list:
+            modules[module['name']] = module
+        return modules
+
     def get_output(self, category, timeout=0.0, clear=True):
         self.output_condition.acquire()
         output = None
@@ -222,13 +238,12 @@ class DebugCommunication(object):
                 self.breakpoint_events.append(packet)
                 # no need to add 'breakpoint' event packets to our packets list
                 return keepGoing
-            elif event == 'module':
-                reason = body['reason']
-                if (reason == 'new' or reason == 'changed'):
-                    self.module_events[body['module']['name']] = body['module']
-                elif reason == 'removed':
-                    if body['module']['name'] in self.module_events:
-                        self.module_events.pop(body['module']['name'])
+            elif event.startswith('progress'):
+                # Progress events come in as 'progressStart', 'progressUpdate',
+                # and 'progressEnd' events. Keep these around in case test
+                # cases want to verify them.
+                self.progress_events.append(packet)
+                # No need to add 'progress' event packets to our packets list.
                 return keepGoing
 
         elif packet_type == 'response':
@@ -309,7 +324,7 @@ class DebugCommunication(object):
                 return response_or_request
             else:
                 if response_or_request['command'] == 'runInTerminal':
-                    subprocess.Popen(response_or_request['arguments']['args'], 
+                    subprocess.Popen(response_or_request['arguments']['args'],
                         env=response_or_request['arguments']['env'])
                     self.send_packet({
                         "type": "response",
@@ -322,7 +337,7 @@ class DebugCommunication(object):
                 else:
                     desc = 'unkonwn reverse request "%s"' % (response_or_request['command'])
                     raise ValueError(desc)
-            
+
         return None
 
     def wait_for_event(self, filter=None, timeout=None):
@@ -491,7 +506,7 @@ class DebugCommunication(object):
                        initCommands=None, preRunCommands=None,
                        stopCommands=None, exitCommands=None,
                        attachCommands=None, terminateCommands=None,
-                       coreFile=None):
+                       coreFile=None, postRunCommands=None):
         args_dict = {}
         if pid is not None:
             args_dict['pid'] = pid
@@ -516,6 +531,8 @@ class DebugCommunication(object):
             args_dict['attachCommands'] = attachCommands
         if coreFile:
             args_dict['coreFile'] = coreFile
+        if postRunCommands:
+            args_dict['postRunCommands'] = postRunCommands
         command_dict = {
             'command': 'attach',
             'type': 'request',
@@ -572,13 +589,14 @@ class DebugCommunication(object):
         }
         return self.send_recv(command_dict)
 
-    def request_evaluate(self, expression, frameIndex=0, threadId=None):
+    def request_evaluate(self, expression, frameIndex=0, threadId=None, context=None):
         stackFrame = self.get_stackFrame(frameIndex=frameIndex,
                                          threadId=threadId)
         if stackFrame is None:
             return []
         args_dict = {
             'expression': expression,
+            'context': context,
             'frameId': stackFrame['id'],
         }
         command_dict = {
@@ -617,7 +635,8 @@ class DebugCommunication(object):
                        stopCommands=None, exitCommands=None,
                        terminateCommands=None ,sourcePath=None,
                        debuggerRoot=None, launchCommands=None, sourceMap=None,
-                       runInTerminal=False):
+                       runInTerminal=False, expectFailure=False,
+                       postRunCommands=None):
         args_dict = {
             'program': program
         }
@@ -658,6 +677,8 @@ class DebugCommunication(object):
             args_dict['sourceMap'] = sourceMap
         if runInTerminal:
             args_dict['runInTerminal'] = runInTerminal
+        if postRunCommands:
+            args_dict['postRunCommands'] = postRunCommands
         command_dict = {
             'command': 'launch',
             'type': 'request',
@@ -665,9 +686,10 @@ class DebugCommunication(object):
         }
         response = self.send_recv(command_dict)
 
-        # Wait for a 'process' and 'initialized' event in any order
-        self.wait_for_event(filter=['process', 'initialized'])
-        self.wait_for_event(filter=['process', 'initialized'])
+        if not expectFailure:
+            # Wait for a 'process' and 'initialized' event in any order
+            self.wait_for_event(filter=['process', 'initialized'])
+            self.wait_for_event(filter=['process', 'initialized'])
         return response
 
     def request_next(self, threadId):
@@ -782,16 +804,16 @@ class DebugCommunication(object):
         }
         return self.send_recv(command_dict)
 
-    def request_getCompileUnits(self, moduleId):
+    def request_compileUnits(self, moduleId):
         args_dict = {'moduleId': moduleId}
         command_dict = {
-            'command': 'getCompileUnits',
+            'command': 'compileUnits',
             'type': 'request',
             'arguments': args_dict
         }
         response = self.send_recv(command_dict)
         return response
-        
+
     def request_completions(self, text):
         args_dict = {
             'text': text,
@@ -803,6 +825,12 @@ class DebugCommunication(object):
             'arguments': args_dict
         }
         return self.send_recv(command_dict)
+
+    def request_modules(self):
+        return self.send_recv({
+            'command': 'modules',
+            'type': 'request'
+        })
 
     def request_stackTrace(self, threadId=None, startFrame=None, levels=None,
                            dump=False):
@@ -912,10 +940,13 @@ class DebugCommunication(object):
 
 
 class DebugAdaptor(DebugCommunication):
-    def __init__(self, executable=None, port=None, init_commands=[], log_file=None):
+    def __init__(self, executable=None, port=None, init_commands=[], log_file=None, env=None):
         self.process = None
         if executable is not None:
             adaptor_env = os.environ.copy()
+            if env is not None:
+                adaptor_env.update(env)
+
             if log_file:
                 adaptor_env['LLDBVSCODE_LOG'] = log_file
             self.process = subprocess.Popen([executable],
@@ -924,7 +955,7 @@ class DebugAdaptor(DebugCommunication):
                                             stderr=subprocess.PIPE,
                                             env=adaptor_env)
             DebugCommunication.__init__(self, self.process.stdout,
-                                        self.process.stdin, init_commands)
+                                        self.process.stdin, init_commands, log_file)
         elif port is not None:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.connect(('127.0.0.1', port))

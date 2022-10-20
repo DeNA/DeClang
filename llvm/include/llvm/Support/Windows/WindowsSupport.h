@@ -21,6 +21,7 @@
 #ifndef LLVM_SUPPORT_WINDOWSSUPPORT_H
 #define LLVM_SUPPORT_WINDOWSSUPPORT_H
 
+#if defined(__MINGW32__)
 // mingw-w64 tends to define it as 0x0502 in its headers.
 #undef _WIN32_WINNT
 #undef _WIN32_IE
@@ -28,6 +29,8 @@
 // Require at least Windows 7 API.
 #define _WIN32_WINNT 0x0601
 #define _WIN32_IE    0x0800 // MinGW at it again. FIXME: verify if still needed.
+#endif
+
 #define WIN32_LEAN_AND_MEAN
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -37,7 +40,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/Config/config.h" // Get build system configuration settings
+#include "llvm/Config/llvm-config.h" // Get build system configuration settings
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Chrono.h"
 #include "llvm/Support/Compiler.h"
@@ -68,10 +71,10 @@ llvm::VersionTuple GetWindowsOSVersion();
 bool MakeErrMsg(std::string *ErrMsg, const std::string &prefix);
 
 // Include GetLastError() in a fatal error message.
-LLVM_ATTRIBUTE_NORETURN inline void ReportLastErrorFatal(const char *Msg) {
+[[noreturn]] inline void ReportLastErrorFatal(const char *Msg) {
   std::string ErrMsg;
   MakeErrMsg(&ErrMsg, Msg);
-  llvm::report_fatal_error(ErrMsg);
+  llvm::report_fatal_error(Twine(ErrMsg));
 }
 
 template <typename HandleTraits>

@@ -1,9 +1,8 @@
 //===- DevelopmentModeInlineAdvisor.cpp - runtime-loadable model runner  --===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
@@ -160,11 +159,11 @@ public:
     *CurrentNativeSize += Change;
   }
   void resetNativeSize(Function *F) {
-    FAM.invalidate<InlineSizeEstimatorAnalysis>(*F);
+    PreservedAnalyses PA = PreservedAnalyses::all();
+    PA.abandon<InlineSizeEstimatorAnalysis>();
+    FAM.invalidate(*F, PA);
   }
 
-  std::unique_ptr<MLInlineAdvice>
-  getMandatoryAdvice(CallBase &CB, OptimizationRemarkEmitter &ORE) override;
   std::unique_ptr<MLInlineAdvice>
   getAdviceFromModel(CallBase &CB, OptimizationRemarkEmitter &ORE) override;
 
@@ -172,6 +171,7 @@ public:
 
 private:
   bool isLogging() const { return !!Logger; }
+  std::unique_ptr<MLInlineAdvice> getMandatoryAdviceImpl(CallBase &CB) override;
 
   std::function<bool(CallBase &)> GetDefaultAdvice;
   const bool IsDoingInference;
@@ -227,6 +227,8 @@ private:
                    (*CallerSizeEstimateBefore + *CalleeSizeEstimateBefore);
       getAdvisor()->updateNativeSizeEstimate(Reward);
       log(Reward, /*Success=*/true);
+    } else {
+      log(NoReward, /*Success=*/true);
     }
   }
 
@@ -332,8 +334,7 @@ TrainingLogger::TrainingLogger(StringRef LogFileName,
     FT.push_back(
         {TensorSpec::createSpec<int64_t>(FeatureNameMap.at(I), {1}), None});
   if (MUTR && MUTR->outputLoggedFeatureSpecs().size() > 1)
-    FT.insert(FT.end(), MUTR->outputLoggedFeatureSpecs().begin() + 1,
-              MUTR->outputLoggedFeatureSpecs().end());
+    append_range(FT, drop_begin(MUTR->outputLoggedFeatureSpecs()));
 
   DefaultDecisionPos = FT.size();
   FT.push_back(
@@ -353,24 +354,22 @@ void TrainingLogger::logInlineEvent(const InlineEvent &Event,
   size_t CurrentFeature = 0;
   for (; CurrentFeature < NumberOfFeatures; ++CurrentFeature) {
     int64_t F = ModelRunner.getFeature(CurrentFeature);
-    L->logTensorValue(CurrentFeature, &F);
+    L->logInt64Value(CurrentFeature, &F);
   }
 
   for (size_t I = 1; I < OutputCount; ++I) {
     const auto &Result = *MUTR->lastEvaluationResult();
-    auto &Spec = MUTR->outputLoggedFeatureSpecs()[I].Spec;
     const char *RawData =
         reinterpret_cast<const char *>(Result.getUntypedTensorValue(I));
-    L->logTensorValue(CurrentFeature, RawData,
-                      Spec.getElementCount() * Spec.getElementByteSize());
+    L->logSpecifiedTensorValue(CurrentFeature, RawData);
     ++CurrentFeature;
   }
 
   assert(CurrentFeature == DefaultDecisionPos);
-  L->logTensorValue(DefaultDecisionPos, &Event.DefaultDecision);
-  L->logTensorValue(DecisionPos, &Event.AdvisedDecision);
+  L->logInt64Value(DefaultDecisionPos, &Event.DefaultDecision);
+  L->logInt64Value(DecisionPos, &Event.AdvisedDecision);
   if (InlineSizeEstimatorAnalysis::isEvaluatorRequested())
-    L->logReward(Event.Reward);
+    L->logInt64Reward(Event.Reward);
 
   // For debugging / later use
   Effects.push_back(Event.Effect);
@@ -379,7 +378,7 @@ void TrainingLogger::logInlineEvent(const InlineEvent &Event,
 void TrainingLogger::print() {
   std::error_code EC;
   raw_fd_ostream OutFile(LogFileName, EC);
-  L->print(OutFile);
+  L->flush(OutFile);
 }
 
 DevelopmentModeMLInlineAdvisor::DevelopmentModeMLInlineAdvisor(
@@ -416,14 +415,11 @@ DevelopmentModeMLInlineAdvisor::getNativeSizeEstimate(const Function &F) const {
 }
 
 std::unique_ptr<MLInlineAdvice>
-DevelopmentModeMLInlineAdvisor::getMandatoryAdvice(
-    CallBase &CB, OptimizationRemarkEmitter &ORE) {
-  if (!isLogging())
-    return MLInlineAdvisor::getMandatoryAdvice(CB, ORE);
-
+DevelopmentModeMLInlineAdvisor::getMandatoryAdviceImpl(CallBase &CB) {
   return std::make_unique<LoggingMLInlineAdvice>(
       /*Advisor=*/this,
-      /*CB=*/CB, /*ORE=*/ORE, /*Recommendation=*/true, /*Logger=*/*Logger,
+      /*CB=*/CB, /*ORE=*/getCallerORE(CB), /*Recommendation=*/true,
+      /*Logger=*/*Logger,
       /*CallerSizeEstimateBefore=*/getNativeSizeEstimate(*CB.getCaller()),
       /*CalleeSizeEstimateBefore=*/
       getNativeSizeEstimate(*CB.getCalledFunction()),
@@ -469,8 +465,7 @@ ModelUnderTrainingRunner::ModelUnderTrainingRunner(LLVMContext &Ctx,
   for (size_t I = 0; I < NumberOfFeatures; ++I)
     InputSpecs.push_back(
         TensorSpec::createSpec<int64_t>(TFFeedPrefix + FeatureNameMap[I], {1}));
-  InputSpecs.insert(InputSpecs.end(), TrainingOnlyFeatures.begin(),
-                    TrainingOnlyFeatures.end());
+  append_range(InputSpecs, TrainingOnlyFeatures);
   if (auto MaybeOutSpecs =
           loadOutputSpecs(Ctx, DecisionName, ModelPath, TFOutputSpecOverride))
     OutputSpecs = std::move(*MaybeOutSpecs);

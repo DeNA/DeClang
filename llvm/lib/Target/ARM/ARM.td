@@ -437,6 +437,11 @@ def FeatureLOB            : SubtargetFeature<"lob", "HasLOB", "true",
                                              "Enable Low Overhead Branch "
                                              "extensions">;
 
+def FeatureFixCMSE_CVE_2021_35465 : SubtargetFeature<"fix-cmse-cve-2021-35465",
+                                        "FixCMSE_CVE_2021_35465", "true",
+                                        "Mitigate against the cve-2021-35465 "
+                                        "security vulnurability">;
+
 //===----------------------------------------------------------------------===//
 // ARM architecture class
 //
@@ -539,6 +544,18 @@ def HasV8_7aOps   : SubtargetFeature<"v8.7a", "HasV8_7aOps", "true",
                                    "Support ARM v8.7a instructions",
                                    [HasV8_6aOps]>;
 
+def HasV9_0aOps   : SubtargetFeature<"v9a", "HasV9_0aOps", "true",
+                                   "Support ARM v9a instructions",
+                                   [HasV8_5aOps]>;
+
+def HasV9_1aOps   : SubtargetFeature<"v9.1a", "HasV9_1aOps", "true",
+                                   "Support ARM v9.1a instructions",
+                                   [HasV8_6aOps, HasV9_0aOps]>;
+
+def HasV9_2aOps   : SubtargetFeature<"v9.2a", "HasV9_2aOps", "true",
+                                   "Support ARM v9.2a instructions",
+                                   [HasV8_7aOps, HasV9_1aOps]>;
+
 def HasV8_1MMainlineOps : SubtargetFeature<
                "v8.1m.main", "HasV8_1MMainlineOps", "true",
                "Support ARM v8-1M Mainline instructions",
@@ -573,8 +590,9 @@ def FeatureHardenSlsRetBr : SubtargetFeature<"harden-sls-retbr",
 def FeatureHardenSlsBlr : SubtargetFeature<"harden-sls-blr",
   "HardenSlsBlr", "true",
   "Harden against straight line speculation across indirect calls">;
-
-
+def FeatureHardenSlsNoComdat : SubtargetFeature<"harden-sls-nocomdat",
+  "HardenSlsNoComdat", "true",
+  "Generate thunk code for SLS mitigation in the normal text section">;
 
 //===----------------------------------------------------------------------===//
 // ARM Processor subtarget features.
@@ -852,7 +870,7 @@ def ARMv86a   : Architecture<"armv8.6-a", "ARMv86a",  [HasV8_6aOps,
                                                        FeatureCRC,
                                                        FeatureRAS,
                                                        FeatureDotProd]>;
-def ARMv87a   : Architecture<"armv8.7-a", "ARMv86a",  [HasV8_7aOps,
+def ARMv87a   : Architecture<"armv8.7-a", "ARMv87a",  [HasV8_7aOps,
                                                        FeatureAClass,
                                                        FeatureDB,
                                                        FeatureFPARMv8,
@@ -862,6 +880,43 @@ def ARMv87a   : Architecture<"armv8.7-a", "ARMv86a",  [HasV8_7aOps,
                                                        FeatureMP,
                                                        FeatureVirtualization,
                                                        FeatureCrypto,
+                                                       FeatureCRC,
+                                                       FeatureRAS,
+                                                       FeatureDotProd]>;
+
+def ARMv9a   : Architecture<"armv9-a", "ARMv9a",       [HasV9_0aOps,
+                                                       FeatureAClass,
+                                                       FeatureDB,
+                                                       FeatureFPARMv8,
+                                                       FeatureNEON,
+                                                       FeatureDSP,
+                                                       FeatureTrustZone,
+                                                       FeatureMP,
+                                                       FeatureVirtualization,
+                                                       FeatureCRC,
+                                                       FeatureRAS,
+                                                       FeatureDotProd]>;
+def ARMv91a   : Architecture<"armv9.1-a", "ARMv91a",   [HasV9_1aOps,
+                                                       FeatureAClass,
+                                                       FeatureDB,
+                                                       FeatureFPARMv8,
+                                                       FeatureNEON,
+                                                       FeatureDSP,
+                                                       FeatureTrustZone,
+                                                       FeatureMP,
+                                                       FeatureVirtualization,
+                                                       FeatureCRC,
+                                                       FeatureRAS,
+                                                       FeatureDotProd]>;
+def ARMv92a   : Architecture<"armv9.2-a", "ARMv92a",  [HasV9_2aOps,
+                                                       FeatureAClass,
+                                                       FeatureDB,
+                                                       FeatureFPARMv8,
+                                                       FeatureNEON,
+                                                       FeatureDSP,
+                                                       FeatureTrustZone,
+                                                       FeatureMP,
+                                                       FeatureVirtualization,
                                                        FeatureCRC,
                                                        FeatureRAS,
                                                        FeatureDotProd]>;
@@ -1000,12 +1055,15 @@ def : Processor<"arm1136jf-s",      ARMV6Itineraries,   [ARMv6,
                                                          FeatureVFP2,
                                                          FeatureHasSlowFPVMLx]>;
 
-def : Processor<"cortex-m0",        ARMV6Itineraries,   [ARMv6m]>;
-def : Processor<"cortex-m0plus",    ARMV6Itineraries,   [ARMv6m]>;
-def : Processor<"cortex-m1",        ARMV6Itineraries,   [ARMv6m]>;
-def : Processor<"sc000",            ARMV6Itineraries,   [ARMv6m]>;
+def : Processor<"cortex-m0",        ARMV6Itineraries,   [ARMv6m,
+                                                         FeatureHasNoBranchPredictor]>;
+def : Processor<"cortex-m0plus",    ARMV6Itineraries,   [ARMv6m,
+                                                         FeatureHasNoBranchPredictor]>;
+def : Processor<"cortex-m1",        ARMV6Itineraries,   [ARMv6m,
+                                                         FeatureHasNoBranchPredictor]>;
+def : Processor<"sc000",            ARMV6Itineraries,   [ARMv6m,
+                                                         FeatureHasNoBranchPredictor]>;
 
-def : Processor<"arm1176j-s",       ARMV6Itineraries,   [ARMv6kz]>;
 def : Processor<"arm1176jz-s",      ARMV6Itineraries,   [ARMv6kz]>;
 def : Processor<"arm1176jzf-s",     ARMV6Itineraries,   [ARMv6kz,
                                                          FeatureVFP2,
@@ -1199,7 +1257,8 @@ def : ProcessorModel<"cortex-m7", CortexM7Model,        [ARMv7em,
                                                          FeatureUseMISched]>;
 
 def : ProcNoItin<"cortex-m23",                          [ARMv8mBaseline,
-                                                         FeatureNoMovt]>;
+                                                         FeatureNoMovt,
+                                                         FeatureHasNoBranchPredictor]>;
 
 def : ProcessorModel<"cortex-m33", CortexM4Model,       [ARMv8mMainline,
                                                          FeatureDSP,
@@ -1208,7 +1267,8 @@ def : ProcessorModel<"cortex-m33", CortexM4Model,       [ARMv8mMainline,
                                                          FeatureHasSlowFPVMLx,
                                                          FeatureHasSlowFPVFMx,
                                                          FeatureUseMISched,
-                                                         FeatureHasNoBranchPredictor]>;
+                                                         FeatureHasNoBranchPredictor,
+                                                         FeatureFixCMSE_CVE_2021_35465]>;
 
 def : ProcessorModel<"cortex-m35p", CortexM4Model,      [ARMv8mMainline,
                                                          FeatureDSP,
@@ -1217,7 +1277,8 @@ def : ProcessorModel<"cortex-m35p", CortexM4Model,      [ARMv8mMainline,
                                                          FeatureHasSlowFPVMLx,
                                                          FeatureHasSlowFPVFMx,
                                                          FeatureUseMISched,
-                                                         FeatureHasNoBranchPredictor]>;
+                                                         FeatureHasNoBranchPredictor,
+                                                         FeatureFixCMSE_CVE_2021_35465]>;
 
 def : ProcessorModel<"cortex-m55", CortexM4Model,      [ARMv81mMainline,
                                                          FeatureDSP,
@@ -1226,7 +1287,8 @@ def : ProcessorModel<"cortex-m55", CortexM4Model,      [ARMv81mMainline,
                                                          FeatureHasNoBranchPredictor,
                                                          FeaturePrefLoopAlign32,
                                                          FeatureHasSlowFPVMLx,
-                                                         HasMVEFloatOps]>;
+                                                         HasMVEFloatOps,
+                                                         FeatureFixCMSE_CVE_2021_35465]>;
 
 def : ProcNoItin<"cortex-a32",                           [ARMv8a,
                                                          FeatureHWDivThumb,

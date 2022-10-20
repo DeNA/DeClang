@@ -4,7 +4,7 @@
 
 // CHECK:      module {
 // CHECK-NEXT:   spv.module Logical GLSL450 {
-// CHECK-NEXT:     spv.globalVariable @foo
+// CHECK-NEXT:     spv.GlobalVariable @foo
 
 // CHECK-NEXT:     spv.func @use_foo
 // CHECK-NEXT:       spv.mlir.addressof @foo
@@ -21,9 +21,8 @@
 // CHECK-NEXT:   }
 // CHECK-NEXT: }
 
-module {
 spv.module Logical GLSL450 {
-  spv.globalVariable @foo bind(1, 0) : !spv.ptr<f32, Input>
+  spv.GlobalVariable @foo bind(1, 0) : !spv.ptr<f32, Input>
 
   spv.func @use_foo() -> f32 "None" {
     %0 = spv.mlir.addressof @foo : !spv.ptr<f32, Input>
@@ -33,7 +32,7 @@ spv.module Logical GLSL450 {
 }
 
 spv.module Logical GLSL450 {
-  spv.globalVariable @bar bind(1, 0) : !spv.ptr<f32, Input>
+  spv.GlobalVariable @bar bind(1, 0) : !spv.ptr<f32, Input>
 
   spv.func @use_bar() -> f32 "None" {
     %0 = spv.mlir.addressof @bar : !spv.ptr<f32, Input>
@@ -42,7 +41,6 @@ spv.module Logical GLSL450 {
     spv.ReturnValue %2 : f32
   }
 }
-}
 
 // -----
 
@@ -50,9 +48,9 @@ spv.module Logical GLSL450 {
 
 // CHECK:      module {
 // CHECK-NEXT: spv.module Logical GLSL450 {
-// CHECK-NEXT:   spv.globalVariable @foo bind(1, 0)
+// CHECK-NEXT:   spv.GlobalVariable @foo bind(1, 0)
 
-// CHECK-NEXT:   spv.globalVariable @bar bind(1, 0)
+// CHECK-NEXT:   spv.GlobalVariable @bar bind(1, 0)
 
 // CHECK-NEXT:   spv.func @use_bar
 // CHECK-NEXT:     spv.mlir.addressof @bar
@@ -62,20 +60,18 @@ spv.module Logical GLSL450 {
 // CHECK-NEXT: }
 // CHECK-NEXT: }
 
-module {
 spv.module Logical GLSL450 {
-  spv.globalVariable @foo bind(1, 0) : !spv.ptr<i32, Input>
+  spv.GlobalVariable @foo bind(1, 0) : !spv.ptr<i32, Input>
 }
 
 spv.module Logical GLSL450 {
-  spv.globalVariable @bar bind(1, 0) : !spv.ptr<f32, Input>
+  spv.GlobalVariable @bar bind(1, 0) : !spv.ptr<f32, Input>
 
   spv.func @use_bar() -> f32 "None" {
     %0 = spv.mlir.addressof @bar : !spv.ptr<f32, Input>
     %1 = spv.Load "Input" %0 : f32
     spv.ReturnValue %1 : f32
   }
-}
 }
 
 // -----
@@ -84,7 +80,7 @@ spv.module Logical GLSL450 {
 
 // CHECK:      module {
 // CHECK-NEXT:   spv.module Logical GLSL450 {
-// CHECK-NEXT:     spv.globalVariable @foo built_in("GlobalInvocationId")
+// CHECK-NEXT:     spv.GlobalVariable @foo built_in("GlobalInvocationId")
 // CHECK-NEXT:     spv.func @use_bar
 // CHECK-NEXT:       spv.mlir.addressof @foo
 // CHECK-NEXT:       spv.Load
@@ -93,13 +89,12 @@ spv.module Logical GLSL450 {
 // CHECK-NEXT:   }
 // CHECK-NEXT: }
 
-module {
 spv.module Logical GLSL450 {
-  spv.globalVariable @foo built_in("GlobalInvocationId") : !spv.ptr<vector<3xi32>, Input>
+  spv.GlobalVariable @foo built_in("GlobalInvocationId") : !spv.ptr<vector<3xi32>, Input>
 }
 
 spv.module Logical GLSL450 {
-  spv.globalVariable @bar built_in("GlobalInvocationId") : !spv.ptr<vector<3xi32>, Input>
+  spv.GlobalVariable @bar built_in("GlobalInvocationId") : !spv.ptr<vector<3xi32>, Input>
 
   spv.func @use_bar() -> vector<3xi32> "None" {
     %0 = spv.mlir.addressof @bar : !spv.ptr<vector<3xi32>, Input>
@@ -107,13 +102,14 @@ spv.module Logical GLSL450 {
     spv.ReturnValue %1 : vector<3xi32>
   }
 }
-}
 
 // -----
 
+// Deduplicate 2 spec constants with the same spec ID.
+
 // CHECK:      module {
 // CHECK-NEXT:   spv.module Logical GLSL450 {
-// CHECK-NEXT:     spv.specConstant @foo spec_id(5)
+// CHECK-NEXT:     spv.SpecConstant @foo spec_id(5)
 
 // CHECK-NEXT:     spv.func @use_foo()
 // CHECK-NEXT:       %0 = spv.mlir.referenceof @foo
@@ -128,9 +124,8 @@ spv.module Logical GLSL450 {
 // CHECK-NEXT:   }
 // CHECK-NEXT: }
 
-module {
 spv.module Logical GLSL450 {
-  spv.specConstant @foo spec_id(5) = 1. : f32
+  spv.SpecConstant @foo spec_id(5) = 1. : f32
 
   spv.func @use_foo() -> (f32) "None" {
     %0 = spv.mlir.referenceof @foo : f32
@@ -139,7 +134,7 @@ spv.module Logical GLSL450 {
 }
 
 spv.module Logical GLSL450 {
-  spv.specConstant @bar spec_id(5) = 1. : f32
+  spv.SpecConstant @bar spec_id(5) = 1. : f32
 
   spv.func @use_bar() -> (f32) "None" {
     %0 = spv.mlir.referenceof @bar : f32
@@ -147,52 +142,86 @@ spv.module Logical GLSL450 {
     spv.ReturnValue %1 : f32
   }
 }
+
+// -----
+
+// Don't deduplicate functions with similar ops but different operands.
+
+//       CHECK: spv.module Logical GLSL450 {
+//  CHECK-NEXT:   spv.func @foo(%[[ARG0:.+]]: f32, %[[ARG1:.+]]: f32, %[[ARG2:.+]]: f32)
+//  CHECK-NEXT:     %[[ADD:.+]] = spv.FAdd %[[ARG0]], %[[ARG1]] : f32
+//  CHECK-NEXT:     %[[MUL:.+]] = spv.FMul %[[ADD]], %[[ARG2]] : f32
+//  CHECK-NEXT:     spv.ReturnValue %[[MUL]] : f32
+//  CHECK-NEXT:   }
+//  CHECK-NEXT:   spv.func @foo_1(%[[ARG0:.+]]: f32, %[[ARG1:.+]]: f32, %[[ARG2:.+]]: f32)
+//  CHECK-NEXT:     %[[ADD:.+]] = spv.FAdd %[[ARG0]], %[[ARG2]] : f32
+//  CHECK-NEXT:     %[[MUL:.+]] = spv.FMul %[[ADD]], %[[ARG1]] : f32
+//  CHECK-NEXT:     spv.ReturnValue %[[MUL]] : f32
+//  CHECK-NEXT:   }
+//  CHECK-NEXT: }
+
+spv.module Logical GLSL450 {
+  spv.func @foo(%a: f32, %b: f32, %c: f32) -> f32 "None" {
+    %add = spv.FAdd %a, %b: f32
+    %mul = spv.FMul %add, %c: f32
+    spv.ReturnValue %mul: f32
+  }
+}
+
+spv.module Logical GLSL450 {
+  spv.func @foo(%a: f32, %b: f32, %c: f32) -> f32 "None" {
+    %add = spv.FAdd %a, %c: f32
+    %mul = spv.FMul %add, %b: f32
+    spv.ReturnValue %mul: f32
+  }
 }
 
 // -----
 
-// CHECK:      module {
-// CHECK-NEXT:   spv.module Logical GLSL450 {
-// CHECK-NEXT:     spv.specConstant @bar spec_id(5)
+// TODO: re-enable this test once we have better function deduplication.
 
-// CHECK-NEXT:     spv.func @foo(%arg0: f32)
-// CHECK-NEXT:       spv.ReturnValue
-// CHECK-NEXT:     }
+// XXXXX:      module {
+// XXXXX-NEXT:   spv.module Logical GLSL450 {
+// XXXXX-NEXT:     spv.SpecConstant @bar spec_id(5)
 
-// CHECK-NEXT:     spv.func @foo_different_body(%arg0: f32)
-// CHECK-NEXT:       spv.mlir.referenceof
-// CHECK-NEXT:       spv.ReturnValue
-// CHECK-NEXT:     }
+// XXXXX-NEXT:     spv.func @foo(%arg0: f32)
+// XXXXX-NEXT:       spv.ReturnValue
+// XXXXX-NEXT:     }
 
-// CHECK-NEXT:     spv.func @baz(%arg0: i32)
-// CHECK-NEXT:       spv.ReturnValue
-// CHECK-NEXT:     }
+// XXXXX-NEXT:     spv.func @foo_different_body(%arg0: f32)
+// XXXXX-NEXT:       spv.mlir.referenceof
+// XXXXX-NEXT:       spv.ReturnValue
+// XXXXX-NEXT:     }
 
-// CHECK-NEXT:     spv.func @baz_no_return(%arg0: i32)
-// CHECK-NEXT:       spv.Return
-// CHECK-NEXT:     }
+// XXXXX-NEXT:     spv.func @baz(%arg0: i32)
+// XXXXX-NEXT:       spv.ReturnValue
+// XXXXX-NEXT:     }
 
-// CHECK-NEXT:     spv.func @baz_no_return_different_control
-// CHECK-NEXT:       spv.Return
-// CHECK-NEXT:     }
+// XXXXX-NEXT:     spv.func @baz_no_return(%arg0: i32)
+// XXXXX-NEXT:       spv.Return
+// XXXXX-NEXT:     }
 
-// CHECK-NEXT:     spv.func @baz_no_return_another_control
-// CHECK-NEXT:       spv.Return
-// CHECK-NEXT:     }
+// XXXXX-NEXT:     spv.func @baz_no_return_different_control
+// XXXXX-NEXT:       spv.Return
+// XXXXX-NEXT:     }
 
-// CHECK-NEXT:     spv.func @kernel
-// CHECK-NEXT:       spv.Return
-// CHECK-NEXT:     }
+// XXXXX-NEXT:     spv.func @baz_no_return_another_control
+// XXXXX-NEXT:       spv.Return
+// XXXXX-NEXT:     }
 
-// CHECK-NEXT:     spv.func @kernel_different_attr
-// CHECK-NEXT:       spv.Return
-// CHECK-NEXT:     }
-// CHECK-NEXT:   }
-// CHECK-NEXT:   }
+// XXXXX-NEXT:     spv.func @kernel
+// XXXXX-NEXT:       spv.Return
+// XXXXX-NEXT:     }
+
+// XXXXX-NEXT:     spv.func @kernel_different_attr
+// XXXXX-NEXT:       spv.Return
+// XXXXX-NEXT:     }
+// XXXXX-NEXT:   }
+// XXXXX-NEXT:   }
 
 module {
 spv.module Logical GLSL450 {
-  spv.specConstant @bar spec_id(5) = 1. : f32
+  spv.SpecConstant @bar spec_id(5) = 1. : f32
 
   spv.func @foo(%arg0: f32) -> (f32) "None" {
     spv.ReturnValue %arg0 : f32

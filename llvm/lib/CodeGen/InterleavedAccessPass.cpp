@@ -22,8 +22,8 @@
 //
 // E.g. An interleaved load (Factor = 2):
 //        %wide.vec = load <8 x i32>, <8 x i32>* %ptr
-//        %v0 = shuffle <8 x i32> %wide.vec, <8 x i32> undef, <0, 2, 4, 6>
-//        %v1 = shuffle <8 x i32> %wide.vec, <8 x i32> undef, <1, 3, 5, 7>
+//        %v0 = shuffle <8 x i32> %wide.vec, <8 x i32> poison, <0, 2, 4, 6>
+//        %v1 = shuffle <8 x i32> %wide.vec, <8 x i32> poison, <1, 3, 5, 7>
 //
 // It could be transformed into a ld2 intrinsic in AArch64 backend or a vld2
 // intrinsic in ARM backend.
@@ -95,7 +95,7 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<DominatorTreeWrapperPass>();
-    AU.addPreserved<DominatorTreeWrapperPass>();
+    AU.setPreservesCFG();
   }
 
 private:
@@ -351,6 +351,7 @@ bool InterleavedAccess::lowerInterleavedLoad(
                                     Index))
       return false;
 
+    assert(Shuffle->getShuffleMask().size() <= NumLoadElements);
     Indices.push_back(Index);
   }
   for (auto *Shuffle : BinOpShuffles) {
@@ -359,6 +360,8 @@ bool InterleavedAccess::lowerInterleavedLoad(
     if (!isDeInterleaveMaskOfFactor(Shuffle->getShuffleMask(), Factor,
                                     Index))
       return false;
+
+    assert(Shuffle->getShuffleMask().size() <= NumLoadElements);
 
     if (cast<Instruction>(Shuffle->getOperand(0))->getOperand(0) == LI)
       Indices.push_back(Index);
@@ -382,8 +385,7 @@ bool InterleavedAccess::lowerInterleavedLoad(
     return !Extracts.empty() || BinOpShuffleChanged;
   }
 
-  for (auto SVI : Shuffles)
-    DeadInsts.push_back(SVI);
+  append_range(DeadInsts, Shuffles);
 
   DeadInsts.push_back(LI);
   return true;
@@ -394,16 +396,20 @@ bool InterleavedAccess::replaceBinOpShuffles(
     SmallVectorImpl<ShuffleVectorInst *> &Shuffles, LoadInst *LI) {
   for (auto *SVI : BinOpShuffles) {
     BinaryOperator *BI = cast<BinaryOperator>(SVI->getOperand(0));
+    Type *BIOp0Ty = BI->getOperand(0)->getType();
     ArrayRef<int> Mask = SVI->getShuffleMask();
+    assert(all_of(Mask, [&](int Idx) {
+      return Idx < (int)cast<FixedVectorType>(BIOp0Ty)->getNumElements();
+    }));
 
-    auto *NewSVI1 = new ShuffleVectorInst(
-        BI->getOperand(0), UndefValue::get(BI->getOperand(0)->getType()), Mask,
-        SVI->getName(), SVI);
+    auto *NewSVI1 =
+        new ShuffleVectorInst(BI->getOperand(0), PoisonValue::get(BIOp0Ty),
+                              Mask, SVI->getName(), SVI);
     auto *NewSVI2 = new ShuffleVectorInst(
-        BI->getOperand(1), UndefValue::get(BI->getOperand(1)->getType()), Mask,
+        BI->getOperand(1), PoisonValue::get(BI->getOperand(1)->getType()), Mask,
         SVI->getName(), SVI);
-    Value *NewBI = BinaryOperator::Create(BI->getOpcode(), NewSVI1, NewSVI2,
-                                          BI->getName(), SVI);
+    BinaryOperator *NewBI = BinaryOperator::CreateWithCopiedFlags(
+        BI->getOpcode(), NewSVI1, NewSVI2, BI, BI->getName(), SVI);
     SVI->replaceAllUsesWith(NewBI);
     LLVM_DEBUG(dbgs() << "  Replaced: " << *BI << "\n    And   : " << *SVI
                       << "\n  With    : " << *NewSVI1 << "\n    And   : "

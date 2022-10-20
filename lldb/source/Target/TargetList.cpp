@@ -48,6 +48,7 @@ Status TargetList::CreateTarget(Debugger &debugger,
                                 LoadDependentFiles load_dependent_files,
                                 const OptionGroupPlatform *platform_options,
                                 TargetSP &target_sp) {
+  std::lock_guard<std::recursive_mutex> guard(m_target_list_mutex);
   auto result = TargetList::CreateTargetInternal(
       debugger, user_exe_path, triple_str, load_dependent_files,
       platform_options, target_sp);
@@ -62,6 +63,7 @@ Status TargetList::CreateTarget(Debugger &debugger,
                                 const ArchSpec &specified_arch,
                                 LoadDependentFiles load_dependent_files,
                                 PlatformSP &platform_sp, TargetSP &target_sp) {
+  std::lock_guard<std::recursive_mutex> guard(m_target_list_mutex);
   auto result = TargetList::CreateTargetInternal(
       debugger, user_exe_path, specified_arch, load_dependent_files,
       platform_sp, target_sp);
@@ -169,80 +171,31 @@ Status TargetList::CreateTargetInternal(
       } else {
         // Fat binary. No architecture specified, check if there is
         // only one platform for all of the architectures.
-        PlatformSP host_platform_sp = Platform::GetHostPlatform();
-        std::vector<PlatformSP> platforms;
-        for (size_t i = 0; i < num_specs; ++i) {
-          ModuleSpec module_spec;
-          if (module_specs.GetModuleSpecAtIndex(i, module_spec)) {
-            // First consider the platform specified by the user, if any, and
-            // the selected platform otherwise.
-            if (platform_sp) {
-              if (platform_sp->IsCompatibleArchitecture(
-                      module_spec.GetArchitecture(), false, nullptr)) {
-                platforms.push_back(platform_sp);
-                continue;
-              }
-            }
-
-            // Now consider the host platform if it is different from the
-            // specified/selected platform.
-            if (host_platform_sp &&
-                (!platform_sp ||
-                 host_platform_sp->GetName() != platform_sp->GetName())) {
-              if (host_platform_sp->IsCompatibleArchitecture(
-                      module_spec.GetArchitecture(), false, nullptr)) {
-                platforms.push_back(host_platform_sp);
-                continue;
-              }
-            }
-
-            // Finally find a platform that matches the architecture in the
-            // executable file.
-            PlatformSP fallback_platform_sp(
-                Platform::GetPlatformForArchitecture(
-                    module_spec.GetArchitecture(), nullptr));
-            if (fallback_platform_sp) {
-              platforms.push_back(fallback_platform_sp);
-            }
-          }
-        }
-
-        Platform *platform_ptr = nullptr;
-        bool more_than_one_platforms = false;
-        for (const auto &the_platform_sp : platforms) {
-          if (platform_ptr) {
-            if (platform_ptr->GetName() != the_platform_sp->GetName()) {
-              more_than_one_platforms = true;
-              platform_ptr = nullptr;
-              break;
-            }
-          } else {
-            platform_ptr = the_platform_sp.get();
-          }
-        }
-
-        if (platform_ptr) {
-          // All platforms for all modules in the executable match, so we can
-          // select this platform.
-          platform_sp = platforms.front();
-        } else if (!more_than_one_platforms) {
-          // No platforms claim to support this file.
+        std::vector<PlatformSP> candidates;
+        std::vector<ArchSpec> archs;
+        for (const ModuleSpec &spec : module_specs.ModuleSpecs())
+          archs.push_back(spec.GetArchitecture());
+        if (PlatformSP platform_for_archs_sp =
+                Platform::GetPlatformForArchitectures(archs, {}, platform_sp,
+                                                      candidates)) {
+          platform_sp = platform_for_archs_sp;
+        } else if (candidates.empty()) {
           error.SetErrorString("no matching platforms found for this file");
           return error;
         } else {
           // More than one platform claims to support this file.
           StreamString error_strm;
-          std::set<Platform *> platform_set;
+          std::set<llvm::StringRef> platform_set;
           error_strm.Printf(
               "more than one platform supports this executable (");
-          for (const auto &the_platform_sp : platforms) {
-            if (platform_set.find(the_platform_sp.get()) ==
-                platform_set.end()) {
-              if (!platform_set.empty())
-                error_strm.PutCString(", ");
-              error_strm.PutCString(the_platform_sp->GetName().GetCString());
-              platform_set.insert(the_platform_sp.get());
-            }
+          for (const auto &candidate : candidates) {
+            llvm::StringRef platform_name = candidate->GetName();
+            if (platform_set.count(platform_name))
+              continue;
+            if (!platform_set.empty())
+              error_strm.PutCString(", ");
+            error_strm.PutCString(platform_name);
+            platform_set.insert(platform_name);
           }
           error_strm.Printf("), specify an architecture to disambiguate");
           error.SetErrorString(error_strm.GetString());
@@ -255,9 +208,9 @@ Status TargetList::CreateTargetInternal(
   // If we have a valid architecture, make sure the current platform is
   // compatible with that architecture.
   if (!prefer_platform_arch && arch.IsValid()) {
-    ArchSpec compatible_arch;
-    if (!platform_sp->IsCompatibleArchitecture(arch, false, &compatible_arch)) {
-      platform_sp = Platform::GetPlatformForArchitecture(arch, &platform_arch);
+    if (!platform_sp->IsCompatibleArchitecture(arch, {}, false, nullptr)) {
+      platform_sp =
+          Platform::GetPlatformForArchitecture(arch, {}, &platform_arch);
       if (platform_sp)
         debugger.GetPlatformList().SetSelectedPlatform(platform_sp);
     }
@@ -265,8 +218,9 @@ Status TargetList::CreateTargetInternal(
     // If "arch" isn't valid, yet "platform_arch" is, it means we have an
     // executable file with a single architecture which should be used.
     ArchSpec fixed_platform_arch;
-    if (!platform_sp->IsCompatibleArchitecture(platform_arch, false, nullptr)) {
-      platform_sp = Platform::GetPlatformForArchitecture(platform_arch,
+    if (!platform_sp->IsCompatibleArchitecture(platform_arch, {}, false,
+                                               nullptr)) {
+      platform_sp = Platform::GetPlatformForArchitecture(platform_arch, {},
                                                          &fixed_platform_arch);
       if (platform_sp)
         debugger.GetPlatformList().SetSelectedPlatform(platform_sp);
@@ -297,8 +251,9 @@ Status TargetList::CreateTargetInternal(Debugger &debugger,
 
   if (arch.IsValid()) {
     if (!platform_sp ||
-        !platform_sp->IsCompatibleArchitecture(arch, false, nullptr))
-      platform_sp = Platform::GetPlatformForArchitecture(specified_arch, &arch);
+        !platform_sp->IsCompatibleArchitecture(arch, {}, false, nullptr))
+      platform_sp =
+          Platform::GetPlatformForArchitecture(specified_arch, {}, &arch);
   }
 
   if (!platform_sp)

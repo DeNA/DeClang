@@ -49,9 +49,9 @@ public:
   lldb_private::DynamicLoader *GetDynamicLoader() override;
 
   // PluginInterface protocol
-  lldb_private::ConstString GetPluginName() override;
-
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override {
+    return GetPluginNameStatic().GetStringRef();
+  }
 
   // Process Control
   lldb_private::Status DoDestroy() override;
@@ -81,8 +81,8 @@ protected:
 
   void Clear();
 
-  bool UpdateThreadList(lldb_private::ThreadList &old_thread_list,
-                        lldb_private::ThreadList &new_thread_list) override;
+  bool DoUpdateThreadList(lldb_private::ThreadList &old_thread_list,
+                          lldb_private::ThreadList &new_thread_list) override;
 
   lldb_private::ObjectFile *GetCoreObjectFile();
 
@@ -120,7 +120,7 @@ private:
   lldb_private::FileSpec m_core_file;
   lldb::addr_t m_dyld_addr;
   lldb::addr_t m_mach_kernel_addr;
-  lldb_private::ConstString m_dyld_plugin_name;
+  llvm::StringRef m_dyld_plugin_name;
 };
 
 #endif // LLDB_SOURCE_PLUGINS_PROCESS_MACH_CORE_PROCESSMACHCORE_H

@@ -14,6 +14,8 @@ write_cmake_config("features") {
   values = [
     "CLANGD_ENABLE_REMOTE=0",
     "CLANGD_MALLOC_TRIM=1",
+    "CLANGD_TIDY_CHECKS=1",
+    "ENABLE_GRPC_REFLECTION=0",
   ]
   if (clangd_build_xpc) {
     values += [ "CLANGD_BUILD_XPC=1" ]
@@ -67,6 +69,7 @@ static_library("clangd") {
   ]
   sources = [
     "AST.cpp",
+    "ASTSignals.cpp",
     "ClangdLSPServer.cpp",
     "ClangdServer.cpp",
     "CodeComplete.cpp",
@@ -83,6 +86,8 @@ static_library("clangd") {
     "DumpAST.cpp",
     "ExpectedTypes.cpp",
     "FS.cpp",
+    "Feature.cpp",
+    "FeatureModule.cpp",
     "FileDistance.cpp",
     "FindSymbols.cpp",
     "FindTarget.cpp",
@@ -91,8 +96,11 @@ static_library("clangd") {
     "GlobalCompilationDatabase.cpp",
     "HeaderSourceSwitch.cpp",
     "Headers.cpp",
+    "HeuristicResolver.cpp",
     "Hover.cpp",
+    "IncludeCleaner.cpp",
     "IncludeFixer.cpp",
+    "InlayHints.cpp",
     "JSONTransport.cpp",
     "ParsedAST.cpp",
     "PathMapping.cpp",

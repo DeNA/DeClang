@@ -42,7 +42,8 @@
   ; Function Attrs: argmemonly nounwind
   declare extern_weak swiftcc void @swift_task_dealloc(i8*) #4
   
-  define hidden swifttailcc void @"$s3fib9fibonacciyS2iYFTQ0_"(i8* swiftasync %0, i64 %1) #6 !dbg !59 {
+  define hidden ; FIXME swifttailcc
+  void @"$s3fib9fibonacciyS2iYFTQ0_"(i8* swiftasync %0, i64 %1) #6 !dbg !59 {
   entryresume.0:
     call void @llvm.dbg.declare(metadata i8* %0, metadata !64, metadata !DIExpression(DW_OP_deref, DW_OP_plus_uconst, 24, DW_OP_plus_uconst, 24)), !dbg !66
     call void @llvm.dbg.declare(metadata i8* %0, metadata !67, metadata !DIExpression(DW_OP_deref, DW_OP_plus_uconst, 24, DW_OP_plus_uconst, 16)), !dbg !68
@@ -101,7 +102,8 @@
     store void (%swift.context*)* %25, void (%swift.context*)** %26, align 8, !dbg !83
     %27 = bitcast i8* %21 to %swift.context*, !dbg !83
     %28 = bitcast void (%swift.context*, i64)* %18 to i8*, !dbg !83
-    musttail call swifttailcc void %18(%swift.context* swiftasync %27, i64 %11) #7, !dbg !84
+    musttail call ; FIXME swifttailcc
+    void %18(%swift.context* swiftasync %27, i64 %11) #7, !dbg !84
     ret void, !dbg !84
   
   29:                                               ; preds = %entryresume.0
@@ -109,7 +111,8 @@
     unreachable, !dbg !87
   }
   
-  declare hidden swifttailcc void @"$s3fib9fibonacciyS2iYFTQ1_"(i8* swiftasync, i64) #6
+  declare hidden ; FIXME: swifttailcc
+  void @"$s3fib9fibonacciyS2iYFTQ1_"(i8* swiftasync, i64) #6
   
   attributes #0 = { cold noreturn nounwind }
   attributes #1 = { argmemonly nofree nosync nounwind willreturn }
@@ -358,7 +361,8 @@ body:             |
     $fp, $lr = frame-destroy LDPXi $sp, 8, debug-location !84 :: (load 8 from %stack.8), (load 8 from %stack.7)
     $fp = frame-destroy ANDXri $fp, 4350, debug-location !84
     $sp = frame-destroy ADDXri $sp, 80, 0, debug-location !84
-    TCRETURNri killed renamable $x1, 0, csr_darwin_aarch64_aapcs_swifttail, implicit $sp, implicit killed $x22, implicit killed $x0, debug-location !84
+    ; FIXME TCRETURNri killed renamable $x1, 0, csr_darwin_aarch64_aapcs_swifttail, implicit $sp, implicit killed $x22, implicit killed $x0, debug-location !84
+    TCRETURNri killed renamable $x1, 0, csr_darwin_aarch64_aapcs, implicit $sp, implicit killed $x22, implicit killed $x0, debug-location !84
   
   bb.2 (%ir-block.29):
     BRK 1, debug-location !87

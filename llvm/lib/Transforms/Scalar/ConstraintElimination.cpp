@@ -18,6 +18,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/ConstraintSystem.h"
 #include "llvm/Analysis/GlobalsModRef.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
@@ -48,9 +49,9 @@ static int64_t MaxConstraintValue = std::numeric_limits<int64_t>::max();
 // vector.
 static SmallVector<std::pair<int64_t, Value *>, 4> decompose(Value *V) {
   if (auto *CI = dyn_cast<ConstantInt>(V)) {
-    if (CI->isNegative() || CI->uge(MaxConstraintValue))
+    if (CI->uge(MaxConstraintValue))
       return {};
-    return {{CI->getSExtValue(), nullptr}};
+    return {{CI->getZExtValue(), nullptr}};
   }
   auto *GEP = dyn_cast<GetElementPtrInst>(V);
   if (GEP && GEP->getNumOperands() == 2 && GEP->isInBounds()) {
@@ -99,15 +100,16 @@ static SmallVector<std::pair<int64_t, Value *>, 4> decompose(Value *V) {
 
   Value *Op1;
   ConstantInt *CI;
-  if (match(V, m_NUWAdd(m_Value(Op0), m_ConstantInt(CI))))
-    return {{CI->getSExtValue(), nullptr}, {1, Op0}};
+  if (match(V, m_NUWAdd(m_Value(Op0), m_ConstantInt(CI))) &&
+      !CI->uge(MaxConstraintValue))
+    return {{CI->getZExtValue(), nullptr}, {1, Op0}};
   if (match(V, m_NUWAdd(m_Value(Op0), m_Value(Op1))))
     return {{0, nullptr}, {1, Op0}, {1, Op1}};
 
   if (match(V, m_NUWSub(m_Value(Op0), m_ConstantInt(CI))))
     return {{-1 * CI->getSExtValue(), nullptr}, {1, Op0}};
   if (match(V, m_NUWSub(m_Value(Op0), m_Value(Op1))))
-    return {{0, nullptr}, {1, Op0}, {1, Op1}};
+    return {{0, nullptr}, {1, Op0}, {-1, Op1}};
 
   return {{0, nullptr}, {1, V}};
 }
@@ -158,12 +160,16 @@ getConstraint(CmpInst::Predicate Pred, Value *Op0, Value *Op1,
     return A;
   }
 
+  if (Pred == CmpInst::ICMP_NE && match(Op1, m_Zero())) {
+    return getConstraint(CmpInst::ICMP_UGT, Op0, Op1, Value2Index, NewIndices);
+  }
+
   // Only ULE and ULT predicates are supported at the moment.
   if (Pred != CmpInst::ICMP_ULE && Pred != CmpInst::ICMP_ULT)
     return {};
 
-  auto ADec = decompose(Op0->stripPointerCasts());
-  auto BDec = decompose(Op1->stripPointerCasts());
+  auto ADec = decompose(Op0->stripPointerCastsSameRepresentation());
+  auto BDec = decompose(Op1->stripPointerCastsSameRepresentation());
   // Skip if decomposing either of the values failed.
   if (ADec.empty() || BDec.empty())
     return {};
@@ -177,8 +183,8 @@ getConstraint(CmpInst::Predicate Pred, Value *Op0, Value *Op1,
   Offset1 *= -1;
 
   // Create iterator ranges that skip the constant-factor.
-  auto VariablesA = make_range(std::next(ADec.begin()), ADec.end());
-  auto VariablesB = make_range(std::next(BDec.begin()), BDec.end());
+  auto VariablesA = llvm::drop_begin(ADec);
+  auto VariablesB = llvm::drop_begin(BDec);
 
   // Make sure all variables have entries in Value2Index or NewIndices.
   for (const auto &KV :
@@ -264,19 +270,55 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
       continue;
     WorkList.emplace_back(DT.getNode(&BB));
 
-    auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
-    if (!Br || !Br->isConditional())
-      continue;
-
     // Returns true if we can add a known condition from BB to its successor
     // block Succ. Each predecessor of Succ can either be BB or be dominated by
     // Succ (e.g. the case when adding a condition from a pre-header to a loop
     // header).
     auto CanAdd = [&BB, &DT](BasicBlock *Succ) {
-      return all_of(predecessors(Succ), [&BB, &DT, Succ](BasicBlock *Pred) {
-        return Pred == &BB || DT.dominates(Succ, Pred);
-      });
+      if (BB.getSingleSuccessor()) {
+        assert(BB.getSingleSuccessor() == Succ);
+        return DT.properlyDominates(&BB, Succ);
+      }
+      return any_of(successors(&BB),
+                    [Succ](const BasicBlock *S) { return S != Succ; }) &&
+             all_of(predecessors(Succ), [&BB, &DT, Succ](BasicBlock *Pred) {
+               return Pred == &BB || DT.dominates(Succ, Pred);
+             });
     };
+
+    // True as long as long as the current instruction is guaranteed to execute.
+    bool GuaranteedToExecute = true;
+    // Scan BB for assume calls.
+    // TODO: also use this scan to queue conditions to simplify, so we can
+    // interleave facts from assumes and conditions to simplify in a single
+    // basic block. And to skip another traversal of each basic block when
+    // simplifying.
+    for (Instruction &I : BB) {
+      Value *Cond;
+      // For now, just handle assumes with a single compare as condition.
+      if (match(&I, m_Intrinsic<Intrinsic::assume>(m_Value(Cond))) &&
+          isa<CmpInst>(Cond)) {
+        if (GuaranteedToExecute) {
+          // The assume is guaranteed to execute when BB is entered, hence Cond
+          // holds on entry to BB.
+          WorkList.emplace_back(DT.getNode(&BB), cast<CmpInst>(Cond), false);
+        } else {
+          // Otherwise the condition only holds in the successors.
+          for (BasicBlock *Succ : successors(&BB)) {
+            if (!CanAdd(Succ))
+              continue;
+            WorkList.emplace_back(DT.getNode(Succ), cast<CmpInst>(Cond),
+                                  false);
+          }
+        }
+      }
+      GuaranteedToExecute &= isGuaranteedToTransferExecutionToSuccessor(&I);
+    }
+
+    auto *Br = dyn_cast<BranchInst>(BB.getTerminator());
+    if (!Br || !Br->isConditional())
+      continue;
+
     // If the condition is an OR of 2 compares and the false successor only has
     // the current block as predecessor, queue both negated conditions for the
     // false successor.
@@ -321,10 +363,9 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
   // come before blocks and conditions dominated by them. If a block and a
   // condition have the same numbers, the condition comes before the block, as
   // it holds on entry to the block.
-  sort(WorkList.begin(), WorkList.end(),
-       [](const ConstraintOrBlock &A, const ConstraintOrBlock &B) {
-         return std::tie(A.NumIn, A.IsBlock) < std::tie(B.NumIn, B.IsBlock);
-       });
+  sort(WorkList, [](const ConstraintOrBlock &A, const ConstraintOrBlock &B) {
+    return std::tie(A.NumIn, A.IsBlock) < std::tie(B.NumIn, B.IsBlock);
+  });
 
   // Finally, process ordered worklist and eliminate implied conditions.
   SmallVector<StackEntry, 16> DFSInStack;
@@ -392,8 +433,13 @@ static bool eliminateConstraints(Function &F, DominatorTree &DT) {
             for (auto &E : reverse(DFSInStack))
               dbgs() << "   C " << *E.Condition << " " << E.IsNot << "\n";
           });
-          Cmp->replaceAllUsesWith(
-              ConstantInt::getTrue(F.getParent()->getContext()));
+          Cmp->replaceUsesWithIf(
+              ConstantInt::getTrue(F.getParent()->getContext()), [](Use &U) {
+                // Conditions in an assume trivially simplify to true. Skip uses
+                // in assume calls to not destroy the available information.
+                auto *II = dyn_cast<IntrinsicInst>(U.getUser());
+                return !II || II->getIntrinsicID() != Intrinsic::assume;
+              });
           NumCondsRemoved++;
           Changed = true;
         }
@@ -472,7 +518,6 @@ PreservedAnalyses ConstraintEliminationPass::run(Function &F,
 
   PreservedAnalyses PA;
   PA.preserve<DominatorTreeAnalysis>();
-  PA.preserve<GlobalsAA>();
   PA.preserveSet<CFGAnalyses>();
   return PA;
 }

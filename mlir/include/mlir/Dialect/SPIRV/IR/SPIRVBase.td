@@ -52,6 +52,9 @@ def SPIRV_Dialect : Dialect {
   let hasRegionResultAttrVerify = 1;
 
   let extraClassDeclaration = [{
+    void registerAttributes();
+    void registerTypes();
+
     //===------------------------------------------------------------------===//
     // Attribute
     //===------------------------------------------------------------------===//
@@ -122,6 +125,7 @@ def SPV_VersionAttr : SPV_I32EnumAttr<"Version", "valid SPIR-V version", [
 
 class MinVersion<I32EnumAttrCase min> : MinVersionBase<
     "QueryMinVersionInterface", SPV_VersionAttr, min> {
+  let cppNamespace = "::mlir::spirv";
   let interfaceDescription = [{
     Querying interface for minimal required SPIR-V version.
 
@@ -133,6 +137,7 @@ class MinVersion<I32EnumAttrCase min> : MinVersionBase<
 
 class MaxVersion<I32EnumAttrCase max> : MaxVersionBase<
     "QueryMaxVersionInterface", SPV_VersionAttr, max> {
+  let cppNamespace = "::mlir::spirv";
   let interfaceDescription = [{
     Querying interface for maximal supported SPIR-V version.
 
@@ -143,6 +148,7 @@ class MaxVersion<I32EnumAttrCase max> : MaxVersionBase<
 }
 
 class Extension<list<StrEnumAttrCase> extensions> : Availability {
+  let cppNamespace = "::mlir::spirv";
   let interfaceName = "QueryExtensionInterface";
   let interfaceDescription = [{
     Querying interface for required SPIR-V extensions.
@@ -186,6 +192,7 @@ class Extension<list<StrEnumAttrCase> extensions> : Availability {
 }
 
 class Capability<list<I32EnumAttrCase> capabilities> : Availability {
+  let cppNamespace = "::mlir::spirv";
   let interfaceName = "QueryCapabilityInterface";
   let interfaceDescription = [{
     Querying interface for required SPIR-V capabilities.
@@ -2668,6 +2675,74 @@ def SPV_ImageFormatAttr :
       SPV_IF_R8ui
     ]>;
 
+def SPV_IO_None               : BitEnumAttrCase<"None", 0x0000>;
+def SPV_IO_Bias               : BitEnumAttrCase<"Bias", 0x0001> {
+  list<Availability> availability = [
+    Capability<[SPV_C_Shader]>
+  ];
+}
+def SPV_IO_Lod                : BitEnumAttrCase<"Lod", 0x0002>;
+def SPV_IO_Grad               : BitEnumAttrCase<"Grad", 0x0004>;
+def SPV_IO_ConstOffset        : BitEnumAttrCase<"ConstOffset", 0x0008>;
+def SPV_IO_Offset             : BitEnumAttrCase<"Offset", 0x0010> {
+  list<Availability> availability = [
+    Capability<[SPV_C_ImageGatherExtended]>
+  ];
+}
+def SPV_IO_ConstOffsets       : BitEnumAttrCase<"ConstOffsets", 0x0020> {
+  list<Availability> availability = [
+    Capability<[SPV_C_ImageGatherExtended]>
+  ];
+}
+def SPV_IO_Sample             : BitEnumAttrCase<"Sample", 0x0040>;
+def SPV_IO_MinLod             : BitEnumAttrCase<"MinLod", 0x0080> {
+  list<Availability> availability = [
+    Capability<[SPV_C_MinLod]>
+  ];
+}
+def SPV_IO_MakeTexelAvailable : BitEnumAttrCase<"MakeTexelAvailable", 0x0100> {
+  list<Availability> availability = [
+    MinVersion<SPV_V_1_5>,
+    Capability<[SPV_C_VulkanMemoryModel]>
+  ];
+}
+def SPV_IO_MakeTexelVisible   : BitEnumAttrCase<"MakeTexelVisible", 0x0200> {
+  list<Availability> availability = [
+    MinVersion<SPV_V_1_5>,
+    Capability<[SPV_C_VulkanMemoryModel]>
+  ];
+}
+def SPV_IO_NonPrivateTexel    : BitEnumAttrCase<"NonPrivateTexel", 0x0400> {
+  list<Availability> availability = [
+    MinVersion<SPV_V_1_5>,
+    Capability<[SPV_C_VulkanMemoryModel]>
+  ];
+}
+def SPV_IO_VolatileTexel      : BitEnumAttrCase<"VolatileTexel", 0x0800> {
+  list<Availability> availability = [
+    MinVersion<SPV_V_1_5>,
+    Capability<[SPV_C_VulkanMemoryModel]>
+  ];
+}
+def SPV_IO_SignExtend         : BitEnumAttrCase<"SignExtend", 0x1000> {
+  list<Availability> availability = [
+    MinVersion<SPV_V_1_4>,
+  ];
+}
+def SPV_IO_ZeroExtend         : BitEnumAttrCase<"ZeroExtend", 0x2000> {
+  list<Availability> availability = [
+    MinVersion<SPV_V_1_4>,
+  ];
+}
+
+def SPV_ImageOperandAttr :
+    SPV_BitEnumAttr<"ImageOperands", "valid SPIR-V ImageOperands", [
+      SPV_IO_None, SPV_IO_Bias, SPV_IO_Lod, SPV_IO_Grad, SPV_IO_ConstOffset,
+      SPV_IO_Offset, SPV_IO_ConstOffsets, SPV_IO_Sample, SPV_IO_MinLod,
+      SPV_IO_MakeTexelAvailable, SPV_IO_MakeTexelVisible, SPV_IO_NonPrivateTexel,
+      SPV_IO_VolatileTexel, SPV_IO_SignExtend, SPV_IO_ZeroExtend
+    ]>;
+
 def SPV_LT_Export : I32EnumAttrCase<"Export", 0> {
   list<Availability> availability = [
     Capability<[SPV_C_Linkage]>
@@ -3030,9 +3105,11 @@ class SignlessOrUnsignedIntOfWidths<list<int> widths> :
 def SPV_IsArrayType : CPred<"$_self.isa<::mlir::spirv::ArrayType>()">;
 def SPV_IsCooperativeMatrixType :
   CPred<"$_self.isa<::mlir::spirv::CooperativeMatrixNVType>()">;
+def SPV_IsImageType : CPred<"$_self.isa<::mlir::spirv::ImageType>()">;
 def SPV_IsMatrixType : CPred<"$_self.isa<::mlir::spirv::MatrixType>()">;
 def SPV_IsPtrType : CPred<"$_self.isa<::mlir::spirv::PointerType>()">;
 def SPV_IsRTArrayType : CPred<"$_self.isa<::mlir::spirv::RuntimeArrayType>()">;
+def SPV_IsSampledImageType : CPred<"$_self.isa<::mlir::spirv::SampledImageType>()">;
 def SPV_IsStructType : CPred<"$_self.isa<::mlir::spirv::StructType>()">;
 
 
@@ -3043,6 +3120,7 @@ def SPV_Void : TypeAlias<NoneType, "void">;
 def SPV_Bool : TypeAlias<I1, "bool">;
 def SPV_Integer : AnyIntOfWidths<[8, 16, 32, 64]>;
 def SPV_Int32 : TypeAlias<I32, "Int32">;
+def SPV_Float32 : TypeAlias<F32, "Float32">;
 def SPV_Float : FloatOfWidths<[16, 32, 64]>;
 def SPV_Float16or32 : FloatOfWidths<[16, 32]>;
 def SPV_Vector : VectorOfLengthAndType<[2, 3, 4, 8, 16],
@@ -3056,12 +3134,16 @@ def SPV_AnyArray : DialectType<SPIRV_Dialect, SPV_IsArrayType,
 def SPV_AnyCooperativeMatrix : DialectType<SPIRV_Dialect,
                                SPV_IsCooperativeMatrixType,
                                "any SPIR-V cooperative matrix type">;
+def SPV_AnyImage : DialectType<SPIRV_Dialect, SPV_IsImageType,
+                                "any SPIR-V image type">;
 def SPV_AnyMatrix : DialectType<SPIRV_Dialect, SPV_IsMatrixType,
                                 "any SPIR-V matrix type">;
 def SPV_AnyRTArray : DialectType<SPIRV_Dialect, SPV_IsRTArrayType,
                                  "any SPIR-V runtime array type">;
 def SPV_AnyStruct : DialectType<SPIRV_Dialect, SPV_IsStructType,
                                 "any SPIR-V struct type">;
+def SPV_AnySampledImage : DialectType<SPIRV_Dialect, SPV_IsSampledImageType,
+                                "any SPIR-V sampled image type">;
 
 def SPV_Numerical : AnyTypeOf<[SPV_Integer, SPV_Float]>;
 def SPV_Scalar : AnyTypeOf<[SPV_Numerical, SPV_Bool]>;
@@ -3072,7 +3154,7 @@ def SPV_Composite :
 def SPV_Type : AnyTypeOf<[
     SPV_Void, SPV_Bool, SPV_Integer, SPV_Float, SPV_Vector,
     SPV_AnyPtr, SPV_AnyArray, SPV_AnyRTArray, SPV_AnyStruct,
-    SPV_AnyCooperativeMatrix, SPV_AnyMatrix
+    SPV_AnyCooperativeMatrix, SPV_AnyMatrix, SPV_AnySampledImage
   ]>;
 
 def SPV_SignedInt : SignedIntOfWidths<[8, 16, 32, 64]>;
@@ -3117,6 +3199,10 @@ def InModuleScope : PredOpTrait<
 
 def UnsignedOp : NativeOpTrait<"spirv::UnsignedOp">;
 
+def SignedOp : NativeOpTrait<"spirv::SignedOp">;
+
+def UsableInSpecConstantOp : NativeOpTrait<"spirv::UsableInSpecConstantOp">;
+
 //===----------------------------------------------------------------------===//
 // SPIR-V opcode specification
 //===----------------------------------------------------------------------===//
@@ -3153,6 +3239,8 @@ def SPV_OC_OpTypeInt                   : I32EnumAttrCase<"OpTypeInt", 21>;
 def SPV_OC_OpTypeFloat                 : I32EnumAttrCase<"OpTypeFloat", 22>;
 def SPV_OC_OpTypeVector                : I32EnumAttrCase<"OpTypeVector", 23>;
 def SPV_OC_OpTypeMatrix                : I32EnumAttrCase<"OpTypeMatrix", 24>;
+def SPV_OC_OpTypeImage                 : I32EnumAttrCase<"OpTypeImage", 25>;
+def SPV_OC_OpTypeSampledImage          : I32EnumAttrCase<"OpTypeSampledImage", 27>;
 def SPV_OC_OpTypeArray                 : I32EnumAttrCase<"OpTypeArray", 28>;
 def SPV_OC_OpTypeRuntimeArray          : I32EnumAttrCase<"OpTypeRuntimeArray", 29>;
 def SPV_OC_OpTypeStruct                : I32EnumAttrCase<"OpTypeStruct", 30>;
@@ -3168,6 +3256,7 @@ def SPV_OC_OpSpecConstantTrue          : I32EnumAttrCase<"OpSpecConstantTrue", 4
 def SPV_OC_OpSpecConstantFalse         : I32EnumAttrCase<"OpSpecConstantFalse", 49>;
 def SPV_OC_OpSpecConstant              : I32EnumAttrCase<"OpSpecConstant", 50>;
 def SPV_OC_OpSpecConstantComposite     : I32EnumAttrCase<"OpSpecConstantComposite", 51>;
+def SPV_OC_OpSpecConstantOp            : I32EnumAttrCase<"OpSpecConstantOp", 52>;
 def SPV_OC_OpFunction                  : I32EnumAttrCase<"OpFunction", 54>;
 def SPV_OC_OpFunctionParameter         : I32EnumAttrCase<"OpFunctionParameter", 55>;
 def SPV_OC_OpFunctionEnd               : I32EnumAttrCase<"OpFunctionEnd", 56>;
@@ -3177,14 +3266,20 @@ def SPV_OC_OpLoad                      : I32EnumAttrCase<"OpLoad", 61>;
 def SPV_OC_OpStore                     : I32EnumAttrCase<"OpStore", 62>;
 def SPV_OC_OpCopyMemory                : I32EnumAttrCase<"OpCopyMemory", 63>;
 def SPV_OC_OpAccessChain               : I32EnumAttrCase<"OpAccessChain", 65>;
+def SPV_OC_OpPtrAccessChain            : I32EnumAttrCase<"OpPtrAccessChain", 67>;
+def SPV_OC_OpInBoundsPtrAccessChain    : I32EnumAttrCase<"OpInBoundsPtrAccessChain", 70>;
 def SPV_OC_OpDecorate                  : I32EnumAttrCase<"OpDecorate", 71>;
 def SPV_OC_OpMemberDecorate            : I32EnumAttrCase<"OpMemberDecorate", 72>;
 def SPV_OC_OpVectorExtractDynamic      : I32EnumAttrCase<"OpVectorExtractDynamic", 77>;
 def SPV_OC_OpVectorInsertDynamic       : I32EnumAttrCase<"OpVectorInsertDynamic", 78>;
+def SPV_OC_OpVectorShuffle             : I32EnumAttrCase<"OpVectorShuffle", 79>;
 def SPV_OC_OpCompositeConstruct        : I32EnumAttrCase<"OpCompositeConstruct", 80>;
 def SPV_OC_OpCompositeExtract          : I32EnumAttrCase<"OpCompositeExtract", 81>;
 def SPV_OC_OpCompositeInsert           : I32EnumAttrCase<"OpCompositeInsert", 82>;
 def SPV_OC_OpTranspose                 : I32EnumAttrCase<"OpTranspose", 84>;
+def SPV_OC_OpImageDrefGather           : I32EnumAttrCase<"OpImageDrefGather", 97>;
+def SPV_OC_OpImage                     : I32EnumAttrCase<"OpImage", 100>;
+def SPV_OC_OpImageQuerySize            : I32EnumAttrCase<"OpImageQuerySize", 104>;
 def SPV_OC_OpConvertFToU               : I32EnumAttrCase<"OpConvertFToU", 109>;
 def SPV_OC_OpConvertFToS               : I32EnumAttrCase<"OpConvertFToS", 110>;
 def SPV_OC_OpConvertSToF               : I32EnumAttrCase<"OpConvertSToF", 111>;
@@ -3211,6 +3306,10 @@ def SPV_OC_OpFRem                      : I32EnumAttrCase<"OpFRem", 140>;
 def SPV_OC_OpFMod                      : I32EnumAttrCase<"OpFMod", 141>;
 def SPV_OC_OpMatrixTimesScalar         : I32EnumAttrCase<"OpMatrixTimesScalar", 143>;
 def SPV_OC_OpMatrixTimesMatrix         : I32EnumAttrCase<"OpMatrixTimesMatrix", 146>;
+def SPV_OC_OpIsNan                     : I32EnumAttrCase<"OpIsNan", 156>;
+def SPV_OC_OpIsInf                     : I32EnumAttrCase<"OpIsInf", 157>;
+def SPV_OC_OpOrdered                   : I32EnumAttrCase<"OpOrdered", 162>;
+def SPV_OC_OpUnordered                 : I32EnumAttrCase<"OpUnordered", 163>;
 def SPV_OC_OpLogicalEqual              : I32EnumAttrCase<"OpLogicalEqual", 164>;
 def SPV_OC_OpLogicalNotEqual           : I32EnumAttrCase<"OpLogicalNotEqual", 165>;
 def SPV_OC_OpLogicalOr                 : I32EnumAttrCase<"OpLogicalOr", 166>;
@@ -3307,24 +3406,28 @@ def SPV_OpcodeAttr :
       SPV_OC_OpMemoryModel, SPV_OC_OpEntryPoint, SPV_OC_OpExecutionMode,
       SPV_OC_OpCapability, SPV_OC_OpTypeVoid, SPV_OC_OpTypeBool, SPV_OC_OpTypeInt,
       SPV_OC_OpTypeFloat, SPV_OC_OpTypeVector, SPV_OC_OpTypeMatrix,
-      SPV_OC_OpTypeArray, SPV_OC_OpTypeRuntimeArray, SPV_OC_OpTypeStruct,
-      SPV_OC_OpTypePointer, SPV_OC_OpTypeFunction, SPV_OC_OpTypeForwardPointer,
-      SPV_OC_OpConstantTrue, SPV_OC_OpConstantFalse, SPV_OC_OpConstant,
-      SPV_OC_OpConstantComposite, SPV_OC_OpConstantNull, SPV_OC_OpSpecConstantTrue,
-      SPV_OC_OpSpecConstantFalse, SPV_OC_OpSpecConstant,
-      SPV_OC_OpSpecConstantComposite, SPV_OC_OpFunction, SPV_OC_OpFunctionParameter,
-      SPV_OC_OpFunctionEnd, SPV_OC_OpFunctionCall, SPV_OC_OpVariable, SPV_OC_OpLoad,
-      SPV_OC_OpStore, SPV_OC_OpCopyMemory, SPV_OC_OpAccessChain, SPV_OC_OpDecorate,
-      SPV_OC_OpMemberDecorate, SPV_OC_OpVectorExtractDynamic,
-      SPV_OC_OpVectorInsertDynamic, SPV_OC_OpCompositeConstruct,
-      SPV_OC_OpCompositeExtract, SPV_OC_OpCompositeInsert, SPV_OC_OpTranspose,
-      SPV_OC_OpConvertFToU, SPV_OC_OpConvertFToS, SPV_OC_OpConvertSToF,
-      SPV_OC_OpConvertUToF, SPV_OC_OpUConvert, SPV_OC_OpSConvert, SPV_OC_OpFConvert,
-      SPV_OC_OpBitcast, SPV_OC_OpSNegate, SPV_OC_OpFNegate, SPV_OC_OpIAdd,
-      SPV_OC_OpFAdd, SPV_OC_OpISub, SPV_OC_OpFSub, SPV_OC_OpIMul, SPV_OC_OpFMul,
-      SPV_OC_OpUDiv, SPV_OC_OpSDiv, SPV_OC_OpFDiv, SPV_OC_OpUMod, SPV_OC_OpSRem,
-      SPV_OC_OpSMod, SPV_OC_OpFRem, SPV_OC_OpFMod, SPV_OC_OpMatrixTimesScalar,
-      SPV_OC_OpMatrixTimesMatrix, SPV_OC_OpLogicalEqual, SPV_OC_OpLogicalNotEqual,
+      SPV_OC_OpTypeImage, SPV_OC_OpTypeSampledImage, SPV_OC_OpTypeArray,
+      SPV_OC_OpTypeRuntimeArray, SPV_OC_OpTypeStruct, SPV_OC_OpTypePointer,
+      SPV_OC_OpTypeFunction, SPV_OC_OpTypeForwardPointer, SPV_OC_OpConstantTrue,
+      SPV_OC_OpConstantFalse, SPV_OC_OpConstant, SPV_OC_OpConstantComposite,
+      SPV_OC_OpConstantNull, SPV_OC_OpSpecConstantTrue, SPV_OC_OpSpecConstantFalse,
+      SPV_OC_OpSpecConstant, SPV_OC_OpSpecConstantComposite, SPV_OC_OpSpecConstantOp,
+      SPV_OC_OpFunction, SPV_OC_OpFunctionParameter, SPV_OC_OpFunctionEnd,
+      SPV_OC_OpFunctionCall, SPV_OC_OpVariable, SPV_OC_OpLoad, SPV_OC_OpStore,
+      SPV_OC_OpCopyMemory, SPV_OC_OpAccessChain, SPV_OC_OpPtrAccessChain,
+      SPV_OC_OpInBoundsPtrAccessChain, SPV_OC_OpDecorate, SPV_OC_OpMemberDecorate,
+      SPV_OC_OpVectorExtractDynamic, SPV_OC_OpVectorInsertDynamic,
+      SPV_OC_OpVectorShuffle, SPV_OC_OpCompositeConstruct, SPV_OC_OpCompositeExtract,
+      SPV_OC_OpCompositeInsert, SPV_OC_OpTranspose, SPV_OC_OpImageDrefGather,
+      SPV_OC_OpImage, SPV_OC_OpImageQuerySize, SPV_OC_OpConvertFToU,
+      SPV_OC_OpConvertFToS, SPV_OC_OpConvertSToF, SPV_OC_OpConvertUToF,
+      SPV_OC_OpUConvert, SPV_OC_OpSConvert, SPV_OC_OpFConvert, SPV_OC_OpBitcast,
+      SPV_OC_OpSNegate, SPV_OC_OpFNegate, SPV_OC_OpIAdd, SPV_OC_OpFAdd,
+      SPV_OC_OpISub, SPV_OC_OpFSub, SPV_OC_OpIMul, SPV_OC_OpFMul, SPV_OC_OpUDiv,
+      SPV_OC_OpSDiv, SPV_OC_OpFDiv, SPV_OC_OpUMod, SPV_OC_OpSRem, SPV_OC_OpSMod,
+      SPV_OC_OpFRem, SPV_OC_OpFMod, SPV_OC_OpMatrixTimesScalar,
+      SPV_OC_OpMatrixTimesMatrix, SPV_OC_OpIsNan, SPV_OC_OpIsInf, SPV_OC_OpOrdered,
+      SPV_OC_OpUnordered, SPV_OC_OpLogicalEqual, SPV_OC_OpLogicalNotEqual,
       SPV_OC_OpLogicalOr, SPV_OC_OpLogicalAnd, SPV_OC_OpLogicalNot, SPV_OC_OpSelect,
       SPV_OC_OpIEqual, SPV_OC_OpINotEqual, SPV_OC_OpUGreaterThan,
       SPV_OC_OpSGreaterThan, SPV_OC_OpUGreaterThanEqual, SPV_OC_OpSGreaterThanEqual,

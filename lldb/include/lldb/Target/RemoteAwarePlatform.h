@@ -64,7 +64,7 @@ public:
                          FileSpec &local_file) override;
 
   bool GetRemoteOSVersion() override;
-  bool GetRemoteOSBuildString(std::string &s) override;
+  llvm::Optional<std::string> GetRemoteOSBuildString() override;
   bool GetRemoteOSKernelDescription(std::string &s) override;
   ArchSpec GetRemoteSystemArchitecture() override;
 
@@ -96,6 +96,9 @@ public:
   Status LaunchProcess(ProcessLaunchInfo &launch_info) override;
 
   Status KillProcess(const lldb::pid_t pid) override;
+
+  size_t ConnectToWaitingProcesses(Debugger &debugger,
+                                   Status &error) override;
 
 protected:
   lldb::PlatformSP m_remote_platform_sp;

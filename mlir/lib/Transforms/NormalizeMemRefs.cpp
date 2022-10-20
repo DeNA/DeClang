@@ -13,9 +13,11 @@
 
 #include "PassDetail.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Transforms/Passes.h"
 #include "mlir/Transforms/Utils.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "normalize-memrefs"
 
@@ -127,10 +129,10 @@ void NormalizeMemRefs::setCalleesAndCallersNonNormalizable(
 
   // Functions called by this function.
   funcOp.walk([&](CallOp callOp) {
-    StringRef callee = callOp.getCallee();
+    StringAttr callee = callOp.getCalleeAttr().getAttr();
     for (FuncOp &funcOp : normalizableFuncs) {
       // We compare FuncOp and callee's name.
-      if (callee == funcOp.getName()) {
+      if (callee == funcOp.getNameAttr()) {
         setCalleesAndCallersNonNormalizable(funcOp, moduleOp,
                                             normalizableFuncs);
         break;
@@ -152,7 +154,7 @@ bool NormalizeMemRefs::areMemRefsNormalizable(FuncOp funcOp) {
     return true;
 
   if (funcOp
-          .walk([&](AllocOp allocOp) -> WalkResult {
+          .walk([&](memref::AllocOp allocOp) -> WalkResult {
             Value oldMemRef = allocOp.getResult();
             if (!isMemRefNormalizable(oldMemRef.getUsers()))
               return WalkResult::interrupt();
@@ -223,7 +225,7 @@ void NormalizeMemRefs::updateFunctionSignature(FuncOp funcOp,
         // memref type is normalized.
         // TODO: When selective normalization is implemented, handle multiple
         // results case where some are normalized, some aren't.
-        if (memrefType.getAffineMaps().empty())
+        if (memrefType.getLayout().isIdentity())
           resultTypes[operandEn.index()] = memrefType;
       }
     });
@@ -253,10 +255,9 @@ void NormalizeMemRefs::updateFunctionSignature(FuncOp funcOp,
     auto callOp = dyn_cast<CallOp>(userOp);
     if (!callOp)
       continue;
-    StringRef callee = callOp.getCallee();
-    Operation *newCallOp = builder.create<CallOp>(
-        userOp->getLoc(), resultTypes, builder.getSymbolRefAttr(callee),
-        userOp->getOperands());
+    Operation *newCallOp =
+        builder.create<CallOp>(userOp->getLoc(), callOp.getCalleeAttr(),
+                               resultTypes, userOp->getOperands());
     bool replacingMemRefUsesFailed = false;
     bool returnTypeChanged = false;
     for (unsigned resIndex : llvm::seq<unsigned>(0, userOp->getNumResults())) {
@@ -268,7 +269,7 @@ void NormalizeMemRefs::updateFunctionSignature(FuncOp funcOp,
       if (oldResult.getType() == newResult.getType())
         continue;
       AffineMap layoutMap =
-          oldResult.getType().dyn_cast<MemRefType>().getAffineMaps().front();
+          oldResult.getType().cast<MemRefType>().getLayout().getAffineMap();
       if (failed(replaceAllMemRefUsesWith(oldResult, /*newMemRef=*/newResult,
                                           /*extraIndices=*/{},
                                           /*indexRemap=*/layoutMap,
@@ -326,10 +327,10 @@ void NormalizeMemRefs::normalizeFuncOpMemRefs(FuncOp funcOp,
   // Turn memrefs' non-identity layouts maps into ones with identity. Collect
   // alloc ops first and then process since normalizeMemRef replaces/erases ops
   // during memref rewriting.
-  SmallVector<AllocOp, 4> allocOps;
-  funcOp.walk([&](AllocOp op) { allocOps.push_back(op); });
-  for (AllocOp allocOp : allocOps)
-    normalizeMemRef(allocOp);
+  SmallVector<memref::AllocOp, 4> allocOps;
+  funcOp.walk([&](memref::AllocOp op) { allocOps.push_back(op); });
+  for (memref::AllocOp allocOp : allocOps)
+    (void)normalizeMemRef(&allocOp);
 
   // We use this OpBuilder to create new memref layout later.
   OpBuilder b(funcOp);
@@ -362,7 +363,7 @@ void NormalizeMemRefs::normalizeFuncOpMemRefs(FuncOp funcOp,
     BlockArgument newMemRef =
         funcOp.front().insertArgument(argIndex, newMemRefType);
     BlockArgument oldMemRef = funcOp.getArgument(argIndex + 1);
-    AffineMap layoutMap = memrefType.getAffineMaps().front();
+    AffineMap layoutMap = memrefType.getLayout().getAffineMap();
     // Replace all uses of the old memref.
     if (failed(replaceAllMemRefUsesWith(oldMemRef, /*newMemRef=*/newMemRef,
                                         /*extraIndices=*/{},
@@ -411,7 +412,7 @@ void NormalizeMemRefs::normalizeFuncOpMemRefs(FuncOp funcOp,
           if (oldMemRefType == newMemRefType)
             continue;
           // TODO: Assume single layout map. Multiple maps not supported.
-          AffineMap layoutMap = oldMemRefType.getAffineMaps().front();
+          AffineMap layoutMap = oldMemRefType.getLayout().getAffineMap();
           if (failed(replaceAllMemRefUsesWith(oldMemRef,
                                               /*newMemRef=*/newMemRef,
                                               /*extraIndices=*/{},
@@ -512,6 +513,10 @@ Operation *NormalizeMemRefs::createOpResultsNormalized(FuncOp funcOp,
   // affine map, `oldOp` is returned without modification.
   if (resultTypeNormalized) {
     OpBuilder bb(oldOp);
+    for (auto &oldRegion : oldOp->getRegions()) {
+      Region *newRegion = result.addRegion();
+      newRegion->takeBody(oldRegion);
+    }
     return bb.createOperation(result);
   } else
     return oldOp;

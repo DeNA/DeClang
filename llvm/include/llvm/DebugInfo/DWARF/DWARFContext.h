@@ -364,12 +364,33 @@ public:
   getLocalsForAddress(object::SectionedAddress Address) override;
 
   bool isLittleEndian() const { return DObj->isLittleEndian(); }
+  static unsigned getMaxSupportedVersion() { return 5; }
   static bool isSupportedVersion(unsigned version) {
-    return version == 2 || version == 3 || version == 4 || version == 5;
+    return version >= 2 && version <= getMaxSupportedVersion();
   }
 
+  static SmallVector<uint8_t, 3> getSupportedAddressSizes() {
+    return {2, 4, 8};
+  }
   static bool isAddressSizeSupported(unsigned AddressSize) {
-    return AddressSize == 2 || AddressSize == 4 || AddressSize == 8;
+    return llvm::is_contained(getSupportedAddressSizes(), AddressSize);
+  }
+  template <typename... Ts>
+  static Error checkAddressSizeSupported(unsigned AddressSize,
+                                         std::error_code EC, char const *Fmt,
+                                         const Ts &...Vals) {
+    if (isAddressSizeSupported(AddressSize))
+      return Error::success();
+    std::string Buffer;
+    raw_string_ostream Stream(Buffer);
+    Stream << format(Fmt, Vals...)
+           << " has unsupported address size: " << AddressSize
+           << " (supported are ";
+    ListSeparator LS;
+    for (unsigned Size : DWARFContext::getSupportedAddressSizes())
+      Stream << LS << Size;
+    Stream << ')';
+    return make_error<StringError>(Stream.str(), EC);
   }
 
   std::shared_ptr<DWARFContext> getDWOContext(StringRef AbsolutePath);
@@ -382,9 +403,12 @@ public:
 
   function_ref<void(Error)> getWarningHandler() { return WarningHandler; }
 
+  enum class ProcessDebugRelocations { Process, Ignore };
+
   static std::unique_ptr<DWARFContext>
-  create(const object::ObjectFile &Obj, const LoadedObjectInfo *L = nullptr,
-         std::string DWPName = "",
+  create(const object::ObjectFile &Obj,
+         ProcessDebugRelocations RelocAction = ProcessDebugRelocations::Process,
+         const LoadedObjectInfo *L = nullptr, std::string DWPName = "",
          std::function<void(Error)> RecoverableErrorHandler =
              WithColor::defaultErrorHandler,
          std::function<void(Error)> WarningHandler =

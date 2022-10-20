@@ -29,7 +29,6 @@ class TsanSwiftTestCase(lldbtest.TestBase):
     @skipIfLinux
     @skipUnlessSwiftThreadSanitizer
     @skipIfAsan # This test does not behave reliable with an ASANified LLDB.
-    @skipIfDarwinEmbedded
     def test_tsan_swift(self):
         self.build()
         self.do_test()

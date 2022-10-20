@@ -47,13 +47,13 @@ namespace tgtok {
 
     // Reserved keywords. ('ElseKW' is named to distinguish it from the
     // existing 'Else' that means the preprocessor #else.)
-    Bit, Bits, Class, Code, Dag, Def, Defm, Defset, Defvar, ElseKW, FalseKW,
-    Field, Foreach, If, In, Include, Int, Let, List, MultiClass,
+    Assert, Bit, Bits, Class, Code, Dag, Def, Defm, Defset, Defvar, ElseKW,
+    FalseKW, Field, Foreach, If, In, Include, Int, Let, List, MultiClass,
     String, Then, TrueKW,
 
     // Bang operators.
     XConcat, XADD, XSUB, XMUL, XNOT, XAND, XOR, XXOR, XSRA, XSRL, XSHL,
-    XListConcat, XListSplat, XStrConcat, XInterleave, XSubstr, XCast,
+    XListConcat, XListSplat, XStrConcat, XInterleave, XSubstr, XFind, XCast,
     XSubst, XForEach, XFilter, XFoldl, XHead, XTail, XSize, XEmpty, XIf,
     XCond, XEq, XIsA, XDag, XNe, XLe, XLt, XGe, XGt, XSetDagOp, XGetDagOp,
 

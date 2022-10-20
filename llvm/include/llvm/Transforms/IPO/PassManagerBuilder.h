@@ -154,7 +154,6 @@ public:
   /// tests.
   const ModuleSummaryIndex *ImportSummary = nullptr;
 
-  bool DisableTailCalls;
   bool DisableUnrollLoops;
   bool CallGraphProfile;
   bool SLPVectorize;
@@ -219,6 +218,7 @@ private:
   void addLateLTOOptimizationPasses(legacy::PassManagerBase &PM);
   void addPGOInstrPasses(legacy::PassManagerBase &MPM, bool IsCS);
   void addFunctionSimplificationPasses(legacy::PassManagerBase &MPM);
+  void addVectorPasses(legacy::PassManagerBase &PM, bool IsFullLTO);
 
 public:
   /// populateFunctionPassManager - This fills in the function pass manager,

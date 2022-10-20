@@ -28,7 +28,11 @@ Some of the important classes are described here:
 * :py:class:`SBFunction`: Represents a generic function, which can be inlined or not.
 * :py:class:`SBBlock`: Represents a lexical block. :py:class:`SBFunction` contains SBBlocks.
 * :py:class:`SBLineEntry`: Specifies an association with a contiguous range of instructions
-  and a source file location. :py:class:`SBCompileUnit` contains SBLineEntry."
+  and a source file location. :py:class:`SBCompileUnit` contains SBLineEntry.
+
+The different enums in the `lldb` module are described in :doc:`python_api_enums`.
+
+"
 %enddef
 
 /*
@@ -117,6 +121,7 @@ def lldb_iter(obj, getsize, getelem):
 
 %{
 #include "../source/Plugins/ScriptInterpreter/Python/PythonDataObjects.h"
+#include "../source/Plugins/ScriptInterpreter/Python/SWIGPythonBridge.h"
 #include "../bindings/python/python-swigsafecast.swig"
 using namespace lldb_private;
 using namespace lldb_private::python;
@@ -128,15 +133,8 @@ using namespace lldb;
 %include "python-wrapper.swig"
 
 %pythoncode%{
-_initialize = True
-try:
-   import lldbconfig
-   _initialize = lldbconfig.INITIALIZE
-except ImportError:
-   pass
 debugger_unique_id = 0
-if _initialize:
-   SBDebugger.Initialize()
+SBDebugger.Initialize()
 debugger = None
 target = None
 process = None

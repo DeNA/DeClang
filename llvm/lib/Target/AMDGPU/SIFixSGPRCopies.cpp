@@ -65,37 +65,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPU.h"
-#include "AMDGPUSubtarget.h"
+#include "GCNSubtarget.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
-#include "SIInstrInfo.h"
-#include "SIRegisterInfo.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineDominators.h"
-#include "llvm/CodeGen/MachineFunction.h"
-#include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/CodeGen/MachineInstr.h"
-#include "llvm/CodeGen/MachineInstrBuilder.h"
-#include "llvm/CodeGen/MachineOperand.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
-#include "llvm/Support/CodeGen.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
-#include <cassert>
-#include <cstdint>
-#include <iterator>
-#include <list>
-#include <map>
-#include <tuple>
-#include <utility>
 
 using namespace llvm;
 
@@ -308,7 +282,7 @@ static bool foldVGPRCopyIntoRegSequence(MachineInstr &MI,
       const TargetRegisterClass *NewSrcRC = TRI->getEquivalentAGPRClass(SrcRC);
       Register TmpAReg = MRI.createVirtualRegister(NewSrcRC);
       unsigned Opc = NewSrcRC == &AMDGPU::AGPR_32RegClass ?
-        AMDGPU::V_ACCVGPR_WRITE_B32 : AMDGPU::COPY;
+        AMDGPU::V_ACCVGPR_WRITE_B32_e64 : AMDGPU::COPY;
       BuildMI(*MI.getParent(), &MI, MI.getDebugLoc(), TII->get(Opc),
             TmpAReg)
         .addReg(TmpReg, RegState::Kill);
@@ -607,12 +581,46 @@ bool SIFixSGPRCopies::runOnMachineFunction(MachineFunction &MF) {
         continue;
       case AMDGPU::COPY:
       case AMDGPU::WQM:
+      case AMDGPU::STRICT_WQM:
       case AMDGPU::SOFT_WQM:
-      case AMDGPU::WWM: {
+      case AMDGPU::STRICT_WWM: {
         Register DstReg = MI.getOperand(0).getReg();
-
         const TargetRegisterClass *SrcRC, *DstRC;
         std::tie(SrcRC, DstRC) = getCopyRegClasses(MI, *TRI, *MRI);
+
+        if (MI.isCopy()) {
+          Register SrcReg = MI.getOperand(1).getReg();
+          if (SrcReg == AMDGPU::SCC) {
+            Register SCCCopy = MRI->createVirtualRegister(
+                TRI->getRegClass(AMDGPU::SReg_1_XEXECRegClassID));
+            I = BuildMI(*MI.getParent(),
+                        std::next(MachineBasicBlock::iterator(MI)),
+                        MI.getDebugLoc(),
+                        TII->get(ST.isWave32() ? AMDGPU::S_CSELECT_B32
+                                               : AMDGPU::S_CSELECT_B64),
+                        SCCCopy)
+                    .addImm(-1)
+                    .addImm(0);
+            I = BuildMI(*MI.getParent(), std::next(I), I->getDebugLoc(),
+                        TII->get(AMDGPU::COPY), DstReg)
+                    .addReg(SCCCopy);
+            MI.eraseFromParent();
+            continue;
+          } else if (DstReg == AMDGPU::SCC) {
+            unsigned Opcode =
+                ST.isWave64() ? AMDGPU::S_AND_B64 : AMDGPU::S_AND_B32;
+            Register Exec = ST.isWave64() ? AMDGPU::EXEC : AMDGPU::EXEC_LO;
+            Register Tmp = MRI->createVirtualRegister(TRI->getBoolRC());
+            I = BuildMI(*MI.getParent(),
+                        std::next(MachineBasicBlock::iterator(MI)),
+                        MI.getDebugLoc(), TII->get(Opcode))
+                    .addReg(Tmp, getDefRegState(true))
+                    .addReg(SrcReg)
+                    .addReg(Exec);
+            MI.eraseFromParent();
+            continue;
+          }
+        }
 
         if (!DstReg.isVirtual()) {
           // If the destination register is a physical register there isn't

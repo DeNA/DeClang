@@ -1,7 +1,7 @@
 // RUN: mlir-opt -split-input-file -verify-diagnostics %s
 
 func @not_enough_sizes(%sz : index) {
-  // expected-error@+1 {{expected 6 operands, but found 5}}
+  // expected-error@+1 {{expected 6 or more operands, but found 5}}
   "gpu.launch"(%sz, %sz, %sz, %sz, %sz) ({
     gpu.return
   }) : (index, index, index, index, index) -> ()
@@ -56,7 +56,7 @@ module attributes {gpu.container_module} {
   func @launch_func_missing_callee_attribute(%sz : index) {
     // expected-error@+1 {{'gpu.launch_func' op requires attribute 'kernel'}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz)
-        {operand_segment_sizes = dense<[0, 1, 1, 1, 1, 1, 1, 0]> : vector<8xi32>}
+        {operand_segment_sizes = dense<[0, 1, 1, 1, 1, 1, 1, 0, 0]> : vector<9xi32>}
         : (index, index, index, index, index, index) -> ()
     return
   }
@@ -87,7 +87,7 @@ module attributes {gpu.container_module} {
 module attributes {gpu.container_module} {
   module @kernels {
     // expected-error@+1 {{'gpu.func' op expects parent op 'gpu.module'}}
-    gpu.func @kernel_1(%arg1 : !llvm.ptr<float>) {
+    gpu.func @kernel_1(%arg1 : !llvm.ptr<f32>) {
       gpu.return
     }
   }
@@ -122,14 +122,14 @@ module attributes {gpu.container_module} {
 
 module attributes {gpu.container_module} {
   module @kernels {
-    gpu.func @kernel_1(%arg1 : !llvm.ptr<float>) kernel {
+    gpu.func @kernel_1(%arg1 : !llvm.ptr<f32>) kernel {
       gpu.return
     }
   }
 
-  func @launch_func_missing_kernel_attr(%sz : index, %arg : !llvm.ptr<float>) {
+  func @launch_func_missing_kernel_attr(%sz : index, %arg : !llvm.ptr<f32>) {
     // expected-error@+1 {{kernel module 'kernels' is undefined}}
-    gpu.launch_func @kernels::@kernel_1 blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz) args(%arg : !llvm.ptr<float>)
+    gpu.launch_func @kernels::@kernel_1 blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz) args(%arg : !llvm.ptr<f32>)
     return
   }
 }
@@ -138,14 +138,14 @@ module attributes {gpu.container_module} {
 
 module attributes {gpu.container_module} {
   gpu.module @kernels {
-    gpu.func @kernel_1(%arg1 : !llvm.ptr<float>) {
+    gpu.func @kernel_1(%arg1 : !llvm.ptr<f32>) {
       gpu.return
     }
   }
 
-  func @launch_func_missing_kernel_attr(%sz : index, %arg : !llvm.ptr<float>) {
+  func @launch_func_missing_kernel_attr(%sz : index, %arg : !llvm.ptr<f32>) {
     // expected-error@+1 {{kernel function is missing the 'gpu.kernel' attribute}}
-    gpu.launch_func @kernels::@kernel_1 blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz) args(%arg : !llvm.ptr<float>)
+    gpu.launch_func @kernels::@kernel_1 blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz) args(%arg : !llvm.ptr<f32>)
     return
   }
 }
@@ -154,14 +154,14 @@ module attributes {gpu.container_module} {
 
 module attributes {gpu.container_module} {
   gpu.module @kernels {
-    gpu.func @kernel_1(%arg1 : !llvm.ptr<float>) kernel {
+    gpu.func @kernel_1(%arg1 : !llvm.ptr<f32>) kernel {
       gpu.return
     }
   }
 
-  func @launch_func_kernel_operand_size(%sz : index, %arg : !llvm.ptr<float>) {
+  func @launch_func_kernel_operand_size(%sz : index, %arg : !llvm.ptr<f32>) {
     // expected-error@+1 {{got 2 kernel operands but expected 1}}
-    gpu.launch_func @kernels::@kernel_1 blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz) args(%arg : !llvm.ptr<float>, %arg : !llvm.ptr<float>)
+    gpu.launch_func @kernels::@kernel_1 blocks in (%sz, %sz, %sz) threads in (%sz, %sz, %sz) args(%arg : !llvm.ptr<f32>, %arg : !llvm.ptr<f32>)
     return
   }
 }
@@ -244,6 +244,7 @@ func @reduce_op_and_body(%arg0 : f32) {
   ^bb(%lhs : f32, %rhs : f32):
     "gpu.yield"(%lhs) : (f32) -> ()
   }) {op = "add"} : (f32) -> (f32)
+  return
 }
 
 // -----
@@ -270,6 +271,7 @@ func @reduce_incorrect_region_arguments(%arg0 : f32) {
   ^bb(%lhs : f32):
     "gpu.yield"(%lhs) : (f32) -> ()
   }) : (f32) -> (f32)
+  return
 }
 
 // -----
@@ -280,6 +282,7 @@ func @reduce_incorrect_region_arguments(%arg0 : f32) {
   ^bb(%lhs : f32, %rhs : i32):
     "gpu.yield"(%lhs) : (f32) -> ()
   }) : (f32) -> (f32)
+  return
 }
 
 // -----
@@ -290,6 +293,7 @@ func @reduce_incorrect_yield(%arg0 : f32) {
   ^bb(%lhs : f32, %rhs : f32):
     "gpu.yield"(%lhs, %rhs) : (f32, f32) -> ()
   }) : (f32) -> (f32)
+  return
 }
 
 // -----
@@ -298,9 +302,10 @@ func @reduce_incorrect_yield(%arg0 : f32) {
   // expected-error@+1 {{incorrect gpu.yield type}}
   %res = "gpu.all_reduce"(%arg0) ({
   ^bb(%lhs : f32, %rhs : f32):
-    %one = constant 1 : i32
+    %one = arith.constant 1 : i32
     "gpu.yield"(%one) : (i32) -> ()
   }) : (f32) -> (f32)
+  return
 }
 
 // -----
@@ -311,6 +316,7 @@ func @reduce_incorrect_yield(%arg0 : f32) {
   ^bb(%lhs : f32, %rhs : f32):
     return
   }) : (f32) -> (f32)
+  return
 }
 
 // -----
@@ -400,7 +406,7 @@ module {
   gpu.module @gpu_funcs {
     // expected-note @+1 {{return type declared here}}
     gpu.func @kernel() {
-      %0 = constant 0 : index
+      %0 = arith.constant 0 : index
       // expected-error @+1 {{'gpu.return' op expected 0 result operands}}
       gpu.return %0 : index
     }
@@ -413,7 +419,7 @@ module {
   gpu.module @gpu_funcs {
     // expected-error @+1 {{'gpu.func' op expected void return type for kernel function}}
     gpu.func @kernel() -> index kernel {
-      %0 = constant 0 : index
+      %0 = arith.constant 0 : index
       gpu.return
     }
   }
@@ -457,4 +463,114 @@ func @memcpy_incompatible_type(%dst : memref<?xf32>, %src : memref<?xi32>) {
 func @memcpy_incompatible_shape(%dst : memref<7xf32>, %src : memref<9xf32>) {
   // expected-error @+1 {{'gpu.memcpy' op arguments have incompatible shape}}
   gpu.memcpy %dst, %src  : memref<7xf32>, memref<9xf32>
+}
+
+// -----
+
+func @memset_incompatible_shape(%dst : memref<?xf32>, %value : i32) {
+  // expected-error @+1 {{'gpu.memset' op failed to verify that all of {dst, value} have same element type}}
+  gpu.memset %dst, %value  : memref<?xf32>, i32
+}
+
+// -----
+
+func @mmamatrix_invalid_shape(){
+    %wg = memref.alloca() {alignment = 32} : memref<32x32xf16, 3>
+    %i = arith.constant 16 : index
+    // expected-error @+1 {{MMAMatrixType must have exactly two dimensions}}
+    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, 3> -> !gpu.mma_matrix<16x16x16xf16, "AOp">
+    return
+}
+
+// -----
+
+func @mmamatrix_operand_type(){
+    %wg = memref.alloca() {alignment = 32} : memref<32x32xf16, 3>
+    %i = arith.constant 16 : index
+    // expected-error @+1 {{operand expected to be one of AOp, BOp or COp}}
+    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, 3> -> !gpu.mma_matrix<16x16xf16, "EOp">
+    return
+}
+
+// -----
+
+func @mmamatrix_invalid_element_type(){
+    %wg = memref.alloca() {alignment = 32} : memref<32x32xf16, 3>
+    %i = arith.constant 16 : index
+    // expected-error @+1 {{MMAMatrixType elements must be F16 or F32}}
+    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, 3> -> !gpu.mma_matrix<16x16xi32, "AOp">
+    return
+}
+
+// -----
+
+#layout_map_col_major = affine_map<(i, j) -> (j, i)>
+
+func @mmaLoadOp_identity_layout(){
+    %wg = memref.alloca() {alignment = 32} : memref<32x32xf16, #layout_map_col_major, 3>
+    %i = arith.constant 16 : index
+    // expected-error @+1 {{expected identity layout map for source memref}}
+    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, #layout_map_col_major, 3> -> !gpu.mma_matrix<16x16xf16, "AOp">
+    return
+}
+
+// -----
+
+func @mmaLoadOp_invalid_mem_space(){
+    %wg = memref.alloca() {alignment = 32} : memref<32x32xf16, 5>
+    %i = arith.constant 16 : index
+    // expected-error @+1 {{source memorySpace kGenericMemorySpace, kSharedMemorySpace or kGlobalMemorySpace only allowed}}
+    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, 5> -> !gpu.mma_matrix<16x16xf16, "AOp">
+    return
+}
+
+// -----
+
+#layout_map_col_major = affine_map<(i, j) -> (j, i)>
+
+func @wmmaStoreOp_invalid_map(%arg0 : !gpu.mma_matrix<16x16xf16, "COp">) -> () {
+    %sg = memref.alloca(){alignment = 32} : memref<32x32xf16, #layout_map_col_major, 3>
+    %i = arith.constant 16 : index
+    %j = arith.constant 16 : index
+    // expected-error @+1 {{expected identity layout map for destination memref}}
+    gpu.subgroup_mma_store_matrix %arg0, %sg[%i,%j] {leadDimension= 32 : index} : !gpu.mma_matrix<16x16xf16, "COp">, memref<32x32xf16,#layout_map_col_major, 3>
+    return
+}
+
+// -----
+
+func @wmmaStoreOp_invalid_mem_space(%arg0 : !gpu.mma_matrix<16x16xf16, "COp">) -> () {
+    %sg = memref.alloca(){alignment = 32} : memref<32x32xf16, 5>
+    %i = arith.constant 16 : index
+    %j = arith.constant 16 : index
+    // expected-error @+1 {{destination memorySpace of kGenericMemorySpace, kGlobalMemorySpace or kSharedMemorySpace only allowed}}
+    gpu.subgroup_mma_store_matrix %arg0, %sg[%i,%j] {leadDimension= 32 : index} : !gpu.mma_matrix<16x16xf16, "COp">, memref<32x32xf16, 5>
+    return
+}
+
+// -----
+
+func @wmmaStoreOp_invalid_store_operand(%arg0 : !gpu.mma_matrix<16x16xf16, "AOp">) -> () {
+    %sg = memref.alloca(){alignment = 32} : memref<32x32xf16, 3>
+    %i = arith.constant 16 : index
+    %j = arith.constant 16 : index
+    // expected-error @+1 {{expected the operand matrix being stored to have 'COp' operand type}}
+    gpu.subgroup_mma_store_matrix %arg0, %sg[%i,%j] {leadDimension= 32 : index} : !gpu.mma_matrix<16x16xf16, "AOp">, memref<32x32xf16, 3>
+    return
+}
+
+// -----
+
+func @wmmaMmaOp_invalid_operand_order(%A : !gpu.mma_matrix<16x16xf16, "AOp">, %B : !gpu.mma_matrix<16x16xf16, "BOp">, %C : !gpu.mma_matrix<16x16xf16, "COp">) -> () {
+    // expected-error @+1 {{operands must be in the order AOp, BOp, COp}}
+    %D = gpu.subgroup_mma_compute %B, %A, %C : !gpu.mma_matrix<16x16xf16, "BOp">, !gpu.mma_matrix<16x16xf16, "AOp"> -> !gpu.mma_matrix<16x16xf16, "COp">
+    return
+}
+
+// -----
+
+func @wmmaMmaOp_invalid_operand_shapes(%A : !gpu.mma_matrix<16x32xf16, "AOp">, %B : !gpu.mma_matrix<16x16xf16, "BOp">, %C : !gpu.mma_matrix<16x16xf16, "COp">) -> () {
+    // expected-error @+1 {{operand shapes do not satisfy matmul constraints}}
+    %D = gpu.subgroup_mma_compute %A, %B, %C : !gpu.mma_matrix<16x32xf16, "AOp">, !gpu.mma_matrix<16x16xf16, "BOp"> -> !gpu.mma_matrix<16x16xf16, "COp">
+    return
 }

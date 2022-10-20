@@ -93,7 +93,6 @@ class LoadUnloadTestCase(TestBase):
     @expectedFailureAll(oslist=["freebsd", "linux", "netbsd"])
     @skipIfRemote
     @skipIfWindows  # Windows doesn't have dlopen and friends, dynamic libraries work differently
-    @skipIfReproducer # VFS is a snapshot.
     def test_modules_search_paths(self):
         """Test target modules list after loading a different copy of the library libd.dylib, and verifies that it works with 'target modules search-paths add'."""
         if self.platformIsDarwin():
@@ -217,7 +216,6 @@ class LoadUnloadTestCase(TestBase):
         self.setSvr4Support(True)
         self.run_lldb_process_load_and_unload_commands()
 
-    @skipIfReproducer # FIXME: Unexpected packet during (passive) replay
     def run_lldb_process_load_and_unload_commands(self):
         """Test that lldb process load/unload command work correctly."""
         self.copy_shlibs_to_remote()
@@ -241,6 +239,15 @@ class LoadUnloadTestCase(TestBase):
             remoteDylibPath = lldbutil.join_remote_paths(wd, dylibName)
         else:
             remoteDylibPath = localDylibPath
+
+        # First make sure that we get some kind of error if process load fails.
+        # We print some error even if the load fails, which isn't formalized.
+        # The only plugin at present (Posix) that supports this says "unknown reasons".
+        # If another plugin shows up, let's require it uses "unknown error" as well.
+        non_existant_shlib = "/NoSuchDir/NoSuchSubdir/ReallyNo/NotAFile"
+        self.expect("process load %s"%(non_existant_shlib), error=True, matching=False,
+                    patterns=["unknown reasons"])
+        
 
         # Make sure that a_function does not exist at this point.
         self.expect(

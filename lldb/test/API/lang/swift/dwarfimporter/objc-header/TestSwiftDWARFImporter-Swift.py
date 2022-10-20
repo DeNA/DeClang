@@ -41,7 +41,8 @@ class TestSwiftDWARFImporter_Swift(lldbtest.TestBase):
 
         found = 0
         response = 0
-        logfile = open(log, "r")
+        import io
+        logfile = io.open(log, "r", encoding='utf-8')
         for line in logfile:
             if 'SwiftDWARFImporterDelegate::lookupValue("ObjCClass")' in line:
                 found += 1
@@ -51,5 +52,5 @@ class TestSwiftDWARFImporter_Swift(lldbtest.TestBase):
             elif found == 2 and response == 1 and 'SwiftDWARFImporterDelegate' in line:
                 self.assertTrue('types collected' in line, line)
                 response += 1
-        self.assertEqual(found, 3)
+        self.assertEqual(found, 1)
         self.assertEqual(response, 1)

@@ -12,13 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "R600MachineScheduler.h"
-#include "AMDGPUSubtarget.h"
-#include "R600InstrInfo.h"
-#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/Pass.h"
-#include "llvm/Support/raw_ostream.h"
+#include "MCTargetDesc/R600MCTargetDesc.h"
+#include "R600Subtarget.h"
 
 using namespace llvm;
 

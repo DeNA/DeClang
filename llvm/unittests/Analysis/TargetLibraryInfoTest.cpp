@@ -37,7 +37,7 @@ protected:
     Error.print("", os);
 
     if (!M)
-      report_fatal_error(os.str());
+      report_fatal_error(Twine(os.str()));
   }
 
   ::testing::AssertionResult isLibFunc(const Function *FDecl,
@@ -580,6 +580,16 @@ TEST_F(TargetLibraryInfoTest, ValidProto) {
       "declare double @__sinh_finite(double)\n"
       "declare float @__sinhf_finite(float)\n"
       "declare x86_fp80 @__sinhl_finite(x86_fp80)\n"
+
+      // These functions are aix vec allocation/free routines
+      "declare i8* @vec_calloc(i64, i64)\n"
+      "declare i8* @vec_malloc(i64)\n"
+      "declare i8* @vec_realloc(i8*, i64)\n"
+      "declare void @vec_free(i8*)\n"
+
+      // These functions are OpenMP Offloading allocation / free routines
+      "declare i8* @__kmpc_alloc_shared(i64)\n"
+      "declare void @__kmpc_free_shared(i8*, i64)\n"
       );
 
   for (unsigned FI = 0; FI != LibFunc::NumLibFuncs; ++FI) {

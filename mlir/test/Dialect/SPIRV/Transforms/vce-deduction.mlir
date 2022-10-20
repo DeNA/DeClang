@@ -27,7 +27,7 @@ spv.module Logical GLSL450 attributes {
     #spv.vce<v1.5, [Shader, GroupNonUniformBallot], []>, {}>
 } {
   spv.func @group_non_uniform_ballot(%predicate : i1) -> vector<4xi32> "None" {
-    %0 = spv.GroupNonUniformBallot "Workgroup" %predicate : vector<4xi32>
+    %0 = spv.GroupNonUniformBallot Workgroup %predicate : vector<4xi32>
     spv.ReturnValue %0: vector<4xi32>
   }
 }
@@ -192,6 +192,6 @@ spv.module Logical GLSL450 attributes {
     #spv.vce<v1.5, [Shader, UniformAndStorageBuffer8BitAccess, StorageBuffer16BitAccess, StorageUniform16, Int16, ImageBuffer, StorageImageExtendedFormats], []>,
     {}>
 } {
-  spv.globalVariable @data : !spv.ptr<!spv.struct<(i8 [0], f16 [2], i64 [4])>, Uniform>
-  spv.globalVariable @img  : !spv.ptr<!spv.image<f32, Buffer, NoDepth, NonArrayed, SingleSampled, SamplerUnknown, Rg32f>, UniformConstant>
+  spv.GlobalVariable @data : !spv.ptr<!spv.struct<(i8 [0], f16 [2], i64 [4])>, Uniform>
+  spv.GlobalVariable @img  : !spv.ptr<!spv.image<f32, Buffer, NoDepth, NonArrayed, SingleSampled, SamplerUnknown, Rg32f>, UniformConstant>
 }

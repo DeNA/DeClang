@@ -34,10 +34,10 @@ public:
 
   bool IsTopLevelFunction(Function &function) override;
 
-  std::vector<ConstString>
+  std::vector<Language::MethodNameVariant>
   GetMethodNameVariants(ConstString method_name) const override;
 
-  virtual lldb::TypeCategoryImplSP GetFormatters() override;
+  lldb::TypeCategoryImplSP GetFormatters() override;
 
   HardcodedFormatters::HardcodedSummaryFinder GetHardcodedSummaries() override;
 
@@ -72,6 +72,9 @@ public:
   void GetExceptionResolverDescription(bool catch_on, bool throw_on,
                                        Stream &s) override;
 
+  ConstString
+  GetDemangledFunctionNameWithoutArguments(Mangled mangled) const override;
+
   //------------------------------------------------------------------
   // Static Functions
   //------------------------------------------------------------------
@@ -83,12 +86,14 @@ public:
 
   static lldb_private::ConstString GetPluginNameStatic();
 
+  bool SymbolNameFitsToLanguage(Mangled mangled) const override;
+
   //------------------------------------------------------------------
   // PluginInterface protocol
   //------------------------------------------------------------------
-  virtual ConstString GetPluginName() override;
-
-  virtual uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override {
+    return GetPluginNameStatic().GetStringRef();
+  }
 };
 
 } // namespace lldb_private

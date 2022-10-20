@@ -1,7 +1,7 @@
 // RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W32 %s
 // RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W64 %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W32-ERR --implicit-check-not=error: %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W64-ERR --implicit-check-not=error: %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 %s 2>&1 | FileCheck --check-prefix=W32-ERR --implicit-check-not=error: %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 %s 2>&1 | FileCheck --check-prefix=W64-ERR --implicit-check-not=error: %s
 
 v_mov_b32_dpp v5, v1 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // GFX10: [0xfa,0x02,0x0a,0x7e,0x01,0x1b,0x00,0x00]
@@ -70,6 +70,9 @@ v_mov_b32_dpp v5, v1 quad_perm:[3,2,1,0] row_mask:0x0
 // GFX10: [0xfa,0x02,0x0a,0x7e,0x01,0x1b,0x00,0x0f]
 
 v_mov_b32_dpp v5, v1 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 bound_ctrl:0
+// GFX10: [0xfa,0x02,0x0a,0x7e,0x01,0x1b,0x08,0x00]
+
+v_mov_b32_dpp v5, v1 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 bound_ctrl:1
 // GFX10: [0xfa,0x02,0x0a,0x7e,0x01,0x1b,0x08,0x00]
 
 v_cvt_f32_i32_dpp v5, v1 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
@@ -658,6 +661,9 @@ v_add_nc_u32_dpp v5, v1, v2 quad_perm:[0,1,2,3] row_mask:0x0 bank_mask:0x0
 // GFX10: [0xfa,0x04,0x0a,0x4a,0x01,0xe4,0x00,0x00]
 
 v_add_nc_u32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 bound_ctrl:0
+// GFX10: [0xfa,0x04,0x0a,0x4a,0x01,0x1b,0x08,0x00]
+
+v_add_nc_u32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 bound_ctrl:1
 // GFX10: [0xfa,0x04,0x0a,0x4a,0x01,0x1b,0x08,0x00]
 
 v_add_nc_u32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1

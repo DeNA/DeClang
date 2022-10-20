@@ -16,11 +16,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
+#include "Utils/WebAssemblyUtilities.h"
 #include "WebAssembly.h"
 #include "WebAssemblyDebugValueManager.h"
 #include "WebAssemblyMachineFunctionInfo.h"
 #include "WebAssemblySubtarget.h"
-#include "WebAssemblyUtilities.h"
 #include "llvm/CodeGen/MachineBlockFrequencyInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -100,8 +100,6 @@ static unsigned getDropOpcode(const TargetRegisterClass *RC) {
     return WebAssembly::DROP_FUNCREF;
   if (RC == &WebAssembly::EXTERNREFRegClass)
     return WebAssembly::DROP_EXTERNREF;
-  if (RC == &WebAssembly::EXNREFRegClass)
-    return WebAssembly::DROP_EXNREF;
   llvm_unreachable("Unexpected register class");
 }
 
@@ -117,8 +115,6 @@ static unsigned getLocalGetOpcode(const TargetRegisterClass *RC) {
     return WebAssembly::LOCAL_GET_F64;
   if (RC == &WebAssembly::V128RegClass)
     return WebAssembly::LOCAL_GET_V128;
-  if (RC == &WebAssembly::EXNREFRegClass)
-    return WebAssembly::LOCAL_GET_EXNREF;
   if (RC == &WebAssembly::FUNCREFRegClass)
     return WebAssembly::LOCAL_GET_FUNCREF;
   if (RC == &WebAssembly::EXTERNREFRegClass)
@@ -138,8 +134,6 @@ static unsigned getLocalSetOpcode(const TargetRegisterClass *RC) {
     return WebAssembly::LOCAL_SET_F64;
   if (RC == &WebAssembly::V128RegClass)
     return WebAssembly::LOCAL_SET_V128;
-  if (RC == &WebAssembly::EXNREFRegClass)
-    return WebAssembly::LOCAL_SET_EXNREF;
   if (RC == &WebAssembly::FUNCREFRegClass)
     return WebAssembly::LOCAL_SET_FUNCREF;
   if (RC == &WebAssembly::EXTERNREFRegClass)
@@ -159,8 +153,6 @@ static unsigned getLocalTeeOpcode(const TargetRegisterClass *RC) {
     return WebAssembly::LOCAL_TEE_F64;
   if (RC == &WebAssembly::V128RegClass)
     return WebAssembly::LOCAL_TEE_V128;
-  if (RC == &WebAssembly::EXNREFRegClass)
-    return WebAssembly::LOCAL_TEE_EXNREF;
   if (RC == &WebAssembly::FUNCREFRegClass)
     return WebAssembly::LOCAL_TEE_FUNCREF;
   if (RC == &WebAssembly::EXTERNREFRegClass)
@@ -180,8 +172,6 @@ static MVT typeForRegClass(const TargetRegisterClass *RC) {
     return MVT::f64;
   if (RC == &WebAssembly::V128RegClass)
     return MVT::v16i8;
-  if (RC == &WebAssembly::EXNREFRegClass)
-    return MVT::exnref;
   if (RC == &WebAssembly::FUNCREFRegClass)
     return MVT::funcref;
   if (RC == &WebAssembly::EXTERNREFRegClass)
@@ -241,12 +231,18 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
     auto Local = static_cast<unsigned>(MI.getOperand(1).getImm());
     Reg2Local[Reg] = Local;
     checkFrameBase(MFI, Local, Reg);
+
+    // Update debug value to point to the local before removing.
+    WebAssemblyDebugValueManager(&MI).replaceWithLocal(Local);
+
     MI.eraseFromParent();
     Changed = true;
   }
 
-  // Start assigning local numbers after the last parameter.
+  // Start assigning local numbers after the last parameter and after any
+  // already-assigned locals.
   unsigned CurLocal = static_cast<unsigned>(MFI.getParams().size());
+  CurLocal += static_cast<unsigned>(MFI.getLocals().size());
 
   // Precompute the set of registers that are unused, so that we can insert
   // drops to their defs.
@@ -256,8 +252,7 @@ bool WebAssemblyExplicitLocals::runOnMachineFunction(MachineFunction &MF) {
 
   // Visit each instruction in the function.
   for (MachineBasicBlock &MBB : MF) {
-    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;) {
-      MachineInstr &MI = *I++;
+    for (MachineInstr &MI : llvm::make_early_inc_range(MBB)) {
       assert(!WebAssembly::isArgument(MI.getOpcode()));
 
       if (MI.isDebugInstr() || MI.isLabel())

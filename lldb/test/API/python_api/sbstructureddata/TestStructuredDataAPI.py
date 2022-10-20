@@ -18,7 +18,6 @@ class TestStructuredDataAPI(TestBase):
     def test(self):
         self.structured_data_api_test()
 
-    @add_test_categories(['pyapi'])
     def structured_data_api_test(self):
         error = lldb.SBError()
         s = lldb.SBStream()
@@ -38,7 +37,7 @@ class TestStructuredDataAPI(TestBase):
         # Test that GetDescription works:
         s.Clear()
         error = example.GetDescription(s)
-        self.assertTrue(error.Success(), "GetDescription works")
+        self.assertSuccess(error, "GetDescription works")
         if not "key_float" in s.GetData():
             self.fail("FAILED: could not find key_float in description output")
         

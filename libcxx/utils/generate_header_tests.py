@@ -26,9 +26,13 @@ header_markup = {
     "future": ["ifndef _LIBCPP_HAS_NO_THREADS"],
     "latch": ["ifndef _LIBCPP_HAS_NO_THREADS"],
     "mutex": ["ifndef _LIBCPP_HAS_NO_THREADS"],
-    "shared_mutex": ["ifndef _LIBCPP_HAS_NO_THREADS"],
     "semaphore": ["ifndef _LIBCPP_HAS_NO_THREADS"],
+    "shared_mutex": ["ifndef _LIBCPP_HAS_NO_THREADS"],
     "thread": ["ifndef _LIBCPP_HAS_NO_THREADS"],
+
+    "experimental/filesystem": ["ifndef _LIBCPP_HAS_NO_FILESYSTEM_LIBRARY"],
+    "filesystem": ["ifndef _LIBCPP_HAS_NO_FILESYSTEM_LIBRARY"],
+    "format": ["ifndef _LIBCPP_HAS_NO_INCOMPLETE_FORMAT"],
 
     "clocale": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "codecvt": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
@@ -37,13 +41,19 @@ header_markup = {
     "ios": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "iostream": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "istream": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
-    "locale": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "locale.h": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
+    "locale": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "ostream": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
+    "ranges": ["ifndef _LIBCPP_HAS_NO_INCOMPLETE_RANGES"],
     "regex": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "sstream": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "streambuf": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
     "strstream": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
+
+    "wctype.h": ["ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS"],
+    "cwctype": ["ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS"],
+    "cwchar": ["ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS"],
+    "wchar.h": ["ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS"],
 
     "experimental/coroutine": ["if defined(__cpp_coroutines)"],
     "experimental/regex": ["ifndef _LIBCPP_HAS_NO_LOCALIZATION"],
@@ -96,7 +106,6 @@ def should_keep_header(p, exclusions=None):
         relpath = os.path.relpath(p, include_path)
         relpath = posixpath.join(*os.path.split(relpath))
         if relpath in exclusions:
-            print('Excluded file:', relpath)
             return False
 
     return os.path.splitext(p)[1] in allowed_extensions

@@ -59,6 +59,8 @@ COMMON_FLAG(
     bool, log_exe_name, false,
     "Mention name of executable when reporting error and "
     "append executable name to logs (as in \"log_path.exe_name.pid\").")
+COMMON_FLAG(const char *, log_suffix, nullptr,
+            "String to append to log file name, e.g. \".txt\".")
 COMMON_FLAG(
     bool, log_to_syslog, (bool)SANITIZER_ANDROID || (bool)SANITIZER_MAC,
     "Write all sanitizer output to syslog in addition to other means of "
@@ -158,6 +160,10 @@ COMMON_FLAG(
 COMMON_FLAG(const char *, coverage_dir, ".",
             "Target directory for coverage dumps. Defaults to the current "
             "directory.")
+COMMON_FLAG(const char *, cov_8bit_counters_out, "",
+    "If non-empty, write 8bit counters to this file. ")
+COMMON_FLAG(const char *, cov_pcs_out, "",
+    "If non-empty, write the coverage pc table to this file. ")
 COMMON_FLAG(bool, full_address_space, false,
             "Sanitize complete address space; "
             "by default kernel area on 32-bit platforms will not be sanitized")

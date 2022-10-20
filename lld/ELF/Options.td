@@ -36,10 +36,15 @@ multiclass B<string name, string help1, string help2> {
 
 defm auxiliary: Eq<"auxiliary", "Set DT_AUXILIARY field to the specified name">;
 
-def Bsymbolic: F<"Bsymbolic">, HelpText<"Bind defined symbols locally">;
+def Bno_symbolic: F<"Bno-symbolic">, HelpText<"Don't bind default visibility defined symbols locally for -shared (default)">;
+
+def Bsymbolic: F<"Bsymbolic">, HelpText<"Bind default visibility defined symbols locally for -shared">;
 
 def Bsymbolic_functions: F<"Bsymbolic-functions">,
-  HelpText<"Bind defined function symbols locally">;
+  HelpText<"Bind default visibility defined function symbols locally for -shared">;
+
+def Bsymbolic_non_weak_functions: F<"Bsymbolic-non-weak-functions">,
+  HelpText<"Bind default visibility defined STB_GLOBAL function symbols locally for -shared">;
 
 def Bdynamic: F<"Bdynamic">, HelpText<"Link against shared libraries (default)">;
 
@@ -114,8 +119,8 @@ defm call_graph_profile_sort: BB<"call-graph-profile-sort",
     "Reorder sections with call graph profile (default)",
     "Do not reorder sections with call graph profile">;
 
-// -chroot doesn't have a help text because it is an internal option.
-def chroot: Separate<["--", "-"], "chroot">;
+// --chroot doesn't have a help text because it is an internal option.
+def chroot: Separate<["--"], "chroot">;
 
 defm color_diagnostics: B<"color-diagnostics",
   "Alias for --color-diagnostics=always",
@@ -124,9 +129,7 @@ def color_diagnostics_eq: J<"color-diagnostics=">,
   HelpText<"Use colors in diagnostics (default: auto)">,
   MetaVarName<"[auto,always,never]">;
 
-defm cref: B<"cref",
-    "Output cross reference table",
-    "Do not output cross reference table">;
+def cref: FF<"cref">, HelpText<"Output cross reference table">;
 
 defm define_common: B<"define-common",
     "Assign space to common symbols",
@@ -153,11 +156,12 @@ def discard_none: F<"discard-none">,
 defm dynamic_linker: Eq<"dynamic-linker", "Which dynamic linker to use">;
 
 defm dynamic_list : Eq<"dynamic-list",
-   "Read a list of dynamic symbols. (executable) Put matched non-local defined"
-   "symbols to the dynamic symbol table. (shared object) References to matched"
-   "non-local STV_DEFAULT symbols shouldn't be bound to definitions within the "
-   "shared object. Implies -Bsymbolic but does not set DF_SYMBOLIC">,
+   "Similar to --export-dynamic-symbol-list. When creating a shared object, "
+   "this additionally implies -Bsymbolic but does not set DF_SYMBOLIC">,
    MetaVarName<"<file>">;
+
+def eb: F<"EB">, HelpText<"Select the big-endian format in OUTPUT_FORMAT">;
+def el: F<"EL">, HelpText<"Select the little-endian format in OUTPUT_FORMAT">;
 
 defm eh_frame_hdr: B<"eh-frame-hdr",
     "Request creation of .eh_frame_hdr section and PT_GNU_EH_FRAME segment header",
@@ -202,6 +206,10 @@ defm export_dynamic_symbol : EEq<"export-dynamic-symbol",
     "shouldn't be bound to definitions within the shared object. "
     "Does not imply -Bsymbolic.">,
     MetaVarName<"glob">;
+
+defm export_dynamic_symbol_list : EEq<"export-dynamic-symbol-list",
+   "Read a list of dynamic symbol patterns. Apply --export-dynamic-symbol on each pattern">,
+    MetaVarName<"file">;
 
 defm fatal_warnings: B<"fatal-warnings",
     "Treat warnings as errors",
@@ -248,7 +256,7 @@ def ignore_function_address_equality: F<"ignore-function-address-equality">,
 def ignore_data_address_equality: F<"ignore-data-address-equality">,
   HelpText<"lld can break the address equality of data">;
 
-defm image_base: Eq<"image-base", "Set the base address">;
+defm image_base: EEq<"image-base", "Set the base address">;
 
 defm init: Eq<"init", "Specify an initializer function">,
   MetaVarName<"<symbol>">;
@@ -306,7 +314,7 @@ defm orphan_handling:
   Eq<"orphan-handling", "Control how orphan sections are handled when linker script used">;
 
 defm pack_dyn_relocs:
-  Eq<"pack-dyn-relocs", "Pack dynamic relocations in the given format">,
+  EEq<"pack-dyn-relocs", "Pack dynamic relocations in the given format">,
   MetaVarName<"[none,android,relr,android+relr]">;
 
 defm use_android_relr_tags: BB<"use-android-relr-tags",
@@ -378,7 +386,7 @@ def start_group: F<"start-group">,
 def start_lib: F<"start-lib">,
   HelpText<"Start a grouping of objects that should be treated as if they were together in an archive">;
 
-def strip_all: F<"strip-all">, HelpText<"Strip all symbols">;
+def strip_all: F<"strip-all">, HelpText<"Strip all symbols. Implies --strip-debug">;
 
 def strip_debug: F<"strip-debug">, HelpText<"Strip debugging information">;
 
@@ -442,6 +450,17 @@ def verbose: F<"verbose">, HelpText<"Verbose mode">;
 
 def version: F<"version">, HelpText<"Display the version number and exit">;
 
+def power10_stubs: F<"power10-stubs">, HelpText<"Alias for --power10-stubs=auto">;
+
+def no_power10_stubs: F<"no-power10-stubs">, HelpText<"Alias for --power10-stubs=no">;
+
+def power10_stubs_eq:
+  J<"power10-stubs=">, HelpText<
+                     "Enables Power10 instructions in all stubs without options, "
+                     "options override previous flags."
+                     "auto: Allow Power10 instructions in stubs if applicable."
+                     "no:   No Power10 instructions in stubs.">;
+
 defm version_script: Eq<"version-script", "Read a version script">;
 
 defm warn_backrefs: BB<"warn-backrefs",
@@ -473,8 +492,11 @@ defm whole_archive: B<"whole-archive",
     "Force load of all members in a static library",
     "Do not force load of all members in a static library (default)">;
 
-defm wrap: Eq<"wrap", "Use wrapper functions for symbol">,
-  MetaVarName<"<symbol>">;
+def why_extract: JJ<"why-extract=">, HelpText<"Print to a file about why archive members are extracted">;
+
+defm wrap : Eq<"wrap", "Redirect symbol references to __wrap_symbol and "
+                       "__real_symbol references to symbol">,
+            MetaVarName<"<symbol>">;
 
 def z: JoinedOrSeparate<["-"], "z">, MetaVarName<"<option>">,
   HelpText<"Linker option extensions">;
@@ -502,7 +524,6 @@ def: Separate<["-"], "F">, Alias<filter>, HelpText<"Alias for --filter">;
 def: Separate<["-"], "b">, Alias<format>, HelpText<"Alias for --format">;
 def: JoinedOrSeparate<["-"], "l">, Alias<library>, HelpText<"Alias for --library">;
 def: JoinedOrSeparate<["-"], "L">, Alias<library_path>, HelpText<"Alias for --library-path">;
-def: F<"no-pic-executable">, Alias<no_pie>, HelpText<"Alias for --no-pie">;
 def: Flag<["-"], "n">, Alias<nmagic>, HelpText<"Alias for --nmagic">;
 def: Flag<["-"], "N">, Alias<omagic>, HelpText<"Alias for --omagic">;
 def: Joined<["--"], "output=">, Alias<o>, HelpText<"Alias for -o">;
@@ -543,6 +564,9 @@ def lto_cs_profile_generate: FF<"lto-cs-profile-generate">,
   HelpText<"Perform context sensitive PGO instrumentation">;
 def lto_cs_profile_file: JJ<"lto-cs-profile-file=">,
   HelpText<"Context sensitive profile file path">;
+defm lto_pgo_warn_mismatch: BB<"lto-pgo-warn-mismatch",
+  "turn on warnings about profile cfg mismatch (default)>",
+  "turn off warnings about profile cfg mismatch">;
 def lto_obj_path_eq: JJ<"lto-obj-path=">;
 def lto_sample_profile: JJ<"lto-sample-profile=">,
   HelpText<"Sample profile file path">;
@@ -563,14 +587,16 @@ def opt_remarks_with_hotness: FF<"opt-remarks-with-hotness">,
   HelpText<"Include hotness information in the optimization remarks file">;
 def opt_remarks_format: Separate<["--"], "opt-remarks-format">,
   HelpText<"The format used for serializing remarks (default: YAML)">;
-def save_temps: F<"save-temps">;
+def save_temps: F<"save-temps">, HelpText<"Save intermediate LTO compilation results">;
 def lto_basic_block_sections: JJ<"lto-basic-block-sections=">,
   HelpText<"Enable basic block sections for LTO">;
 defm lto_unique_basic_block_section_names: BB<"lto-unique-basic-block-section-names",
     "Give unique names to every basic block section for LTO",
     "Do not give unique names to every basic block section for LTO (default)">;
-def shuffle_sections: JJ<"shuffle-sections=">, MetaVarName<"<seed>">,
-  HelpText<"Shuffle input sections using the given seed. If 0, use a random seed">;
+defm shuffle_sections: EEq<"shuffle-sections",
+  "Shuffle matched sections using the given seed before mapping them to the output sections. "
+  "If -1, reverse the section order. If 0, use a random seed">,
+  MetaVarName<"<section-glob>=<seed>">;
 def thinlto_cache_dir: JJ<"thinlto-cache-dir=">,
   HelpText<"Path to ThinLTO cached object file directory">;
 defm thinlto_cache_policy: EEq<"thinlto-cache-policy", "Pruning policy for the ThinLTO cache">;
@@ -666,14 +692,11 @@ def plugin_opt_eq : J<"plugin-opt=">;
 def: F<"detect-odr-violations">;
 def: Flag<["-"], "g">;
 def: F<"long-plt">;
-def: F<"no-add-needed">;
 def: F<"no-copy-dt-needed-entries">;
 def: F<"no-ctors-in-init-array">;
 def: F<"no-keep-memory">;
-def: F<"no-pipeline-knowledge">;
 def: F<"no-relax">;
 def: F<"no-warn-mismatch">;
-def: Flag<["-"], "p">;
 def: Separate<["--", "-"], "rpath-link">;
 def: J<"rpath-link=">;
 def: F<"secure-plt">;
@@ -682,12 +705,15 @@ def: F<"stats">;
 def: F<"warn-execstack">;
 def: F<"warn-once">;
 def: F<"warn-shared-textrel">;
-def: F<"EB">;
-def: F<"EL">;
 def: JoinedOrSeparate<["-"], "G">;
-def: F<"Qy">;
 
 // Hidden option used for testing MIPS multi-GOT implementation.
 defm mips_got_size:
   Eq<"mips-got-size", "Max size of a single MIPS GOT. 0x10000 by default.">,
+  Flags<[HelpHidden]>;
+
+// Hidden option used to opt-in to additional output checks.
+defm check_dynamic_relocations: BB<"check-dynamic-relocations",
+    "Perform additional validation of the written dynamic relocations",
+    "Do not perform additional validation of the written dynamic relocations">,
   Flags<[HelpHidden]>;

@@ -3,7 +3,9 @@
 declare dso_local swifttailcc i32 @tailcallee(i32 %a1, i32 %a2, i32 %a3, i32 %a4)
 
 define dso_local swifttailcc i32 @tailcaller(i32 %in1, i32 %in2) nounwind {
-; CHECK-LABEL: tailcaller
+; CHECK-LABEL: tailcaller:
+; CHECK-NOT: subq
+; CHECK-NOT: addq
 ; CHECK: jmp tailcallee
 entry:
   %tmp11 = musttail call swifttailcc i32 @tailcallee(i32 %in1, i32 %in2, i32 %in1, i32 %in2)

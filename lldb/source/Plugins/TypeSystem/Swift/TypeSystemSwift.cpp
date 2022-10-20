@@ -23,20 +23,28 @@ using namespace lldb;
 using namespace lldb_private;
 using llvm::StringRef;
 
+TypeSystemSwift::TypeSystemSwift() : TypeSystem() {}
+
 /// TypeSystem Plugin functionality.
 /// \{
 static lldb::TypeSystemSP CreateTypeSystemInstance(lldb::LanguageType language,
                                                    Module *module,
                                                    Target *target,
                                                    const char *extra_options) {
+  if (language != eLanguageTypeSwift)
+    return {};
+
   // This should be called with either a target or a module.
   if (module) {
     assert(!target);
     assert(StringRef(extra_options).empty());
-    return SwiftASTContext::CreateInstance(language, *module);
+    return std::shared_ptr<TypeSystemSwiftTypeRef>(
+        new TypeSystemSwiftTypeRef(*module));
   } else if (target) {
     assert(!module);
-    return SwiftASTContext::CreateInstance(language, *target, extra_options);
+    return std::shared_ptr<TypeSystemSwiftTypeRefForExpressions>(
+        new TypeSystemSwiftTypeRefForExpressions(language, *target,
+                                                 extra_options));
   }
   llvm_unreachable("Neither type nor module given to CreateTypeSystemInstance");
 }
@@ -64,12 +72,6 @@ ConstString TypeSystemSwift::GetPluginNameStatic() {
   return ConstString("swift");
 }
 
-ConstString TypeSystemSwift::GetPluginName() {
-  return TypeSystemSwift::GetPluginNameStatic();
-}
-
-uint32_t TypeSystemSwift::GetPluginVersion() { return 1; }
-
 /// \}
 
 void TypeSystemSwift::DumpValue(
@@ -78,6 +80,10 @@ void TypeSystemSwift::DumpValue(
     size_t data_byte_size, uint32_t bitfield_bit_size,
     uint32_t bitfield_bit_offset, bool show_types, bool show_summary,
     bool verbose, uint32_t depth) {}
+
+void TypeSystemSwift::Dump(llvm::raw_ostream &output) {
+  // TODO: What to dump?
+}
 
 bool TypeSystemSwift::IsFloatingPointType(opaque_compiler_type_t type,
                                           uint32_t &count, bool &is_complex) {
@@ -115,4 +121,28 @@ uint32_t TypeSystemSwift::GetIndexOfChildWithName(
   size_t num_child_indexes = GetIndexOfChildMemberWithName(
       type, name, exe_ctx, omit_empty_base_classes, child_indexes);
   return num_child_indexes == 1 ? child_indexes.front() : UINT32_MAX;
+}
+
+lldb::Format TypeSystemSwift::GetFormat(opaque_compiler_type_t type) {
+  auto swift_flags = GetTypeInfo(type, nullptr);
+
+  if (swift_flags & eTypeIsInteger)
+    return eFormatDecimal;
+
+  if (swift_flags & eTypeIsFloat)
+    return eFormatFloat;
+
+  if (swift_flags & eTypeIsPointer || swift_flags & eTypeIsClass)
+    return eFormatAddressInfo;
+
+  if (swift_flags & eTypeIsClass)
+    return eFormatHex;
+
+  if (swift_flags & eTypeIsGeneric)
+    return eFormatUnsigned;
+
+  if (swift_flags & eTypeIsFuncPrototype || swift_flags & eTypeIsBlock)
+    return eFormatAddressInfo;
+
+  return eFormatBytes;
 }

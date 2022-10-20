@@ -8,20 +8,24 @@
 
 #include "FDimTest.h"
 
+#include "src/__support/FPUtil/FPBits.h"
+#include "src/__support/FPUtil/TestHelpers.h"
 #include "src/math/fdimf.h"
-#include "utils/FPUtil/FPBits.h"
-#include "utils/FPUtil/TestHelpers.h"
 #include "utils/UnitTest/Test.h"
 #include <math.h>
 
-using FDimTest = FDimTestTemplate<float>;
+using LlvmLibcFDimTest = FDimTestTemplate<float>;
 
-TEST_F(FDimTest, NaNArg_fdimf) { testNaNArg(&__llvm_libc::fdimf); }
+TEST_F(LlvmLibcFDimTest, NaNArg_fdimf) { testNaNArg(&__llvm_libc::fdimf); }
 
-TEST_F(FDimTest, InfArg_fdimf) { testInfArg(&__llvm_libc::fdimf); }
+TEST_F(LlvmLibcFDimTest, InfArg_fdimf) { testInfArg(&__llvm_libc::fdimf); }
 
-TEST_F(FDimTest, NegInfArg_fdimf) { testNegInfArg(&__llvm_libc::fdimf); }
+TEST_F(LlvmLibcFDimTest, NegInfArg_fdimf) {
+  testNegInfArg(&__llvm_libc::fdimf);
+}
 
-TEST_F(FDimTest, BothZero_fdimf) { testBothZero(&__llvm_libc::fdimf); }
+TEST_F(LlvmLibcFDimTest, BothZero_fdimf) { testBothZero(&__llvm_libc::fdimf); }
 
-TEST_F(FDimTest, InFloatRange_fdimf) { testInRange(&__llvm_libc::fdimf); }
+TEST_F(LlvmLibcFDimTest, InFloatRange_fdimf) {
+  testInRange(&__llvm_libc::fdimf);
+}

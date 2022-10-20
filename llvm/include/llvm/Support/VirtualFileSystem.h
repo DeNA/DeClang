@@ -57,6 +57,17 @@ public:
   // FIXME: remove when files support multiple names
   bool IsVFSMapped = false;
 
+  /// Whether this entity has an external path different from the virtual path,
+  /// and the external path is exposed by leaking it through the abstraction.
+  /// For example, a RedirectingFileSystem will set this for paths where
+  /// UseExternalName is true.
+  ///
+  /// FIXME: Currently the external path is exposed by replacing the virtual
+  /// path in this Status object. Instead, we should leave the path in the
+  /// Status intact (matching the requested virtual path) - see
+  /// FileManager::getFileRef for how how we plan to fix this.
+  bool ExposesExternalVFSPath = false;
+
   Status() = default;
   Status(const llvm::sys::fs::file_status &Status);
   Status(const Twine &Name, llvm::sys::fs::UniqueID UID,
@@ -121,6 +132,14 @@ public:
 
   /// Closes the file.
   virtual std::error_code close() = 0;
+
+  // Get the same file with a different path.
+  static ErrorOr<std::unique_ptr<File>>
+  getWithPath(ErrorOr<std::unique_ptr<File>> Result, const Twine &P);
+
+protected:
+  // Set the file's underlying path.
+  virtual void setPath(const Twine &Path) {}
 };
 
 /// A member of a directory, yielded by a directory_iterator.
@@ -541,7 +560,10 @@ class RedirectingFileSystemParser;
 ///   'case-sensitive': <boolean, default=(true for Posix, false for Windows)>
 ///   'use-external-names': <boolean, default=true>
 ///   'overlay-relative': <boolean, default=false>
-///   'fallthrough': <boolean, default=true>
+///   'fallthrough': <boolean, default=true, deprecated - use 'redirecting-with'
+///                   instead>
+///   'redirecting-with': <string, one of 'fallthrough', 'fallback', or
+///                        'redirect-only', default='fallthrough'>
 ///
 /// Virtual directories that list their contents are represented as
 /// \verbatim
@@ -596,10 +618,35 @@ class RedirectingFileSystemParser;
 /// contain multiple path components (e.g. /path/to/file). However, any
 /// directory in such a path that contains more than one child must be uniquely
 /// represented by a 'directory' entry.
+///
+/// When the 'use-external-name' field is set, calls to \a vfs::File::status()
+/// give the external (remapped) filesystem name instead of the name the file
+/// was accessed by. This is an intentional leak through the \a
+/// RedirectingFileSystem abstraction layer. It enables clients to discover
+/// (and use) the external file location when communicating with users or tools
+/// that don't use the same VFS overlay.
+///
+/// FIXME: 'use-external-name' causes behaviour that's inconsistent with how
+/// "real" filesystems behave. Maybe there should be a separate channel for
+/// this information.
 class RedirectingFileSystem : public vfs::FileSystem {
 public:
   enum EntryKind { EK_Directory, EK_DirectoryRemap, EK_File };
   enum NameKind { NK_NotSet, NK_External, NK_Virtual };
+
+  /// The type of redirection to perform.
+  enum class RedirectKind {
+    /// Lookup the redirected path first (ie. the one specified in
+    /// 'external-contents') and if that fails "fallthrough" to a lookup of the
+    /// originally provided path.
+    Fallthrough,
+    /// Lookup the provided path first and if that fails, "fallback" to a
+    /// lookup of the redirected path.
+    Fallback,
+    /// Only lookup the redirected path, do not lookup the originally provided
+    /// path.
+    RedirectOnly
+  };
 
   /// A single file or directory in the VFS.
   class Entry {
@@ -678,6 +725,7 @@ public:
       case EK_Directory:
         return false;
       }
+      llvm_unreachable("invalid entry kind");
     }
   };
 
@@ -734,16 +782,16 @@ private:
   friend class RedirectingFSDirIterImpl;
   friend class RedirectingFileSystemParser;
 
-  bool shouldUseExternalFS() const { return IsFallthrough; }
-
   /// Canonicalize path by removing ".", "..", "./", components. This is
   /// a VFS request, do not bother about symlinks in the path components
   /// but canonicalize in order to perform the correct entry search.
   std::error_code makeCanonical(SmallVectorImpl<char> &Path) const;
 
-  /// Whether to fall back to the external file system when an operation fails
-  /// with the given error code on a path associated with the provided Entry.
-  bool shouldFallBackToExternalFS(std::error_code EC, Entry *E = nullptr) const;
+  /// Get the File status, or error, from the underlying external file system.
+  /// This returns the status with the originally requested name, while looking
+  /// up the entry using the canonical path.
+  ErrorOr<Status> getExternalStatus(const Twine &CanonicalPath,
+                                    const Twine &OriginalPath) const;
 
   // In a RedirectingFileSystem, keys can be specified in Posix or Windows
   // style (or even a mixture of both), so this comparison helper allows
@@ -751,7 +799,7 @@ private:
   // that, other than the root, path components should not contain slashes or
   // backslashes.
   bool pathComponentMatches(llvm::StringRef lhs, llvm::StringRef rhs) const {
-    if ((CaseSensitive ? lhs.equals(rhs) : lhs.equals_lower(rhs)))
+    if ((CaseSensitive ? lhs.equals(rhs) : lhs.equals_insensitive(rhs)))
       return true;
     return (lhs == "/" && rhs == "\\") || (lhs == "\\" && rhs == "/");
   }
@@ -791,9 +839,9 @@ private:
   /// names of files.  This global value is overridable on a per-file basis.
   bool UseExternalNames = true;
 
-  /// Whether to attempt a file lookup in external file system after it wasn't
-  /// found in VFS.
-  bool IsFallthrough = true;
+  /// Determines the lookups to perform, as well as their order. See
+  /// \c RedirectKind for details.
+  RedirectKind Redirection = RedirectKind::Fallthrough;
   /// @}
 
   RedirectingFileSystem(IntrusiveRefCntPtr<FileSystem> ExternalFS);
@@ -807,7 +855,8 @@ private:
                                        Entry *From) const;
 
   /// Get the status for a path with the provided \c LookupResult.
-  ErrorOr<Status> status(const Twine &Path, const LookupResult &Result);
+  ErrorOr<Status> status(const Twine &CanonicalPath, const Twine &OriginalPath,
+                         const LookupResult &Result);
 
 public:
   /// Looks up \p Path in \c Roots and returns a LookupResult giving the
@@ -847,7 +896,11 @@ public:
 
   StringRef getExternalContentsPrefixDir() const;
 
+  /// Sets the redirection kind to \c Fallthrough if true or \c RedirectOnly
+  /// otherwise. Will removed in the future, use \c setRedirection instead.
   void setFallthrough(bool Fallthrough);
+
+  void setRedirection(RedirectingFileSystem::RedirectKind Kind);
 
   std::vector<llvm::StringRef> getRoots() const;
 

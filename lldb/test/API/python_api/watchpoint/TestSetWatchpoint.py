@@ -25,7 +25,6 @@ class SetWatchpointAPITestCase(TestBase):
         self.line = line_number(
             self.source, '// Set break point at this line.')
 
-    @add_test_categories(['pyapi'])
     # Read-write watchpoints not supported on SystemZ
     @expectedFailureAll(archs=['s390x'])
     def test_watch_val(self):
@@ -103,9 +102,4 @@ class SetWatchpointAPITestCase(TestBase):
             PROCESS_EXITED)
 
         self.dbg.DeleteTarget(target)
-
-        # The next check relies on the watchpoint being destructed, which does
-        # not happen during replay because objects are intentionally kept alive
-        # forever.
-        if not configuration.is_reproducer():
-            self.assertFalse(watchpoint.IsValid())
+        self.assertFalse(watchpoint.IsValid())

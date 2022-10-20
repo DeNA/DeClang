@@ -16,6 +16,7 @@
 #include "lldb/Symbol/SymbolContextScope.h"
 #include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Target/PathMappingList.h"
+#include "lldb/Target/Statistics.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/FileSpec.h"
@@ -32,10 +33,10 @@
 #include "llvm/Support/Chrono.h"
 
 #include <atomic>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
-#include <stddef.h>
-#include <stdint.h>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,15 @@ class Target;
 class TypeList;
 class TypeMap;
 class VariableList;
+
+/// Options used by Module::FindFunctions. This cannot be a nested class
+/// because it must be forward-declared in ModuleList.h.
+struct ModuleFunctionSearchOptions {
+  /// Include the symbol table.
+  bool include_symbols = false;
+  /// Include inlined functions.
+  bool include_inlines = false;
+};
 
 /// \class Module Module.h "lldb/Core/Module.h"
 /// A class that describes an executable image and its associated
@@ -304,8 +314,9 @@ public:
   ///     matches.
   void FindFunctions(ConstString name,
                      const CompilerDeclContext &parent_decl_ctx,
-                     lldb::FunctionNameType name_type_mask, bool symbols_ok,
-                     bool inlines_ok, SymbolContextList &sc_list);
+                     lldb::FunctionNameType name_type_mask,
+                     const ModuleFunctionSearchOptions &options,
+                     SymbolContextList &sc_list);
 
   /// Find functions by name.
   ///
@@ -319,8 +330,9 @@ public:
   /// \param[out] sc_list
   ///     A symbol context list that gets filled in with all of the
   ///     matches.
-  void FindFunctions(const RegularExpression &regex, bool symbols_ok,
-                     bool inlines_ok, SymbolContextList &sc_list);
+  void FindFunctions(const RegularExpression &regex,
+                     const ModuleFunctionSearchOptions &options,
+                     SymbolContextList &sc_list);
 
   /// Find addresses by file/line
   ///
@@ -806,6 +818,21 @@ public:
   void ReportErrorIfModifyDetected(const char *format, ...)
       __attribute__((format(printf, 2, 3)));
 
+  void ReportWarningOptimization(llvm::Optional<lldb::user_id_t> debugger_id);
+
+  void
+  ReportWarningUnsupportedLanguage(lldb::LanguageType language,
+                                   llvm::Optional<lldb::user_id_t> debugger_id);
+
+#ifdef LLDB_ENABLE_SWIFT
+  void
+  ReportWarningCantLoadSwiftModule(std::string details,
+                                   llvm::Optional<lldb::user_id_t> debugger_id);
+  void
+  ReportWarningToolchainMismatch(CompileUnit &comp_unit,
+                                 llvm::Optional<lldb::user_id_t> debugger_id);
+#endif
+
   // Return true if the file backing this module has changed since the module
   // was originally created  since we saved the initial file modification time
   // when the module first gets created.
@@ -850,13 +877,10 @@ public:
   /// \param[in] path
   ///     The original source file path to try and remap.
   ///
-  /// \param[out] new_path
-  ///     The newly remapped filespec that is may or may not exist.
-  ///
   /// \return
-  ///     /b true if \a path was successfully located and \a new_path
-  ///     is filled in with a new source path, \b false otherwise.
-  bool RemapSourceFile(llvm::StringRef path, std::string &new_path) const;
+  ///     The newly remapped filespec that is may or may not exist if
+  ///     \a path was successfully located.
+  llvm::Optional<std::string> RemapSourceFile(llvm::StringRef path) const;
   bool RemapSourceFile(const char *, std::string &) const = delete;
 
   void ClearModuleDependentCaches();
@@ -873,6 +897,18 @@ public:
 
   /// Update the ArchSpec to a more specific variant.
   bool MergeArchitecture(const ArchSpec &arch_spec);
+
+  /// Accessor for the symbol table parse time metric.
+  ///
+  /// The value is returned as a reference to allow it to be updated by the
+  /// ElapsedTime RAII object.
+  StatsDuration &GetSymtabParseTime() { return m_symtab_parse_time; }
+  
+  /// Accessor for the symbol table index time metric.
+  ///
+  /// The value is returned as a reference to allow it to be updated by the
+  /// ElapsedTime RAII object.
+  StatsDuration &GetSymtabIndexTime() { return m_symtab_index_time; }
 
   /// \class LookupInfo Module.h "lldb/Core/Module.h"
   /// A class that encapsulates name lookup information.
@@ -897,10 +933,7 @@ public:
   /// correctly.
   class LookupInfo {
   public:
-    LookupInfo()
-        : m_name(), m_lookup_name(), m_language(lldb::eLanguageTypeUnknown),
-          m_name_type_mask(lldb::eFunctionNameTypeNone),
-          m_match_name_after_lookup(false) {}
+    LookupInfo() : m_name(), m_lookup_name() {}
 
     LookupInfo(ConstString name, lldb::FunctionNameType name_type_mask,
                lldb::LanguageType language);
@@ -929,15 +962,15 @@ public:
     ConstString m_lookup_name;
 
     /// Limit matches to only be for this language
-    lldb::LanguageType m_language;
+    lldb::LanguageType m_language = lldb::eLanguageTypeUnknown;
 
     /// One or more bits from lldb::FunctionNameType that indicate what kind of
     /// names we are looking for
-    lldb::FunctionNameType m_name_type_mask;
+    lldb::FunctionNameType m_name_type_mask = lldb::eFunctionNameTypeNone;
 
     ///< If \b true, then demangled names that match will need to contain
     ///< "m_name" in order to be considered a match
-    bool m_match_name_after_lookup;
+    bool m_match_name_after_lookup = false;
   };
 
 protected:
@@ -964,7 +997,7 @@ protected:
   ConstString m_object_name; ///< The name an object within this module that is
                              ///selected, or empty of the module is represented
                              ///by \a m_file.
-  uint64_t m_object_offset;
+  uint64_t m_object_offset = 0;
   llvm::sys::TimePoint<> m_object_mod_time;
 
   /// DataBuffer containing the module image, if it was provided at
@@ -1002,6 +1035,21 @@ protected:
   mutable bool m_file_has_changed : 1,
       m_first_file_changed_log : 1; /// See if the module was modified after it
                                     /// was initially opened.
+  /// We store a symbol table parse time duration here because we might have
+  /// an object file and a symbol file which both have symbol tables. The parse
+  /// time for the symbol tables can be aggregated here.
+  StatsDuration m_symtab_parse_time;
+  /// We store a symbol named index time duration here because we might have
+  /// an object file and a symbol file which both have symbol tables. The parse
+  /// time for the symbol tables can be aggregated here.
+  StatsDuration m_symtab_index_time;
+
+  std::once_flag m_optimization_warning;
+  std::once_flag m_language_warning;
+#ifdef LLDB_ENABLE_SWIFT
+  std::once_flag m_swift_import_warning;
+  std::once_flag m_toolchain_mismatch_warning;
+#endif
 
   /// Resolve a file or load virtual address.
   ///

@@ -7,6 +7,21 @@ let Definition = "target_experimental" in {
   def SwiftCreateModuleContextsInParallel : Property<"swift-create-module-contexts-in-parallel", "Boolean">,
     DefaultTrue,
     Desc<"Create the per-module Swift AST contexts in parallel.">;
+  def SwiftReadMetadataFromFileCache: Property<"swift-read-metadata-from-file-cache", "Boolean">,
+    DefaultTrue,
+    Desc<"Read Swift reflection metadata from the file cache instead of the process when possible">;
+  def SwiftUseReflectionSymbols : Property<"swift-use-reflection-symbols", "Boolean">,
+    Global, DefaultTrue,
+    Desc<"if true, optimize the loading of Swift reflection metadata by making use of available symbols.">;
+  def SwiftReadMetadataFromDSYM: Property<"swift-read-metadata-from-dsym", "Boolean">,
+    DefaultFalse,
+    Desc<"Read Swift reflection metadata from the dsym instead of the process when possible">;
+  def SwiftDiscoverImplicitSearchPaths: Property<"swift-discover-implicit-search-paths", "Boolean">,
+    DefaultTrue,
+    Desc<"Discover implicit search paths from all implicitly imported Swift modules and make them available to the expression context. A Swift module built with -serialize-debugging-options can contain additional search paths which are discovered as the module is imported. This optiondoes an eager import of all modules first to make sure all implicit search paths are availableto the expression evaluator. If the build system registers all Swift modules with the linker (Darwin: via -add_ast_path, Other platforms: -module-wrap), turning this on is not necessary.">;
+  def SwiftEnableBareSlashRegex: Property<"swift-enable-bare-slash-regex", "Boolean">,
+    DefaultFalse,
+    Desc<"Passes the -enable-bare-slash-regex compiler flag to the swift compiler.">;
 }
 
 let Definition = "target" in {
@@ -53,10 +68,14 @@ let Definition = "target" in {
     DefaultTrue,
     Desc<"Automatically load Clang modules referred to by the program.">;
   def ImportStdModule: Property<"import-std-module", "Enum">,
-    DefaultEnumValue<"eImportStdModuleFallback">,
+    DefaultEnumValue<"eImportStdModuleFalse">,
     EnumValues<"OptionEnumValues(g_import_std_module_value_types)">,
     Desc<"Import the 'std' C++ module to improve expression parsing involving "
          " C++ standard library types.">;
+  def DynamicClassInfoHelper: Property<"objc-dynamic-class-extractor", "Enum">,
+    DefaultEnumValue<"eDynamicClassInfoHelperAuto">,
+    EnumValues<"OptionEnumValues(g_dynamic_class_info_helper_value_types)">,
+    Desc<"Configure how LLDB parses dynamic Objective-C class metadata. By default LLDB will choose the most appropriate method for the target OS.">;
   def AutoApplyFixIts: Property<"auto-apply-fixits", "Boolean">,
     DefaultTrue,
     Desc<"Automatically apply fix-it hints to expressions.">;
@@ -75,6 +94,9 @@ let Definition = "target" in {
   def MaxChildrenCount: Property<"max-children-count", "SInt64">,
     DefaultUnsignedValue<256>,
     Desc<"Maximum number of children to expand in any level of depth.">;
+  def MaxChildrenDepth: Property<"max-children-depth", "UInt64">,
+    DefaultUnsignedValue<6>,
+    Desc<"Maximum depth to expand children.">;
   def MaxSummaryLength: Property<"max-string-summary-length", "SInt64">,
     DefaultUnsignedValue<1024>,
     Desc<"Maximum number of characters to show when using %s in summary strings.">;
@@ -166,9 +188,6 @@ let Definition = "target" in {
   def DisplayRecognizedArguments: Property<"display-recognized-arguments", "Boolean">,
     DefaultFalse,
     Desc<"Show recognized arguments in variable listings by default.">;
-  def NonStopModeEnabled: Property<"non-stop-mode", "Boolean">,
-    DefaultFalse,
-    Desc<"Disable lock-step debugging, instead control threads independently.">;
   def RequireHardwareBreakpoints: Property<"require-hardware-breakpoint", "Boolean">,
     DefaultFalse,
     Desc<"Require all breakpoints to be hardware breakpoints.">;
@@ -184,6 +203,9 @@ let Definition = "target" in {
   def SwiftExtraClangFlags: Property<"swift-extra-clang-flags", "String">,
     DefaultStringValue<"">,
     Desc<"Additional -Xcc flags to be passed to the Swift ClangImporter.">;
+  def SwiftAutoImportFrameworks : Property<"swift-auto-import-frameworks", "Boolean">,
+     DefaultFalse,
+     Desc<"Automatically import all frameworks and dynamic libraries that are autolinked by Swift modules in the target.">;
   def UseAllCompilerFlags: Property<"use-all-compiler-flags", "Boolean">,
     DefaultTrue,
     Desc<"Try to use compiler flags for all modules when setting up the Swift expression parser, not just the main executable.">;
@@ -241,6 +263,9 @@ let Definition = "process" in {
   def WarningUnsupportedLanguage: Property<"unsupported-language-warnings", "Boolean">,
     DefaultTrue,
     Desc<"If true, warn when stopped in code that is written in a source language that LLDB does not support.">;
+  def WarningToolchainMismatch: Property<"toolchain-mismatch-warnings", "Boolean">,
+    DefaultTrue,
+    Desc<"If true, warn when stopped in code that was compiled by a Swift compiler different from the one embedded in LLDB.">;
   def StopOnExec: Property<"stop-on-exec", "Boolean">,
     Global,
     DefaultTrue,
@@ -254,6 +279,13 @@ let Definition = "process" in {
   def SteppingRunsAllThreads: Property<"run-all-threads", "Boolean">,
     DefaultFalse,
     Desc<"If true, stepping operations will run all threads.  This is equivalent to setting the run-mode option to 'all-threads'.">;
+  def VirtualAddressableBits: Property<"virtual-addressable-bits", "UInt64">,
+    DefaultUnsignedValue<0>,
+    Desc<"The number of bits used for addressing. If the value is 39, then bits 0..38 are used for addressing. The default value of 0 means unspecified.">;
+  def FollowForkMode: Property<"follow-fork-mode", "Enum">,
+    DefaultEnumValue<"eFollowParent">,
+    EnumValues<"OptionEnumValues(g_follow_fork_mode_values)">,
+    Desc<"Debugger's behavior upon fork or vfork.">;
 }
 
 let Definition = "platform" in {

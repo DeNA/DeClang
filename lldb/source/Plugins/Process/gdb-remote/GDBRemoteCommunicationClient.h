@@ -22,7 +22,7 @@
 #include "lldb/Utility/GDBRemote.h"
 #include "lldb/Utility/ProcessInfo.h"
 #include "lldb/Utility/StructuredData.h"
-#include "lldb/Utility/TraceOptions.h"
+#include "lldb/Utility/TraceGDBRemotePackets.h"
 #if defined(_WIN32)
 #include "lldb/Host/windows/PosixApi.h"
 #endif
@@ -49,6 +49,12 @@ inline bool operator==(const QOffsets &a, const QOffsets &b) {
 }
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const QOffsets &offsets);
 
+// A trivial struct used to return a pair of PID and TID.
+struct PidTid {
+  uint64_t pid;
+  uint64_t tid;
+};
+
 class GDBRemoteCommunicationClient : public GDBRemoteClientBase {
 public:
   GDBRemoteCommunicationClient();
@@ -58,27 +64,6 @@ public:
   // After connecting, send the handshake to the server to make sure
   // we are communicating with it.
   bool HandshakeWithServer(Status *error_ptr);
-
-  // For packets which specify a range of output to be returned,
-  // return all of the output via a series of request packets of the form
-  // <prefix>0,<size>
-  // <prefix><size>,<size>
-  // <prefix><size>*2,<size>
-  // <prefix><size>*3,<size>
-  // ...
-  // until a "$l..." packet is received, indicating the end.
-  // (size is in hex; this format is used by a standard gdbserver to
-  // return the given portion of the output specified by <prefix>;
-  // for example, "qXfer:libraries-svr4:read::fff,1000" means
-  // "return a chunk of the xml description file for shared
-  // library load addresses, where the chunk starts at offset 0xfff
-  // and continues for 0x1000 bytes").
-  // Concatenate the resulting server response packets together and
-  // return in response_string.  If any packet fails, the return value
-  // indicates that failure and the returned string value is undefined.
-  PacketResult
-  SendPacketsAndConcatenateResponses(const char *send_payload_prefix,
-                                     std::string &response_string);
 
   bool GetThreadSuffixSupported();
 
@@ -140,21 +125,6 @@ public:
 
   int SendLaunchEventDataPacket(const char *data,
                                 bool *was_supported = nullptr);
-
-  /// Sends a "vAttach:PID" where PID is in hex.
-  ///
-  /// \param[in] pid
-  ///     A process ID for the remote gdb server to attach to.
-  ///
-  /// \param[out] response
-  ///     The response received from the gdb server. If the return
-  ///     value is zero, \a response will contain a stop reply
-  ///     packet.
-  ///
-  /// \return
-  ///     Zero if the attach was successful, or an error indicating
-  ///     an error code.
-  int SendAttach(lldb::pid_t pid, StringExtractorGDBRemote &response);
 
   /// Sends a GDB remote protocol 'I' packet that delivers stdin
   /// data to the remote process.
@@ -229,7 +199,7 @@ public:
 
   bool DeallocateMemory(lldb::addr_t addr);
 
-  Status Detach(bool keep_stopped);
+  Status Detach(bool keep_stopped, lldb::pid_t pid = LLDB_INVALID_PROCESS_ID);
 
   Status GetMemoryRegionInfo(lldb::addr_t addr, MemoryRegionInfo &range_info);
 
@@ -246,6 +216,9 @@ public:
   std::chrono::seconds GetHostDefaultPacketTimeout();
 
   const ArchSpec &GetProcessArchitecture();
+
+  bool GetProcessStandaloneBinary(UUID &uuid, lldb::addr_t &value,
+                                  bool &value_is_offset);
 
   void GetRemoteQSupported();
 
@@ -269,11 +242,13 @@ public:
 
   llvm::VersionTuple GetMacCatalystVersion();
 
-  bool GetOSBuildString(std::string &s);
+  llvm::Optional<std::string> GetOSBuildString();
 
   bool GetOSKernelDescription(std::string &s);
 
   ArchSpec GetSystemArchitecture();
+
+  uint32_t GetAddressingBits();
 
   bool GetHostname(std::string &s);
 
@@ -322,8 +297,6 @@ public:
       uint32_t length,       // Byte Size of breakpoint or watchpoint
       std::chrono::seconds interrupt_timeout); // Time to wait for an interrupt
 
-  bool SetNonStopMode(const bool enable);
-
   void TestPacketSpeed(const uint32_t num_packets, uint32_t max_send,
                        uint32_t max_recv, uint64_t recv_amount, bool json,
                        Stream &strm);
@@ -335,9 +308,14 @@ public:
   // and response times.
   bool SendSpeedTestPacket(uint32_t send_size, uint32_t recv_size);
 
-  bool SetCurrentThread(uint64_t tid);
+  llvm::Optional<PidTid>
+  SendSetCurrentThreadPacket(uint64_t tid, uint64_t pid, char op);
 
-  bool SetCurrentThreadForRun(uint64_t tid);
+  bool SetCurrentThread(uint64_t tid,
+                        lldb::pid_t pid = LLDB_INVALID_PROCESS_ID);
+
+  bool SetCurrentThreadForRun(uint64_t tid,
+                              lldb::pid_t pid = LLDB_INVALID_PROCESS_ID);
 
   bool GetQXferAuxvReadSupported();
 
@@ -367,6 +345,9 @@ public:
     return m_supports_alloc_dealloc_memory;
   }
 
+  std::vector<std::pair<lldb::pid_t, lldb::tid_t>>
+  GetCurrentProcessAndThreadIDs(bool &sequence_mutex_unavailable);
+
   size_t GetCurrentThreadIDs(std::vector<lldb::tid_t> &thread_ids,
                              bool &sequence_mutex_unavailable);
 
@@ -374,6 +355,12 @@ public:
                            mode_t mode, Status &error);
 
   bool CloseFile(lldb::user_id_t fd, Status &error);
+
+  llvm::Optional<GDBRemoteFStatData> FStat(lldb::user_id_t fd);
+
+  // NB: this is just a convenience wrapper over open() + fstat().  It does not
+  // work if the file cannot be opened.
+  llvm::Optional<GDBRemoteFStatData> Stat(const FileSpec &file_spec);
 
   lldb::user_id_t GetFileSize(const FileSpec &file_spec);
 
@@ -447,6 +434,14 @@ public:
 
   bool GetSharedCacheInfoSupported();
 
+  bool GetMemoryTaggingSupported();
+
+  lldb::DataBufferSP ReadMemoryTags(lldb::addr_t addr, size_t len,
+                                    int32_t type);
+
+  Status WriteMemoryTags(lldb::addr_t addr, size_t len, int32_t type,
+                         const std::vector<uint8_t> &tags);
+
   /// Use qOffsets to query the offset used when relocating the target
   /// executable. If successful, the returned structure will contain at least
   /// one value in the offsets field.
@@ -459,9 +454,8 @@ public:
   GetModulesInfo(llvm::ArrayRef<FileSpec> module_file_specs,
                  const llvm::Triple &triple);
 
-  bool ReadExtFeature(const lldb_private::ConstString object,
-                      const lldb_private::ConstString annex, std::string &out,
-                      lldb_private::Status &err);
+  llvm::Expected<std::string> ReadExtFeature(llvm::StringRef object,
+                                             llvm::StringRef annex);
 
   void ServeSymbolLookups(lldb_private::Process *process);
 
@@ -506,65 +500,64 @@ public:
   ConfigureRemoteStructuredData(ConstString type_name,
                                 const StructuredData::ObjectSP &config_sp);
 
-  lldb::user_id_t SendStartTracePacket(const TraceOptions &options,
-                                       std::chrono::seconds interrupt_timeout,
-                                       Status &error);
+  llvm::Expected<TraceSupportedResponse>
+  SendTraceSupported(std::chrono::seconds interrupt_timeout);
 
-  Status SendStopTracePacket(lldb::user_id_t uid, lldb::tid_t thread_id,
+  llvm::Error SendTraceStart(const llvm::json::Value &request,
                              std::chrono::seconds interrupt_timeout);
 
-  Status SendGetDataPacket(lldb::user_id_t uid, lldb::tid_t thread_id,
-                           llvm::MutableArrayRef<uint8_t> &buffer,
-                           std::chrono::seconds interrupt_timeout,
-                           size_t offset = 0);
+  llvm::Error SendTraceStop(const TraceStopRequest &request,
+                            std::chrono::seconds interrupt_timeout);
 
-  Status SendGetMetaDataPacket(lldb::user_id_t uid, lldb::tid_t thread_id,
-                               llvm::MutableArrayRef<uint8_t> &buffer,
-                               std::chrono::seconds interrupt_timeout,
-                               size_t offset = 0);
+  llvm::Expected<std::string>
+  SendTraceGetState(llvm::StringRef type,
+                    std::chrono::seconds interrupt_timeout);
 
-  Status SendGetTraceConfigPacket(lldb::user_id_t uid, TraceOptions &options,
-                                  std::chrono::seconds interrupt_timeout);
+  llvm::Expected<std::vector<uint8_t>>
+  SendTraceGetBinaryData(const TraceGetBinaryDataRequest &request,
+                         std::chrono::seconds interrupt_timeout);
 
-  llvm::Expected<TraceTypeInfo> SendGetSupportedTraceType(
-      std::chrono::seconds interrupt_timeout);
+  bool GetSaveCoreSupported() const;
 
 protected:
-  LazyBool m_supports_not_sending_acks;
-  LazyBool m_supports_thread_suffix;
-  LazyBool m_supports_threads_in_stop_reply;
-  LazyBool m_supports_vCont_all;
-  LazyBool m_supports_vCont_any;
-  LazyBool m_supports_vCont_c;
-  LazyBool m_supports_vCont_C;
-  LazyBool m_supports_vCont_s;
-  LazyBool m_supports_vCont_S;
-  LazyBool m_qHostInfo_is_valid;
-  LazyBool m_curr_pid_is_valid;
-  LazyBool m_qProcessInfo_is_valid;
-  LazyBool m_qGDBServerVersion_is_valid;
-  LazyBool m_supports_alloc_dealloc_memory;
-  LazyBool m_supports_memory_region_info;
-  LazyBool m_supports_watchpoint_support_info;
-  LazyBool m_supports_detach_stay_stopped;
-  LazyBool m_watchpoints_trigger_after_instruction;
-  LazyBool m_attach_or_wait_reply;
-  LazyBool m_prepare_for_reg_writing_reply;
-  LazyBool m_supports_p;
-  LazyBool m_supports_x;
-  LazyBool m_avoid_g_packets;
-  LazyBool m_supports_QSaveRegisterState;
-  LazyBool m_supports_qXfer_auxv_read;
-  LazyBool m_supports_qXfer_libraries_read;
-  LazyBool m_supports_qXfer_libraries_svr4_read;
-  LazyBool m_supports_qXfer_features_read;
-  LazyBool m_supports_qXfer_memory_map_read;
-  LazyBool m_supports_augmented_libraries_svr4_read;
-  LazyBool m_supports_jThreadExtendedInfo;
-  LazyBool m_supports_jLoadedDynamicLibrariesInfos;
-  LazyBool m_supports_jGetSharedCacheInfo;
-  LazyBool m_supports_QPassSignals;
-  LazyBool m_supports_error_string_reply;
+  LazyBool m_supports_not_sending_acks = eLazyBoolCalculate;
+  LazyBool m_supports_thread_suffix = eLazyBoolCalculate;
+  LazyBool m_supports_threads_in_stop_reply = eLazyBoolCalculate;
+  LazyBool m_supports_vCont_all = eLazyBoolCalculate;
+  LazyBool m_supports_vCont_any = eLazyBoolCalculate;
+  LazyBool m_supports_vCont_c = eLazyBoolCalculate;
+  LazyBool m_supports_vCont_C = eLazyBoolCalculate;
+  LazyBool m_supports_vCont_s = eLazyBoolCalculate;
+  LazyBool m_supports_vCont_S = eLazyBoolCalculate;
+  LazyBool m_qHostInfo_is_valid = eLazyBoolCalculate;
+  LazyBool m_curr_pid_is_valid = eLazyBoolCalculate;
+  LazyBool m_qProcessInfo_is_valid = eLazyBoolCalculate;
+  LazyBool m_qGDBServerVersion_is_valid = eLazyBoolCalculate;
+  LazyBool m_supports_alloc_dealloc_memory = eLazyBoolCalculate;
+  LazyBool m_supports_memory_region_info = eLazyBoolCalculate;
+  LazyBool m_supports_watchpoint_support_info = eLazyBoolCalculate;
+  LazyBool m_supports_detach_stay_stopped = eLazyBoolCalculate;
+  LazyBool m_watchpoints_trigger_after_instruction = eLazyBoolCalculate;
+  LazyBool m_attach_or_wait_reply = eLazyBoolCalculate;
+  LazyBool m_prepare_for_reg_writing_reply = eLazyBoolCalculate;
+  LazyBool m_supports_p = eLazyBoolCalculate;
+  LazyBool m_supports_x = eLazyBoolCalculate;
+  LazyBool m_avoid_g_packets = eLazyBoolCalculate;
+  LazyBool m_supports_QSaveRegisterState = eLazyBoolCalculate;
+  LazyBool m_supports_qXfer_auxv_read = eLazyBoolCalculate;
+  LazyBool m_supports_qXfer_libraries_read = eLazyBoolCalculate;
+  LazyBool m_supports_qXfer_libraries_svr4_read = eLazyBoolCalculate;
+  LazyBool m_supports_qXfer_features_read = eLazyBoolCalculate;
+  LazyBool m_supports_qXfer_memory_map_read = eLazyBoolCalculate;
+  LazyBool m_supports_augmented_libraries_svr4_read = eLazyBoolCalculate;
+  LazyBool m_supports_jThreadExtendedInfo = eLazyBoolCalculate;
+  LazyBool m_supports_jLoadedDynamicLibrariesInfos = eLazyBoolCalculate;
+  LazyBool m_supports_jGetSharedCacheInfo = eLazyBoolCalculate;
+  LazyBool m_supports_QPassSignals = eLazyBoolCalculate;
+  LazyBool m_supports_error_string_reply = eLazyBoolCalculate;
+  LazyBool m_supports_multiprocess = eLazyBoolCalculate;
+  LazyBool m_supports_memory_tagging = eLazyBoolCalculate;
+  LazyBool m_supports_qSaveCore = eLazyBoolCalculate;
 
   bool m_supports_qProcessInfoPID : 1, m_supports_qfProcessInfo : 1,
       m_supports_qUserName : 1, m_supports_qGroupName : 1,
@@ -573,18 +566,27 @@ protected:
       m_supports_QEnvironment : 1, m_supports_QEnvironmentHexEncoded : 1,
       m_supports_qSymbol : 1, m_qSymbol_requests_done : 1,
       m_supports_qModuleInfo : 1, m_supports_jThreadsInfo : 1,
-      m_supports_jModulesInfo : 1;
+      m_supports_jModulesInfo : 1, m_supports_vFileSize : 1,
+      m_supports_vFileMode : 1, m_supports_vFileExists : 1,
+      m_supports_vRun : 1;
 
-  lldb::pid_t m_curr_pid;
-  lldb::tid_t m_curr_tid; // Current gdb remote protocol thread index for all
-                          // other operations
-  lldb::tid_t m_curr_tid_run; // Current gdb remote protocol thread index for
-                              // continue, step, etc
+  /// Current gdb remote protocol process identifier for all other operations
+  lldb::pid_t m_curr_pid = LLDB_INVALID_PROCESS_ID;
+  /// Current gdb remote protocol process identifier for continue, step, etc
+  lldb::pid_t m_curr_pid_run = LLDB_INVALID_PROCESS_ID;
+  /// Current gdb remote protocol thread identifier for all other operations
+  lldb::tid_t m_curr_tid = LLDB_INVALID_THREAD_ID;
+  /// Current gdb remote protocol thread identifier for continue, step, etc
+  lldb::tid_t m_curr_tid_run = LLDB_INVALID_THREAD_ID;
 
-  uint32_t m_num_supported_hardware_watchpoints;
+  uint32_t m_num_supported_hardware_watchpoints = 0;
+  uint32_t m_addressing_bits = 0;
 
   ArchSpec m_host_arch;
   ArchSpec m_process_arch;
+  UUID m_process_standalone_uuid;
+  lldb::addr_t m_process_standalone_value = LLDB_INVALID_ADDRESS;
+  bool m_process_standalone_value_is_offset = false;
   llvm::VersionTuple m_os_version;
   llvm::VersionTuple m_maccatalyst_version;
   std::string m_os_build;
@@ -592,17 +594,19 @@ protected:
   std::string m_hostname;
   std::string m_gdb_server_name; // from reply to qGDBServerVersion, empty if
                                  // qGDBServerVersion is not supported
-  uint32_t m_gdb_server_version; // from reply to qGDBServerVersion, zero if
-                                 // qGDBServerVersion is not supported
+  uint32_t m_gdb_server_version =
+      UINT32_MAX; // from reply to qGDBServerVersion, zero if
+                  // qGDBServerVersion is not supported
   std::chrono::seconds m_default_packet_timeout;
-  uint64_t m_max_packet_size;        // as returned by qSupported
+  int m_target_vm_page_size = 0; // target system VM page size; 0 unspecified
+  uint64_t m_max_packet_size = 0;    // as returned by qSupported
   std::string m_qSupported_response; // the complete response to qSupported
 
-  bool m_supported_async_json_packets_is_valid;
+  bool m_supported_async_json_packets_is_valid = false;
   lldb_private::StructuredData::ObjectSP m_supported_async_json_packets_sp;
 
   std::vector<MemoryRegionInfo> m_qXfer_memory_map;
-  bool m_qXfer_memory_map_loaded;
+  bool m_qXfer_memory_map_loaded = false;
 
   bool GetCurrentProcessInfo(bool allow_lazy_pid = true);
 
@@ -610,7 +614,8 @@ protected:
 
   // Given the list of compression types that the remote debug stub can support,
   // possibly enable compression if we find an encoding we can handle.
-  void MaybeEnableCompression(std::vector<std::string> supported_compressions);
+  void MaybeEnableCompression(
+      llvm::ArrayRef<llvm::StringRef> supported_compressions);
 
   bool DecodeProcessInfoResponse(StringExtractorGDBRemote &response,
                                  ProcessInstanceInfo &process_info);
@@ -624,7 +629,6 @@ protected:
   Status SendGetTraceDataPacket(StreamGDBRemote &packet, lldb::user_id_t uid,
                                 lldb::tid_t thread_id,
                                 llvm::MutableArrayRef<uint8_t> &buffer,
-                                std::chrono::seconds timeout,
                                 size_t offset);
 
   Status LoadQXferMemoryMap();

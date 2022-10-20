@@ -12,7 +12,7 @@
 #define lldb_NativeRegisterContextLinux_x86_64_h
 
 #include "Plugins/Process/Linux/NativeRegisterContextLinux.h"
-#include "Plugins/Process/Utility/NativeRegisterContextWatchpoint_x86.h"
+#include "Plugins/Process/Utility/NativeRegisterContextDBReg_x86.h"
 #include "Plugins/Process/Utility/RegisterContext_x86.h"
 #include "Plugins/Process/Utility/lldb-x86-register-enums.h"
 #include <sys/uio.h>
@@ -24,7 +24,7 @@ class NativeProcessLinux;
 
 class NativeRegisterContextLinux_x86_64
     : public NativeRegisterContextLinux,
-      public NativeRegisterContextWatchpoint_x86 {
+      public NativeRegisterContextDBReg_x86 {
 public:
   NativeRegisterContextLinux_x86_64(const ArchSpec &target_arch,
                                     NativeThreadProtocol &native_thread);
@@ -41,7 +41,7 @@ public:
   Status WriteRegister(const RegisterInfo *reg_info,
                        const RegisterValue &reg_value) override;
 
-  Status ReadAllRegisterValues(lldb::DataBufferSP &data_sp) override;
+  Status ReadAllRegisterValues(lldb::WritableDataBufferSP &data_sp) override;
 
   Status WriteAllRegisterValues(const lldb::DataBufferSP &data_sp) override;
 

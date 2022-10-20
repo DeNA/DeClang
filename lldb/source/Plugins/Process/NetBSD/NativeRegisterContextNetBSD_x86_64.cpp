@@ -29,8 +29,8 @@
 #include <x86/specialreg.h>
 #include <elf.h>
 #include <err.h>
-#include <stdint.h>
-#include <stdlib.h>
+#include <cstdint>
+#include <cstdlib>
 // clang-format on
 
 using namespace lldb_private;
@@ -267,7 +267,7 @@ NativeRegisterContextNetBSD_x86_64::NativeRegisterContextNetBSD_x86_64(
     const ArchSpec &target_arch, NativeThreadProtocol &native_thread)
     : NativeRegisterContextRegisterInfo(
           native_thread, CreateRegisterInfoInterface(target_arch)),
-      m_regset_offsets({0}) {
+      NativeRegisterContextDBReg_x86(native_thread), m_regset_offsets({0}) {
   assert(m_gpr.size() == GetRegisterInfoInterface().GetGPRSize());
   std::array<uint32_t, MaxRegularRegSet + 1> first_regnos;
 
@@ -527,7 +527,7 @@ Status NativeRegisterContextNetBSD_x86_64::WriteRegister(
 }
 
 Status NativeRegisterContextNetBSD_x86_64::ReadAllRegisterValues(
-    lldb::DataBufferSP &data_sp) {
+    lldb::WritableDataBufferSP &data_sp) {
   Status error;
 
   data_sp.reset(new DataBufferHeap(REG_CONTEXT_SIZE, 0));
@@ -561,7 +561,7 @@ Status NativeRegisterContextNetBSD_x86_64::WriteAllRegisterValues(
     return error;
   }
 
-  uint8_t *src = data_sp->GetBytes();
+  const uint8_t *src = data_sp->GetBytes();
   if (src == nullptr) {
     error.SetErrorStringWithFormat("NativeRegisterContextNetBSD_x86_64::%s "
                                    "DataBuffer::GetBytes() returned a null "

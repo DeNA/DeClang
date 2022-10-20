@@ -271,15 +271,10 @@ void ScheduleDAGInstrs::addPhysRegDataDeps(SUnit *SU, unsigned OperIdx) {
       if (!ImplicitPseudoDef && !ImplicitPseudoUse) {
         Dep.setLatency(SchedModel.computeOperandLatency(SU->getInstr(), OperIdx,
                                                         RegUse, UseOp));
-        ST.adjustSchedDependency(SU, OperIdx, UseSU, UseOp, Dep);
       } else {
         Dep.setLatency(0);
-        // FIXME: We could always let target to adjustSchedDependency(), and
-        // remove this condition, but that currently asserts in Hexagon BE.
-        if (SU->getInstr()->isBundle() || (RegUse && RegUse->isBundle()))
-          ST.adjustSchedDependency(SU, OperIdx, UseSU, UseOp, Dep);
       }
-
+      ST.adjustSchedDependency(SU, OperIdx, UseSU, UseOp, Dep);
       UseSU->addPred(Dep);
     }
   }
@@ -514,7 +509,7 @@ void ScheduleDAGInstrs::addVRegDefDeps(SUnit *SU, unsigned OperIdx) {
 /// TODO: Handle ExitSU "uses" properly.
 void ScheduleDAGInstrs::addVRegUseDeps(SUnit *SU, unsigned OperIdx) {
   const MachineInstr *MI = SU->getInstr();
-  assert(!MI->isDebugInstr());
+  assert(!MI->isDebugOrPseudoInstr());
 
   const MachineOperand &MO = MI->getOperand(OperIdx);
   Register Reg = MO.getReg();
@@ -572,7 +567,7 @@ void ScheduleDAGInstrs::initSUnits() {
   SUnits.reserve(NumRegionInstrs);
 
   for (MachineInstr &MI : make_range(RegionBegin, RegionEnd)) {
-    if (MI.isDebugInstr())
+    if (MI.isDebugOrPseudoInstr())
       continue;
 
     SUnit *SU = newSUnit(&MI);
@@ -807,11 +802,12 @@ void ScheduleDAGInstrs::buildSchedGraph(AAResults *AA,
       DbgMI = nullptr;
     }
 
-    if (MI.isDebugValue() || MI.isDebugRef()) {
+    if (MI.isDebugValue() || MI.isDebugPHI()) {
       DbgMI = &MI;
       continue;
     }
-    if (MI.isDebugLabel())
+
+    if (MI.isDebugLabel() || MI.isDebugRef() || MI.isPseudoProbe())
       continue;
 
     SUnit *SU = MISUnitMap[&MI];
@@ -1117,7 +1113,7 @@ void ScheduleDAGInstrs::fixupKills(MachineBasicBlock &MBB) {
 
   // Examine block from end to start...
   for (MachineInstr &MI : make_range(MBB.rbegin(), MBB.rend())) {
-    if (MI.isDebugInstr())
+    if (MI.isDebugOrPseudoInstr())
       continue;
 
     // Update liveness.  Registers that are defed but not used in this
@@ -1152,7 +1148,7 @@ void ScheduleDAGInstrs::fixupKills(MachineBasicBlock &MBB) {
       while (I->isBundledWithSucc())
         ++I;
       do {
-        if (!I->isDebugInstr())
+        if (!I->isDebugOrPseudoInstr())
           toggleKills(MRI, LiveRegs, *I, true);
         --I;
       } while (I != Bundle);

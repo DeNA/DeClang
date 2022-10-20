@@ -13,7 +13,9 @@ add_mlir_dialect_library(MLIRShapeOpsTransforms
 
 target_link_libraries(MLIRShapeOpsTransforms
   PUBLIC
+  MLIRArithmetic
   MLIRIR
+  MLIRMemRef
   MLIRPass
   MLIRShape
   MLIRSupport

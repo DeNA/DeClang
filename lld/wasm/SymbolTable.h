@@ -54,12 +54,13 @@ public:
   Symbol *addDefinedFunction(StringRef name, uint32_t flags, InputFile *file,
                              InputFunction *function);
   Symbol *addDefinedData(StringRef name, uint32_t flags, InputFile *file,
-                         InputSegment *segment, uint64_t address,
-                         uint64_t size);
+                         InputChunk *segment, uint64_t address, uint64_t size);
   Symbol *addDefinedGlobal(StringRef name, uint32_t flags, InputFile *file,
                            InputGlobal *g);
-  Symbol *addDefinedEvent(StringRef name, uint32_t flags, InputFile *file,
-                          InputEvent *e);
+  Symbol *addDefinedTag(StringRef name, uint32_t flags, InputFile *file,
+                        InputTag *t);
+  Symbol *addDefinedTable(StringRef name, uint32_t flags, InputFile *file,
+                          InputTable *t);
 
   Symbol *addUndefinedFunction(StringRef name,
                                llvm::Optional<StringRef> importName,
@@ -73,6 +74,17 @@ public:
                              llvm::Optional<StringRef> importModule,
                              uint32_t flags, InputFile *file,
                              const WasmGlobalType *type);
+  Symbol *addUndefinedTable(StringRef name,
+                            llvm::Optional<StringRef> importName,
+                            llvm::Optional<StringRef> importModule,
+                            uint32_t flags, InputFile *file,
+                            const WasmTableType *type);
+  Symbol *addUndefinedTag(StringRef name, llvm::Optional<StringRef> importName,
+                          llvm::Optional<StringRef> importModule,
+                          uint32_t flags, InputFile *file,
+                          const WasmSignature *sig);
+
+  TableSymbol *resolveIndirectFunctionTable(bool required);
 
   void addLazy(ArchiveFile *f, const llvm::object::Archive::Symbol *sym);
 
@@ -84,8 +96,9 @@ public:
   DefinedFunction *addSyntheticFunction(StringRef name, uint32_t flags,
                                         InputFunction *function);
   DefinedData *addOptionalDataSymbol(StringRef name, uint64_t value = 0);
-  DefinedGlobal *addOptionalGlobalSymbols(StringRef name, uint32_t flags,
-                                          InputGlobal *global);
+  DefinedGlobal *addOptionalGlobalSymbol(StringRef name, InputGlobal *global);
+  DefinedTable *addSyntheticTable(StringRef name, uint32_t flags,
+                                  InputTable *global);
 
   void handleSymbolVariants();
   void handleWeakUndefines();
@@ -96,6 +109,7 @@ public:
   std::vector<BitcodeFile *> bitcodeFiles;
   std::vector<InputFunction *> syntheticFunctions;
   std::vector<InputGlobal *> syntheticGlobals;
+  std::vector<InputTable *> syntheticTables;
 
 private:
   std::pair<Symbol *, bool> insert(StringRef name, const InputFile *file);
@@ -106,6 +120,9 @@ private:
   InputFunction *replaceWithUnreachable(Symbol *sym, const WasmSignature &sig,
                                         StringRef debugName);
   void replaceWithUndefined(Symbol *sym);
+
+  TableSymbol *createDefinedIndirectFunctionTable(StringRef name);
+  TableSymbol *createUndefinedIndirectFunctionTable(StringRef name);
 
   // Maps symbol names to index into the symVector.  -1 means that symbols
   // is to not yet in the vector but it should have tracing enabled if it is

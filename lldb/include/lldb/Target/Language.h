@@ -34,8 +34,8 @@ public:
     public:
       virtual bool IsValid() = 0;
 
-      virtual bool DumpToStream(Stream &stream,
-                                bool print_help_if_available) = 0;
+      virtual bool DumpToStream(Stream &stream, bool print_help_if_available,
+                                ExecutionContextScope *exe_scope = nullptr) = 0;
 
       virtual ~Result() = default;
     };
@@ -62,9 +62,11 @@ public:
 
       bool IsValid() override { return m_compiler_type.IsValid(); }
 
-      bool DumpToStream(Stream &stream, bool print_help_if_available) override {
+      bool DumpToStream(Stream &stream, bool print_help_if_available,
+                        ExecutionContextScope *exe_scope = nullptr) override {
         if (IsValid()) {
-          m_compiler_type.DumpTypeDescription(&stream);
+          m_compiler_type.DumpTypeDescription(
+              &stream, lldb::eDescriptionLevelFull, exe_scope);
           stream.EOL();
           return true;
         }
@@ -184,13 +186,30 @@ public:
 
   virtual const char *GetLanguageSpecificTypeLookupHelp();
 
+  class MethodNameVariant {
+    ConstString m_name;
+    lldb::FunctionNameType m_type;
+
+  public:
+    MethodNameVariant(ConstString name, lldb::FunctionNameType type)
+        : m_name(name), m_type(type) {}
+    ConstString GetName() const { return m_name; }
+    lldb::FunctionNameType GetType() const { return m_type; }
+  };
   // If a language can have more than one possible name for a method, this
   // function can be used to enumerate them. This is useful when doing name
   // lookups.
-  virtual std::vector<ConstString>
+  virtual std::vector<Language::MethodNameVariant>
   GetMethodNameVariants(ConstString method_name) const {
-    return std::vector<ConstString>();
+    return std::vector<Language::MethodNameVariant>();
   };
+
+  /// Returns true iff the given symbol name is compatible with the mangling
+  /// scheme of this language.
+  ///
+  /// This function should only return true if there is a high confidence
+  /// that the name actually belongs to this language.
+  virtual bool SymbolNameFitsToLanguage(Mangled name) const { return false; }
 
   // if an individual data formatter can apply to several types and cross a
   // language boundary it makes sense for individual languages to want to
@@ -225,6 +244,14 @@ public:
                                       const ExecutionContext *exe_ctx,
                                       FunctionNameRepresentation representation,
                                       Stream &s);
+
+  virtual ConstString
+  GetDemangledFunctionNameWithoutArguments(Mangled mangled) const {
+    if (ConstString demangled = mangled.GetDemangledName())
+      return demangled;
+
+    return mangled.GetMangledName();
+  }
 
   virtual void GetExceptionResolverDescription(bool catch_on, bool throw_on,
                                                Stream &s);
@@ -267,6 +294,19 @@ public:
   static LanguageSet GetLanguagesSupportingTypeSystems();
   static LanguageSet GetLanguagesSupportingTypeSystemsForExpressions();
   static LanguageSet GetLanguagesSupportingREPLs();
+
+  // Given a mangled function name, calculates some alternative manglings since
+  // the compiler mangling may not line up with the symbol we are expecting.
+  virtual std::vector<ConstString>
+  GenerateAlternateFunctionManglings(const ConstString mangled) const {
+    return std::vector<ConstString>();
+  }
+
+  virtual ConstString
+  FindBestAlternateFunctionMangledName(const Mangled mangled,
+                                       const SymbolContext &sym_ctx) const {
+    return ConstString();
+  }
 
 protected:
   // Classes that inherit from Language can see and modify these

@@ -8,31 +8,31 @@
 
 #include "ILogbTest.h"
 
+#include "src/__support/FPUtil/FPBits.h"
+#include "src/__support/FPUtil/ManipulationFunctions.h"
+#include "src/__support/FPUtil/TestHelpers.h"
 #include "src/math/ilogbl.h"
-#include "utils/FPUtil/FPBits.h"
-#include "utils/FPUtil/ManipulationFunctions.h"
-#include "utils/FPUtil/TestHelpers.h"
 #include "utils/UnitTest/Test.h"
 #include <math.h>
 
 using RunContext = __llvm_libc::testing::RunContext;
 
-TEST_F(ILogbTest, SpecialNumbers_ilogbl) {
+TEST_F(LlvmLibcILogbTest, SpecialNumbers_ilogbl) {
   testSpecialNumbers<long double>(&__llvm_libc::ilogbl);
 }
 
-TEST_F(ILogbTest, PowersOfTwo_ilogbl) {
+TEST_F(LlvmLibcILogbTest, PowersOfTwo_ilogbl) {
   testPowersOfTwo<long double>(&__llvm_libc::ilogbl);
 }
 
-TEST_F(ILogbTest, SomeIntegers_ilogbl) {
+TEST_F(LlvmLibcILogbTest, SomeIntegers_ilogbl) {
   testSomeIntegers<long double>(&__llvm_libc::ilogbl);
 }
 
-TEST_F(ILogbTest, SubnormalRange_ilogbl) {
+TEST_F(LlvmLibcILogbTest, SubnormalRange_ilogbl) {
   testSubnormalRange<long double>(&__llvm_libc::ilogbl);
 }
 
-TEST_F(ILogbTest, NormalRange_ilogbl) {
+TEST_F(LlvmLibcILogbTest, NormalRange_ilogbl) {
   testNormalRange<long double>(&__llvm_libc::ilogbl);
 }

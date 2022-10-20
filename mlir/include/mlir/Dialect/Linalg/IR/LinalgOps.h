@@ -10,19 +10,22 @@
 #define MLIR_DIALECT_LINALG_LINALGOPS_H_
 
 #include "mlir/Dialect/Linalg/IR/LinalgTypes.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BlockAndValueMapping.h"
-#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Interfaces/CopyOpInterface.h"
+#include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/TilingInterface.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
@@ -31,20 +34,12 @@
 namespace mlir {
 namespace linalg {
 
-class ConvOp;
 class LinalgOp;
-class PoolingMaxOp;
-class PoolingMinOp;
-class PoolingSumOp;
 
 // TOFO: allow an extra ValueRange to specify an indexing and allow
 // non-hyperrectangular shapes.
 using LoopRangeBuilder =
-    std::function<SmallVector<Range, 4>(OpBuilder &, Location)>;
-
-/// Returns the values obtained by applying `map` to the list of values.
-SmallVector<Value, 4> applyMapToValues(OpBuilder &b, Location loc,
-                                       AffineMap map, ValueRange values);
+    std::function<SmallVector<Range, 4>(ImplicitLocOpBuilder)>;
 
 /// Provide a very simple inference procedure to build the loop ranges from the
 /// op and its operands. This only works with permutation affine maps and
@@ -54,9 +49,6 @@ SmallVector<Value, 4> applyMapToValues(OpBuilder &b, Location loc,
 /// As a consequence, we relax the default behavior very conservatively and
 /// provide an op-specified hook so that Linalg ops may override the behavior.
 LoopRangeBuilder defaultLoopRangesBuilder(LinalgOp op);
-
-using ReassociationIndices = SmallVector<int64_t, 2>;
-using ReassociationExprs = SmallVector<AffineExpr, 2>;
 
 /// Returns the name mangled library call name to disambiguate between different
 /// overloads at the C level. The name mangling scheme is basic and uses MLIR
@@ -68,33 +60,25 @@ using ReassociationExprs = SmallVector<AffineExpr, 2>;
 ///
 /// Examples:
 ///
-/// 1. linalg.fill(%A, %f) : memref<f32>, f32
-///   name mangles into `linalg_fill_viewf32_f32_impl`
+/// 1. linalg.fill(%f, %A) : f32, memref<f32>
+///   name mangles into `linalg_fill_f32_viewf32`
 ///
 /// 2. linalg.dot %A, %B, %C :
 ///      (memref<?xf32, stride_specification>,
 ///       memref<?xf32, stride_specification>, memref<f32>)
-///   name mangles into `linalg_dot_viewxf32_viewxf32_viewf32_impl`
+///   name mangles into `linalg_dot_viewxf32_viewxf32_viewf32`
 ///
 /// 3. linalg.matmul(...) :
 ///      memref<?x?xf32, stride_specification>,
 ///      memref<?x?xf32, stride_specification>,
 ///      memref<?x?xf32, stride_specification>
-///   name mangles into `linalg_matmul_viewxxf32_viewxxf32_viewxxf32_impl`
+///   name mangles into `linalg_matmul_viewxxf32_viewxxf32_viewxxf32`
 std::string generateLibraryCallName(Operation *op);
 
 /// Returns `num` AffineDimExpr dimensions at positions
 ///   [startIdx, startIdx + num) and increments `startIdx` to `startIdx + num`.
 SmallVector<AffineExpr, 4> makeAffineDimExprs(unsigned num, unsigned &startIdx,
                                               MLIRContext *context);
-
-/// Builds the indexing expressions for a ConvOp/PoolingOp `op`. Returns the
-/// vector of AffineMaps representing:
-///   `stride[i] * outputDims[i] + dilation[i] * windowDims[i] - pad_low[i]`
-template <typename PoolingOp>
-extern SmallVector<AffineExpr, 4>
-weightedPoolingInputIndex(PoolingOp op, ArrayRef<AffineExpr> outputDims,
-                          ArrayRef<AffineExpr> windowDims);
 
 /// Returns `maybeMap.get()` if `maybeMap` is set, otherwise returns the
 /// symbol-less identity map of `rank`.
@@ -116,12 +100,7 @@ LogicalResult verifyStructuredOpInterface(Operation *op);
 } // namespace linalg
 } // namespace mlir
 
-namespace mlir {
-namespace linalg {
-class IndexedGenericOp;
-} // namespace linalg
-} // namespace mlir
-#include "mlir/Dialect/Linalg/IR/LinalgStructuredOpsInterfaces.h.inc"
+#include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h.inc"

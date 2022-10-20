@@ -22,9 +22,17 @@
 //===----------------------------------------------------------------------===//
 // Visibility annotations.
 // Use MLIR_CAPI_EXPORTED for exported functions.
+//
+// On Windows, if MLIR_CAPI_ENABLE_WINDOWS_DLL_DECLSPEC is defined, then
+// __declspec(dllexport) and __declspec(dllimport) will be generated. This
+// can only be enabled if actually building DLLs. It is generally, mutually
+// exclusive with the use of other mechanisms for managing imports/exports
+// (i.e. CMake's WINDOWS_EXPORT_ALL_SYMBOLS feature).
 //===----------------------------------------------------------------------===//
 
-#if defined(MLIR_CAPI_DISABLE_VISIBILITY_ANNOTATIONS)
+#if (defined(_WIN32) || defined(__CYGWIN__)) &&                                \
+    !defined(MLIR_CAPI_ENABLE_WINDOWS_DLL_DECLSPEC)
+// Visibility annotations disabled.
 #define MLIR_CAPI_EXPORTED
 #elif defined(_WIN32) || defined(__CYGWIN__)
 // Windows visibility declarations.
@@ -46,18 +54,18 @@ extern "C" {
 // MlirStringRef.
 //===----------------------------------------------------------------------===//
 
-/** A pointer to a sized fragment of a string, not necessarily null-terminated.
- * Does not own the underlying string. This is equivalent to llvm::StringRef.
- */
+/// A pointer to a sized fragment of a string, not necessarily null-terminated.
+/// Does not own the underlying string. This is equivalent to llvm::StringRef.
+
 struct MlirStringRef {
-  const char *data; /**< Pointer to the first symbol. */
-  size_t length;    /**< Length of the fragment. */
+  const char *data; ///< Pointer to the first symbol.
+  size_t length;    ///< Length of the fragment.
 };
 typedef struct MlirStringRef MlirStringRef;
 
-/** Constructs a string reference from the pointer and length. The pointer need
- * not reference to a null-terminated string.
- */
+/// Constructs a string reference from the pointer and length. The pointer need
+/// not reference to a null-terminated string.
+
 inline static MlirStringRef mlirStringRefCreate(const char *str,
                                                 size_t length) {
   MlirStringRef result;
@@ -66,30 +74,28 @@ inline static MlirStringRef mlirStringRefCreate(const char *str,
   return result;
 }
 
-/** Constructs a string reference from a null-terminated C string. Prefer
- * mlirStringRefCreate if the length of the string is known.
- */
+/// Constructs a string reference from a null-terminated C string. Prefer
+/// mlirStringRefCreate if the length of the string is known.
 MLIR_CAPI_EXPORTED MlirStringRef
 mlirStringRefCreateFromCString(const char *str);
 
-/** A callback for returning string references.
- *
- * This function is called back by the functions that need to return a reference
- * to the portion of the string with the following arguments:
- *   - an MlirStringRef representing the current portion of the string
- *   - a pointer to user data forwarded from the printing call.
- */
+/// A callback for returning string references.
+///
+/// This function is called back by the functions that need to return a
+/// reference to the portion of the string with the following arguments:
+///  - an MlirStringRef representing the current portion of the string
+///  - a pointer to user data forwarded from the printing call.
 typedef void (*MlirStringCallback)(MlirStringRef, void *);
 
 //===----------------------------------------------------------------------===//
 // MlirLogicalResult.
 //===----------------------------------------------------------------------===//
 
-/** A logical result value, essentially a boolean with named states. LLVM
- * convention for using boolean values to designate success or failure of an
- * operation is a moving target, so MLIR opted for an explicit class.
- * Instances of MlirLogicalResult must only be inspected using the associated
- * functions. */
+/// A logical result value, essentially a boolean with named states. LLVM
+/// convention for using boolean values to designate success or failure of an
+/// operation is a moving target, so MLIR opted for an explicit class.
+/// Instances of MlirLogicalResult must only be inspected using the associated
+/// functions.
 struct MlirLogicalResult {
   int8_t value;
 };

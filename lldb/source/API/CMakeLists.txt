@@ -86,7 +86,6 @@ add_lldb_library(liblldb SHARED ${option_framework}
   SBThreadCollection.cpp
   SBThreadPlan.cpp
   SBTrace.cpp
-  SBTraceOptions.cpp
   SBType.cpp
   SBTypeCategory.cpp
   SBTypeEnumMember.cpp
@@ -105,7 +104,6 @@ add_lldb_library(liblldb SHARED ${option_framework}
   ${lldb_lua_wrapper}
 
   LINK_LIBS
-    lldbBase
     lldbBreakpoint
     lldbCore
     lldbDataFormatters
@@ -116,6 +114,7 @@ add_lldb_library(liblldb SHARED ${option_framework}
     lldbSymbol
     lldbTarget
     lldbUtility
+    lldbVersion
     ${LLDB_ALL_PLUGINS}
 ## BEGIN SWIFT
     ${SWIFT_ALL_LIBS}
@@ -125,6 +124,10 @@ add_lldb_library(liblldb SHARED ${option_framework}
 
   ${option_install_prefix}
 )
+
+# BEGIN Swift Mods
+add_properties_for_swift_modules(liblldb)
+# END Swift Mods
 
 # lib/pythonX.Y/dist-packages/lldb/_lldb.so is a symlink to lib/liblldb.so,
 # which depends on lib/libLLVM*.so (BUILD_SHARED_LIBS) or lib/libLLVM-10git.so
@@ -144,6 +147,7 @@ if(Python3_RPATH)
       "@loader_path/../../../../Developer/Library/Frameworks/"
       "@loader_path/../../../../Frameworks"
       "@loader_path/../../../"
+      "/Library/Developer/CommandLineTools/Library/Frameworks"
       "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/"
     )
 endif()
@@ -203,13 +207,7 @@ if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
   set_target_properties(liblldb_exports PROPERTIES FOLDER "lldb misc")
 endif()
 
-if (MSVC)
-  # Only MSVC has the ABI compatibility problem and avoids using FindPythonLibs,
-  # so only it needs to explicitly link against ${Python3_LIBRARIES}
-  if (LLDB_ENABLE_PYTHON)
-    target_link_libraries(liblldb PRIVATE ${Python3_LIBRARIES})
-  endif()
-else()
+if (NOT MSVC)
   set_target_properties(liblldb
     PROPERTIES
     OUTPUT_NAME lldb

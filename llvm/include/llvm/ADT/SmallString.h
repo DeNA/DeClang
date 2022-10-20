@@ -40,35 +40,15 @@ public:
   template<typename ItTy>
   SmallString(ItTy S, ItTy E) : SmallVector<char, InternalLen>(S, E) {}
 
-  // Note that in order to add new overloads for append & assign, we have to
-  // duplicate the inherited versions so as not to inadvertently hide them.
-
   /// @}
   /// @name String Assignment
   /// @{
 
-  /// Assign from a repeated element.
-  void assign(size_t NumElts, char Elt) {
-    this->SmallVectorImpl<char>::assign(NumElts, Elt);
-  }
-
-  /// Assign from an iterator pair.
-  template<typename in_iter>
-  void assign(in_iter S, in_iter E) {
-    this->clear();
-    SmallVectorImpl<char>::append(S, E);
-  }
+  using SmallVector<char, InternalLen>::assign;
 
   /// Assign from a StringRef.
   void assign(StringRef RHS) {
-    this->clear();
-    SmallVectorImpl<char>::append(RHS.begin(), RHS.end());
-  }
-
-  /// Assign from a SmallVector.
-  void assign(const SmallVectorImpl<char> &RHS) {
-    this->clear();
-    SmallVectorImpl<char>::append(RHS.begin(), RHS.end());
+    SmallVectorImpl<char>::assign(RHS.begin(), RHS.end());
   }
 
   /// Assign from a list of StringRefs.
@@ -81,23 +61,10 @@ public:
   /// @name String Concatenation
   /// @{
 
-  /// Append from an iterator pair.
-  template<typename in_iter>
-  void append(in_iter S, in_iter E) {
-    SmallVectorImpl<char>::append(S, E);
-  }
-
-  void append(size_t NumInputs, char Elt) {
-    SmallVectorImpl<char>::append(NumInputs, Elt);
-  }
+  using SmallVector<char, InternalLen>::append;
 
   /// Append from a StringRef.
   void append(StringRef RHS) {
-    SmallVectorImpl<char>::append(RHS.begin(), RHS.end());
-  }
-
-  /// Append from a SmallVector.
-  void append(const SmallVectorImpl<char> &RHS) {
     SmallVectorImpl<char>::append(RHS.begin(), RHS.end());
   }
 
@@ -126,8 +93,8 @@ public:
   }
 
   /// Check for string equality, ignoring case.
-  bool equals_lower(StringRef RHS) const {
-    return str().equals_lower(RHS);
+  bool equals_insensitive(StringRef RHS) const {
+    return str().equals_insensitive(RHS);
   }
 
   /// Compare two strings; the result is -1, 0, or 1 if this string is
@@ -136,9 +103,9 @@ public:
     return str().compare(RHS);
   }
 
-  /// compare_lower - Compare two strings, ignoring case.
-  int compare_lower(StringRef RHS) const {
-    return str().compare_lower(RHS);
+  /// compare_insensitive - Compare two strings, ignoring case.
+  int compare_insensitive(StringRef RHS) const {
+    return str().compare_insensitive(RHS);
   }
 
   /// compare_numeric - Compare two strings, treating sequences of digits as

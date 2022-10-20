@@ -29,6 +29,7 @@
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Symbol/Variable.h"
 #include "lldb/Symbol/VariableList.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 
 #include "llvm/DebugInfo/CodeView/CVRecord.h"
@@ -256,7 +257,7 @@ SymbolFile *SymbolFileNativePDB::CreateInstance(ObjectFileSP objfile_sp) {
 SymbolFileNativePDB::SymbolFileNativePDB(ObjectFileSP objfile_sp)
     : SymbolFile(std::move(objfile_sp)) {}
 
-SymbolFileNativePDB::~SymbolFileNativePDB() {}
+SymbolFileNativePDB::~SymbolFileNativePDB() = default;
 
 uint32_t SymbolFileNativePDB::CalculateAbilities() {
   uint32_t abilities = 0;
@@ -307,8 +308,8 @@ void SymbolFileNativePDB::InitializeObject() {
   auto ts_or_err = m_objfile_sp->GetModule()->GetTypeSystemForLanguage(
       lldb::eLanguageTypeC_plus_plus);
   if (auto err = ts_or_err.takeError()) {
-    LLDB_LOG_ERROR(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_SYMBOLS),
-                   std::move(err), "Failed to initialize");
+    LLDB_LOG_ERROR(GetLog(LLDBLog::Symbols), std::move(err),
+                   "Failed to initialize");
   } else {
     ts_or_err->SetSymbolFile(this);
     auto *clang = llvm::cast_or_null<TypeSystemClang>(&ts_or_err.get());
@@ -1042,7 +1043,7 @@ static void TerminateLineSequence(LineTable &table,
   table.AppendLineEntryToSequence(seq.get(), base_addr + block.CodeSize,
                                   last_line, 0, file_number, false, false,
                                   false, false, true);
-  table.InsertSequence(seq.release());
+  table.InsertSequence(seq.get());
 }
 
 bool SymbolFileNativePDB::ParseLineTable(CompileUnit &comp_unit) {
@@ -1571,9 +1572,8 @@ SymbolFileNativePDB::GetTypeSystemForLanguage(lldb::LanguageType language) {
   return type_system_or_err;
 }
 
-ConstString SymbolFileNativePDB::GetPluginName() {
-  static ConstString g_name("pdb");
-  return g_name;
+uint64_t SymbolFileNativePDB::GetDebugInfoSize() {
+  // PDB files are a separate file that contains all debug info.
+  return m_index->pdb().getFileSize();
 }
 
-uint32_t SymbolFileNativePDB::GetPluginVersion() { return 1; }

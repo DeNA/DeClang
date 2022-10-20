@@ -15,7 +15,7 @@
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
@@ -23,10 +23,6 @@
 
 #include "Plugins/Language/ObjC/NSDictionary.h"
 
-#include "swift/AST/ASTContext.h"
-#include "swift/AST/Types.h"
-#include "swift/Remote/RemoteAddress.h"
-#include "swift/RemoteAST/RemoteAST.h"
 #include "llvm/ADT/StringRef.h"
 
 #include <algorithm>
@@ -294,16 +290,17 @@ HashedCollectionConfig::StorageObjectAtAddress(
   // same address.
   Status error;
   ExecutionContextScope *exe_scope = exe_ctx.GetBestExecutionContextScope();
-  llvm::Optional<SwiftASTContextReader> reader =
-    process_sp->GetTarget().GetScratchSwiftASTContext(error, *exe_scope);
+  llvm::Optional<SwiftScratchContextReader> reader =
+    process_sp->GetTarget().GetSwiftScratchContext(error, *exe_scope);
   if (!reader)
     return nullptr;
   if (error.Fail())
     return nullptr;
-  SwiftASTContext *ast_ctx = reader->get();
-
+  auto scratch_ctx = reader->get();
+  if (!scratch_ctx)
+    return nullptr;
   CompilerType rawStorage_type =
-      ast_ctx->GetTypeFromMangledTypename(m_nativeStorageRoot_mangled);
+      scratch_ctx->GetTypeFromMangledTypename(m_nativeStorageRoot_mangled);
   if (!rawStorage_type.IsValid())
     return nullptr;
 
@@ -368,8 +365,15 @@ HashedCollectionConfig::CreateNativeHandler(
   }
   
   if (typeName.startswith(m_nativeStorage_demangledPrefix.GetStringRef())) {
-    auto key_type = SwiftASTContext::GetGenericArgumentType(type, 0);
-    auto value_type = SwiftASTContext::GetGenericArgumentType(type, 1);
+    auto *type_system =
+        llvm::dyn_cast_or_null<TypeSystemSwift>(type.GetTypeSystem());
+    if (!type_system)
+      return nullptr;
+
+    auto key_type =
+        type_system->GetGenericArgumentType(type.GetOpaqueQualType(), 0);
+    auto value_type =
+        type_system->GetGenericArgumentType(type.GetOpaqueQualType(), 1);
     if (key_type.IsValid()) {
       return _CreateNativeHandler(dynamic_storage_sp, key_type, value_type);
     }
@@ -379,8 +383,12 @@ HashedCollectionConfig::CreateNativeHandler(
   // is some valid storage class instance, and attempt to get
   // key/value types from value_sp.
   type = value_sp->GetCompilerType();
-  CompilerType key_type = SwiftASTContext::GetGenericArgumentType(type, 0);
-  CompilerType value_type = SwiftASTContext::GetGenericArgumentType(type, 1);
+  auto *type_system =
+      llvm::dyn_cast_or_null<TypeSystemSwift>(type.GetTypeSystem());
+  if (!type_system)
+    return nullptr;
+  CompilerType key_type = type_system->GetGenericArgumentType(type.GetOpaqueQualType(), 0);
+  CompilerType value_type = type_system->GetGenericArgumentType(type.GetOpaqueQualType(), 1);
   if (key_type.IsValid()) {
     return _CreateNativeHandler(storage_sp, key_type, value_type);
   }
@@ -443,31 +451,19 @@ NativeHashedStorageHandler::NativeHashedStorageHandler(
   if (value_type) {
     auto value_type_stride = value_type.GetByteStride(m_process);
     m_value_stride = value_type_stride ? *value_type_stride : 0;
-    if (TypeSystemSwift *swift_ast =
+    if (TypeSystemSwift *type_system =
             llvm::dyn_cast_or_null<TypeSystemSwift>(key_type.GetTypeSystem())) {
-      llvm::Optional<SwiftASTContextReader> scratch_ctx_reader = nativeStorage_sp->GetScratchSwiftASTContext();
-      if (!scratch_ctx_reader)
-        return;
       auto *runtime = SwiftLanguageRuntime::Get(m_process);
       if (!runtime)
         return;
-      std::vector<SwiftASTContext::TupleElement> tuple_elements{
+      std::vector<TypeSystemSwift::TupleElement> tuple_elements{
           {g_key, key_type}, {g_value, value_type}};
-      m_element_type = swift_ast->CreateTupleType(tuple_elements);
-      auto *swift_type = reinterpret_cast<::swift::TypeBase *>(
-          m_element_type.GetCanonicalType().GetOpaqueQualType());
-      auto element_stride = m_element_type.GetByteStride(m_process);
-      if (element_stride) {
+      m_element_type = type_system->CreateTupleType(tuple_elements);
+      if (auto result = runtime->GetMemberVariableOffset(
+              m_element_type, nativeStorage_sp.get(), "1"))
+        m_key_stride_padded = *result;
+      else if (auto element_stride = m_element_type.GetByteStride(m_process))
         m_key_stride_padded = *element_stride - m_value_stride;
-      }
-      if (llvm::isa<::swift::TupleType>(swift_type)) {
-        Status error;
-        llvm::Optional<uint64_t> result = runtime->GetMemberVariableOffset(
-            {swift_ast, swift_type}, nativeStorage_sp.get(), "1",
-            &error);
-        if (result)
-          m_key_stride_padded = result.getValue();
-      }
     }
   } else {
     m_element_type = key_type;
@@ -601,8 +597,8 @@ NativeHashedStorageHandler::GetElementAtIndex(size_t idx) {
   if (idx >= m_occupiedBuckets.size())
     return nullptr;
   Bucket bucket = m_occupiedBuckets[idx];
-  DataBufferSP full_buffer_sp(
-    new DataBufferHeap(m_key_stride_padded + m_value_stride, 0));
+  WritableDataBufferSP full_buffer_sp(
+      new DataBufferHeap(m_key_stride_padded + m_value_stride, 0));
   uint8_t *key_buffer_ptr = full_buffer_sp->GetBytes();
   uint8_t *value_buffer_ptr =
     m_value_stride ? (key_buffer_ptr + m_key_stride_padded) : nullptr;

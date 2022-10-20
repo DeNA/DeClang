@@ -1,5 +1,0 @@
-[component_0]
-type = Library
-name = AntiHack
-parent = Transforms
-required_libraries = Linker

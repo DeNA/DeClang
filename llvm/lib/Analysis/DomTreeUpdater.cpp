@@ -166,7 +166,7 @@ bool DomTreeUpdater::hasPendingPostDomTreeUpdates() const {
 bool DomTreeUpdater::isBBPendingDeletion(llvm::BasicBlock *DelBB) const {
   if (Strategy == UpdateStrategy::Eager || DeletedBBs.empty())
     return false;
-  return DeletedBBs.count(DelBB) != 0;
+  return DeletedBBs.contains(DelBB);
 }
 
 // The DT and PDT require the nodes related to updates
@@ -232,6 +232,7 @@ void DomTreeUpdater::applyUpdates(ArrayRef<DominatorTree::UpdateType> Updates) {
     return;
 
   if (Strategy == UpdateStrategy::Lazy) {
+    PendUpdates.reserve(PendUpdates.size() + Updates.size());
     for (const auto &U : Updates)
       if (!isSelfDominance(U))
         PendUpdates.push_back(U);

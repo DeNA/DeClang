@@ -70,7 +70,8 @@ bool llvm::isAllocaPromotable(const AllocaInst *AI) {
       if (LI->isVolatile())
         return false;
     } else if (const StoreInst *SI = dyn_cast<StoreInst>(U)) {
-      if (SI->getOperand(0) == AI)
+      if (SI->getValueOperand() == AI ||
+          SI->getValueOperand()->getType() != AI->getAllocatedType())
         return false; // Don't allow a store OF the AI, only INTO the AI.
       // Note that atomic stores can be transformed; atomic semantics do
       // not have any meaning for a local alloca.
@@ -129,8 +130,8 @@ struct AllocaInfo {
     // As we scan the uses of the alloca instruction, keep track of stores,
     // and decide whether all of the loads and stores to the alloca are within
     // the same basic block.
-    for (auto UI = AI->user_begin(), E = AI->user_end(); UI != E;) {
-      Instruction *User = cast<Instruction>(*UI++);
+    for (User *U : AI->users()) {
+      Instruction *User = cast<Instruction>(U);
 
       if (StoreInst *SI = dyn_cast<StoreInst>(User)) {
         // Remember the basic blocks which define new values for the alloca
@@ -306,17 +307,15 @@ static void addAssumeNonNull(AssumptionCache *AC, LoadInst *LI) {
   LoadNotNull->insertAfter(LI);
   CallInst *CI = CallInst::Create(AssumeIntrinsic, {LoadNotNull});
   CI->insertAfter(LoadNotNull);
-  AC->registerAssumption(CI);
+  AC->registerAssumption(cast<AssumeInst>(CI));
 }
 
 static void removeIntrinsicUsers(AllocaInst *AI) {
   // Knowing that this alloca is promotable, we know that it's safe to kill all
   // instructions except for load and store.
 
-  for (auto UI = AI->use_begin(), UE = AI->use_end(); UI != UE;) {
-    Instruction *I = cast<Instruction>(UI->getUser());
-    Use &U = *UI;
-    ++UI;
+  for (Use &U : llvm::make_early_inc_range(AI->uses())) {
+    Instruction *I = cast<Instruction>(U.getUser());
     if (isa<LoadInst>(I) || isa<StoreInst>(I))
       continue;
 
@@ -330,10 +329,8 @@ static void removeIntrinsicUsers(AllocaInst *AI) {
       // The only users of this bitcast/GEP instruction are lifetime intrinsics.
       // Follow the use/def chain to erase them now instead of leaving it for
       // dead code elimination later.
-      for (auto UUI = I->use_begin(), UUE = I->use_end(); UUI != UUE;) {
-        Instruction *Inst = cast<Instruction>(UUI->getUser());
-        Use &UU = *UUI;
-        ++UUI;
+      for (Use &UU : llvm::make_early_inc_range(I->uses())) {
+        Instruction *Inst = cast<Instruction>(UU.getUser());
 
         // Drop the use of I in droppable instructions.
         if (Inst->isDroppable()) {
@@ -366,8 +363,8 @@ static bool rewriteSingleStoreAlloca(AllocaInst *AI, AllocaInfo &Info,
   // Clear out UsingBlocks.  We will reconstruct it here if needed.
   Info.UsingBlocks.clear();
 
-  for (auto UI = AI->user_begin(), E = AI->user_end(); UI != E;) {
-    Instruction *UserInst = cast<Instruction>(*UI++);
+  for (User *U : make_early_inc_range(AI->users())) {
+    Instruction *UserInst = cast<Instruction>(U);
     if (UserInst == OnlyStore)
       continue;
     LoadInst *LI = cast<LoadInst>(UserInst);
@@ -403,7 +400,7 @@ static bool rewriteSingleStoreAlloca(AllocaInst *AI, AllocaInfo &Info,
     // If the replacement value is the load, this must occur in unreachable
     // code.
     if (ReplVal == LI)
-      ReplVal = UndefValue::get(LI->getType());
+      ReplVal = PoisonValue::get(LI->getType());
 
     // If the load was marked as nonnull we don't want to lose
     // that information when we erase this Load. So we preserve
@@ -480,8 +477,8 @@ static bool promoteSingleBlockAlloca(AllocaInst *AI, const AllocaInfo &Info,
 
   // Walk all of the loads from this alloca, replacing them with the nearest
   // store above them, if any.
-  for (auto UI = AI->user_begin(), E = AI->user_end(); UI != E;) {
-    LoadInst *LI = dyn_cast<LoadInst>(*UI++);
+  for (User *U : make_early_inc_range(AI->users())) {
+    LoadInst *LI = dyn_cast<LoadInst>(U);
     if (!LI)
       continue;
 
@@ -512,7 +509,7 @@ static bool promoteSingleBlockAlloca(AllocaInst *AI, const AllocaInfo &Info,
       // If the replacement value is the load, this must occur in unreachable
       // code.
       if (ReplVal == LI)
-        ReplVal = UndefValue::get(LI->getType());
+        ReplVal = PoisonValue::get(LI->getType());
 
       LI->replaceAllUsesWith(ReplVal);
     }
@@ -676,7 +673,7 @@ void PromoteMem2Reg::run() {
     // unreachable basic blocks that were not processed by walking the dominator
     // tree. Just delete the users now.
     if (!A->use_empty())
-      A->replaceAllUsesWith(UndefValue::get(A->getType()));
+      A->replaceAllUsesWith(PoisonValue::get(A->getType()));
     A->eraseFromParent();
   }
 

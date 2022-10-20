@@ -16,6 +16,7 @@
 #include "flang/Evaluate/intrinsics.h"
 #include "flang/Parser/message.h"
 #include <iosfwd>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -170,7 +171,15 @@ public:
   void ActivateIndexVar(const parser::Name &, IndexVarKind);
   void DeactivateIndexVar(const parser::Name &);
   SymbolVector GetIndexVars(IndexVarKind);
+  SourceName SaveTempName(std::string &&);
   SourceName GetTempName(const Scope &);
+
+  // Locate and process the contents of a built-in module on demand
+  Scope *GetBuiltinModule(const char *name);
+
+  // Defines builtinsScope_ from the __Fortran_builtins module
+  void UseFortranBuiltinsModule();
+  const Scope *GetBuiltinsScope() const { return builtinsScope_; }
 
 private:
   void CheckIndexVarRedefine(
@@ -196,18 +205,19 @@ private:
     parser::CharBlock location;
     IndexVarKind kind;
   };
-  std::map<SymbolRef, const IndexVarInfo> activeIndexVars_;
-  std::set<SymbolRef> errorSymbols_;
-  std::vector<std::string> tempNames_;
+  std::map<SymbolRef, const IndexVarInfo, SymbolAddressCompare>
+      activeIndexVars_;
+  UnorderedSymbolSet errorSymbols_;
+  std::set<std::string> tempNames_;
+  const Scope *builtinsScope_{nullptr}; // module __Fortran_builtins
 };
 
 class Semantics {
 public:
   explicit Semantics(SemanticsContext &context, parser::Program &program,
-      parser::CharBlock charBlock, bool debugModuleWriter = false)
+      bool debugModuleWriter = false)
       : context_{context}, program_{program} {
     context.set_debugModuleWriter(debugModuleWriter);
-    context.globalScope().AddSourceRange(charBlock);
   }
 
   SemanticsContext &context() const { return context_; }
