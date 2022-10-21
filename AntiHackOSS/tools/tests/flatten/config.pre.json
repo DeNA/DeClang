@@ -1,0 +1,11 @@
+{
+    "flatten":
+    [
+        {
+            "name": "foo"
+        },
+        {
+            "name": "bar"
+        }
+    ]
+}
