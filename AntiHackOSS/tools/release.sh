@@ -33,8 +33,9 @@ cd ../
 mkdir -p ./Release/compiler/include/llvm/
 mkdir -p ./Release/compiler/include/c++/v1/
 
-cp -r build/include/llvm/* ./Release/compiler/include/llvm/
-cp -r libcxx/include/* ./Release/compiler/include/c++/v1/
+# cp -r build/include/llvm/* ./Release/compiler/include/llvm/
+# cp -r libcxx/include/* ./Release/compiler/include/c++/v1/
+cp -r build/include/* ./Release/compiler/include/
 popd > /dev/null
 
 pushd $(dirname $0) > /dev/null

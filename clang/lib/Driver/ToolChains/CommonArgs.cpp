@@ -1449,7 +1449,11 @@ static void AddUnwindLibrary(const ToolChain &TC, const Driver &D,
       if (LGT != LibGccType::StaticLibGcc)
         CmdArgs.push_back("-lunwind");
     } else if (LGT == LibGccType::StaticLibGcc) {
-      CmdArgs.push_back("-l:libunwind.a");
+      //BEGIN DECLANG CODES
+      if (!TC.getTriple().isAndroid()) {
+        CmdArgs.push_back("-l:libunwind.a");
+      }
+      //END DECLANG CODES
     } else if (TC.getTriple().isOSCygMing()) {
       if (LGT == LibGccType::SharedLibGcc)
         CmdArgs.push_back("-l:libunwind.dll.a");
