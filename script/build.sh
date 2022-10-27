@@ -107,8 +107,6 @@ else
     cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj'
   else
    make llvm-headers
-   make -j 16 cxxabi
-   make -j 16 cxx
    make -j 16
   fi
 fi

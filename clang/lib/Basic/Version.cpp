@@ -86,7 +86,7 @@ std::string getClangFullRepositoryVersion() {
 }
 
 std::string getClangFullVersion() {
-  return getClangToolFullVersion("clang-swift5.7");
+  return getClangToolFullVersion("clang");
 }
 
 std::string getClangToolFullVersion(StringRef ToolName) {
@@ -101,6 +101,8 @@ std::string getClangToolFullVersion(StringRef ToolName) {
   if (!repo.empty()) {
     OS << " " << repo;
   }
+
+  OS << " DeNA clang-swift5.7";
 
   return OS.str();
 }
