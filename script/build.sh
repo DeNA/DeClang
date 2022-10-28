@@ -42,10 +42,7 @@ if [[ -e AntiHackDeNA ]]; then
   ln -s ../../../AntiHackDeNA/src llvm/lib/Transforms/AntiHack
   ln -s ../../../../AntiHackDeNA/include llvm/include/llvm/Transforms/AntiHack
   ln -s AntiHackDeNA/tools tools
-  DECLANG_P=${DECLANG_HOME:-$HOME}
-  mkdir -p $DECLANG_P/.DeClang/
-  cp AntiHackDeNA/tools/LICENSE_FOR_BUILD_TOOLS.txt $DECLANG_P/.DeClang/LICENSE.txt
-  echo "echo temporary install_hook.sh >> $DECLANG_P/.DeClang/log.txt" > $DECLANG_P/.DeClang/install_hook.sh
+  bash tools/script/gen_dummy_files.sh
 else
   ln -s ../../../AntiHackOSS/clang/DeClangExtraProcess.cpp clang/lib/Driver/DeClangExtraProcess.cpp
   ln -s ../../../AntiHackOSS/src llvm/lib/Transforms/AntiHack
