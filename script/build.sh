@@ -75,13 +75,13 @@ else
         -DLLVM_INCLUDE_BENCHMARKS=OFF \
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_TESTS=OFF \
-        -DLLVM_ENABLE_PROJECTS=clang \
+        -DLLVM_ENABLE_PROJECTS="clang;libcxx;libcxxabi" \
         -DLLVM_CCACHE_BUILD=${use_ccache}\
         -DLLVM_USE_CRT_RELEASE=MT \
         -DLLVM_USE_CRT_RELWITHDEBINFO=MT \
         -A x64\
         -Thost=x64\
-          -G "Visual Studio 15 2017" ../llvm
+          -G "Visual Studio 17 2022" ../llvm
 
     else
       echo "Build for $build_arch"
@@ -105,7 +105,8 @@ else
   if [[ "_$OS" = "_Windows_NT" ]]; then
     # TODO Community版以外でも動くようにする
     echo "Build Release x64 in Visual Studio"
-    cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj'
+    #cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj'
+    cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild  /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj'
   else
    make llvm-headers
    make -j 16
