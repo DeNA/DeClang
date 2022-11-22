@@ -150,4 +150,5 @@ using namespace llvm;
 
 Pass* llvm::createAntiHack(std::string configPath) {
   //return new AntiHack(configPath);
+  return nullptr;
 }
