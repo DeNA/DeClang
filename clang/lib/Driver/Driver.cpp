@@ -1601,6 +1601,7 @@ int Driver::ExecuteCompilation(
 
   for (Command& cmd : C.getJobs() ) {
     cmd.Print(*logFile, "\n", /*Quote=*/true);
+    logFile->flush();
   }
   //DECLANG CODES END
 
