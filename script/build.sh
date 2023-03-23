@@ -76,6 +76,7 @@ else
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_TESTS=OFF \
         -DLLVM_ENABLE_PROJECTS="clang;libcxx;libcxxabi" \
+        -DCLANG_DEFAULT_RTLIB="libgcc" \
         -DLLVM_CCACHE_BUILD=${use_ccache}\
         -DLLVM_USE_CRT_RELEASE=MT \
         -DLLVM_USE_CRT_RELWITHDEBINFO=MT \
@@ -93,6 +94,7 @@ else
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS="clang" \
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
+        -DCLANG_DEFAULT_RTLIB="libgcc" \
         -DCMAKE_OSX_ARCHITECTURES="$build_arch" \
         -DLLVM_CCACHE_BUILD=${use_ccache}\
           -G "Unix Makefiles" ../llvm
