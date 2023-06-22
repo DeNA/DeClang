@@ -45,7 +45,7 @@ project(LLVM
   VERSION ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}
   LANGUAGES C CXX ASM)
 
-set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to conform to")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 if (CYGWIN)
   # Cygwin is a bit stricter and lack things like 'strdup', 'stricmp', etc in
@@ -950,6 +950,12 @@ endif()
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include_directories( ${LLVM_INCLUDE_DIR} ${LLVM_MAIN_INCLUDE_DIR})
+
+set(SQLITE3_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/../vendor/include)
+set(SQLITE3_LIBRARY_DIR ${CMAKE_SOURCE_DIR}/../vendor/lib)
+include_directories(${SQLITE3_INCLUDE_DIR})
+link_directories(${SQLITE3_LIBRARY_DIR})
+link_libraries(${SQLITE3_LIBRARY_DIR}/libsqlite3.a)
 
 # when crosscompiling import the executable targets from a file
 if(LLVM_USE_HOST_TOOLS)

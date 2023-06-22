@@ -78,6 +78,8 @@ pythonenv*
 /clang/lib/Driver/DeClangExtraProcess.cpp
 /llvm/lib/Transforms/AntiHack
 /llvm/include/llvm/Transforms/AntiHack
+/llvm/cmake-build-debug
+/clang/cmake-build-debug
 /AntiHackOSS/tools/config/gen_config_*
 /tools
 .DS_Store

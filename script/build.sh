@@ -50,6 +50,10 @@ else
   ln -s AntiHackOSS/tools tools
 fi
 
+# deploy sqlite3
+cd vendor && make && make install
+cd ../
+
 if [[ $# -eq 1 && $1 == "toolchain" ]]; then
   echo "build toolchain"
   cd ../
@@ -96,7 +100,7 @@ else
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
         -DCLANG_DEFAULT_RTLIB="libgcc" \
         -DCMAKE_OSX_ARCHITECTURES="$build_arch" \
-        -DLLVM_CCACHE_BUILD=${use_ccache}\
+        -DLLVM_CCACHE_BUILD=${use_ccache} \
           -G "Unix Makefiles" ../llvm
     fi
 
