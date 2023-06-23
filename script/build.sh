@@ -50,10 +50,6 @@ else
   ln -s AntiHackOSS/tools tools
 fi
 
-# deploy sqlite3
-cd vendor && make && make install
-cd ../
-
 if [[ $# -eq 1 && $1 == "toolchain" ]]; then
   echo "build toolchain"
   cd ../

@@ -951,12 +951,6 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 include_directories( ${LLVM_INCLUDE_DIR} ${LLVM_MAIN_INCLUDE_DIR})
 
-set(SQLITE3_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/../vendor/include)
-set(SQLITE3_LIBRARY_DIR ${CMAKE_SOURCE_DIR}/../vendor/lib)
-include_directories(${SQLITE3_INCLUDE_DIR})
-link_directories(${SQLITE3_LIBRARY_DIR})
-link_libraries(${SQLITE3_LIBRARY_DIR}/libsqlite3.a)
-
 # when crosscompiling import the executable targets from a file
 if(LLVM_USE_HOST_TOOLS)
   include(CrossCompile)
