@@ -1427,7 +1427,7 @@ static void AddUnwindLibrary(const ToolChain &TC, const Driver &D,
   ToolChain::UnwindLibType UNW = TC.GetUnwindLibType(Args);
 
   //BEGIN DECLANG CODES
-  int ndkVersion = getNdkVersion(std::filesystem::current_path().c_str());
+  int ndkVersion = getNdkVersion(D.getInstalledDir());
   if (TC.getTriple().isAndroid() && (ndkVersion >= 23)) {
      if (LGT == LibGccType::StaticLibGcc) {
        CmdArgs.push_back("-l:libunwind.a");
@@ -1511,7 +1511,7 @@ void tools::AddRunTimeLibs(const ToolChain &TC, const Driver &D,
     break;
   case ToolChain::RLT_Libgcc:
     //BEGIN DECLANG CODES
-    int ndkVersion = getNdkVersion(std::filesystem::current_path().c_str()); 
+    int ndkVersion = getNdkVersion(D.getInstalledDir());
     if (TC.getTriple().isAndroid() && ndkVersion >= 23) {
       CmdArgs.push_back(TC.getCompilerRTArgString(Args, "builtins"));
       AddUnwindLibrary(TC, D, CmdArgs, Args);
