@@ -79,6 +79,7 @@ add_clang_library(clangDriver
   Types.cpp
   XRayArgs.cpp
   DeClangExtraProcess.cpp
+  ToolChains/DeClangAndroidNdk.cpp
 
 
   DEPENDS

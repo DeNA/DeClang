@@ -58,6 +58,11 @@
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/YAMLParser.h"
 
+//BEGIN DECLANG CODES
+#include "DeClangAndroidNdk.h"
+#include <filesystem>
+//END DECLANG CODES
+
 using namespace clang::driver;
 using namespace clang::driver::tools;
 using namespace clang;
@@ -1418,14 +1423,27 @@ static LibGccType getLibGccType(const ToolChain &TC, const Driver &D,
 
 static void AddUnwindLibrary(const ToolChain &TC, const Driver &D,
                              ArgStringList &CmdArgs, const ArgList &Args) {
+  LibGccType LGT = getLibGccType(TC, D, Args);
   ToolChain::UnwindLibType UNW = TC.GetUnwindLibType(Args);
+
+  //BEGIN DECLANG CODES
+  int ndkVersion = getNdkVersion(std::filesystem::current_path().c_str());
+  if (TC.getTriple().isAndroid() && (ndkVersion >= 23)) {
+     if (LGT == LibGccType::StaticLibGcc) {
+       CmdArgs.push_back("-l:libunwind.a");
+     } else {
+       CmdArgs.push_back("-l:libunwind.so");
+     }
+     return;
+  }
+  //END DECLANG CODES
+
   // Targets that don't use unwind libraries.
   if ((TC.getTriple().isAndroid() && UNW == ToolChain::UNW_Libgcc) ||
       TC.getTriple().isOSIAMCU() || TC.getTriple().isOSBinFormatWasm() ||
       UNW == ToolChain::UNW_None)
     return;
 
-  LibGccType LGT = getLibGccType(TC, D, Args);
   bool AsNeeded = LGT == LibGccType::UnspecifiedLibGcc &&
                   !TC.getTriple().isAndroid() &&
                   !TC.getTriple().isOSCygMing() && !TC.getTriple().isOSAIX();
@@ -1492,6 +1510,15 @@ void tools::AddRunTimeLibs(const ToolChain &TC, const Driver &D,
     AddUnwindLibrary(TC, D, CmdArgs, Args);
     break;
   case ToolChain::RLT_Libgcc:
+    //BEGIN DECLANG CODES
+    int ndkVersion = getNdkVersion(std::filesystem::current_path().c_str()); 
+    if (TC.getTriple().isAndroid() && ndkVersion >= 23) {
+      CmdArgs.push_back(TC.getCompilerRTArgString(Args, "builtins"));
+      AddUnwindLibrary(TC, D, CmdArgs, Args);
+      break;
+    }
+    //END DECLANG CODES
+
     // Make sure libgcc is not used under MSVC environment by default
     if (TC.getTriple().isKnownWindowsMSVCEnvironment()) {
       // Issue error diagnostic if libgcc is explicitly specified
