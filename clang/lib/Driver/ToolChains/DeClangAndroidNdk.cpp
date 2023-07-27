@@ -22,7 +22,7 @@ int getNdkVersion(const char *path) {
 		for (const std::filesystem::directory_entry& file : std::filesystem::directory_iterator(dir)) {
 			if (file.is_regular_file()) {
 				if (file.path().filename().compare("source.properties") == 0) {
-					std::ifstream version_file(file, std::ios::in);
+					std::ifstream version_file(file.path(), std::ios::in);
 					std::string line;
 					while (std::getline(version_file, line)) {
 						std::stringstream ss(line);
