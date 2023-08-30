@@ -105,9 +105,7 @@ else
 # -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="AARCH64;X64" \
 
   if [[ "_$OS" = "_Windows_NT" ]]; then
-    # TODO Community版以外でも動くようにする
     echo "Build Release x64 in Visual Studio"
-    #cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj'
     cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild  /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj'
   else
    make llvm-headers
