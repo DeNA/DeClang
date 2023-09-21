@@ -212,7 +212,7 @@ std::error_code current_path(SmallVectorImpl<char> &result) {
 
 std::error_code set_current_path(const Twine &path) {
   // Convert to utf-16.
-  SmallVector<wchar_t, 128> wide_path;
+  SmallVector<wchar_t, 512> wide_path;
   if (std::error_code ec = widenPath(path, wide_path))
     return ec;
 
@@ -224,7 +224,7 @@ std::error_code set_current_path(const Twine &path) {
 
 std::error_code create_directory(const Twine &path, bool IgnoreExisting,
                                  perms Perms) {
-  SmallVector<wchar_t, 128> path_utf16;
+  SmallVector<wchar_t, 512> path_utf16;
 
   // CreateDirectoryW has a lower maximum path length as it must leave room for
   // an 8.3 filename.
@@ -243,8 +243,8 @@ std::error_code create_directory(const Twine &path, bool IgnoreExisting,
 // We can't use symbolic links for windows.
 std::error_code create_link(const Twine &to, const Twine &from) {
   // Convert to utf-16.
-  SmallVector<wchar_t, 128> wide_from;
-  SmallVector<wchar_t, 128> wide_to;
+  SmallVector<wchar_t, 512> wide_from;
+  SmallVector<wchar_t, 512> wide_to;
   if (std::error_code ec = widenPath(from, wide_from))
     return ec;
   if (std::error_code ec = widenPath(to, wide_to))
@@ -261,7 +261,7 @@ std::error_code create_hard_link(const Twine &to, const Twine &from) {
 }
 
 std::error_code remove(const Twine &path, bool IgnoreNonExisting) {
-  SmallVector<wchar_t, 128> path_utf16;
+  SmallVector<wchar_t, 512> path_utf16;
 
   if (std::error_code ec = widenPath(path, path_utf16))
     return ec;
@@ -294,8 +294,8 @@ std::error_code remove(const Twine &path, bool IgnoreNonExisting) {
 
 static std::error_code is_local_internal(SmallVectorImpl<wchar_t> &Path,
                                          bool &Result) {
-  SmallVector<wchar_t, 128> VolumePath;
-  size_t Len = 128;
+  SmallVector<wchar_t, 512> VolumePath;
+  size_t Len = 512;
   while (true) {
     VolumePath.resize(Len);
     BOOL Success =
@@ -338,11 +338,11 @@ std::error_code is_local(const Twine &path, bool &result) {
   if (!llvm::sys::fs::exists(path) || !llvm::sys::path::has_root_path(path))
     return make_error_code(errc::no_such_file_or_directory);
 
-  SmallString<128> Storage;
+  SmallString<512> Storage;
   StringRef P = path.toStringRef(Storage);
 
   // Convert to utf-16.
-  SmallVector<wchar_t, 128> WidePath;
+  SmallVector<wchar_t, 512> WidePath;
   if (std::error_code ec = widenPath(P, WidePath))
     return ec;
   return is_local_internal(WidePath, result);
@@ -392,7 +392,7 @@ static std::error_code realPathFromHandle(HANDLE H,
 }
 
 std::error_code is_local(int FD, bool &Result) {
-  SmallVector<wchar_t, 128> FinalPath;
+  SmallVector<wchar_t, 512> FinalPath;
   HANDLE Handle = reinterpret_cast<HANDLE>(_get_osfhandle(FD));
 
   if (std::error_code EC = realPathFromHandle(Handle, FinalPath))
@@ -418,7 +418,7 @@ static std::error_code setDeleteDisposition(HANDLE Handle, bool Delete) {
   // continue when DeleteFile is true, since it prevents opening the file for
   // writes. Note -- this will leak temporary files on disk, but only when the
   // target file is on a network drive.
-  SmallVector<wchar_t, 128> FinalPath;
+  SmallVector<wchar_t, 512> FinalPath;
   if (std::error_code EC = realPathFromHandle(Handle, FinalPath))
     return EC;
 
@@ -467,7 +467,7 @@ static std::error_code rename_internal(HANDLE FromHandle, const Twine &To,
 }
 
 static std::error_code rename_handle(HANDLE FromHandle, const Twine &To) {
-  SmallVector<wchar_t, 128> WideTo;
+  SmallVector<wchar_t, 512> WideTo;
   if (std::error_code EC = widenPath(To, WideTo))
     return EC;
 
@@ -563,7 +563,7 @@ static std::error_code rename_handle(HANDLE FromHandle, const Twine &To) {
 
 std::error_code rename(const Twine &From, const Twine &To) {
   // Convert to utf-16.
-  SmallVector<wchar_t, 128> WideFrom;
+  SmallVector<wchar_t, 512> WideFrom;
   if (std::error_code EC = widenPath(From, WideFrom))
     return EC;
 
@@ -600,7 +600,7 @@ std::error_code resize_file(int FD, uint64_t Size) {
 }
 
 std::error_code access(const Twine &Path, AccessMode Mode) {
-  SmallVector<wchar_t, 128> PathUtf16;
+  SmallVector<wchar_t, 512> PathUtf16;
 
   if (std::error_code EC = widenPath(Path, PathUtf16))
     return EC;
@@ -737,8 +737,8 @@ handle_status_error:
 }
 
 std::error_code status(const Twine &path, file_status &result, bool Follow) {
-  SmallString<128> path_storage;
-  SmallVector<wchar_t, 128> path_utf16;
+  SmallString<512> path_storage;
+  SmallVector<wchar_t, 512> path_utf16;
 
   StringRef path8 = path.toStringRef(path_storage);
   if (isReservedName(path8)) {
@@ -782,7 +782,7 @@ unsigned getUmask() {
 }
 
 std::error_code setPermissions(const Twine &Path, perms Permissions) {
-  SmallVector<wchar_t, 128> PathUTF16;
+  SmallVector<wchar_t, 512> PathUTF16;
   if (std::error_code EC = widenPath(Path, PathUTF16))
     return EC;
 
@@ -962,7 +962,7 @@ static basic_file_status status_from_find_data(WIN32_FIND_DATAW *FindData) {
 std::error_code detail::directory_iterator_construct(detail::DirIterState &IT,
                                                      StringRef Path,
                                                      bool FollowSymlinks) {
-  SmallVector<wchar_t, 128> PathUTF16;
+  SmallVector<wchar_t, 512> PathUTF16;
 
   if (std::error_code EC = widenPath(Path, PathUTF16))
     return EC;
@@ -999,14 +999,14 @@ std::error_code detail::directory_iterator_construct(detail::DirIterState &IT,
       FilenameLen = ::wcslen(FirstFind.cFileName);
 
   // Construct the current directory entry.
-  SmallString<128> DirectoryEntryNameUTF8;
+  SmallString<512> DirectoryEntryNameUTF8;
   if (std::error_code EC =
           UTF16ToUTF8(FirstFind.cFileName, ::wcslen(FirstFind.cFileName),
                       DirectoryEntryNameUTF8))
     return EC;
 
   IT.IterationHandle = intptr_t(FindHandle.take());
-  SmallString<128> DirectoryEntryPath(Path);
+  SmallString<512> DirectoryEntryPath(Path);
   path::append(DirectoryEntryPath, DirectoryEntryNameUTF8);
   IT.CurrentEntry =
       directory_entry(DirectoryEntryPath, FollowSymlinks,
@@ -1041,7 +1041,7 @@ std::error_code detail::directory_iterator_increment(detail::DirIterState &IT) {
                            FindData.cFileName[1] == L'.'))
     return directory_iterator_increment(IT);
 
-  SmallString<128> DirectoryEntryPathUTF8;
+  SmallString<512> DirectoryEntryPathUTF8;
   if (std::error_code EC =
           UTF16ToUTF8(FindData.cFileName, ::wcslen(FindData.cFileName),
                       DirectoryEntryPathUTF8))
@@ -1123,7 +1123,7 @@ static std::error_code openNativeFileInternal(const Twine &Name,
                                               file_t &ResultFile, DWORD Disp,
                                               DWORD Access, DWORD Flags,
                                               bool Inherit = false) {
-  SmallVector<wchar_t, 128> PathUTF16;
+  SmallVector<wchar_t, 512> PathUTF16;
   if (std::error_code EC = widenPath(Name, PathUTF16))
     return EC;
 
@@ -1320,7 +1320,7 @@ std::error_code closeFile(file_t &F) {
 
 std::error_code remove_directories(const Twine &path, bool IgnoreErrors) {
   // Convert to utf-16.
-  SmallVector<wchar_t, 128> Path16;
+  SmallVector<wchar_t, 512> Path16;
   std::error_code EC = widenPath(path, Path16);
   if (EC && !IgnoreErrors)
     return EC;
@@ -1358,7 +1358,7 @@ static void expandTildeExpr(SmallVectorImpl<char> &Path) {
     return;
   }
 
-  SmallString<128> HomeDir;
+  SmallString<512> HomeDir;
   if (!path::home_directory(HomeDir)) {
     // For some reason we couldn't get the home directory.  Just exit.
     return;
@@ -1387,7 +1387,7 @@ std::error_code real_path(const Twine &path, SmallVectorImpl<char> &dest,
     return std::error_code();
 
   if (expand_tilde) {
-    SmallString<128> Storage;
+    SmallString<512> Storage;
     path.toVector(Storage);
     expandTildeExpr(Storage);
     return real_path(Storage, dest, false);

@@ -395,7 +395,7 @@ std::error_code current_path(SmallVectorImpl<char> &result) {
 }
 
 std::error_code set_current_path(const Twine &path) {
-  SmallString<128> path_storage;
+  SmallString<512> path_storage;
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
   if (::chdir(p.begin()) == -1)
@@ -406,7 +406,7 @@ std::error_code set_current_path(const Twine &path) {
 
 std::error_code create_directory(const Twine &path, bool IgnoreExisting,
                                  perms Perms) {
-  SmallString<128> path_storage;
+  SmallString<512> path_storage;
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
   if (::mkdir(p.begin(), Perms) == -1) {
@@ -421,8 +421,8 @@ std::error_code create_directory(const Twine &path, bool IgnoreExisting,
 // all filesystems (SMB doesn't).
 std::error_code create_link(const Twine &to, const Twine &from) {
   // Get arguments.
-  SmallString<128> from_storage;
-  SmallString<128> to_storage;
+  SmallString<512> from_storage;
+  SmallString<512> to_storage;
   StringRef f = from.toNullTerminatedStringRef(from_storage);
   StringRef t = to.toNullTerminatedStringRef(to_storage);
 
@@ -434,8 +434,8 @@ std::error_code create_link(const Twine &to, const Twine &from) {
 
 std::error_code create_hard_link(const Twine &to, const Twine &from) {
   // Get arguments.
-  SmallString<128> from_storage;
-  SmallString<128> to_storage;
+  SmallString<512> from_storage;
+  SmallString<512> to_storage;
   StringRef f = from.toNullTerminatedStringRef(from_storage);
   StringRef t = to.toNullTerminatedStringRef(to_storage);
 
@@ -446,7 +446,7 @@ std::error_code create_hard_link(const Twine &to, const Twine &from) {
 }
 
 std::error_code remove(const Twine &path, bool IgnoreNonExisting) {
-  SmallString<128> path_storage;
+  SmallString<512> path_storage;
   StringRef p = path.toNullTerminatedStringRef(path_storage);
 
   struct stat buf;
@@ -575,8 +575,8 @@ std::error_code is_local(int FD, bool &Result) {
 
 std::error_code rename(const Twine &from, const Twine &to) {
   // Get arguments.
-  SmallString<128> from_storage;
-  SmallString<128> to_storage;
+  SmallString<512> from_storage;
+  SmallString<512> to_storage;
   StringRef f = from.toNullTerminatedStringRef(from_storage);
   StringRef t = to.toNullTerminatedStringRef(to_storage);
 
@@ -621,7 +621,7 @@ static int convertAccessMode(AccessMode Mode) {
 }
 
 std::error_code access(const Twine &Path, AccessMode Mode) {
-  SmallString<128> PathStorage;
+  SmallString<512> PathStorage;
   StringRef P = Path.toNullTerminatedStringRef(PathStorage);
 
   if (::access(P.begin(), convertAccessMode(Mode)) == -1)
@@ -668,7 +668,7 @@ static void expandTildeExpr(SmallVectorImpl<char> &Path) {
   StringRef Expr =
       PathStr.take_until([](char c) { return path::is_separator(c); });
   StringRef Remainder = PathStr.substr(Expr.size() + 1);
-  SmallString<128> Storage;
+  SmallString<512> Storage;
   if (Expr.empty()) {
     // This is just ~/..., resolve it to the current user's home dir.
     if (!path::home_directory(Storage)) {
@@ -759,7 +759,7 @@ static std::error_code fillStatus(int StatRet, const struct stat &Status,
 }
 
 std::error_code status(const Twine &Path, file_status &Result, bool Follow) {
-  SmallString<128> PathStorage;
+  SmallString<512> PathStorage;
   StringRef P = Path.toNullTerminatedStringRef(PathStorage);
 
   struct stat Status;
@@ -782,7 +782,7 @@ unsigned getUmask() {
 }
 
 std::error_code setPermissions(const Twine &Path, perms Permissions) {
-  SmallString<128> PathStorage;
+  SmallString<512> PathStorage;
   StringRef P = Path.toNullTerminatedStringRef(PathStorage);
 
   if (::chmod(P.begin(), Permissions))
@@ -887,7 +887,7 @@ int mapped_file_region::alignment() {
 std::error_code detail::directory_iterator_construct(detail::DirIterState &it,
                                                      StringRef path,
                                                      bool follow_symlinks) {
-  SmallString<128> path_null(path);
+  SmallString<512> path_null(path);
   DIR *directory = ::opendir(path_null.c_str());
   if (!directory)
     return std::error_code(errno, std::generic_category());
@@ -1002,7 +1002,7 @@ std::error_code openFile(const Twine &Name, int &ResultFD,
                          OpenFlags Flags, unsigned Mode) {
   int OpenFlags = nativeOpenFlags(Disp, Flags, Access);
 
-  SmallString<128> Storage;
+  SmallString<512> Storage;
   StringRef P = Name.toNullTerminatedStringRef(Storage);
   // Call ::open in a lambda to avoid overload resolution in RetryAfterSignal
   // when open is overloaded, such as in Bionic.
@@ -1139,7 +1139,7 @@ std::error_code openFileForRead(const Twine &Name, int &ResultFD,
     if (CharCount > 0)
       RealPath->append(Buffer, Buffer + CharCount);
   } else {
-    SmallString<128> Storage;
+    SmallString<512> Storage;
     StringRef P = Name.toNullTerminatedStringRef(Storage);
 
     // Use ::realpath to get the real path name
@@ -1293,13 +1293,13 @@ std::error_code real_path(const Twine &path, SmallVectorImpl<char> &dest,
     return std::error_code();
 
   if (expand_tilde) {
-    SmallString<128> Storage;
+    SmallString<512> Storage;
     path.toVector(Storage);
     expandTildeExpr(Storage);
     return real_path(Storage, dest, false);
   }
 
-  SmallString<128> Storage;
+  SmallString<512> Storage;
   StringRef P = path.toNullTerminatedStringRef(Storage);
   char Buffer[PATH_MAX];
   if (::realpath(P.begin(), Buffer) == nullptr)
