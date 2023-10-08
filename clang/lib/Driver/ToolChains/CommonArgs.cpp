@@ -236,10 +236,11 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   // (constructed via -Xarch_).
   Args.AddAllArgValues(CmdArgs, options::OPT_Zlinker_input);
 
-  // add -Bsymbolic flag
+  //BEGIN DECLANG CODES
   if (TC.getTriple().isAndroid()) {
     CmdArgs.push_back("-Bsymbolic");
   }
+  //END DECLANG CODES
 
   // LIBRARY_PATH are included before user inputs and only supported on native
   // toolchains.

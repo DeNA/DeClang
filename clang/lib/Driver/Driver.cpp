@@ -1018,20 +1018,24 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   // FIXME: What are we going to do with -V and -b?
 
   //DECLANG CODES BEGIN
-  //add -DDECLANG
   std::vector<const char*> modArgs = ArgList.vec();
   modArgs.push_back("-DDECLANG");
 
-  //std::string noautolink = "-fno-autolink";
-  //for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end(); ++it) {
-  //  if (noautolink == *it) {
-  //    modArgs.erase(it);
-  //    llvm::errs() << "removed no-autolink\n";
-  //  }
-  //}
+  for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end();) {
+    if (std::string("--gc-sections") == *it) {
+      it = modArgs.erase(it);
+    } else if (std::string("-Wl,--gc-sections") == *it) {
+      it = modArgs.erase(it);
+    } else if (std::string("--no-undefined") == *it) {
+      it = modArgs.erase(it);
+    } else if (std::string("-Wl,--no-undefined") == *it) {
+      it = modArgs.erase(it);
+    } else {
+      ++it;
+    }
+  }
 
   ArgList = ArrayRef<const char*>(modArgs);
-
   //DECLANG CODES END
 
 
@@ -1573,7 +1577,7 @@ int Driver::ExecuteCompilation(
   for (auto &Job : C.getJobs())
     setUpResponseFiles(C, Job);
 
-   //DECLANG CODES BEGIN
+  //DECLANG CODES BEGIN
   char* home_dir = getenv("DECLANG_HOME");
   if (home_dir == nullptr) {
     home_dir = getenv("HOME");
