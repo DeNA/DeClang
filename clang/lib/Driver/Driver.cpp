@@ -1020,21 +1020,33 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   //DECLANG CODES BEGIN
   std::vector<const char*> modArgs = ArgList.vec();
   modArgs.push_back("-DDECLANG");
-
-  for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end();) {
-    if (std::string("--gc-sections") == *it) {
-      it = modArgs.erase(it);
-    } else if (std::string("-Wl,--gc-sections") == *it) {
-      it = modArgs.erase(it);
-    } else if (std::string("--no-undefined") == *it) {
-      it = modArgs.erase(it);
-    } else if (std::string("-Wl,--no-undefined") == *it) {
-      it = modArgs.erase(it);
-    } else {
-      ++it;
+  // remove --gc-sections and --no-undefined flags if libil2cpp.so is linked on unity
+  bool linkIl2cpp = false;
+  for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end(); ++it) {
+    if (std::string("-o") == *it) {
+       ++it;
+       std::string execFilename(llvm::sys::path::filename(*it).data());
+       if (execFilename == "libil2cpp.so") {
+         linkIl2cpp = true;
+         break;
+       }
     }
   }
-
+  if (linkIl2cpp) {
+    for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end();) {
+      if (std::string("--gc-sections") == *it) {
+        it = modArgs.erase(it);
+      } else if (std::string("-Wl,--gc-sections") == *it) {
+        it = modArgs.erase(it);
+      } else if (std::string("--no-undefined") == *it) {
+        it = modArgs.erase(it);
+      } else if (std::string("-Wl,--no-undefined") == *it) {
+        it = modArgs.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
   ArgList = ArrayRef<const char*>(modArgs);
   //DECLANG CODES END
 
