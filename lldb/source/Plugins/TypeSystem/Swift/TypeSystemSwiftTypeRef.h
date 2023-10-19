@@ -37,7 +37,8 @@ class ClangExternalASTSourceCallbacks;
 class ClangNameImporter;
 class SwiftASTContext;
 class SwiftASTContextForExpressions;
-
+class SwiftPersistentExpressionState;
+  
 /// A Swift TypeSystem that does not own a swift::ASTContext.
 class TypeSystemSwiftTypeRef : public TypeSystemSwift {
   /// LLVM RTTI support.
@@ -79,6 +80,11 @@ public:
 
   CompilerType GetGenericArgumentType(lldb::opaque_compiler_type_t type,
                                       size_t idx) override;
+
+  /// Returns the list of DependentGenericParamTypes (depth, index pairs) that a
+  /// type has, if any.
+  static llvm::SmallVector<std::pair<int, int>, 1>
+  GetDependentGenericParamListForType(llvm::StringRef type);
 
   // PluginInterface functions
   llvm::StringRef GetPluginName() override { return "TypeSystemSwiftTypeRef"; }
@@ -191,7 +197,8 @@ public:
                                 const char *name, ExecutionContext *exe_ctx,
                                 bool omit_empty_base_classes,
                                 std::vector<uint32_t> &child_indexes) override;
-  size_t GetNumTemplateArguments(lldb::opaque_compiler_type_t type) override;
+  size_t GetNumTemplateArguments(lldb::opaque_compiler_type_t type,
+                                 bool expand_pack) override;
   CompilerType GetTypeForFormatters(lldb::opaque_compiler_type_t type) override;
   LazyBool ShouldPrintAsOneLiner(lldb::opaque_compiler_type_t type,
                                  ValueObject *valobj) override;
@@ -259,17 +266,39 @@ public:
                       CompilerType *original_type) override;
   /// Like \p IsImportedType(), but even returns Clang types that are also Swift
   /// builtins (int <-> Swift.Int) as Clang types.
-  CompilerType GetAsClangTypeOrNull(lldb::opaque_compiler_type_t type);
+  CompilerType GetAsClangTypeOrNull(lldb::opaque_compiler_type_t type,
+                                    bool *is_imported = nullptr);
   CompilerType GetErrorType() override;
   CompilerType GetReferentType(lldb::opaque_compiler_type_t type) override;
   CompilerType GetInstanceType(lldb::opaque_compiler_type_t type) override;
+  CompilerType GetStaticSelfType(lldb::opaque_compiler_type_t type) override;
+  static swift::Demangle::NodePointer
+  GetStaticSelfType(swift::Demangle::Demangler &dem,
+                    swift::Demangle::NodePointer node);
+
+  /// Wrap type inside a SILPackType.
+  CompilerType CreateSILPackType(CompilerType type, bool indirect);
+  struct PackTypeInfo {
+    unsigned count = 0;
+    bool indirect = false;
+    bool expanded = false;
+  };
+  llvm::Optional<PackTypeInfo> IsSILPackType(CompilerType type);
+  CompilerType GetSILPackElementAtIndex(CompilerType type, unsigned i);
   CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) override;
   bool IsTupleType(lldb::opaque_compiler_type_t type) override;
+  llvm::Optional<NonTriviallyManagedReferenceKind>
+  GetNonTriviallyManagedReferenceKind(
+      lldb::opaque_compiler_type_t type) override;
 
   /// Return the nth tuple element's type and name, if it has one.
   llvm::Optional<TupleElement>
   GetTupleElement(lldb::opaque_compiler_type_t type, size_t idx);
+
+  /// Creates a GenericTypeParamType with the desired depth and index.
+  CompilerType CreateGenericTypeParamType(unsigned int depth,
+                                    unsigned int index) override;
 
   /// Get the Swift raw pointer type.
   CompilerType GetRawPointerType();
@@ -283,7 +312,13 @@ public:
   static swift::Demangle::NodePointer Transform(
       swift::Demangle::Demangler &dem, swift::Demangle::NodePointer node,
       std::function<swift::Demangle::NodePointer(swift::Demangle::NodePointer)>
-          fn);
+          visitor);
+
+  /// A left-to-right preorder traversal. Don't visit children if
+  /// visitor returns false.
+  static void
+  PreOrderTraversal(swift::Demangle::NodePointer node,
+                    std::function<bool(swift::Demangle::NodePointer)>);
 
   /// Canonicalize Array, Dictionary and Optional to their sugared form.
   static swift::Demangle::NodePointer
@@ -297,24 +332,39 @@ public:
   /// Return the base name of the topmost nominal type.
   static llvm::StringRef GetBaseName(swift::Demangle::NodePointer node);
 
+  /// Return whether the type is known to be specially handled by the compiler.
+  static bool IsKnownSpecialImportedType(llvm::StringRef name);
+
   /// Use API notes to determine the swiftified name of \p clang_decl.
   std::string GetSwiftName(const clang::Decl *clang_decl,
                            TypeSystemClang &clang_typesystem) override;
+
+  CompilerType GetBuiltinRawPointerType() override;
 
   /// Wrap \p node as \p Global(TypeMangling(node)), remangle the type
   /// and create a CompilerType from it.
   CompilerType RemangleAsType(swift::Demangle::Demangler &dem,
                               swift::Demangle::NodePointer node);
 
-  /// Search the debug info for a Clang type with the specified name and cache
-  /// the result.
-  lldb::TypeSP LookupClangType(llvm::StringRef name);
+  /// Search the debug info for a non-nested Clang type with the specified name
+  /// and cache the result. Users should prefer the version that takes in the
+  /// decl_context.
+  lldb::TypeSP LookupClangType(llvm::StringRef name_ref);
+
+  /// Search the debug info for a Clang type with the specified name and decl
+  /// context, and cache the result.
+  lldb::TypeSP LookupClangType(llvm::StringRef name_ref,
+                               llvm::ArrayRef<CompilerContext> decl_context);
+
+  /// Attempts to convert a Clang type into a Swift type.
+  /// For example, int is converted to Int32.
+  CompilerType ConvertClangTypeToSwiftType(CompilerType clang_type) override;
 
 protected:
   /// Helper that creates an AST type from \p type.
   void *ReconstructType(lldb::opaque_compiler_type_t type);
   /// Cast \p opaque_type as a mangled name.
-  const char *AsMangledName(lldb::opaque_compiler_type_t type);
+  static const char *AsMangledName(lldb::opaque_compiler_type_t type);
 
   /// Lookup a type in the debug info.
   lldb::TypeSP FindTypeInModule(lldb::opaque_compiler_type_t type);
@@ -354,7 +404,8 @@ protected:
   clang::api_notes::APINotesManager *
   GetAPINotesManager(ClangExternalASTSourceCallbacks *source, unsigned id);
 
-  CompilerType LookupClangForwardType(llvm::StringRef name);
+  CompilerType LookupClangForwardType(llvm::StringRef name, 
+                  llvm::ArrayRef<CompilerContext> decl_context);
 
   std::pair<swift::Demangle::NodePointer, CompilerType>
   ResolveTypeAlias(swift::Demangle::Demangler &dem,
@@ -367,8 +418,7 @@ protected:
 
   uint32_t CollectTypeInfo(swift::Demangle::Demangler &dem,
                            swift::Demangle::NodePointer node,
-                           bool &unresolved_typealias,
-                           bool generic_walk = false);
+                           bool &unresolved_typealias);
 
   swift::Demangle::NodePointer
   GetClangTypeNode(CompilerType clang_type, swift::Demangle::Demangler &dem);
@@ -383,6 +433,7 @@ protected:
 #endif
 
   /// The sibling SwiftASTContext.
+  llvm::Triple m_swift_ast_context_triple;
   mutable bool m_swift_ast_context_initialized = false;
   mutable lldb::TypeSystemSP m_swift_ast_context_sp;
   mutable SwiftASTContext *m_swift_ast_context = nullptr;
@@ -437,7 +488,7 @@ public:
 
   /// Forwards to SwiftASTContext.
   PersistentExpressionState *GetPersistentExpressionState() override;
-  void PerformCompileUnitImports(SymbolContext &sc);
+  Status PerformCompileUnitImports(SymbolContext &sc);
 
   friend class SwiftASTContextForExpressions;
 protected:
@@ -451,7 +502,8 @@ protected:
   ///        initialized. It should be replaced by something more
   ///        deterministic.
   /// Perform all the implicit imports for the current frame.
-  mutable std::unique_ptr<SymbolContext> m_initial_symbol_context;
+  mutable std::unique_ptr<SymbolContext> m_initial_symbol_context_up;
+  std::unique_ptr<SwiftPersistentExpressionState> m_persistent_state_up;
 };
 
 swift::DWARFImporterDelegate *

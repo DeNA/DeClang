@@ -15,12 +15,17 @@
 #ifndef LLVM_SUPPORT_SOURCEMGR_H
 #define LLVM_SUPPORT_SOURCEMGR_H
 
+#include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SMLoc.h"
 #include <vector>
 
 namespace llvm {
+
+namespace vfs {
+class FileSystem;
+} // end namespace vfs
 
 class raw_ostream;
 class SMDiagnostic;
@@ -90,15 +95,25 @@ private:
   DiagHandlerTy DiagHandler = nullptr;
   void *DiagContext = nullptr;
 
+  // Filesystem for finding includes, if not the real FS.
+  IntrusiveRefCntPtr<vfs::FileSystem> FS;
+
   bool isValidBufferID(unsigned i) const { return i && i <= Buffers.size(); }
 
 public:
-  SourceMgr() = default;
+  SourceMgr();
   SourceMgr(const SourceMgr &) = delete;
   SourceMgr &operator=(const SourceMgr &) = delete;
-  SourceMgr(SourceMgr &&) = default;
-  SourceMgr &operator=(SourceMgr &&) = default;
-  ~SourceMgr() = default;
+  SourceMgr(SourceMgr &&);
+  SourceMgr &operator=(SourceMgr &&);
+  ~SourceMgr();
+
+  /// Specify a \a vfs::FileSystem for finding includes.
+  explicit SourceMgr(IntrusiveRefCntPtr<vfs::FileSystem> FS);
+  void setFileSystem(IntrusiveRefCntPtr<vfs::FileSystem> FS);
+
+  /// Return the include directories of this source manager.
+  ArrayRef<std::string> getIncludeDirs() const { return IncludeDirectories; }
 
   void setIncludeDirs(const std::vector<std::string> &Dirs) {
     IncludeDirectories = Dirs;
@@ -147,6 +162,22 @@ public:
     return Buffers.size();
   }
 
+  /// Takes the source buffers from the given source manager and append them to
+  /// the current manager. `MainBufferIncludeLoc` is an optional include
+  /// location to attach to the main buffer of `SrcMgr` after it gets moved to
+  /// the current manager.
+  void takeSourceBuffersFrom(SourceMgr &SrcMgr,
+                             SMLoc MainBufferIncludeLoc = SMLoc()) {
+    if (SrcMgr.Buffers.empty())
+      return;
+
+    size_t OldNumBuffers = getNumBuffers();
+    std::move(SrcMgr.Buffers.begin(), SrcMgr.Buffers.end(),
+              std::back_inserter(Buffers));
+    SrcMgr.Buffers.clear();
+    Buffers[OldNumBuffers].IncludeLoc = MainBufferIncludeLoc;
+  }
+
   /// Search for a file with the specified name in the current directory or in
   /// one of the IncludeDirs.
   ///
@@ -155,6 +186,17 @@ public:
   /// \p IncludedFile.
   unsigned AddIncludeFile(const std::string &Filename, SMLoc IncludeLoc,
                           std::string &IncludedFile);
+
+  /// Search for a file with the specified name in the current directory or in
+  /// one of the IncludeDirs, and try to open it **without** adding to the
+  /// SourceMgr. If the opened file is intended to be added to the source
+  /// manager, prefer `AddIncludeFile` instead.
+  ///
+  /// If no file is found, this returns an Error, otherwise it returns the
+  /// buffer of the stacked file. The full path to the included file can be
+  /// found in \p IncludedFile.
+  ErrorOr<std::unique_ptr<MemoryBuffer>>
+  OpenIncludeFile(const std::string &Filename, std::string &IncludedFile);
 
   /// Return the ID of the buffer containing the specified location.
   ///

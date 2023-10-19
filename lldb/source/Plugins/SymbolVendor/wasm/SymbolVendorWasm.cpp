@@ -41,12 +41,7 @@ void SymbolVendorWasm::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-lldb_private::ConstString SymbolVendorWasm::GetPluginNameStatic() {
-  static ConstString g_name("WASM");
-  return g_name;
-}
-
-const char *SymbolVendorWasm::GetPluginDescriptionStatic() {
+llvm::StringRef SymbolVendorWasm::GetPluginDescriptionStatic() {
   return "Symbol vendor for WASM that looks for dwo files that match "
          "executables.";
 }
@@ -112,6 +107,9 @@ SymbolVendorWasm::CreateInstance(const lldb::ModuleSP &module_sp,
   // that.
   SectionList *module_section_list = module_sp->GetSectionList();
   SectionList *objfile_section_list = sym_objfile_sp->GetSectionList();
+
+  if (!module_section_list || !objfile_section_list)
+    return nullptr;
 
   static const SectionType g_sections[] = {
       eSectionTypeDWARFDebugAbbrev,   eSectionTypeDWARFDebugAddr,

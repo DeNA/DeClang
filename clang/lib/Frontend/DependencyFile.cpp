@@ -24,6 +24,7 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/VirtualOutputBackends.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace clang;
@@ -31,23 +32,21 @@ using namespace clang;
 namespace {
 struct DepCollectorPPCallbacks : public PPCallbacks {
   DependencyCollector &DepCollector;
-  SourceManager &SM;
-  DiagnosticsEngine &Diags;
-  DepCollectorPPCallbacks(DependencyCollector &L, SourceManager &SM,
-                          DiagnosticsEngine &Diags)
-      : DepCollector(L), SM(SM), Diags(Diags) {}
+  Preprocessor &PP;
+  DepCollectorPPCallbacks(DependencyCollector &L, Preprocessor &PP)
+      : DepCollector(L), PP(PP) {}
 
-  void FileChanged(SourceLocation Loc, FileChangeReason Reason,
-                   SrcMgr::CharacteristicKind FileType,
-                   FileID PrevFID) override {
-    if (Reason != PPCallbacks::EnterFile)
+  void LexedFileChanged(FileID FID, LexedFileChangeReason Reason,
+                        SrcMgr::CharacteristicKind FileType, FileID PrevFID,
+                        SourceLocation Loc) override {
+    if (Reason != PPCallbacks::LexedFileChangeReason::EnterFile)
       return;
 
     // Dependency generation really does want to go all the way to the
     // file entry for a source location to find out what is depended on.
     // We do not want #line markers to affect dependency generation!
-    if (Optional<StringRef> Filename = SM.getNonBuiltinFilenameForID(
-            SM.getFileID(SM.getExpansionLoc(Loc))))
+    if (Optional<StringRef> Filename =
+            PP.getSourceManager().getNonBuiltinFilenameForID(FID))
       DepCollector.maybeAddDependency(
           llvm::sys::path::remove_leading_dotslash(*Filename),
           /*FromModule*/ false, isSystem(FileType), /*IsModuleFile*/ false,
@@ -66,9 +65,9 @@ struct DepCollectorPPCallbacks : public PPCallbacks {
 
   void InclusionDirective(SourceLocation HashLoc, const Token &IncludeTok,
                           StringRef FileName, bool IsAngled,
-                          CharSourceRange FilenameRange, const FileEntry *File,
-                          StringRef SearchPath, StringRef RelativePath,
-                          const Module *Imported,
+                          CharSourceRange FilenameRange,
+                          Optional<FileEntryRef> File, StringRef SearchPath,
+                          StringRef RelativePath, const Module *Imported,
                           SrcMgr::CharacteristicKind FileType) override {
     if (!File)
       DepCollector.maybeAddDependency(FileName, /*FromModule*/false,
@@ -90,7 +89,9 @@ struct DepCollectorPPCallbacks : public PPCallbacks {
                                     /*IsMissing=*/false);
   }
 
-  void EndOfMainFile() override { DepCollector.finishedMainFile(Diags); }
+  void EndOfMainFile() override {
+    DepCollector.finishedMainFile(PP.getDiagnostics());
+  }
 };
 
 struct DepCollectorMMCallbacks : public ModuleMapCallbacks {
@@ -139,7 +140,9 @@ struct DFGMMCallback : public ModuleMapCallbacks {
 
 struct DepCollectorASTListener : public ASTReaderListener {
   DependencyCollector &DepCollector;
-  DepCollectorASTListener(DependencyCollector &L) : DepCollector(L) { }
+  FileManager &FileMgr;
+  DepCollectorASTListener(DependencyCollector &L, FileManager &FileMgr)
+      : DepCollector(L), FileMgr(FileMgr) {}
   bool needsInputFileVisitation() override { return true; }
   bool needsSystemInputFileVisitation() override {
     return DepCollector.needSystemDependencies();
@@ -154,6 +157,11 @@ struct DepCollectorASTListener : public ASTReaderListener {
                       bool IsOverridden, bool IsExplicitModule) override {
     if (IsOverridden || IsExplicitModule)
       return true;
+
+    // Run this through the FileManager in order to respect 'use-external-name'
+    // in case we have a VFS overlay.
+    if (auto FE = FileMgr.getOptionalFileRef(Filename))
+      Filename = FE->getName();
 
     DepCollector.maybeAddDependency(Filename, /*FromModule*/true, IsSystem,
                                    /*IsModuleFile*/false, /*IsMissing*/false);
@@ -205,24 +213,27 @@ bool DependencyCollector::sawDependency(StringRef Filename, bool FromModule,
 
 DependencyCollector::~DependencyCollector() { }
 void DependencyCollector::attachToPreprocessor(Preprocessor &PP) {
-  PP.addPPCallbacks(std::make_unique<DepCollectorPPCallbacks>(
-      *this, PP.getSourceManager(), PP.getDiagnostics()));
+  PP.addPPCallbacks(std::make_unique<DepCollectorPPCallbacks>(*this, PP));
   PP.getHeaderSearchInfo().getModuleMap().addModuleMapCallbacks(
       std::make_unique<DepCollectorMMCallbacks>(*this));
 }
 void DependencyCollector::attachToASTReader(ASTReader &R) {
-  R.addListener(std::make_unique<DepCollectorASTListener>(*this));
+  R.addListener(
+      std::make_unique<DepCollectorASTListener>(*this, R.getFileManager()));
 }
 
 DependencyFileGenerator::DependencyFileGenerator(
-    const DependencyOutputOptions &Opts)
-    : OutputFile(Opts.OutputFile), Targets(Opts.Targets),
-      IncludeSystemHeaders(Opts.IncludeSystemHeaders),
+    const DependencyOutputOptions &Opts,
+    IntrusiveRefCntPtr<llvm::vfs::OutputBackend> OB)
+    : OutputBackend(std::move(OB)), OutputFile(Opts.OutputFile),
+      Targets(Opts.Targets), IncludeSystemHeaders(Opts.IncludeSystemHeaders),
       PhonyTarget(Opts.UsePhonyTargets),
       AddMissingHeaderDeps(Opts.AddMissingHeaderDeps), SeenMissingHeader(false),
       IncludeModuleFiles(Opts.IncludeModuleFiles),
       SkipUnusedModuleMaps(Opts.SkipUnusedModuleMaps),
       OutputFormat(Opts.OutputFormat), InputFileIndex(0) {
+  if (!OutputBackend)
+    OutputBackend = llvm::makeIntrusiveRefCnt<llvm::vfs::OnDiskOutputBackend>();
   for (const auto &ExtraDep : Opts.ExtraDeps) {
     if (addDependency(ExtraDep.first))
       ++InputFileIndex;
@@ -236,8 +247,7 @@ void DependencyFileGenerator::attachToPreprocessor(Preprocessor &PP) {
 
   // FIXME: Restore the call to DependencyCollector::attachToPreprocessor(PP);
   // once the SkipUnusedModuleMaps is upstreamed.
-  PP.addPPCallbacks(std::make_unique<DepCollectorPPCallbacks>(
-      *this, PP.getSourceManager(), PP.getDiagnostics()));
+  PP.addPPCallbacks(std::make_unique<DepCollectorPPCallbacks>(*this, PP));
   PP.getHeaderSearchInfo().getModuleMap().addModuleMapCallbacks(
       std::make_unique<DFGMMCallback>(*this, SkipUnusedModuleMaps));
 }
@@ -348,19 +358,33 @@ static void PrintFilename(raw_ostream &OS, StringRef Filename,
 }
 
 void DependencyFileGenerator::outputDependencyFile(DiagnosticsEngine &Diags) {
+  // The use of NoAtomicWrite and calling discard on SeenMissingHeader
+  // preserves the previous behaviour: no temporary files are used, and when
+  // SeenMissingHeader is true it deletes a previously-existing file.
+  // FIXME: switch to atomic-write based on FrontendOptions::UseTemporary and
+  // and not deleting the previous file, if possible.
+  Expected<llvm::vfs::OutputFile> O =
+      OutputBackend->createFile(OutputFile, llvm::vfs::OutputConfig()
+                                                .setTextWithCRLF()
+                                                .setNoAtomicWrite()
+                                                .setNoDiscardOnSignal());
+
+  if (!O) {
+    Diags.Report(diag::err_fe_error_opening)
+        << OutputFile << toString(O.takeError());
+    return;
+  }
+
   if (SeenMissingHeader) {
-    llvm::sys::fs::remove(OutputFile);
+    consumeError(O->discard());
     return;
   }
 
-  std::error_code EC;
-  llvm::raw_fd_ostream OS(OutputFile, EC, llvm::sys::fs::OF_TextWithCRLF);
-  if (EC) {
-    Diags.Report(diag::err_fe_error_opening) << OutputFile << EC.message();
-    return;
-  }
+  outputDependencyFile(O->getOS());
 
-  outputDependencyFile(OS);
+  if (auto Err = O->keep())
+    Diags.Report(diag::err_fe_error_writing)
+        << OutputFile << toString(std::move(Err));
 }
 
 void DependencyFileGenerator::outputDependencyFile(llvm::raw_ostream &OS) {

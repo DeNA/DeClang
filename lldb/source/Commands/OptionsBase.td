@@ -62,7 +62,7 @@
 //                          "OptionEnumValues(g_sort_option_enumeration)">;
 ////////////////////////////////////////////////////////////////////////////////
 // Field: completion_type
-// Default value: CommandCompletions::eNoCompletion (no tab completion)
+// Default value: lldb::CompletionType:eNoCompletion (no tab completion)
 // Set by:
 //  - `Completion`: Gives the option a single completion kind.
 //                  Example: def foo : Option<"foo", "f">,
@@ -151,15 +151,13 @@ class Arg<string type> {
 }
 
 // Gives the option an required argument.
-class EnumArg<string type, string enum> {
+class EnumArg<string type> {
   string ArgType = type;
-  string ArgEnum = enum;
 }
 
 // Gives the option an required argument.
-class OptionalEnumArg<string type, string enum> {
+class OptionalEnumArg<string type> {
   string ArgType = type;
-  string ArgEnum = enum;
   bit OptionalArg = 1;
 }
 

@@ -29,27 +29,30 @@
 void implicit_maps_double_complex (int a, int *b){
   double _Complex dc = (double)a;
 
-  // CK11-DAG: call i32 @__tgt_target_mapper(%struct.ident_t* @{{.+}}, i64 {{.+}}, i8* {{.+}}, i32 2, i8** [[BPGEP:%[0-9]+]], i8** [[PGEP:%[0-9]+]], {{.+}}[[SIZES]]{{.+}}, {{.+}}[[TYPES]]{{.+}}, i8** null, i8** null)
-  // CK11-DAG: [[BPGEP]] = getelementptr inbounds {{.+}}[[BPS:%[^,]+]], i32 0, i32 0
-  // CK11-DAG: [[PGEP]] = getelementptr inbounds {{.+}}[[PS:%[^,]+]], i32 0, i32 0
-  // CK11-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BPS]], i32 0, i32 0
-  // CK11-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[PS]], i32 0, i32 0
-  // CK11-DAG: [[CBP1:%.+]] = bitcast i8** [[BP1]] to { double, double }**
-  // CK11-DAG: [[CP1:%.+]] = bitcast i8** [[P1]] to { double, double }**
-  // CK11-DAG: store { double, double }* [[PTR:%[^,]+]], { double, double }** [[CBP1]]
-  // CK11-DAG: store { double, double }* [[PTR]], { double, double }** [[CP1]]
+// CK11-DAG: call i32 @__tgt_target_kernel(ptr @{{.+}}, i64 -1, i32 -1, i32 0, ptr @.{{.+}}.region_id, ptr [[ARGS:%.+]])
+// CK11-DAG: [[BPARG:%.+]] = getelementptr inbounds {{.+}}[[ARGS]], i32 0, i32 2
+// CK11-DAG: store ptr [[BPGEP:%.+]], ptr [[BPARG]]
+// CK11-DAG: [[PGEP:%.+]] = getelementptr inbounds {{.+}}[[ARGS]], i32 0, i32 3
+// CK11-DAG: store ptr [[PGEP:%.+]], ptr [[BPARG]]
+// CK11-DAG: [[BPGEP]] = getelementptr inbounds {{.+}}[[BPS:%[^,]+]], i32 0, i32 0
+// CK11-DAG: [[PGEP]] = getelementptr inbounds {{.+}}[[PS:%[^,]+]], i32 0, i32 0
+// CK11-DAG: [[BP1:%.+]] = getelementptr inbounds {{.+}}[[BPS]], i32 0, i32 0
+// CK11-DAG: [[P1:%.+]] = getelementptr inbounds {{.+}}[[PS]], i32 0, i32 0
+// CK11-DAG: store ptr [[PTR:%[^,]+]], ptr [[BP1]]
+// CK11-DAG: store ptr [[PTR]], ptr [[P1]]
 
-  // CK11: call void [[KERNEL:@.+]]({ double, double }* [[PTR]], i32** %{{.+}})
-  #pragma omp target defaultmap(tofrom:scalar)
+// CK11: call void [[KERNEL:@.+]](ptr [[PTR]], ptr %{{.+}})
+#pragma omp target defaultmap(tofrom \
+                              : scalar)
   {
    dc *= dc; *b = 1;
   }
 }
 
-// CK11: define internal void [[KERNEL]]({ double, double }* {{.*}}[[ARG:%.+]], i32** {{.*}})
-// CK11: [[ADDR:%.+]] = alloca { double, double }*,
-// CK11: store { double, double }* [[ARG]], { double, double }** [[ADDR]],
-// CK11: [[REF:%.+]] = load { double, double }*, { double, double }** [[ADDR]],
-// CK11: {{.+}} = getelementptr inbounds { double, double }, { double, double }* [[REF]], i32 0, i32 0
+// CK11: define internal void [[KERNEL]](ptr {{.*}}[[ARG:%.+]], ptr {{.*}})
+// CK11: [[ADDR:%.+]] = alloca ptr,
+// CK11: store ptr [[ARG]], ptr [[ADDR]],
+// CK11: [[REF:%.+]] = load ptr, ptr [[ADDR]],
+// CK11: {{.+}} = getelementptr inbounds { double, double }, ptr [[REF]], i32 0, i32 0
 #endif // CK11
 #endif

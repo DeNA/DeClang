@@ -22,6 +22,7 @@ class HostInfoPosix : public HostInfoBase {
 public:
   static size_t GetPageSize();
   static bool GetHostname(std::string &s);
+  static llvm::Optional<std::string> GetOSKernelDescription();
 
   static uint32_t GetUserID();
   static uint32_t GetGroupID();
@@ -34,6 +35,14 @@ public:
 
   static UserIDResolver &GetUserIDResolver();
 
+#ifdef LLDB_ENABLE_SWIFT
+  static FileSpec GetSwiftResourceDir();
+  static std::string GetSwiftResourceDir(llvm::Triple triple,
+                                         llvm::StringRef platform_sdk_path);
+  static bool ComputeSwiftResourceDirectory(FileSpec &lldb_shlib_spec,
+                                            FileSpec &file_spec, bool verify);
+#endif
+  
 protected:
   static bool ComputeSupportExeDirectory(FileSpec &file_spec);
   static bool ComputeHeaderDirectory(FileSpec &file_spec);

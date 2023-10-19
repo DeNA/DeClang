@@ -108,6 +108,9 @@ public:
     CommandExists (const char *cmd);
 
     bool
+    UserCommandExists(const char *cmd);
+
+    bool
     AliasExists (const char *cmd);
 
     lldb::SBBroadcaster
@@ -171,6 +174,9 @@ public:
 
     bool
     WasInterrupted () const;
+
+    bool
+    InterruptCommand();
 };
 
 } // namespace lldb

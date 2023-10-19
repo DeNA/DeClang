@@ -18,21 +18,20 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SetVector.h"
-#include "llvm/Analysis/DomTreeUpdater.h"
-#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CFG.h"
-#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Dominators.h"
 #include <cassert>
 
 namespace llvm {
-
+class BranchInst;
+class LandingPadInst;
+class Loop;
+class PHINode;
+template <typename PtrType> class SmallPtrSetImpl;
 class BlockFrequencyInfo;
 class BranchProbabilityInfo;
-class DominatorTree;
 class DomTreeUpdater;
 class Function;
-class Instruction;
 class LoopInfo;
 class MDNode;
 class MemoryDependenceResults;
@@ -46,9 +45,9 @@ class Value;
 /// instruction. If \p Updates is specified, collect all necessary DT updates
 /// into this vector. If \p KeepOneInputPHIs is true, one-input Phis in
 /// successors of blocks being deleted will be preserved.
-void DetatchDeadBlocks(ArrayRef <BasicBlock *> BBs,
-                       SmallVectorImpl<DominatorTree::UpdateType> *Updates,
-                       bool KeepOneInputPHIs = false);
+void detachDeadBlocks(ArrayRef <BasicBlock *> BBs,
+                      SmallVectorImpl<DominatorTree::UpdateType> *Updates,
+                      bool KeepOneInputPHIs = false);
 
 /// Delete the specified block, which must have no predecessors.
 void DeleteDeadBlock(BasicBlock *BB, DomTreeUpdater *DTU = nullptr,
@@ -91,11 +90,14 @@ bool DeleteDeadPHIs(BasicBlock *BB, const TargetLibraryInfo *TLI = nullptr,
 /// if BB's Pred has a branch to BB and to AnotherBB, and BB has a single
 /// successor Sing. In this case the branch will be updated with Sing instead of
 /// BB, and BB will still be merged into its predecessor and removed.
+/// If \p DT is not nullptr, update it directly; in that case, DTU must be
+/// nullptr.
 bool MergeBlockIntoPredecessor(BasicBlock *BB, DomTreeUpdater *DTU = nullptr,
                                LoopInfo *LI = nullptr,
                                MemorySSAUpdater *MSSAU = nullptr,
                                MemoryDependenceResults *MemDep = nullptr,
-                               bool PredecessorWithTwoSuccessors = false);
+                               bool PredecessorWithTwoSuccessors = false,
+                               DominatorTree *DT = nullptr);
 
 /// Merge block(s) sucessors, if possible. Return true if at least two
 /// of the blocks were merged together.
@@ -128,6 +130,13 @@ void ReplaceInstWithInst(BasicBlock::InstListType &BIL,
 /// Replace the instruction specified by From with the instruction specified by
 /// To. Copies DebugLoc from BI to I, if I doesn't already have a DebugLoc.
 void ReplaceInstWithInst(Instruction *From, Instruction *To);
+
+/// Check if we can prove that all paths starting from this block converge
+/// to a block that either has a @llvm.experimental.deoptimize call
+/// prior to its terminating return instruction or is terminated by unreachable.
+/// All blocks in the traversed sequence must have an unique successor, maybe
+/// except for the last one.
+bool IsBlockFollowedByDeoptOrUnreachable(const BasicBlock *BB);
 
 /// Option class for critical edge splitting.
 ///
@@ -493,7 +502,9 @@ BranchInst *GetIfCondition(BasicBlock *BB, BasicBlock *&IfTrue,
 // create the following structure:
 // A -> D0A, B -> D0A, I -> D0B, D0A -> D1, D0B -> D1
 // If BPI and BFI aren't non-null, BPI/BFI will be updated accordingly.
-bool SplitIndirectBrCriticalEdges(Function &F,
+// When `IgnoreBlocksWithoutPHI` is set to `true` critical edges leading to a
+// block without phi-instructions will not be split.
+bool SplitIndirectBrCriticalEdges(Function &F, bool IgnoreBlocksWithoutPHI,
                                   BranchProbabilityInfo *BPI = nullptr,
                                   BlockFrequencyInfo *BFI = nullptr);
 

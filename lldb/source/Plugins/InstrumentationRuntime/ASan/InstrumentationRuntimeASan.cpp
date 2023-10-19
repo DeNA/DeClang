@@ -47,10 +47,6 @@ void InstrumentationRuntimeASan::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-lldb_private::ConstString InstrumentationRuntimeASan::GetPluginNameStatic() {
-  return ConstString("AddressSanitizer");
-}
-
 lldb::InstrumentationRuntimeType InstrumentationRuntimeASan::GetTypeStatic() {
   return eInstrumentationRuntimeTypeAddressSanitizer;
 }
@@ -117,7 +113,8 @@ StructuredData::ObjectSP InstrumentationRuntimeASan::RetrieveReportData() {
 
   ThreadSP thread_sp =
       process_sp->GetThreadList().GetExpressionExecutionThread();
-  StackFrameSP frame_sp = thread_sp->GetSelectedFrame();
+  StackFrameSP frame_sp =
+      thread_sp->GetSelectedFrame(DoNoSelectMostRelevantFrame);
 
   if (!frame_sp)
     return StructuredData::ObjectSP();
@@ -140,9 +137,11 @@ StructuredData::ObjectSP InstrumentationRuntimeASan::RetrieveReportData() {
       exe_ctx, options, address_sanitizer_retrieve_report_data_command, "",
       return_value_sp, eval_error);
   if (result != eExpressionCompleted) {
-    process_sp->GetTarget().GetDebugger().GetAsyncOutputStream()->Printf(
-        "Warning: Cannot evaluate AddressSanitizer expression:\n%s\n",
-        eval_error.AsCString());
+    StreamString ss;
+    ss << "cannot evaluate AddressSanitizer expression:\n";
+    ss << eval_error.AsCString();
+    Debugger::ReportWarning(ss.GetString().str(),
+                            process_sp->GetTarget().GetDebugger().GetID());
     return StructuredData::ObjectSP();
   }
 
@@ -301,14 +300,15 @@ void InstrumentationRuntimeASan::Activate() {
   if (symbol_address == LLDB_INVALID_ADDRESS)
     return;
 
-  bool internal = true;
-  bool hardware = false;
+  const bool internal = true;
+  const bool hardware = false;
+  const bool sync = false;
   Breakpoint *breakpoint =
       process_sp->GetTarget()
           .CreateBreakpoint(symbol_address, internal, hardware)
           .get();
   breakpoint->SetCallback(InstrumentationRuntimeASan::NotifyBreakpointHit, this,
-                          true);
+                          sync);
   breakpoint->SetBreakpointKind("address-sanitizer-report");
   SetBreakpointID(breakpoint->GetID());
 

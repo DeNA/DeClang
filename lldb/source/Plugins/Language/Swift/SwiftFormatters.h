@@ -54,6 +54,12 @@ bool String_SummaryProvider(ValueObject &valobj, Stream &stream,
                             const TypeSummaryOptions &,
                             StringPrinter::ReadStringAndDumpToStreamOptions);
 
+bool Substring_SummaryProvider(ValueObject &, Stream &,
+                               const TypeSummaryOptions &);
+
+bool StringIndex_SummaryProvider(ValueObject &valobj, Stream &stream,
+                                 const TypeSummaryOptions &options);
+
 bool StaticString_SummaryProvider(ValueObject &valobj, Stream &stream,
                                   const TypeSummaryOptions &options);
 

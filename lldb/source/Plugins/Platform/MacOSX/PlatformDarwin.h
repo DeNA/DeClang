@@ -48,6 +48,18 @@ public:
 
   ~PlatformDarwin() override;
 
+  static lldb::PlatformSP CreateInstance(bool force, const ArchSpec *arch);
+
+  static void DebuggerInitialize(lldb_private::Debugger &debugger);
+  
+  static void Initialize();
+
+  static void Terminate();
+
+  static llvm::StringRef GetPluginNameStatic() { return "darwin"; }
+
+  static llvm::StringRef GetDescriptionStatic();
+
   Status PutFile(const FileSpec &source, const FileSpec &destination,
                  uint32_t uid = UINT32_MAX, uint32_t gid = UINT32_MAX) override;
 
@@ -96,6 +108,8 @@ public:
   FileSpec LocateExecutable(const char *basename) override;
 
   Status LaunchProcess(ProcessLaunchInfo &launch_info) override;
+  
+  Args GetExtraStartupCommands() override;
 
   static std::tuple<llvm::VersionTuple, llvm::StringRef>
   ParseVersionBuildDir(llvm::StringRef str);
@@ -139,6 +153,10 @@ protected:
   ///     module spec, its UUID, the crash messages and the abort cause.
   ///     \b nullptr if process has no crash information annotations.
   StructuredData::ArraySP ExtractCrashInfoAnnotations(Process &process);
+
+  /// Extract the `Application Specific Information` messages from a crash
+  /// report.
+  StructuredData::DictionarySP ExtractAppSpecificInfo(Process &process);
 
   void ReadLibdispatchOffsetsAddress(Process *process);
 

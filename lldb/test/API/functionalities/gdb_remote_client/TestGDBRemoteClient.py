@@ -3,11 +3,11 @@ import binascii
 import os.path
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
-from gdbclientutils import *
+from lldbsuite.test.gdbclientutils import *
+from lldbsuite.test.lldbgdbclient import GDBRemoteTestBase
 
 
 class TestGDBRemoteClient(GDBRemoteTestBase):
-
     class gPacketResponder(MockGDBServerResponder):
         registers = [
             "name:rax;bitsize:64;offset:0;encoding:uint;format:hex;set:General Purpose Registers;ehframe:0;dwarf:0;",
@@ -27,7 +27,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 return "E45"
 
         def readRegisters(self):
-            return len(self.registers) * 16 * '0'
+            return len(self.registers) * 16 * "0"
 
         def readRegister(self, register):
             return "0000000000000000"
@@ -47,7 +47,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 return "E42"
 
             def qfThreadInfo(self):
-                return "OK" # No threads.
+                return "OK"  # No threads.
 
             # Then, when we are asked to attach, error out.
             def vAttach(self, pid):
@@ -57,7 +57,9 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
 
         target = self.dbg.CreateTarget("")
         process = self.connect(target)
-        lldbutil.expect_state_changes(self, self.dbg.GetListener(), process, [lldb.eStateConnected])
+        lldbutil.expect_state_changes(
+            self, self.dbg.GetListener(), process, [lldb.eStateConnected]
+        )
 
         error = lldb.SBError()
         target.AttachToProcessWithID(lldb.SBListener(), 47, error)
@@ -70,7 +72,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 return "E42"
 
             def qfThreadInfo(self):
-                return "OK" # No threads.
+                return "OK"  # No threads.
 
             # Then, when we are asked to attach, error out.
             def A(self, packet):
@@ -80,19 +82,52 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
 
         target = self.createTarget("a.yaml")
         process = self.connect(target)
-        lldbutil.expect_state_changes(self, self.dbg.GetListener(), process, [lldb.eStateConnected])
+        lldbutil.expect_state_changes(
+            self, self.dbg.GetListener(), process, [lldb.eStateConnected]
+        )
 
         error = lldb.SBError()
-        target.Launch(lldb.SBListener(), None, None, None, None, None,
-                None, 0, True, error)
-        self.assertEquals("'A' packet returned an error: 71", error.GetCString())
+        target.Launch(
+            lldb.SBListener(), None, None, None, None, None, None, 0, True, error
+        )
+        self.assertRegex(error.GetCString(), "Cannot launch '.*a': Error 71")
+
+    def test_launch_rich_error(self):
+        class MyResponder(MockGDBServerResponder):
+            def qC(self):
+                return "E42"
+
+            def qfThreadInfo(self):
+                return "OK"  # No threads.
+
+            # Then, when we are asked to attach, error out.
+            def vRun(self, packet):
+                return "Eff;" + seven.hexlify("I'm a teapot")
+
+        self.server.responder = MyResponder()
+
+        target = self.createTarget("a.yaml")
+        process = self.connect(target)
+        lldbutil.expect_state_changes(
+            self, self.dbg.GetListener(), process, [lldb.eStateConnected]
+        )
+
+        error = lldb.SBError()
+        target.Launch(
+            lldb.SBListener(), None, None, None, None, None, None, 0, True, error
+        )
+        self.assertRegex(error.GetCString(), "Cannot launch '.*a': I'm a teapot")
 
     def test_read_registers_using_g_packets(self):
         """Test reading registers using 'g' packets (default behavior)"""
         self.dbg.HandleCommand(
-                "settings set plugin.process.gdb-remote.use-g-packet-for-reading true")
-        self.addTearDownHook(lambda:
-                self.runCmd("settings set plugin.process.gdb-remote.use-g-packet-for-reading false"))
+            "settings set plugin.process.gdb-remote.use-g-packet-for-reading true"
+        )
+        self.addTearDownHook(
+            lambda: self.runCmd(
+                "settings set plugin.process.gdb-remote.use-g-packet-for-reading false"
+            )
+        )
         self.server.responder = self.gPacketResponder()
         target = self.createTarget("a.yaml")
         process = self.connect(target)
@@ -102,12 +137,14 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
         self.read_registers(process)
         # Reading registers should not cause any 'p' packets to be exchanged.
         self.assertEquals(
-                0, len([p for p in self.server.responder.packetLog if p.startswith("p")]))
+            0, len([p for p in self.server.responder.packetLog if p.startswith("p")])
+        )
 
     def test_read_registers_using_p_packets(self):
         """Test reading registers using 'p' packets"""
         self.dbg.HandleCommand(
-                "settings set plugin.process.gdb-remote.use-g-packet-for-reading false")
+            "settings set plugin.process.gdb-remote.use-g-packet-for-reading false"
+        )
         self.server.responder = self.gPacketResponder()
         target = self.createTarget("a.yaml")
         process = self.connect(target)
@@ -115,7 +152,8 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
         self.read_registers(process)
         self.assertNotIn("g", self.server.responder.packetLog)
         self.assertGreater(
-                len([p for p in self.server.responder.packetLog if p.startswith("p")]), 0)
+            len([p for p in self.server.responder.packetLog if p.startswith("p")]), 0
+        )
 
     def test_write_registers_using_P_packets(self):
         """Test writing registers using 'P' packets (default behavior)"""
@@ -124,10 +162,12 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
         process = self.connect(target)
 
         self.write_registers(process)
-        self.assertEquals(0, len(
-                [p for p in self.server.responder.packetLog if p.startswith("G")]))
+        self.assertEquals(
+            0, len([p for p in self.server.responder.packetLog if p.startswith("G")])
+        )
         self.assertGreater(
-                len([p for p in self.server.responder.packetLog if p.startswith("P")]), 0)
+            len([p for p in self.server.responder.packetLog if p.startswith("P")]), 0
+        )
 
     def test_write_registers_using_G_packets(self):
         """Test writing registers using 'G' packets"""
@@ -142,18 +182,22 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
         process = self.connect(target)
 
         self.write_registers(process)
-        self.assertEquals(0, len(
-                [p for p in self.server.responder.packetLog if p.startswith("P")]))
-        self.assertGreater(len(
-                [p for p in self.server.responder.packetLog if p.startswith("G")]), 0)
+        self.assertEquals(
+            0, len([p for p in self.server.responder.packetLog if p.startswith("P")])
+        )
+        self.assertGreater(
+            len([p for p in self.server.responder.packetLog if p.startswith("G")]), 0
+        )
 
     def read_registers(self, process):
         self.for_each_gpr(
-                process, lambda r: self.assertEquals("0x0000000000000000", r.GetValue()))
+            process, lambda r: self.assertEquals("0x0000000000000000", r.GetValue())
+        )
 
     def write_registers(self, process):
         self.for_each_gpr(
-                process, lambda r: r.SetValueFromCString("0x0000000000000000"))
+            process, lambda r: r.SetValueFromCString("0x0000000000000000")
+        )
 
     def for_each_gpr(self, process, operation):
         registers = process.GetThreadAtIndex(0).GetFrameAtIndex(0).GetRegisters()
@@ -180,7 +224,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 if self.started:
                     return "mp10.10"
                 else:
-                   return "E42"
+                    return "E42"
 
             def qsThreadInfo(self):
                 return "l"
@@ -198,29 +242,34 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
 
         target = self.createTarget("a.yaml")
         # NB: apparently GDB packets are using "/" on Windows too
-        exe_path = self.getBuildArtifact("a").replace(os.path.sep, '/')
+        exe_path = self.getBuildArtifact("a").replace(os.path.sep, "/")
         exe_hex = binascii.b2a_hex(exe_path.encode()).decode()
         process = self.connect(target)
-        lldbutil.expect_state_changes(self, self.dbg.GetListener(), process,
-                                      [lldb.eStateConnected])
+        lldbutil.expect_state_changes(
+            self, self.dbg.GetListener(), process, [lldb.eStateConnected]
+        )
 
-        target.Launch(lldb.SBListener(),
-                      ["arg1", "arg2", "arg3"],  # argv
-                      [],  # envp
-                      None,  # stdin_path
-                      None,  # stdout_path
-                      None,  # stderr_path
-                      None,  # working_directory
-                      0,  # launch_flags
-                      True,  # stop_at_entry
-                      lldb.SBError())  # error
+        target.Launch(
+            lldb.SBListener(),
+            ["arg1", "arg2", "arg3"],  # argv
+            [],  # envp
+            None,  # stdin_path
+            None,  # stdout_path
+            None,  # stderr_path
+            None,  # working_directory
+            0,  # launch_flags
+            True,  # stop_at_entry
+            lldb.SBError(),
+        )  # error
         self.assertTrue(process, PROCESS_IS_VALID)
         self.assertEqual(process.GetProcessID(), 16)
 
-        self.assertPacketLogContains([
-          "A%d,0,%s,8,1,61726731,8,2,61726732,8,3,61726733" % (
-              len(exe_hex), exe_hex),
-        ])
+        self.assertPacketLogContains(
+            [
+                "A%d,0,%s,8,1,61726731,8,2,61726732,8,3,61726733"
+                % (len(exe_hex), exe_hex),
+            ]
+        )
 
     def test_launch_vRun(self):
         class MyResponder(MockGDBServerResponder):
@@ -238,7 +287,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 if self.started:
                     return "mp10.10"
                 else:
-                   return "E42"
+                    return "E42"
 
             def qsThreadInfo(self):
                 return "l"
@@ -254,28 +303,31 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
 
         target = self.createTarget("a.yaml")
         # NB: apparently GDB packets are using "/" on Windows too
-        exe_path = self.getBuildArtifact("a").replace(os.path.sep, '/')
+        exe_path = self.getBuildArtifact("a").replace(os.path.sep, "/")
         exe_hex = binascii.b2a_hex(exe_path.encode()).decode()
         process = self.connect(target)
-        lldbutil.expect_state_changes(self, self.dbg.GetListener(), process,
-                                      [lldb.eStateConnected])
+        lldbutil.expect_state_changes(
+            self, self.dbg.GetListener(), process, [lldb.eStateConnected]
+        )
 
-        process = target.Launch(lldb.SBListener(),
-                                ["arg1", "arg2", "arg3"],  # argv
-                                [],  # envp
-                                None,  # stdin_path
-                                None,  # stdout_path
-                                None,  # stderr_path
-                                None,  # working_directory
-                                0,  # launch_flags
-                                True,  # stop_at_entry
-                                lldb.SBError())  # error
+        process = target.Launch(
+            lldb.SBListener(),
+            ["arg1", "arg2", "arg3"],  # argv
+            [],  # envp
+            None,  # stdin_path
+            None,  # stdout_path
+            None,  # stderr_path
+            None,  # working_directory
+            0,  # launch_flags
+            True,  # stop_at_entry
+            lldb.SBError(),
+        )  # error
         self.assertTrue(process, PROCESS_IS_VALID)
         self.assertEqual(process.GetProcessID(), 16)
 
-        self.assertPacketLogContains([
-          "vRun;%s;61726731;61726732;61726733" % (exe_hex,)
-        ])
+        self.assertPacketLogContains(
+            ["vRun;%s;61726731;61726732;61726733" % (exe_hex,)]
+        )
 
     def test_launch_QEnvironment(self):
         class MyResponder(MockGDBServerResponder):
@@ -283,7 +335,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 return "E42"
 
             def qfThreadInfo(self):
-               return "E42"
+                return "E42"
 
             def vRun(self, packet):
                 self.started = True
@@ -293,34 +345,40 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
 
         target = self.createTarget("a.yaml")
         process = self.connect(target)
-        lldbutil.expect_state_changes(self, self.dbg.GetListener(), process,
-                                      [lldb.eStateConnected])
+        lldbutil.expect_state_changes(
+            self, self.dbg.GetListener(), process, [lldb.eStateConnected]
+        )
 
-        target.Launch(lldb.SBListener(),
-                      [],  # argv
-                      ["PLAIN=foo",
-                       "NEEDSENC=frob$",
-                       "NEEDSENC2=fr*ob",
-                       "NEEDSENC3=fro}b",
-                       "NEEDSENC4=f#rob",
-                       "EQUALS=foo=bar",
-                       ],  # envp
-                      None,  # stdin_path
-                      None,  # stdout_path
-                      None,  # stderr_path
-                      None,  # working_directory
-                      0,  # launch_flags
-                      True,  # stop_at_entry
-                      lldb.SBError())  # error
+        target.Launch(
+            lldb.SBListener(),
+            [],  # argv
+            [
+                "PLAIN=foo",
+                "NEEDSENC=frob$",
+                "NEEDSENC2=fr*ob",
+                "NEEDSENC3=fro}b",
+                "NEEDSENC4=f#rob",
+                "EQUALS=foo=bar",
+            ],  # envp
+            None,  # stdin_path
+            None,  # stdout_path
+            None,  # stderr_path
+            None,  # working_directory
+            0,  # launch_flags
+            True,  # stop_at_entry
+            lldb.SBError(),
+        )  # error
 
-        self.assertPacketLogContains([
-          "QEnvironment:PLAIN=foo",
-          "QEnvironmentHexEncoded:4e45454453454e433d66726f6224",
-          "QEnvironmentHexEncoded:4e45454453454e43323d66722a6f62",
-          "QEnvironmentHexEncoded:4e45454453454e43333d66726f7d62",
-          "QEnvironmentHexEncoded:4e45454453454e43343d6623726f62",
-          "QEnvironment:EQUALS=foo=bar",
-        ])
+        self.assertPacketLogContains(
+            [
+                "QEnvironment:PLAIN=foo",
+                "QEnvironmentHexEncoded:4e45454453454e433d66726f6224",
+                "QEnvironmentHexEncoded:4e45454453454e43323d66722a6f62",
+                "QEnvironmentHexEncoded:4e45454453454e43333d66726f7d62",
+                "QEnvironmentHexEncoded:4e45454453454e43343d6623726f62",
+                "QEnvironment:EQUALS=foo=bar",
+            ]
+        )
 
     def test_launch_QEnvironmentHexEncoded_only(self):
         class MyResponder(MockGDBServerResponder):
@@ -328,7 +386,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 return "E42"
 
             def qfThreadInfo(self):
-               return "E42"
+                return "E42"
 
             def vRun(self, packet):
                 self.started = True
@@ -341,34 +399,40 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
 
         target = self.createTarget("a.yaml")
         process = self.connect(target)
-        lldbutil.expect_state_changes(self, self.dbg.GetListener(), process,
-                                      [lldb.eStateConnected])
+        lldbutil.expect_state_changes(
+            self, self.dbg.GetListener(), process, [lldb.eStateConnected]
+        )
 
-        target.Launch(lldb.SBListener(),
-                      [],  # argv
-                      ["PLAIN=foo",
-                       "NEEDSENC=frob$",
-                       "NEEDSENC2=fr*ob",
-                       "NEEDSENC3=fro}b",
-                       "NEEDSENC4=f#rob",
-                       "EQUALS=foo=bar",
-                       ],  # envp
-                      None,  # stdin_path
-                      None,  # stdout_path
-                      None,  # stderr_path
-                      None,  # working_directory
-                      0,  # launch_flags
-                      True,  # stop_at_entry
-                      lldb.SBError())  # error
+        target.Launch(
+            lldb.SBListener(),
+            [],  # argv
+            [
+                "PLAIN=foo",
+                "NEEDSENC=frob$",
+                "NEEDSENC2=fr*ob",
+                "NEEDSENC3=fro}b",
+                "NEEDSENC4=f#rob",
+                "EQUALS=foo=bar",
+            ],  # envp
+            None,  # stdin_path
+            None,  # stdout_path
+            None,  # stderr_path
+            None,  # working_directory
+            0,  # launch_flags
+            True,  # stop_at_entry
+            lldb.SBError(),
+        )  # error
 
-        self.assertPacketLogContains([
-          "QEnvironmentHexEncoded:504c41494e3d666f6f",
-          "QEnvironmentHexEncoded:4e45454453454e433d66726f6224",
-          "QEnvironmentHexEncoded:4e45454453454e43323d66722a6f62",
-          "QEnvironmentHexEncoded:4e45454453454e43333d66726f7d62",
-          "QEnvironmentHexEncoded:4e45454453454e43343d6623726f62",
-          "QEnvironmentHexEncoded:455155414c533d666f6f3d626172",
-        ])
+        self.assertPacketLogContains(
+            [
+                "QEnvironmentHexEncoded:504c41494e3d666f6f",
+                "QEnvironmentHexEncoded:4e45454453454e433d66726f6224",
+                "QEnvironmentHexEncoded:4e45454453454e43323d66722a6f62",
+                "QEnvironmentHexEncoded:4e45454453454e43333d66726f7d62",
+                "QEnvironmentHexEncoded:4e45454453454e43343d6623726f62",
+                "QEnvironmentHexEncoded:455155414c533d666f6f3d626172",
+            ]
+        )
 
     def test_detach_no_multiprocess(self):
         class MyResponder(MockGDBServerResponder):
@@ -384,7 +448,7 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 return "OK"
 
         self.server.responder = MyResponder()
-        target = self.dbg.CreateTarget('')
+        target = self.dbg.CreateTarget("")
         process = self.connect(target)
         process.Detach()
         self.assertEqual(self.server.responder.detached, "D")
@@ -408,7 +472,171 @@ class TestGDBRemoteClient(GDBRemoteTestBase):
                 return "OK"
 
         self.server.responder = MyResponder(self)
-        target = self.dbg.CreateTarget('')
+        target = self.dbg.CreateTarget("")
         process = self.connect(target)
         process.Detach()
         self.assertRegex(self.server.responder.detached, r"D;0*400")
+
+    def test_signal_gdb(self):
+        class MyResponder(MockGDBServerResponder):
+            def qSupported(self, client_supported):
+                return "PacketSize=3fff;QStartNoAckMode+"
+
+            def haltReason(self):
+                return "S0a"
+
+            def cont(self):
+                return self.haltReason()
+
+        self.server.responder = MyResponder()
+
+        self.runCmd("platform select remote-linux")
+        target = self.createTarget("a.yaml")
+        process = self.connect(target)
+
+        self.assertEqual(process.threads[0].GetStopReason(), lldb.eStopReasonSignal)
+        self.assertEqual(process.threads[0].GetStopDescription(100), "signal SIGBUS")
+
+    def test_signal_lldb_old(self):
+        class MyResponder(MockGDBServerResponder):
+            def qSupported(self, client_supported):
+                return "PacketSize=3fff;QStartNoAckMode+"
+
+            def qHostInfo(self):
+                return "triple:61726d76372d756e6b6e6f776e2d6c696e75782d676e75;"
+
+            def QThreadSuffixSupported(self):
+                return "OK"
+
+            def haltReason(self):
+                return "S0a"
+
+            def cont(self):
+                return self.haltReason()
+
+        self.server.responder = MyResponder()
+
+        self.runCmd("platform select remote-linux")
+        target = self.createTarget("a.yaml")
+        process = self.connect(target)
+
+        self.assertEqual(process.threads[0].GetStopReason(), lldb.eStopReasonSignal)
+        self.assertEqual(process.threads[0].GetStopDescription(100), "signal SIGUSR1")
+
+    def test_signal_lldb(self):
+        class MyResponder(MockGDBServerResponder):
+            def qSupported(self, client_supported):
+                return "PacketSize=3fff;QStartNoAckMode+;native-signals+"
+
+            def qHostInfo(self):
+                return "triple:61726d76372d756e6b6e6f776e2d6c696e75782d676e75;"
+
+            def haltReason(self):
+                return "S0a"
+
+            def cont(self):
+                return self.haltReason()
+
+        self.server.responder = MyResponder()
+
+        self.runCmd("platform select remote-linux")
+        target = self.createTarget("a.yaml")
+        process = self.connect(target)
+
+        self.assertEqual(process.threads[0].GetStopReason(), lldb.eStopReasonSignal)
+        self.assertEqual(process.threads[0].GetStopDescription(100), "signal SIGUSR1")
+
+    def do_siginfo_test(self, platform, target_yaml, raw_data, expected):
+        class MyResponder(MockGDBServerResponder):
+            def qSupported(self, client_supported):
+                return "PacketSize=3fff;QStartNoAckMode+;qXfer:siginfo:read+"
+
+            def qXferRead(self, obj, annex, offset, length):
+                if obj == "siginfo":
+                    return raw_data, False
+                else:
+                    return None, False
+
+            def haltReason(self):
+                return "T02"
+
+            def cont(self):
+                return self.haltReason()
+
+        self.server.responder = MyResponder()
+
+        self.runCmd("platform select " + platform)
+        target = self.createTarget(target_yaml)
+        process = self.connect(target)
+
+        siginfo = process.threads[0].GetSiginfo()
+        self.assertSuccess(siginfo.GetError())
+
+        for key, value in expected.items():
+            self.assertEqual(
+                siginfo.GetValueForExpressionPath("." + key).GetValueAsUnsigned(), value
+            )
+
+    def test_siginfo_linux_amd64(self):
+        data = (
+            # si_signo         si_errno        si_code
+            "\x11\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00"
+            # __pad0           si_pid          si_uid
+            "\x00\x00\x00\x00\xbf\xf7\x0b\x00\xe8\x03\x00\x00"
+            # si_status
+            "\x0c\x00\x00\x00"
+            + "\x00" * 100
+        )
+        expected = {
+            "si_signo": 17,  # SIGCHLD
+            "si_errno": 0,
+            "si_code": 1,  # CLD_EXITED
+            "_sifields._sigchld.si_pid": 784319,
+            "_sifields._sigchld.si_uid": 1000,
+            "_sifields._sigchld.si_status": 12,
+            "_sifields._sigchld.si_utime": 0,
+            "_sifields._sigchld.si_stime": 0,
+        }
+        self.do_siginfo_test("remote-linux", "basic_eh_frame.yaml", data, expected)
+
+    def test_siginfo_linux_i386(self):
+        data = (
+            # si_signo         si_errno        si_code
+            "\x11\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00"
+            # si_pid           si_uid          si_status
+            "\x49\x43\x07\x00\xe8\x03\x00\x00\x0c\x00\x00\x00"
+            + "\x00" * 104
+        )
+        expected = {
+            "si_signo": 17,  # SIGCHLD
+            "si_errno": 0,
+            "si_code": 1,  # CLD_EXITED
+            "_sifields._sigchld.si_pid": 475977,
+            "_sifields._sigchld.si_uid": 1000,
+            "_sifields._sigchld.si_status": 12,
+            "_sifields._sigchld.si_utime": 0,
+            "_sifields._sigchld.si_stime": 0,
+        }
+        self.do_siginfo_test("remote-linux", "basic_eh_frame-i386.yaml", data, expected)
+
+    def test_siginfo_freebsd_amd64(self):
+        data = (
+            # si_signo         si_errno        si_code
+            "\x0b\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x00"
+            # si_pid           si_uid          si_status
+            "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+            # si_addr
+            "\x76\x98\xba\xdc\xfe\x00\x00\x00"
+            # si_status                        si_trapno
+            "\x00\x00\x00\x00\x00\x00\x00\x00\x0c\x00\x00\x00"
+            + "\x00" * 36
+        )
+
+        expected = {
+            "si_signo": 11,  # SIGSEGV
+            "si_errno": 0,
+            "si_code": 1,  # SEGV_MAPERR
+            "si_addr": 0xFEDCBA9876,
+            "_reason._fault._trapno": 12,
+        }
+        self.do_siginfo_test("remote-freebsd", "basic_eh_frame.yaml", data, expected)

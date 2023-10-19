@@ -150,6 +150,7 @@ void ODRHash::AddTemplateName(TemplateName Name) {
   case TemplateName::DependentTemplate:
   case TemplateName::SubstTemplateTemplateParm:
   case TemplateName::SubstTemplateTemplateParmPack:
+  case TemplateName::UsingTemplate:
     break;
   }
 }
@@ -440,7 +441,7 @@ public:
 
 // Only allow a small portion of Decl's to be processed.  Remove this once
 // all Decl's can be handled.
-bool ODRHash::isDeclToBeProcessed(const Decl *D, const DeclContext *Parent) {
+bool ODRHash::isSubDeclToBeProcessed(const Decl *D, const DeclContext *Parent) {
   if (D->isImplicit()) return false;
   if (D->getDeclContext() != Parent) return false;
 
@@ -487,7 +488,7 @@ void ODRHash::AddCXXRecordDecl(const CXXRecordDecl *Record) {
   // accurate count of Decl's.
   llvm::SmallVector<const Decl *, 16> Decls;
   for (Decl *SubDecl : Record->decls()) {
-    if (isDeclToBeProcessed(SubDecl, Record)) {
+    if (isSubDeclToBeProcessed(SubDecl, Record)) {
       Decls.push_back(SubDecl);
       if (auto *Function = dyn_cast<FunctionDecl>(SubDecl)) {
         // Compute/Preload ODRHash into FunctionDecl.
@@ -514,6 +515,24 @@ void ODRHash::AddCXXRecordDecl(const CXXRecordDecl *Record) {
     ID.AddInteger(Base.isVirtual());
     ID.AddInteger(Base.getAccessSpecifierAsWritten());
   }
+}
+
+void ODRHash::AddRecordDecl(const RecordDecl *Record) {
+  assert(!isa<CXXRecordDecl>(Record) &&
+         "For CXXRecordDecl should call AddCXXRecordDecl.");
+  AddDecl(Record);
+
+  // Filter out sub-Decls which will not be processed in order to get an
+  // accurate count of Decl's.
+  llvm::SmallVector<const Decl *, 16> Decls;
+  for (Decl *SubDecl : Record->decls()) {
+    if (isSubDeclToBeProcessed(SubDecl, Record))
+      Decls.push_back(SubDecl);
+  }
+
+  ID.AddInteger(Decls.size());
+  for (const Decl *SubDecl : Decls)
+    AddSubDecl(SubDecl);
 }
 
 void ODRHash::AddFunctionDecl(const FunctionDecl *Function,
@@ -563,7 +582,7 @@ void ODRHash::AddFunctionDecl(const FunctionDecl *Function,
   AddQualType(Function->getReturnType());
 
   ID.AddInteger(Function->param_size());
-  for (auto Param : Function->parameters())
+  for (auto *Param : Function->parameters())
     AddSubDecl(Param);
 
   if (SkipBody) {
@@ -588,7 +607,7 @@ void ODRHash::AddFunctionDecl(const FunctionDecl *Function,
   // accurate count of Decl's.
   llvm::SmallVector<const Decl *, 16> Decls;
   for (Decl *SubDecl : Function->decls()) {
-    if (isDeclToBeProcessed(SubDecl, Function)) {
+    if (isSubDeclToBeProcessed(SubDecl, Function)) {
       Decls.push_back(SubDecl);
     }
   }
@@ -614,7 +633,7 @@ void ODRHash::AddEnumDecl(const EnumDecl *Enum) {
   // accurate count of Decl's.
   llvm::SmallVector<const Decl *, 16> Decls;
   for (Decl *SubDecl : Enum->decls()) {
-    if (isDeclToBeProcessed(SubDecl, Enum)) {
+    if (isSubDeclToBeProcessed(SubDecl, Enum)) {
       assert(isa<EnumConstantDecl>(SubDecl) && "Unexpected Decl");
       Decls.push_back(SubDecl);
     }
@@ -933,7 +952,7 @@ public:
 
     auto Protocols = T->getProtocols();
     ID.AddInteger(Protocols.size());
-    for (auto Protocol : Protocols) {
+    for (auto *Protocol : Protocols) {
       AddDecl(Protocol);
     }
 
@@ -951,7 +970,7 @@ public:
     AddDecl(T->getDecl());
     auto Protocols = T->getProtocols();
     ID.AddInteger(Protocols.size());
-    for (auto Protocol : Protocols) {
+    for (auto *Protocol : Protocols) {
       AddDecl(Protocol);
     }
 
@@ -1060,7 +1079,7 @@ public:
     VisitType(T);
   }
   void VisitTypeOfType(const TypeOfType *T) {
-    AddQualType(T->getUnderlyingType());
+    AddQualType(T->getUnmodifiedType());
     VisitType(T);
   }
 

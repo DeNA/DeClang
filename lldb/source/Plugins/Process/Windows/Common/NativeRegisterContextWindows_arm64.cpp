@@ -84,10 +84,10 @@ static_assert(((sizeof g_fpr_regnums_arm64 / sizeof g_fpr_regnums_arm64[0]) -
               "g_fpu_regnums_arm64 has wrong number of register infos");
 
 static const RegisterSet g_reg_sets_arm64[] = {
-    {"General Purpose Registers", "gpr",
-     llvm::array_lengthof(g_gpr_regnums_arm64) - 1, g_gpr_regnums_arm64},
-    {"Floating Point Registers", "fpr",
-     llvm::array_lengthof(g_fpr_regnums_arm64) - 1, g_fpr_regnums_arm64},
+    {"General Purpose Registers", "gpr", std::size(g_gpr_regnums_arm64) - 1,
+     g_gpr_regnums_arm64},
+    {"Floating Point Registers", "fpr", std::size(g_fpr_regnums_arm64) - 1,
+     g_fpr_regnums_arm64},
 };
 
 enum { k_num_register_sets = 2 };
@@ -220,7 +220,7 @@ Status NativeRegisterContextWindows_arm64::GPRRead(const uint32_t reg,
     reg_value.SetUInt64(tls_context.Pc);
     break;
   case gpr_cpsr_arm64:
-    reg_value.SetUInt64(tls_context.Cpsr);
+    reg_value.SetUInt32(tls_context.Cpsr);
     break;
 
   case gpr_w0_arm64:
@@ -317,7 +317,7 @@ NativeRegisterContextWindows_arm64::GPRWrite(const uint32_t reg,
     tls_context.Pc = reg_value.GetAsUInt64();
     break;
   case gpr_cpsr_arm64:
-    tls_context.Cpsr = reg_value.GetAsUInt64();
+    tls_context.Cpsr = reg_value.GetAsUInt32();
     break;
 
   case gpr_w0_arm64:

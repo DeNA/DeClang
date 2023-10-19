@@ -13,6 +13,7 @@
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Symbol/SymbolFileOnDemand.h"
 #include "lldb/Symbol/TypeList.h"
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Symbol/TypeSystem.h"
@@ -27,6 +28,7 @@ using namespace lldb_private;
 using namespace lldb;
 
 char SymbolFile::ID;
+char SymbolFileCommon::ID;
 
 void SymbolFile::PreloadSymbols() {
   // No-op for most implementations.
@@ -34,9 +36,6 @@ void SymbolFile::PreloadSymbols() {
 
 std::recursive_mutex &SymbolFile::GetModuleMutex() const {
   return GetObjectFile()->GetModule()->GetMutex();
-}
-ObjectFile *SymbolFile::GetMainObjectFile() {
-  return m_objfile_sp->GetModule()->GetObjectFile();
 }
 
 SymbolFile *SymbolFile::FindPlugin(ObjectFileSP objfile_sp) {
@@ -81,34 +80,30 @@ SymbolFile *SymbolFile::FindPlugin(ObjectFileSP objfile_sp) {
       }
     }
     if (best_symfile_up) {
+      // If symbol on-demand is enabled the winning symbol file parser is
+      // wrapped with SymbolFileOnDemand so that hydration of the debug info
+      // can be controlled to improve performance.
+      //
+      // Currently the supported on-demand symbol files include:
+      //  executables, shared libraries and debug info files.
+      //
+      // To reduce unnecessary wrapping files with zero debug abilities are
+      // skipped.
+      ObjectFile::Type obj_file_type = objfile_sp->CalculateType();
+      if (ModuleList::GetGlobalModuleListProperties().GetLoadSymbolOnDemand() &&
+          best_symfile_abilities > 0 &&
+          (obj_file_type == ObjectFile::eTypeExecutable ||
+           obj_file_type == ObjectFile::eTypeSharedLibrary ||
+           obj_file_type == ObjectFile::eTypeDebugInfo)) {
+        best_symfile_up =
+            std::make_unique<SymbolFileOnDemand>(std::move(best_symfile_up));
+      }
       // Let the winning symbol file parser initialize itself more completely
       // now that it has been chosen
       best_symfile_up->InitializeObject();
     }
   }
   return best_symfile_up.release();
-}
-
-llvm::Expected<TypeSystem &>
-SymbolFile::GetTypeSystemForLanguage(lldb::LanguageType language) {
-  auto type_system_or_err =
-      m_objfile_sp->GetModule()->GetTypeSystemForLanguage(language);
-  if (type_system_or_err) {
-    type_system_or_err->SetSymbolFile(this);
-  }
-  return type_system_or_err;
-}
-
-bool SymbolFile::ForceInlineSourceFileCheck() {
-  // Force checking for inline breakpoint locations for any JIT object files.
-  // If we have a symbol file for something that has been JIT'ed, chances
-  // are we used "#line" directives to point to the expression code and this
-  // means we will have DWARF line tables that have source implementation
-  // entries that do not match the compile unit source (usually a memory buffer)
-  // file. Returning true for JIT files means all breakpoints set by file and
-  // line
-  // will be found correctly.
-  return m_objfile_sp->GetType() == ObjectFile::eTypeJIT;
 }
 
 std::vector<lldb::DataBufferSP>
@@ -133,9 +128,8 @@ void SymbolFile::FindGlobalVariables(const RegularExpression &regex,
                                      uint32_t max_matches,
                                      VariableList &variables) {}
 
-void SymbolFile::FindFunctions(ConstString name,
+void SymbolFile::FindFunctions(const Module::LookupInfo &lookup_info,
                                const CompilerDeclContext &parent_decl_ctx,
-                               lldb::FunctionNameType name_type_mask,
                                bool include_inlines,
                                SymbolContextList &sc_list) {}
 
@@ -145,9 +139,7 @@ void SymbolFile::FindFunctions(const RegularExpression &regex,
 
 void SymbolFile::GetMangledNamesForFunction(
     const std::string &scope_qualified_name,
-    std::vector<ConstString> &mangled_names) {
-  return;
-}
+    std::vector<ConstString> &mangled_names) {}
 
 void SymbolFile::FindTypes(
     ConstString name, const CompilerDeclContext &parent_decl_ctx,
@@ -167,50 +159,18 @@ void SymbolFile::AssertModuleLock() {
   // We assert that we have to module lock by trying to acquire the lock from a
   // different thread. Note that we must abort if the result is true to
   // guarantee correctness.
-  assert(std::async(std::launch::async,
-                    [this] { return this->GetModuleMutex().try_lock(); })
-                 .get() == false &&
+  assert(std::async(
+             std::launch::async,
+             [this] {
+               return this->GetModuleMutex().try_lock();
+             }).get() == false &&
          "Module is not locked");
 #endif
 }
 
-uint32_t SymbolFile::GetNumCompileUnits() {
-  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  if (!m_compile_units) {
-    // Create an array of compile unit shared pointers -- which will each
-    // remain NULL until someone asks for the actual compile unit information.
-    m_compile_units.emplace(CalculateNumCompileUnits());
-  }
-  return m_compile_units->size();
-}
+SymbolFile::RegisterInfoResolver::~RegisterInfoResolver() = default;
 
-CompUnitSP SymbolFile::GetCompileUnitAtIndex(uint32_t idx) {
-  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  uint32_t num = GetNumCompileUnits();
-  if (idx >= num)
-    return nullptr;
-  lldb::CompUnitSP &cu_sp = (*m_compile_units)[idx];
-  if (!cu_sp)
-    cu_sp = ParseCompileUnitAtIndex(idx);
-  return cu_sp;
-}
-
-void SymbolFile::SetCompileUnitAtIndex(uint32_t idx, const CompUnitSP &cu_sp) {
-  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  const size_t num_compile_units = GetNumCompileUnits();
-  assert(idx < num_compile_units);
-  (void)num_compile_units;
-
-  // Fire off an assertion if this compile unit already exists for now. The
-  // partial parsing should take care of only setting the compile unit
-  // once, so if this assertion fails, we need to make sure that we don't
-  // have a race condition, or have a second parse of the same compile
-  // unit.
-  assert((*m_compile_units)[idx] == nullptr);
-  (*m_compile_units)[idx] = cu_sp;
-}
-
-Symtab *SymbolFile::GetSymtab() {
+Symtab *SymbolFileCommon::GetSymtab() {
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
   if (m_symtab)
     return m_symtab;
@@ -225,7 +185,11 @@ Symtab *SymbolFile::GetSymtab() {
   return m_symtab;
 }
 
-void SymbolFile::SectionFileAddressesChanged() {
+ObjectFile *SymbolFileCommon::GetMainObjectFile() {
+  return m_objfile_sp->GetModule()->GetObjectFile();
+}
+
+void SymbolFileCommon::SectionFileAddressesChanged() {
   ObjectFile *module_objfile = GetMainObjectFile();
   ObjectFile *symfile_objfile = GetObjectFile();
   if (symfile_objfile != module_objfile)
@@ -234,7 +198,67 @@ void SymbolFile::SectionFileAddressesChanged() {
     m_symtab->SectionFileAddressesChanged();
 }
 
-void SymbolFile::Dump(Stream &s) {
+uint32_t SymbolFileCommon::GetNumCompileUnits() {
+  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
+  if (!m_compile_units) {
+    // Create an array of compile unit shared pointers -- which will each
+    // remain NULL until someone asks for the actual compile unit information.
+    m_compile_units.emplace(CalculateNumCompileUnits());
+  }
+  return m_compile_units->size();
+}
+
+CompUnitSP SymbolFileCommon::GetCompileUnitAtIndex(uint32_t idx) {
+  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
+  uint32_t num = GetNumCompileUnits();
+  if (idx >= num)
+    return nullptr;
+  lldb::CompUnitSP &cu_sp = (*m_compile_units)[idx];
+  if (!cu_sp)
+    cu_sp = ParseCompileUnitAtIndex(idx);
+  return cu_sp;
+}
+
+void SymbolFileCommon::SetCompileUnitAtIndex(uint32_t idx,
+                                             const CompUnitSP &cu_sp) {
+  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
+  const size_t num_compile_units = GetNumCompileUnits();
+  assert(idx < num_compile_units);
+  (void)num_compile_units;
+
+  // Fire off an assertion if this compile unit already exists for now. The
+  // partial parsing should take care of only setting the compile unit
+  // once, so if this assertion fails, we need to make sure that we don't
+  // have a race condition, or have a second parse of the same compile
+  // unit.
+  assert((*m_compile_units)[idx] == nullptr);
+  (*m_compile_units)[idx] = cu_sp;
+}
+
+llvm::Expected<TypeSystemSP>
+SymbolFileCommon::GetTypeSystemForLanguage(lldb::LanguageType language) {
+  auto type_system_or_err =
+      m_objfile_sp->GetModule()->GetTypeSystemForLanguage(language);
+  if (type_system_or_err) {
+    if (auto ts = *type_system_or_err)
+      ts->SetSymbolFile(this);
+  }
+  return type_system_or_err;
+}
+
+uint64_t SymbolFileCommon::GetDebugInfoSize() {
+  if (!m_objfile_sp)
+    return 0;
+  ModuleSP module_sp(m_objfile_sp->GetModule());
+  if (!module_sp)
+    return 0;
+  const SectionList *section_list = module_sp->GetSectionList();
+  if (section_list)
+    return section_list->GetDebugInfoSize();
+  return 0;
+}
+
+void SymbolFileCommon::Dump(Stream &s) {
   s.Format("SymbolFile {0} ({1})\n", GetPluginName(),
            GetMainObjectFile()->GetFileSpec());
   s.PutCString("Types:\n");
@@ -253,18 +277,4 @@ void SymbolFile::Dump(Stream &s) {
 
   if (Symtab *symtab = GetSymtab())
     symtab->Dump(&s, nullptr, eSortOrderNone);
-}
-
-SymbolFile::RegisterInfoResolver::~RegisterInfoResolver() = default;
-
-uint64_t SymbolFile::GetDebugInfoSize() {
-  if (!m_objfile_sp)
-    return 0;
-  ModuleSP module_sp(m_objfile_sp->GetModule());
-  if (!module_sp)
-    return 0;
-  const SectionList *section_list = module_sp->GetSectionList();
-  if (section_list)
-    return section_list->GetDebugInfoSize();
-  return 0;
 }

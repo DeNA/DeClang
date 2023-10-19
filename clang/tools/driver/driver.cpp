@@ -12,7 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Driver/Driver.h"
+#include "CacheLauncherMode.h"
+#include "clang/Basic/Diagnostic.h"
 #include "clang/Basic/DiagnosticOptions.h"
+#include "clang/Basic/HeaderInclude.h"
 #include "clang/Basic/Stack.h"
 #include "clang/Config/config.h"
 #include "clang/Driver/Compilation.h"
@@ -30,6 +33,7 @@
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/OptTable.h"
 #include "llvm/Option/Option.h"
+#include "llvm/RemoteCachingService/RemoteCachingService.h"
 #include "llvm/Support/BuryPointer.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/CrashRecoveryContext.h"
@@ -50,6 +54,11 @@
 #include <memory>
 #include <set>
 #include <system_error>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 using namespace clang;
 using namespace clang::driver;
 using namespace llvm::opt;
@@ -120,7 +129,7 @@ static void ApplyOneQAOverride(raw_ostream &OS,
     OS << "### Adding argument " << Str << " at end\n";
     Args.push_back(Str);
   } else if (Edit[0] == 's' && Edit[1] == '/' && Edit.endswith("/") &&
-             Edit.slice(2, Edit.size()-1).find('/') != StringRef::npos) {
+             Edit.slice(2, Edit.size() - 1).contains('/')) {
     StringRef MatchPattern = Edit.substr(2).split('/').first;
     StringRef ReplPattern = Edit.substr(2).split('/').second;
     ReplPattern = ReplPattern.slice(0, ReplPattern.size()-1);
@@ -205,6 +214,12 @@ static void ApplyQAOverride(SmallVectorImpl<const char*> &Args,
 
 extern int cc1_main(ArrayRef<const char *> Argv, const char *Argv0,
                     void *MainAddr);
+#if LLVM_ON_UNIX
+extern int cc1depscand_main(ArrayRef<const char *> Argv, const char *Argv0,
+                            void *MainAddr);
+extern int cc1depscan_main(ArrayRef<const char *> Argv, const char *Argv0,
+                           void *MainAddr);
+#endif /* LLVM_ON_UNIX */
 extern int cc1as_main(ArrayRef<const char *> Argv, const char *Argv0,
                       void *MainAddr);
 extern int cc1gen_reproducer_main(ArrayRef<const char *> Argv,
@@ -243,29 +258,68 @@ static void getCLEnvVarOptions(std::string &EnvValue, llvm::StringSaver &Saver,
       *NumberSignPtr = '=';
 }
 
-static void SetBackdoorDriverOutputsFromEnvVars(Driver &TheDriver) {
-  auto CheckEnvVar = [](const char *EnvOptSet, const char *EnvOptFile,
-                        std::string &OptFile) {
-    bool OptSet = !!::getenv(EnvOptSet);
-    if (OptSet) {
-      if (const char *Var = ::getenv(EnvOptFile))
-        OptFile = Var;
-    }
-    return OptSet;
-  };
+template <class T>
+static T checkEnvVar(const char *EnvOptSet, const char *EnvOptFile,
+                     std::string &OptFile) {
+  const char *Str = ::getenv(EnvOptSet);
+  if (!Str)
+    return T{};
 
+  T OptVal = Str;
+  if (const char *Var = ::getenv(EnvOptFile))
+    OptFile = Var;
+  return OptVal;
+}
+
+static bool SetBackdoorDriverOutputsFromEnvVars(Driver &TheDriver) {
   TheDriver.CCPrintOptions =
-      CheckEnvVar("CC_PRINT_OPTIONS", "CC_PRINT_OPTIONS_FILE",
-                  TheDriver.CCPrintOptionsFilename);
-  TheDriver.CCPrintHeaders =
-      CheckEnvVar("CC_PRINT_HEADERS", "CC_PRINT_HEADERS_FILE",
-                  TheDriver.CCPrintHeadersFilename);
+      checkEnvVar<bool>("CC_PRINT_OPTIONS", "CC_PRINT_OPTIONS_FILE",
+                        TheDriver.CCPrintOptionsFilename);
+  if (checkEnvVar<bool>("CC_PRINT_HEADERS", "CC_PRINT_HEADERS_FILE",
+                        TheDriver.CCPrintHeadersFilename)) {
+    TheDriver.CCPrintHeadersFormat = HIFMT_Textual;
+    TheDriver.CCPrintHeadersFiltering = HIFIL_None;
+  } else {
+    std::string EnvVar = checkEnvVar<std::string>(
+        "CC_PRINT_HEADERS_FORMAT", "CC_PRINT_HEADERS_FILE",
+        TheDriver.CCPrintHeadersFilename);
+    if (!EnvVar.empty()) {
+      TheDriver.CCPrintHeadersFormat =
+          stringToHeaderIncludeFormatKind(EnvVar.c_str());
+      if (!TheDriver.CCPrintHeadersFormat) {
+        TheDriver.Diag(clang::diag::err_drv_print_header_env_var)
+            << 0 << EnvVar;
+        return false;
+      }
+
+      const char *FilteringStr = ::getenv("CC_PRINT_HEADERS_FILTERING");
+      HeaderIncludeFilteringKind Filtering;
+      if (!stringToHeaderIncludeFiltering(FilteringStr, Filtering)) {
+        TheDriver.Diag(clang::diag::err_drv_print_header_env_var)
+            << 1 << FilteringStr;
+        return false;
+      }
+
+      if ((TheDriver.CCPrintHeadersFormat == HIFMT_Textual &&
+           Filtering != HIFIL_None) ||
+          (TheDriver.CCPrintHeadersFormat == HIFMT_JSON &&
+           Filtering != HIFIL_Only_Direct_System)) {
+        TheDriver.Diag(clang::diag::err_drv_print_header_env_var_combination)
+            << EnvVar << FilteringStr;
+        return false;
+      }
+      TheDriver.CCPrintHeadersFiltering = Filtering;
+    }
+  }
+
   TheDriver.CCLogDiagnostics =
-      CheckEnvVar("CC_LOG_DIAGNOSTICS", "CC_LOG_DIAGNOSTICS_FILE",
-                  TheDriver.CCLogDiagnosticsFilename);
+      checkEnvVar<bool>("CC_LOG_DIAGNOSTICS", "CC_LOG_DIAGNOSTICS_FILE",
+                        TheDriver.CCLogDiagnosticsFilename);
   TheDriver.CCPrintProcessStats =
-      CheckEnvVar("CC_PRINT_PROC_STAT", "CC_PRINT_PROC_STAT_FILE",
-                  TheDriver.CCPrintStatReportFilename);
+      checkEnvVar<bool>("CC_PRINT_PROC_STAT", "CC_PRINT_PROC_STAT_FILE",
+                        TheDriver.CCPrintStatReportFilename);
+
+  return true;
 }
 
 static void FixupDiagPrefixExeName(TextDiagnosticPrinter *DiagClient,
@@ -308,13 +362,20 @@ static int ExecuteCC1Tool(SmallVectorImpl<const char *> &ArgV) {
   llvm::cl::ResetAllOptionOccurrences();
 
   llvm::BumpPtrAllocator A;
-  llvm::StringSaver Saver(A);
-  llvm::cl::ExpandResponseFiles(Saver, &llvm::cl::TokenizeGNUCommandLine, ArgV,
-                                /*MarkEOLs=*/false);
+  llvm::cl::ExpansionContext ECtx(A, llvm::cl::TokenizeGNUCommandLine);
+  ECtx.expandResponseFiles(ArgV);
   StringRef Tool = ArgV[1];
   void *GetExecutablePathVP = (void *)(intptr_t)GetExecutablePath;
   if (Tool == "-cc1")
     return cc1_main(makeArrayRef(ArgV).slice(1), ArgV[0], GetExecutablePathVP);
+#if LLVM_ON_UNIX
+  if (Tool == "-cc1depscand")
+    return cc1depscand_main(makeArrayRef(ArgV).slice(2), ArgV[0],
+                            GetExecutablePathVP);
+  if (Tool == "-cc1depscan")
+    return cc1depscan_main(makeArrayRef(ArgV).slice(2), ArgV[0],
+                           GetExecutablePathVP);
+#endif /* LLVM_ON_UNIX */
   if (Tool == "-cc1as")
     return cc1as_main(makeArrayRef(ArgV).slice(2), ArgV[0],
                       GetExecutablePathVP);
@@ -327,7 +388,7 @@ static int ExecuteCC1Tool(SmallVectorImpl<const char *> &ArgV) {
   return 1;
 }
 
-int main(int Argc, const char **Argv) {
+int clang_main(int Argc, char **Argv) {
   noteBottomOfStack();
   llvm::InitLLVM X(Argc, Argv);
   llvm::setBugReportMsg("PLEASE submit a bug report to " BUG_REPORT_URL
@@ -343,50 +404,23 @@ int main(int Argc, const char **Argv) {
   llvm::BumpPtrAllocator A;
   llvm::StringSaver Saver(A);
 
-  // Parse response files using the GNU syntax, unless we're in CL mode. There
-  // are two ways to put clang in CL compatibility mode: Args[0] is either
-  // clang-cl or cl, or --driver-mode=cl is on the command line. The normal
-  // command line parsing can't happen until after response file parsing, so we
-  // have to manually search for a --driver-mode=cl argument the hard way.
-  // Finally, our -cc1 tools don't care which tokenization mode we use because
-  // response files written by clang will tokenize the same way in either mode.
-  bool ClangCLMode =
-      IsClangCL(getDriverMode(Args[0], llvm::makeArrayRef(Args).slice(1)));
-  enum { Default, POSIX, Windows } RSPQuoting = Default;
-  for (const char *F : Args) {
-    if (strcmp(F, "--rsp-quoting=posix") == 0)
-      RSPQuoting = POSIX;
-    else if (strcmp(F, "--rsp-quoting=windows") == 0)
-      RSPQuoting = Windows;
+  StringRef DriverMode =
+      getDriverMode(Args[0], llvm::makeArrayRef(Args).slice(1));
+  if (isClangCache(DriverMode)) {
+    if (Optional<int> ExitCode = handleClangCacheInvocation(Args, Saver))
+      return *ExitCode;
   }
 
-  // Determines whether we want nullptr markers in Args to indicate response
-  // files end-of-lines. We only use this for the /LINK driver argument with
-  // clang-cl.exe on Windows.
-  bool MarkEOLs = ClangCLMode;
+  bool ClangCLMode = IsClangCL(DriverMode);
 
-  llvm::cl::TokenizerCallback Tokenizer;
-  if (RSPQuoting == Windows || (RSPQuoting == Default && ClangCLMode))
-    Tokenizer = &llvm::cl::TokenizeWindowsCommandLine;
-  else
-    Tokenizer = &llvm::cl::TokenizeGNUCommandLine;
+  if (llvm::Error Err = expandResponseFiles(Args, ClangCLMode, A)) {
+    llvm::errs() << toString(std::move(Err)) << '\n';
+    return 1;
+  }
 
-  if (MarkEOLs && Args.size() > 1 && StringRef(Args[1]).startswith("-cc1"))
-    MarkEOLs = false;
-  llvm::cl::ExpandResponseFiles(Saver, Tokenizer, Args, MarkEOLs);
-
-  // Handle -cc1 integrated tools, even if -cc1 was expanded from a response
-  // file.
-  auto FirstArg = llvm::find_if(llvm::drop_begin(Args),
-                                [](const char *A) { return A != nullptr; });
-  if (FirstArg != Args.end() && StringRef(*FirstArg).startswith("-cc1")) {
-    // If -cc1 came from a response file, remove the EOL sentinels.
-    if (MarkEOLs) {
-      auto newEnd = std::remove(Args.begin(), Args.end(), nullptr);
-      Args.resize(newEnd - Args.begin());
-    }
+  // Handle -cc1 integrated tools.
+  if (Args.size() >= 2 && StringRef(Args[1]).startswith("-cc1"))
     return ExecuteCC1Tool(Args);
-  }
 
   // Handle options that need handling before the real command line parsing in
   // Driver::BuildCompilation()
@@ -406,18 +440,18 @@ int main(int Argc, const char **Argv) {
   if (ClangCLMode) {
     // Arguments in "CL" are prepended.
     llvm::Optional<std::string> OptCL = llvm::sys::Process::GetEnv("CL");
-    if (OptCL.hasValue()) {
+    if (OptCL) {
       SmallVector<const char *, 8> PrependedOpts;
-      getCLEnvVarOptions(OptCL.getValue(), Saver, PrependedOpts);
+      getCLEnvVarOptions(OptCL.value(), Saver, PrependedOpts);
 
       // Insert right after the program name to prepend to the argument list.
       Args.insert(Args.begin() + 1, PrependedOpts.begin(), PrependedOpts.end());
     }
     // Arguments in "_CL_" are appended.
     llvm::Optional<std::string> Opt_CL_ = llvm::sys::Process::GetEnv("_CL_");
-    if (Opt_CL_.hasValue()) {
+    if (Opt_CL_) {
       SmallVector<const char *, 8> AppendedOpts;
-      getCLEnvVarOptions(Opt_CL_.getValue(), Saver, AppendedOpts);
+      getCLEnvVarOptions(Opt_CL_.value(), Saver, AppendedOpts);
 
       // Insert at the end of the argument list to append.
       Args.append(AppendedOpts.begin(), AppendedOpts.end());
@@ -473,7 +507,8 @@ int main(int Argc, const char **Argv) {
 
   insertTargetAndModeArgs(TargetAndMode, Args, SavedStrings);
 
-  SetBackdoorDriverOutputsFromEnvVars(TheDriver);
+  if (!SetBackdoorDriverOutputsFromEnvVars(TheDriver))
+    return 1;
 
   if (!UseNewCC1Process) {
     TheDriver.CC1Main = &ExecuteCC1Tool;
@@ -482,32 +517,39 @@ int main(int Argc, const char **Argv) {
   }
 
   std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(Args));
+
+  Driver::ReproLevel ReproLevel = Driver::ReproLevel::OnCrash;
+  if (Arg *A = C->getArgs().getLastArg(options::OPT_gen_reproducer_eq)) {
+    auto Level = llvm::StringSwitch<Optional<Driver::ReproLevel>>(A->getValue())
+                     .Case("off", Driver::ReproLevel::Off)
+                     .Case("crash", Driver::ReproLevel::OnCrash)
+                     .Case("error", Driver::ReproLevel::OnError)
+                     .Case("always", Driver::ReproLevel::Always)
+                     .Default(None);
+    if (!Level) {
+      llvm::errs() << "Unknown value for " << A->getSpelling() << ": '"
+                   << A->getValue() << "'\n";
+      return 1;
+    }
+    ReproLevel = *Level;
+  }
+  if (!!::getenv("FORCE_CLANG_DIAGNOSTICS_CRASH"))
+    ReproLevel = Driver::ReproLevel::Always;
+
   int Res = 1;
   bool IsCrash = false;
+  Driver::CommandStatus CommandStatus = Driver::CommandStatus::Ok;
+  // Pretend the first command failed if ReproStatus is Always.
+  const Command *FailingCommand = nullptr;
+  if (!C->getJobs().empty())
+    FailingCommand = &*C->getJobs().begin();
   if (C && !C->containsError()) {
     SmallVector<std::pair<int, const Command *>, 4> FailingCommands;
     Res = TheDriver.ExecuteCompilation(*C, FailingCommands);
 
-    // Force a crash to test the diagnostics.
-    if (TheDriver.GenReproducer) {
-      Diags.Report(diag::err_drv_force_crash)
-        << !::getenv("FORCE_CLANG_DIAGNOSTICS_CRASH");
-
-      // Pretend that every command failed.
-      FailingCommands.clear();
-      for (const auto &J : C->getJobs())
-        if (const Command *C = dyn_cast<Command>(&J))
-          FailingCommands.push_back(std::make_pair(-1, C));
-
-      // Print the bug report message that would be printed if we did actually
-      // crash, but only if we're crashing due to FORCE_CLANG_DIAGNOSTICS_CRASH.
-      if (::getenv("FORCE_CLANG_DIAGNOSTICS_CRASH"))
-        llvm::dbgs() << llvm::getBugReportMsg();
-    }
-
     for (const auto &P : FailingCommands) {
       int CommandRes = P.first;
-      const Command *FailingCommand = P.second;
+      FailingCommand = P.second;
       if (!Res)
         Res = CommandRes;
 
@@ -526,12 +568,21 @@ int main(int Argc, const char **Argv) {
       // https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_xcu_chap02.html
       IsCrash |= CommandRes > 128;
 #endif
-      if (IsCrash) {
-        TheDriver.generateCompilationDiagnostics(*C, *FailingCommand);
+      CommandStatus =
+          IsCrash ? Driver::CommandStatus::Crash : Driver::CommandStatus::Error;
+      if (IsCrash)
         break;
-      }
     }
   }
+
+  // Print the bug report message that would be printed if we did actually
+  // crash, but only if we're crashing due to FORCE_CLANG_DIAGNOSTICS_CRASH.
+  if (::getenv("FORCE_CLANG_DIAGNOSTICS_CRASH"))
+    llvm::dbgs() << llvm::getBugReportMsg();
+  if (FailingCommand != nullptr &&
+    TheDriver.maybeGenerateCompilationDiagnostics(CommandStatus, ReproLevel,
+                                                  *C, *FailingCommand))
+    Res = 1;
 
   Diags.getClient()->finish();
 

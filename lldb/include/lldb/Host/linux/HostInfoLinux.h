@@ -27,9 +27,14 @@ public:
 
   static llvm::VersionTuple GetOSVersion();
   static llvm::Optional<std::string> GetOSBuildString();
-  static bool GetOSKernelDescription(std::string &s);
   static llvm::StringRef GetDistributionId();
   static FileSpec GetProgramFileSpec();
+
+  static llvm::Expected<llvm::StringRef> GetSDKRoot(SDKOptions options) {
+    if (options.XcodeSDK && options.XcodeSDK->GetType() == XcodeSDK::Type::Linux)
+      return "/";
+    return llvm::make_error<HostInfoError>("cannot determine SDK root");
+  }
 
 protected:
   static bool ComputeSupportExeDirectory(FileSpec &file_spec);

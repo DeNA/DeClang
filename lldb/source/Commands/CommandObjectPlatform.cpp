@@ -7,20 +7,24 @@
 //===----------------------------------------------------------------------===//
 
 #include "CommandObjectPlatform.h"
+#include "CommandOptionsProcessAttach.h"
 #include "CommandOptionsProcessLaunch.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
+#include "lldb/Interpreter/CommandOptionArgumentTable.h"
 #include "lldb/Interpreter/CommandOptionValidators.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionGroupFile.h"
 #include "lldb/Interpreter/OptionGroupPlatform.h"
+#include "lldb/Interpreter/OptionGroupPythonClassWithDict.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/Args.h"
+#include "lldb/Utility/ScriptedMetadata.h"
 
 #include "llvm/ADT/SmallString.h"
 
@@ -145,19 +149,20 @@ public:
                             "Create a platform if needed and select it as the "
                             "current platform.",
                             "platform select <platform-name>", 0),
-        m_option_group(),
         m_platform_options(
             false) // Don't include the "--platform" option by passing false
   {
     m_option_group.Append(&m_platform_options, LLDB_OPT_SET_ALL, 1);
     m_option_group.Finalize();
+    CommandArgumentData platform_arg{eArgTypePlatform, eArgRepeatPlain};
+    m_arguments.push_back({platform_arg});
   }
 
   ~CommandObjectPlatformSelect() override = default;
 
   void HandleCompletion(CompletionRequest &request) override {
-    CommandCompletions::PlatformPluginNames(GetCommandInterpreter(), request,
-                                            nullptr);
+    lldb_private::CommandCompletions::PlatformPluginNames(
+        GetCommandInterpreter(), request, nullptr);
   }
 
   Options *GetOptions() override { return &m_option_group; }
@@ -272,7 +277,10 @@ public:
       : CommandObjectParsed(
             interpreter, "platform connect",
             "Select the current platform by providing a connection URL.",
-            "platform connect <connect-url>", 0) {}
+            "platform connect <connect-url>", 0) {
+    CommandArgumentData platform_arg{eArgTypeConnectURL, eArgRepeatPlain};
+    m_arguments.push_back({platform_arg});
+  }
 
   ~CommandObjectPlatformConnect() override = default;
 
@@ -377,10 +385,8 @@ public:
                             "Set settings for the current target's platform, "
                             "or for a platform by name.",
                             "platform settings", 0),
-        m_options(),
         m_option_working_dir(LLDB_OPT_SET_1, false, "working-dir", 'w',
-                             CommandCompletions::eRemoteDiskDirectoryCompletion,
-                             eArgTypePath,
+                             lldb::eRemoteDiskDirectoryCompletion, eArgTypePath,
                              "The working directory for the platform.") {
     m_options.Append(&m_option_working_dir, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
   }
@@ -417,8 +423,10 @@ public:
   CommandObjectPlatformMkDir(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "platform mkdir",
                             "Make a new directory on the remote end.", nullptr,
-                            0),
-        m_options() {}
+                            0) {
+    CommandArgumentData thread_arg{eArgTypePath, eArgRepeatPlain};
+    m_arguments.push_back({thread_arg});
+  }
 
   ~CommandObjectPlatformMkDir() override = default;
 
@@ -464,8 +472,10 @@ class CommandObjectPlatformFOpen : public CommandObjectParsed {
 public:
   CommandObjectPlatformFOpen(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "platform file open",
-                            "Open a file on the remote end.", nullptr, 0),
-        m_options() {}
+                            "Open a file on the remote end.", nullptr, 0) {
+    CommandArgumentData path_arg{eArgTypePath, eArgRepeatPlain};
+    m_arguments.push_back({path_arg});
+  }
 
   ~CommandObjectPlatformFOpen() override = default;
 
@@ -473,9 +483,9 @@ public:
   HandleArgumentCompletion(CompletionRequest &request,
                            OptionElementVector &opt_element_vector) override {
     if (request.GetCursorIndex() == 0)
-      CommandCompletions::InvokeCommonCompletionCallbacks(
-          GetCommandInterpreter(),
-          CommandCompletions::eRemoteDiskFileCompletion, request, nullptr);
+      lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+          GetCommandInterpreter(), lldb::eRemoteDiskFileCompletion, request,
+          nullptr);
   }
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {
@@ -525,7 +535,10 @@ class CommandObjectPlatformFClose : public CommandObjectParsed {
 public:
   CommandObjectPlatformFClose(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "platform file close",
-                            "Close a file on the remote end.", nullptr, 0) {}
+                            "Close a file on the remote end.", nullptr, 0) {
+    CommandArgumentData path_arg{eArgTypeUnsignedInteger, eArgRepeatPlain};
+    m_arguments.push_back({path_arg});
+  }
 
   ~CommandObjectPlatformFClose() override = default;
 
@@ -566,8 +579,10 @@ public:
   CommandObjectPlatformFRead(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "platform file read",
                             "Read data from a file on the remote end.", nullptr,
-                            0),
-        m_options() {}
+                            0) {
+    CommandArgumentData path_arg{eArgTypeUnsignedInteger, eArgRepeatPlain};
+    m_arguments.push_back({path_arg});
+  }
 
   ~CommandObjectPlatformFRead() override = default;
 
@@ -605,7 +620,7 @@ public:
 protected:
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options() {}
+    CommandOptions() = default;
 
     ~CommandOptions() override = default;
 
@@ -660,8 +675,10 @@ public:
   CommandObjectPlatformFWrite(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "platform file write",
                             "Write data to a file on the remote end.", nullptr,
-                            0),
-        m_options() {}
+                            0) {
+    CommandArgumentData path_arg{eArgTypeUnsignedInteger, eArgRepeatPlain};
+    m_arguments.push_back({path_arg});
+  }
 
   ~CommandObjectPlatformFWrite() override = default;
 
@@ -698,7 +715,7 @@ public:
 protected:
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options() {}
+    CommandOptions() = default;
 
     ~CommandOptions() override = default;
 
@@ -812,13 +829,12 @@ public:
   HandleArgumentCompletion(CompletionRequest &request,
                            OptionElementVector &opt_element_vector) override {
     if (request.GetCursorIndex() == 0)
-      CommandCompletions::InvokeCommonCompletionCallbacks(
-          GetCommandInterpreter(),
-          CommandCompletions::eRemoteDiskFileCompletion, request, nullptr);
+      lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+          GetCommandInterpreter(), lldb::eRemoteDiskFileCompletion, request,
+          nullptr);
     else if (request.GetCursorIndex() == 1)
-      CommandCompletions::InvokeCommonCompletionCallbacks(
-          GetCommandInterpreter(), CommandCompletions::eDiskFileCompletion,
-          request, nullptr);
+      lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+          GetCommandInterpreter(), lldb::eDiskFileCompletion, request, nullptr);
   }
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {
@@ -888,9 +904,9 @@ public:
     if (request.GetCursorIndex() != 0)
       return;
 
-    CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), CommandCompletions::eRemoteDiskFileCompletion,
-        request, nullptr);
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), lldb::eRemoteDiskFileCompletion, request,
+        nullptr);
   }
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {
@@ -959,9 +975,9 @@ public:
     if (request.GetCursorIndex() != 0)
       return;
 
-    CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), CommandCompletions::eRemoteDiskFileCompletion,
-        request, nullptr);
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), lldb::eRemoteDiskFileCompletion, request,
+        nullptr);
   }
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {
@@ -1029,9 +1045,9 @@ public:
     if (request.GetCursorIndex() != 0)
       return;
 
-    CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), CommandCompletions::eRemoteDiskFileCompletion,
-        request, nullptr);
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), lldb::eRemoteDiskFileCompletion, request,
+        nullptr);
   }
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {
@@ -1076,6 +1092,10 @@ public:
     Relative source file paths are resolved against lldb's local working directory.
 
     Omitting the destination places the file in the platform working directory.)");
+    CommandArgumentData source_arg{eArgTypePath, eArgRepeatPlain};
+    CommandArgumentData path_arg{eArgTypePath, eArgRepeatOptional};
+    m_arguments.push_back({source_arg});
+    m_arguments.push_back({path_arg});
   }
 
   ~CommandObjectPlatformPutFile() override = default;
@@ -1084,13 +1104,12 @@ public:
   HandleArgumentCompletion(CompletionRequest &request,
                            OptionElementVector &opt_element_vector) override {
     if (request.GetCursorIndex() == 0)
-      CommandCompletions::InvokeCommonCompletionCallbacks(
-          GetCommandInterpreter(), CommandCompletions::eDiskFileCompletion,
-          request, nullptr);
+      lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+          GetCommandInterpreter(), lldb::eDiskFileCompletion, request, nullptr);
     else if (request.GetCursorIndex() == 1)
-      CommandCompletions::InvokeCommonCompletionCallbacks(
-          GetCommandInterpreter(),
-          CommandCompletions::eRemoteDiskFileCompletion, request, nullptr);
+      lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+          GetCommandInterpreter(), lldb::eRemoteDiskFileCompletion, request,
+          nullptr);
   }
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {
@@ -1125,9 +1144,13 @@ public:
                             "Launch a new process on a remote platform.",
                             "platform process launch program",
                             eCommandRequiresTarget | eCommandTryTargetAPILock),
-        m_options(), m_all_options() {
+        m_class_options("scripted process", true, 'C', 'k', 'v', 0) {
     m_all_options.Append(&m_options);
+    m_all_options.Append(&m_class_options, LLDB_OPT_SET_1 | LLDB_OPT_SET_2,
+                         LLDB_OPT_SET_ALL);
     m_all_options.Finalize();
+    CommandArgumentData run_arg_arg{eArgTypeRunArgs, eArgRepeatStar};
+    m_arguments.push_back({run_arg_arg});
   }
 
   ~CommandObjectPlatformProcessLaunch() override = default;
@@ -1157,6 +1180,14 @@ protected:
         if (!exe_path.empty())
           m_options.launch_info.GetArguments().AppendArgument(exe_path);
         m_options.launch_info.GetArchitecture() = exe_module->GetArchitecture();
+      }
+
+      if (!m_class_options.GetName().empty()) {
+        m_options.launch_info.SetProcessPluginName("ScriptedProcess");
+        ScriptedMetadataSP metadata_sp = std::make_shared<ScriptedMetadata>(
+            m_class_options.GetName(), m_class_options.GetStructuredData());
+        m_options.launch_info.SetScriptedMetadata(metadata_sp);
+        target->SetProcessLaunchInfo(m_options.launch_info);
       }
 
       if (argc > 0) {
@@ -1202,6 +1233,7 @@ protected:
   }
 
   CommandOptionsProcessLaunch m_options;
+  OptionGroupPythonClassWithDict m_class_options;
   OptionGroupOptions m_all_options;
 };
 
@@ -1217,8 +1249,7 @@ public:
       : CommandObjectParsed(interpreter, "platform process list",
                             "List processes on a remote platform by name, pid, "
                             "or many other matching attributes.",
-                            "platform process list", 0),
-        m_options() {}
+                            "platform process list", 0) {}
 
   ~CommandObjectPlatformProcessList() override = default;
 
@@ -1237,83 +1268,78 @@ protected:
 
     if (platform_sp) {
       Status error;
-      if (args.GetArgumentCount() == 0) {
-        if (platform_sp) {
-          Stream &ostrm = result.GetOutputStream();
+      if (platform_sp) {
+        Stream &ostrm = result.GetOutputStream();
 
-          lldb::pid_t pid =
-              m_options.match_info.GetProcessInfo().GetProcessID();
-          if (pid != LLDB_INVALID_PROCESS_ID) {
-            ProcessInstanceInfo proc_info;
-            if (platform_sp->GetProcessInfo(pid, proc_info)) {
-              ProcessInstanceInfo::DumpTableHeader(ostrm, m_options.show_args,
-                                                   m_options.verbose);
-              proc_info.DumpAsTableRow(ostrm, platform_sp->GetUserIDResolver(),
-                                       m_options.show_args, m_options.verbose);
-              result.SetStatus(eReturnStatusSuccessFinishResult);
-            } else {
-              result.AppendErrorWithFormat(
-                  "no process found with pid = %" PRIu64 "\n", pid);
-            }
+        lldb::pid_t pid = m_options.match_info.GetProcessInfo().GetProcessID();
+        if (pid != LLDB_INVALID_PROCESS_ID) {
+          ProcessInstanceInfo proc_info;
+          if (platform_sp->GetProcessInfo(pid, proc_info)) {
+            ProcessInstanceInfo::DumpTableHeader(ostrm, m_options.show_args,
+                                                 m_options.verbose);
+            proc_info.DumpAsTableRow(ostrm, platform_sp->GetUserIDResolver(),
+                                     m_options.show_args, m_options.verbose);
+            result.SetStatus(eReturnStatusSuccessFinishResult);
           } else {
-            ProcessInstanceInfoList proc_infos;
-            const uint32_t matches =
-                platform_sp->FindProcesses(m_options.match_info, proc_infos);
-            const char *match_desc = nullptr;
-            const char *match_name =
-                m_options.match_info.GetProcessInfo().GetName();
-            if (match_name && match_name[0]) {
-              switch (m_options.match_info.GetNameMatchType()) {
-              case NameMatch::Ignore:
-                break;
-              case NameMatch::Equals:
-                match_desc = "matched";
-                break;
-              case NameMatch::Contains:
-                match_desc = "contained";
-                break;
-              case NameMatch::StartsWith:
-                match_desc = "started with";
-                break;
-              case NameMatch::EndsWith:
-                match_desc = "ended with";
-                break;
-              case NameMatch::RegularExpression:
-                match_desc = "matched the regular expression";
-                break;
-              }
+            result.AppendErrorWithFormat(
+                "no process found with pid = %" PRIu64 "\n", pid);
+          }
+        } else {
+          ProcessInstanceInfoList proc_infos;
+          const uint32_t matches =
+              platform_sp->FindProcesses(m_options.match_info, proc_infos);
+          const char *match_desc = nullptr;
+          const char *match_name =
+              m_options.match_info.GetProcessInfo().GetName();
+          if (match_name && match_name[0]) {
+            switch (m_options.match_info.GetNameMatchType()) {
+            case NameMatch::Ignore:
+              break;
+            case NameMatch::Equals:
+              match_desc = "matched";
+              break;
+            case NameMatch::Contains:
+              match_desc = "contained";
+              break;
+            case NameMatch::StartsWith:
+              match_desc = "started with";
+              break;
+            case NameMatch::EndsWith:
+              match_desc = "ended with";
+              break;
+            case NameMatch::RegularExpression:
+              match_desc = "matched the regular expression";
+              break;
             }
+          }
 
-            if (matches == 0) {
-              if (match_desc)
-                result.AppendErrorWithFormatv(
-                    "no processes were found that {0} \"{1}\" on the \"{2}\" "
-                    "platform\n",
-                    match_desc, match_name, platform_sp->GetName());
-              else
-                result.AppendErrorWithFormatv(
-                    "no processes were found on the \"{0}\" platform\n",
-                    platform_sp->GetName());
-            } else {
-              result.AppendMessageWithFormatv(
-                  "{0} matching process{1} found on \"{2}\"", matches,
-                  matches > 1 ? "es were" : " was", platform_sp->GetName());
-              if (match_desc)
-                result.AppendMessageWithFormat(" whose name %s \"%s\"",
-                                               match_desc, match_name);
-              result.AppendMessageWithFormat("\n");
-              ProcessInstanceInfo::DumpTableHeader(ostrm, m_options.show_args,
-                                                   m_options.verbose);
-              for (uint32_t i = 0; i < matches; ++i) {
-                proc_infos[i].DumpAsTableRow(
-                    ostrm, platform_sp->GetUserIDResolver(),
-                    m_options.show_args, m_options.verbose);
-              }
+          if (matches == 0) {
+            if (match_desc)
+              result.AppendErrorWithFormatv(
+                  "no processes were found that {0} \"{1}\" on the \"{2}\" "
+                  "platform\n",
+                  match_desc, match_name, platform_sp->GetName());
+            else
+              result.AppendErrorWithFormatv(
+                  "no processes were found on the \"{0}\" platform\n",
+                  platform_sp->GetName());
+          } else {
+            result.AppendMessageWithFormatv(
+                "{0} matching process{1} found on \"{2}\"", matches,
+                matches > 1 ? "es were" : " was", platform_sp->GetName());
+            if (match_desc)
+              result.AppendMessageWithFormat(" whose name %s \"%s\"",
+                                             match_desc, match_name);
+            result.AppendMessageWithFormat("\n");
+            ProcessInstanceInfo::DumpTableHeader(ostrm, m_options.show_args,
+                                                 m_options.verbose);
+            for (uint32_t i = 0; i < matches; ++i) {
+              proc_infos[i].DumpAsTableRow(
+                  ostrm, platform_sp->GetUserIDResolver(), m_options.show_args,
+                  m_options.verbose);
             }
           }
         }
-      } else {
-        result.AppendError("invalid args: process list takes only options\n");
       }
     } else {
       result.AppendError("no platform is selected\n");
@@ -1323,7 +1349,7 @@ protected:
 
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options(), match_info() {}
+    CommandOptions() = default;
 
     ~CommandOptions() override = default;
 
@@ -1493,9 +1519,8 @@ public:
   void
   HandleArgumentCompletion(CompletionRequest &request,
                            OptionElementVector &opt_element_vector) override {
-    CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), CommandCompletions::eProcessIDCompletion,
-        request, nullptr);
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), lldb::eProcessIDCompletion, request, nullptr);
   }
 
 protected:
@@ -1557,72 +1582,16 @@ protected:
 
 class CommandObjectPlatformProcessAttach : public CommandObjectParsed {
 public:
-  class CommandOptions : public Options {
-  public:
-    CommandOptions() : Options() {
-      // Keep default values of all options in one place: OptionParsingStarting
-      // ()
-      OptionParsingStarting(nullptr);
-    }
-
-    ~CommandOptions() override = default;
-
-    Status SetOptionValue(uint32_t option_idx, llvm::StringRef option_arg,
-                          ExecutionContext *execution_context) override {
-      Status error;
-      char short_option = (char)m_getopt_table[option_idx].val;
-      switch (short_option) {
-      case 'p': {
-        lldb::pid_t pid = LLDB_INVALID_PROCESS_ID;
-        if (option_arg.getAsInteger(0, pid)) {
-          error.SetErrorStringWithFormat("invalid process ID '%s'",
-                                         option_arg.str().c_str());
-        } else {
-          attach_info.SetProcessID(pid);
-        }
-      } break;
-
-      case 'P':
-        attach_info.SetProcessPluginName(option_arg);
-        break;
-
-      case 'n':
-        attach_info.GetExecutableFile().SetFile(option_arg,
-                                                FileSpec::Style::native);
-        break;
-
-      case 'w':
-        attach_info.SetWaitForLaunch(true);
-        break;
-
-      default:
-        llvm_unreachable("Unimplemented option");
-      }
-      return error;
-    }
-
-    void OptionParsingStarting(ExecutionContext *execution_context) override {
-      attach_info.Clear();
-    }
-
-    llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
-      return llvm::makeArrayRef(g_platform_process_attach_options);
-    }
-
-    // Options table: Required for subclasses of Options.
-
-    static OptionDefinition g_option_table[];
-
-    // Instance variables to hold the values for command options.
-
-    ProcessAttachInfo attach_info;
-  };
-
   CommandObjectPlatformProcessAttach(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "platform process attach",
                             "Attach to a process.",
                             "platform process attach <cmd-options>"),
-        m_options() {}
+        m_class_options("scripted process", true, 'C', 'k', 'v', 0) {
+    m_all_options.Append(&m_options);
+    m_all_options.Append(&m_class_options, LLDB_OPT_SET_1 | LLDB_OPT_SET_2,
+                         LLDB_OPT_SET_ALL);
+    m_all_options.Finalize();
+  }
 
   ~CommandObjectPlatformProcessAttach() override = default;
 
@@ -1630,6 +1599,14 @@ public:
     PlatformSP platform_sp(
         GetDebugger().GetPlatformList().GetSelectedPlatform());
     if (platform_sp) {
+
+      if (!m_class_options.GetName().empty()) {
+        m_options.attach_info.SetProcessPluginName("ScriptedProcess");
+        ScriptedMetadataSP metadata_sp = std::make_shared<ScriptedMetadata>(
+            m_class_options.GetName(), m_class_options.GetStructuredData());
+        m_options.attach_info.SetScriptedMetadata(metadata_sp);
+      }
+
       Status err;
       ProcessSP remote_process_sp = platform_sp->Attach(
           m_options.attach_info, GetDebugger(), nullptr, err);
@@ -1645,10 +1622,12 @@ public:
     return result.Succeeded();
   }
 
-  Options *GetOptions() override { return &m_options; }
+  Options *GetOptions() override { return &m_all_options; }
 
 protected:
-  CommandOptions m_options;
+  CommandOptionsProcessAttach m_options;
+  OptionGroupPythonClassWithDict m_class_options;
+  OptionGroupOptions m_all_options;
 };
 
 class CommandObjectPlatformProcess : public CommandObjectMultiword {
@@ -1688,7 +1667,7 @@ class CommandObjectPlatformShell : public CommandObjectRaw {
 public:
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options() {}
+    CommandOptions() = default;
 
     ~CommandOptions() override = default;
 
@@ -1746,8 +1725,10 @@ public:
   CommandObjectPlatformShell(CommandInterpreter &interpreter)
       : CommandObjectRaw(interpreter, "platform shell",
                          "Run a shell command on the current platform.",
-                         "platform shell <shell-command>", 0),
-        m_options() {}
+                         "platform shell <shell-command>", 0) {
+    CommandArgumentData thread_arg{eArgTypeNone, eArgRepeatStar};
+    m_arguments.push_back({thread_arg});
+  }
 
   ~CommandObjectPlatformShell() override = default;
 
@@ -1834,7 +1815,12 @@ public:
       : CommandObjectParsed(
             interpreter, "platform target-install",
             "Install a target (bundle or executable file) to the remote end.",
-            "platform target-install <local-thing> <remote-sandbox>", 0) {}
+            "platform target-install <local-thing> <remote-sandbox>", 0) {
+    CommandArgumentData local_arg{eArgTypePath, eArgRepeatPlain};
+    CommandArgumentData remote_arg{eArgTypePath, eArgRepeatPlain};
+    m_arguments.push_back({local_arg});
+    m_arguments.push_back({remote_arg});
+  }
 
   ~CommandObjectPlatformInstall() override = default;
 
@@ -1843,9 +1829,8 @@ public:
                            OptionElementVector &opt_element_vector) override {
     if (request.GetCursorIndex())
       return;
-    CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), CommandCompletions::eDiskFileCompletion,
-        request, nullptr);
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), lldb::eDiskFileCompletion, request, nullptr);
   }
 
   bool DoExecute(Args &args, CommandReturnObject &result) override {

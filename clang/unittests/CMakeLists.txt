@@ -19,6 +19,7 @@ function(add_clang_unittest test_dirname)
 endfunction()
 
 add_subdirectory(Basic)
+add_subdirectory(CAS)
 add_subdirectory(Lex)
 add_subdirectory(Driver)
 if(CLANG_ENABLE_STATIC_ANALYZER)
@@ -35,7 +36,9 @@ add_subdirectory(Frontend)
 add_subdirectory(Rewrite)
 add_subdirectory(Sema)
 add_subdirectory(CodeGen)
-add_subdirectory(Interpreter)
+if(HAVE_CLANG_REPL_SUPPORT)
+  add_subdirectory(Interpreter)
+endif()
 # FIXME: libclang unit tests are disabled on Windows due
 # to failures, mostly in libclang.VirtualFileOverlay_*.
 if(NOT WIN32 AND CLANG_TOOL_LIBCLANG_BUILD) 

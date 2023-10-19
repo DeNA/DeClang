@@ -174,6 +174,15 @@ void SBExpressionOptions::SetPlaygroundTransformEnabled(
   m_opaque_up->SetPlaygroundTransformEnabled(enable_playground_transform);
 }
 
+bool SBExpressionOptions::GetPlaygroundTransformHighPerformance() const {
+  return m_opaque_up->GetPlaygroundTransformHighPerformance();
+}
+
+void SBExpressionOptions::SetPlaygroundTransformHighPerformance(
+    bool playground_transforms_hp) {
+  m_opaque_up->SetPlaygroundTransformHighPerformance(playground_transforms_hp);
+}
+
 bool SBExpressionOptions::GetREPLMode() const {
   return m_opaque_up->GetREPLEnabled();
 }
@@ -203,13 +212,13 @@ void SBExpressionOptions::SetGenerateDebugInfo(bool b) {
 bool SBExpressionOptions::GetSuppressPersistentResult() {
   LLDB_INSTRUMENT_VA(this);
 
-  return m_opaque_up->GetResultIsInternal();
+  return m_opaque_up->GetSuppressPersistentResult();
 }
 
 void SBExpressionOptions::SetSuppressPersistentResult(bool b) {
   LLDB_INSTRUMENT_VA(this, b);
 
-  return m_opaque_up->SetResultIsInternal(b);
+  return m_opaque_up->SetSuppressPersistentResult(b);
 }
 
 const char *SBExpressionOptions::GetPrefix() const {

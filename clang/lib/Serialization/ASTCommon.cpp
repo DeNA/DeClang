@@ -391,6 +391,7 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
   case Decl::Field:
   case Decl::MSProperty:
   case Decl::MSGuid:
+  case Decl::UnnamedGlobalConstant:
   case Decl::TemplateParamObject:
   case Decl::ObjCIvar:
   case Decl::ObjCAtDefsField:
@@ -432,6 +433,7 @@ bool serialization::isRedeclarableDeclKind(unsigned Kind) {
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
   case Decl::UnresolvedUsingIfExists:
+  case Decl::HLSLBuffer:
     return false;
 
   // These indirectly derive from Redeclarable<T> but are not actually

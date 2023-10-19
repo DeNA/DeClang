@@ -3,10 +3,8 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
+
 class TestCase(TestBase):
-
-    mydir = TestBase.compute_mydir(__file__)
-
     def test(self):
         """
         Tests that running the utility expression that retrieves the Objective-C
@@ -20,7 +18,9 @@ class TestCase(TestBase):
         """
 
         self.build()
-        lldbutil.run_to_source_breakpoint(self, "// break here", lldb.SBFileSpec("main.mm"))
+        lldbutil.run_to_source_breakpoint(
+            self, "// break here", lldb.SBFileSpec("main.mm")
+        )
 
         # First check our side effect variable is in its initial state.
         self.expect_expr("called_function", result_summary='"none"')

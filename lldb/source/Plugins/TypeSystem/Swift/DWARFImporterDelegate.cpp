@@ -114,9 +114,11 @@ class SwiftDWARFImporterDelegate : public swift::DWARFImporterDelegate {
                   clang::ASTContext &to_ctx,
                   llvm::Optional<swift::ClangTypeKind> kind,
                   llvm::SmallVectorImpl<clang::Decl *> &results) {
-    clang::ASTImporter importer(
-        to_ctx, to_ctx.getSourceManager().getFileManager(), from_ctx,
-        from_ctx.getSourceManager().getFileManager(), false);
+    clang::ASTImporter importer(to_ctx,
+                                to_ctx.getSourceManager().getFileManager(),
+                                from_ctx,
+                                from_ctx.getSourceManager().getFileManager(),
+                                false);
     llvm::Expected<clang::QualType> clang_type(importer.Import(qual_type));
     if (!clang_type) {
       llvm::consumeError(clang_type.takeError());
@@ -200,7 +202,6 @@ public:
                    StringRef inModule,
                    llvm::SmallVectorImpl<clang::Decl *> &results) override {
     LLDB_SCOPED_TIMER();
-
     LLDB_LOG(GetLog(LLDBLog::Types), "{0}::lookupValue(\"{1}\")", m_description,
              name.str());
 
@@ -218,6 +219,7 @@ public:
 
     // Find the type in the debug info.
     TypeSP clang_type_sp;
+    // FIXME: LookupClangType won't work for nested C++ types.
     if (m_swift_typesystem.GetModule())
       clang_type_sp = m_swift_typesystem.LookupClangType(name);
     else if (TargetSP target_sp = m_swift_typesystem.GetTargetWP().lock()) {
@@ -238,7 +240,10 @@ public:
           llvm::consumeError(ts.takeError());
           continue;
         }
-        auto *swift_ts = static_cast<TypeSystemSwift *>(&*ts);
+        auto swift_ts = llvm::dyn_cast_or_null<TypeSystemSwift>(ts->get());
+        if (!swift_ts)
+          continue;
+        // FIXME: LookupClangType won't work for nested C++ types.
         clang_type_sp = swift_ts->GetTypeSystemSwiftTypeRef().LookupClangType(name);
         if (clang_type_sp)
           break;
@@ -256,8 +261,8 @@ public:
     CompilerType compiler_type = clang_type_sp->GetFullCompilerType();
 
     // Filter our non-Clang types.
-    auto *type_system =
-        llvm::dyn_cast_or_null<TypeSystemClang>(compiler_type.GetTypeSystem());
+    auto type_system =
+        compiler_type.GetTypeSystem().dyn_cast_or_null<TypeSystemClang>();
     if (!type_system)
       return;
 

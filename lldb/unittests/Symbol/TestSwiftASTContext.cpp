@@ -12,13 +12,13 @@
 
 #include "gtest/gtest.h"
 
+#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+#include "llvm/Support/FileUtilities.h"
 
 using namespace lldb;
 using namespace lldb_private;
-using namespace llvm::sys;
 
 #define ASSERT_NO_ERROR(x)                                                     \
   if (std::error_code ASSERT_NO_ERROR_ec = x) {                                \
@@ -32,24 +32,6 @@ using namespace llvm::sys;
   }
 
 struct TestSwiftASTContext : public testing::Test {
-  /// Unique temporary directory in which all created filesystem entities must
-  /// be placed. It is removed at the end of the test suite.
-  llvm::SmallString<128> m_base_dir;
-
-  void SetUp() override {
-    // Get the name of the current test. To prevent that by chance two tests
-    // get the same temporary directory if createUniqueDirectory fails.
-    auto test_info = ::testing::UnitTest::GetInstance()->current_test_info();
-    ASSERT_TRUE(test_info != nullptr);
-    std::string name = test_info->name();
-    ASSERT_NO_ERROR(
-        fs::createUniqueDirectory("SwiftASTCtx-" + name, m_base_dir));
-  }
-
-  void TearDown() override {
-    ASSERT_NO_ERROR(fs::remove_directories(m_base_dir));
-  }
-
   static void SetUpTestCase() {
     FileSystem::Initialize();
     HostInfo::Initialize();  }
@@ -69,141 +51,14 @@ struct SwiftASTContextTester : public SwiftASTContext {
     return m_typeref_typesystem;
   }
 
-  static std::string GetResourceDir(llvm::StringRef platform_sdk_path,
-                                    std::string swift_dir,
-                                    std::string swift_stdlib_os_dir,
-                                    std::string xcode_contents_path,
-                                    std::string toolchain_path,
-                                    std::string cl_tools_path) {
-    return SwiftASTContext::GetResourceDir(
-        platform_sdk_path, swift_dir, swift_stdlib_os_dir, xcode_contents_path,
-        toolchain_path, cl_tools_path);
-  }
-  static std::string GetSwiftStdlibOSDir(const llvm::Triple &target,
-                                         const llvm::Triple &host) {
-    return SwiftASTContext::GetSwiftStdlibOSDir(target, host);
-  }
   TypeSystemSwiftTypeRef m_typeref_typesystem;
 };
-
-TEST_F(TestSwiftASTContext, ResourceDir) {
-  const char *paths[] = {
-      // Toolchains.
-      "/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
-      "lib/swift/macosx",
-
-      "/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
-      "lib/swift/iphoneos",
-
-      "/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
-      "lib/swift/iphonesimulator",
-
-      // SDKs.
-      "/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/"
-      "MacOSX10.13.sdk/usr",
-
-      "/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/"
-      "SDKs/"
-      "iPhoneOS11.3.sdk/usr",
-
-      "/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/"
-      "Developer/SDKs/iPhoneSimulatorOS12.0.sdk/usr",
-
-      "/Xcode.app/Contents/Developer/Platforms/Linux.platform/Developer/SDKs/"
-      "Linux.sdk/usr/lib/swift/linux",
-
-      // Custom toolchains.
-      "/Xcode.app/Contents/Developer/Toolchains/"
-      "Swift-4.1-development-snapshot.xctoolchain/usr/lib/swift/macosx",
-
-      // CLTools.
-      "/Library/Developer/CommandLineTools/usr/lib/swift/macosx",
-
-      // Local builds.
-      "/build/LLDB.framework/Resources/Swift/clang",
-  };
-
-  using SmallString = llvm::SmallString<256>;
-  std::vector<std::string> abs_paths;
-  for (auto dir : paths) {
-    SmallString path = m_base_dir.str();
-    path::append(path, dir);
-    ASSERT_NO_ERROR(fs::create_directories(path));
-    abs_paths.push_back(std::string(path));
-  }
-
-  llvm::StringRef macosx_sdk = path::parent_path(abs_paths[3]);
-  llvm::StringRef ios_sdk = path::parent_path(abs_paths[4]);
-  llvm::StringRef iossim_sdk = path::parent_path(abs_paths[5]);
-  llvm::StringRef cross_sdk = path::parent_path(
-      path::parent_path(path::parent_path(path::parent_path(abs_paths[6]))));
-
-  SmallString swift_dir = m_base_dir.str();
-  path::append(swift_dir,
-      "/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Resources/Swift");
-  SmallString xcode_contents = m_base_dir.str();
-  path::append(xcode_contents, "/Xcode.app/Contents");
-  SmallString toolchain = m_base_dir.str();
-  path::append(toolchain, "/Xcode.app/Contents/Developer/Toolchains");
-  SmallString cl_tools = m_base_dir.str();
-  path::append(cl_tools, "/Library/Developer/CommandLineTools");
-
-  SmallString tc_rdir = m_base_dir.str();
-  llvm::sys::path::append(tc_rdir, "/Xcode.app/Contents/Developer/Toolchains/"
-                                   "XcodeDefault.xctoolchain/usr/lib/swift");
-
-  auto GetResourceDir = [&](const char *triple_string,
-                            llvm::StringRef sdk_path) {
-    llvm::Triple host("x86_64-apple-macosx10.14");
-    llvm::Triple target(triple_string);
-    return SwiftASTContextTester::GetResourceDir(
-        sdk_path,
-        SwiftASTContextTester::GetSwiftStdlibOSDir(target, host),
-        std::string(swift_dir), std::string(xcode_contents),
-        std::string(toolchain), std::string(cl_tools));
-  };
-
-  EXPECT_EQ(GetResourceDir("x86_64-apple-macosx10.14", macosx_sdk),
-            tc_rdir.str());
-  EXPECT_EQ(GetResourceDir("x86_64-apple-darwin", macosx_sdk), tc_rdir);
-  EXPECT_EQ(GetResourceDir("aarch64-apple-ios11.3", ios_sdk), tc_rdir);
-  // Old-style simulator triple with missing environment.
-  EXPECT_EQ(GetResourceDir("x86_64-apple-ios11.3", iossim_sdk), tc_rdir);
-  EXPECT_EQ(GetResourceDir("x86_64-apple-ios11.3-simulator", iossim_sdk),
-            tc_rdir);
-  EXPECT_EQ(GetResourceDir("x86_64-unknown-linux", cross_sdk),
-            path::parent_path(abs_paths[6]));
-
-  // Version is too low, but we still expect a valid resource directory.
-  EXPECT_EQ(GetResourceDir("x86_64-apple-ios11.0", ios_sdk), tc_rdir);
-  std::string s = GetResourceDir("armv7k-apple-watchos4.0", ios_sdk);
-  EXPECT_NE(GetResourceDir("armv7k-apple-watchos4.0", ios_sdk), "");
-
-  // Custom toolchain.
-  toolchain = path::parent_path(
-      path::parent_path(path::parent_path(path::parent_path(abs_paths[7]))));
-  std::string custom_tc = path::parent_path(abs_paths[7]).str();
-  EXPECT_EQ(GetResourceDir("x86_64-apple-macosx", macosx_sdk), custom_tc);
-
-  // CLTools.
-  xcode_contents = "";
-  toolchain = "";
-  std::string cl_tools_rd = path::parent_path(abs_paths[8]).str();
-  EXPECT_EQ(GetResourceDir("x86_64-apple-macosx", macosx_sdk), cl_tools_rd);
-
-  // Local builds.
-  swift_dir = path::parent_path(abs_paths[9]);
-  EXPECT_EQ(GetResourceDir("x86_64-apple-macosx", macosx_sdk), swift_dir);
-}
 
 TEST_F(TestSwiftASTContext, IsNonTriviallyManagedReferenceType) {
 #ifndef NDEBUG
   // The mock constructor is only available in asserts mode.
-  SwiftASTContext::NonTriviallyManagedReferenceStrategy strategy;
-  SwiftASTContextTester context;
-  CompilerType t(&context, nullptr);
-  EXPECT_FALSE(SwiftASTContext::IsNonTriviallyManagedReferenceType(t, strategy,
-                                                                   nullptr));
+  auto context = std::make_shared<SwiftASTContextTester>();
+  EXPECT_FALSE(context->GetNonTriviallyManagedReferenceKind(nullptr));
 #endif
 }
 
@@ -228,6 +83,7 @@ TEST_F(TestSwiftASTContext, SwiftFriendlyTriple) {
 TEST_F(TestSwiftASTContext, ApplyWorkingDir) {
   std::string abs_working_dir = "/abs/dir";
   std::string rel_working_dir = "rel/dir";
+  std::string dot_working_dir = ".";
 
   // non-include option should not apply working dir
   llvm::SmallString<128> non_include_flag("-non-include-flag");
@@ -300,6 +156,35 @@ TEST_F(TestSwiftASTContext, ApplyWorkingDir) {
   EXPECT_EQ(module_file_with_name_rel_path,
             llvm::SmallString<128>(
                 "-fmodule-file=modulename=/abs/dir/relpath/module.pcm"));
+
+  // include path arg with cwd = .
+  llvm::SmallString<128> dot_rel_path("-iquoterel/path");
+  SwiftASTContext::ApplyWorkingDir(dot_rel_path, dot_working_dir);
+  EXPECT_EQ(dot_rel_path, llvm::SmallString<128>("-iquoterel/path"));
+
+  // . include path arg with cwd = . should stay as .
+  llvm::SmallString<128> dot_dot_path("-iquote.");
+  SwiftASTContext::ApplyWorkingDir(dot_dot_path, dot_working_dir);
+  EXPECT_EQ(dot_dot_path, llvm::SmallString<128>("-iquote."));
+}
+
+TEST_F(TestSwiftASTContext, PluginPath) {
+  llvm::StringRef path(
+      "/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
+      "lib/swift/host/plugins/libFoo.dylib");
+  llvm::StringRef local_path(
+      "/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/"
+      "local/lib/swift/host/plugins/libFoo.dylib");
+  std::string server("/Xcode.app/Contents/Developer/Toolchains/"
+                     "XcodeDefault.xctoolchain/usr/bin/swift-plugin-server");
+  EXPECT_EQ(SwiftASTContext::GetPluginServer(path), server);
+  EXPECT_EQ(
+      SwiftASTContext::GetPluginServer(llvm::sys::path::parent_path(path)),
+      server);
+  EXPECT_EQ(SwiftASTContext::GetPluginServer(local_path), server);
+  EXPECT_EQ(
+      SwiftASTContext::GetPluginServer(llvm::sys::path::parent_path(local_path)),
+      server);
 }
 
 namespace {
@@ -370,4 +255,41 @@ TEST(ClangArgs, DoubleDash) {
 
   // Check that all ignored arguments got removed.
   EXPECT_EQ(dest, std::vector<std::string>({"-v"}));
+}
+
+TEST_F(TestSwiftASTContext, IVFS) {
+  const auto *Info = testing::UnitTest::GetInstance()->current_test_info();
+  llvm::SmallString<128> name;
+  auto ec = llvm::sys::fs::createTemporaryFile(
+      llvm::Twine(Info->test_case_name()) + "-" + Info->name(), "overlay.yaml",
+      name);
+  ASSERT_FALSE((bool)ec);
+  llvm::FileRemover remover(name);
+
+  std::string valid = name.str().str();
+  std::string invalid = name.str().drop_back(1).str() +"XXX";
+  std::vector<std::string> args;
+  args.push_back("-ivfsoverlay");
+  args.push_back(valid);
+
+  args.push_back("-ivfsoverlay");
+  args.push_back(invalid);
+
+  args.push_back("-ivfsstatcache");
+  args.push_back(valid);
+
+  args.push_back("-ivfsstatcache");
+  args.push_back(invalid);
+
+  std::vector<std::string> expected;
+  expected.push_back("-ivfsoverlay");
+  expected.push_back(valid);
+
+  expected.push_back("-ivfsstatcache");
+  expected.push_back(valid);
+
+  SwiftASTContext::FilterClangImporterOptions(args);
+
+  // Check that all ignored arguments got removed.
+  EXPECT_EQ(args, expected);
 }

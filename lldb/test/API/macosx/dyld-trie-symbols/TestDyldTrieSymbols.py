@@ -7,15 +7,12 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
+
 class DyldTrieSymbolsTestCase(TestBase):
-
-    mydir = TestBase.compute_mydir(__file__)
-
     NO_DEBUG_INFO_TESTCASE = True
 
     @skipIfRemote
     @skipUnlessDarwin
-
     def test_dyld_trie_symbols(self):
         """Test that we make create symbol table entries from the dyld trie data structure."""
         self.build()
@@ -37,8 +34,8 @@ class DyldTrieSymbolsTestCase(TestBase):
         unstripped_foo_symbols = unstripped_target.FindSymbols("foo")
         self.assertEqual(unstripped_foo_symbols.GetSize(), 1)
 
-        # make sure we can look up the mangled name, demangled base name,
-        # demangled name with argument.
+        # Make sure we can look up the mangled name and the demangled base
+        # name.
         unstripped_Z3pat_symbols = unstripped_target.FindSymbols("_Z3pati")
         self.assertEqual(unstripped_Z3pat_symbols.GetSize(), 1)
         unstripped_pat_symbols = unstripped_target.FindSymbols("pat")
@@ -46,8 +43,6 @@ class DyldTrieSymbolsTestCase(TestBase):
 
         unstripped_bar_symbols = unstripped_target.FindSymbols("bar")
         self.assertEqual(unstripped_bar_symbols.GetSize(), 1)
-
-
 
         # Verify that we can retrieve all the symbols with external
         # linkage after the binary has been stripped; they should not
@@ -97,7 +92,10 @@ class DyldTrieSymbolsTestCase(TestBase):
             if sym1.GetType() == lldb.eSymbolTypeObjCClass:
                 self.assertEqual(sym2.GetType(), lldb.eSymbolTypeObjCMetaClass)
             else:
-                self.assertTrue(sym1.GetType() == lldb.eSymbolTypeObjCMetaClass or sym1.GetType() == lldb.eSymbolTypeObjCClass)
+                self.assertTrue(
+                    sym1.GetType() == lldb.eSymbolTypeObjCMetaClass
+                    or sym1.GetType() == lldb.eSymbolTypeObjCClass
+                )
 
         syms_ctx = stripped_target.FindSymbols("SourceDerived._derivedValue")
         self.assertEqual(syms_ctx.GetSize(), 1)

@@ -12,9 +12,8 @@
 
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-forward.h"
-
+#include "lldb/lldb-types.h"
 #include "lldb/Utility/ConstString.h"
-
 #include "llvm/ADT/StringRef.h"
 
 #include <cstddef>
@@ -27,7 +26,7 @@ namespace lldb_private {
 ///
 /// Designed to handle mangled names. The demangled version of any names will
 /// be computed when the demangled name is accessed through the Demangled()
-/// acccessor. This class can also tokenize the demangled version of the name
+/// accessor. This class can also tokenize the demangled version of the name
 /// for powerful searches. Functions and symbols could make instances of this
 /// class for their mangled names. Uniqued string pools are used for the
 /// mangled, demangled, and token string values to allow for faster
@@ -44,7 +43,11 @@ public:
     eManglingSchemeNone = 0,
     eManglingSchemeMSVC,
     eManglingSchemeItanium,
-    eManglingSchemeRustV0
+    eManglingSchemeRustV0,
+    eManglingSchemeD,
+#ifdef LLDB_ENABLE_SWIFT
+    eManglingSchemeSwift
+#endif // LLDB_ENABLE_SWIFT
   };
 
   /// Default constructor.
@@ -63,10 +66,19 @@ public:
 
   explicit Mangled(llvm::StringRef name);
 
-  /// Convert to pointer operator.
+  bool operator==(const Mangled &rhs) const {
+    return m_mangled == rhs.m_mangled &&
+           GetDemangledName() == rhs.GetDemangledName();
+  }
+
+  bool operator!=(const Mangled &rhs) const {
+    return !(*this == rhs);
+  }
+
+  /// Convert to bool operator.
   ///
-  /// This allows code to check a Mangled object to see if it contains a valid
-  /// mangled name using code such as:
+  /// This allows code to check any Mangled objects to see if they contain
+  /// anything valid using code such as:
   ///
   /// \code
   /// Mangled mangled(...);
@@ -75,25 +87,9 @@ public:
   /// \endcode
   ///
   /// \return
-  ///     A pointer to this object if either the mangled or unmangled
-  ///     name is set, NULL otherwise.
-  operator void *() const;
-
-  /// Logical NOT operator.
-  ///
-  /// This allows code to check a Mangled object to see if it contains an
-  /// empty mangled name using code such as:
-  ///
-  /// \code
-  /// Mangled mangled(...);
-  /// if (!mangled)
-  /// { ...
-  /// \endcode
-  ///
-  /// \return
-  ///     Returns \b true if the object has an empty mangled and
-  ///     unmangled name, \b false otherwise.
-  bool operator!() const;
+  ///     Returns \b true if either the mangled or unmangled name is set,
+  ///     \b false if the object has an empty mangled and unmangled name.
+  explicit operator bool() const;
 
   /// Clear the mangled and demangled values.
   void Clear();
@@ -191,8 +187,6 @@ public:
   ///
   /// \return
   ///     The number of bytes that this object occupies in memory.
-  ///
-  /// \see ConstString::StaticMemorySize ()
   size_t MemorySize() const;
 
   /// Set the string value in this object.
@@ -268,6 +262,35 @@ public:
   ///     eManglingSchemeNone if no known mangling scheme could be identified
   ///     for s, otherwise the enumerator for the mangling scheme detected.
   static Mangled::ManglingScheme GetManglingScheme(llvm::StringRef const name);
+
+  /// Decode a serialized version of this object from data.
+  ///
+  /// \param data
+  ///   The decoder object that references the serialized data.
+  ///
+  /// \param offset_ptr
+  ///   A pointer that contains the offset from which the data will be decoded
+  ///   from that gets updated as data gets decoded.
+  ///
+  /// \param strtab
+  ///   All strings in cache files are put into string tables for efficiency
+  ///   and cache file size reduction. Strings are stored as uint32_t string
+  ///   table offsets in the cache data.
+  bool Decode(const DataExtractor &data, lldb::offset_t *offset_ptr,
+              const StringTableReader &strtab);
+
+  /// Encode this object into a data encoder object.
+  ///
+  /// This allows this object to be serialized to disk.
+  ///
+  /// \param encoder
+  ///   A data encoder object that serialized bytes will be encoded into.
+  ///
+  /// \param strtab
+  ///   All strings in cache files are put into string tables for efficiency
+  ///   and cache file size reduction. Strings are stored as uint32_t string
+  ///   table offsets in the cache data.
+  void Encode(DataEncoder &encoder, ConstStringTable &strtab) const;
 
 private:
   /// Mangled member variables.

@@ -3,6 +3,7 @@ add_subdirectory(Rewrite)
 set(LLVM_LINK_COMPONENTS
   BitReader
   BitstreamReader
+  CAS
   Option
   ProfileData
   Support
@@ -12,8 +13,11 @@ add_clang_library(clangFrontend
   ASTConsumers.cpp
   ASTMerge.cpp
   ASTUnit.cpp
+  CASDependencyCollector.cpp
   ChainedDiagnosticConsumer.cpp
   ChainedIncludesSource.cpp
+  CompileJobCacheKey.cpp
+  CompileJobCacheResult.cpp
   CompilerInstance.cpp
   CompilerInvocation.cpp
   CreateInvocationFromCommandLine.cpp
@@ -24,7 +28,7 @@ add_clang_library(clangFrontend
   FrontendActions.cpp
   FrontendOptions.cpp
   HeaderIncludeGen.cpp
-  InitHeaderSearch.cpp
+  IncludeTreePPActions.cpp
   InitPreprocessor.cpp
   LayoutOverrideSource.cpp
   LogDiagnosticPrinter.cpp
@@ -32,6 +36,8 @@ add_clang_library(clangFrontend
   MultiplexConsumer.cpp
   PrecompiledPreamble.cpp
   PrintPreprocessedOutput.cpp
+  SARIFDiagnostic.cpp
+  SARIFDiagnosticPrinter.cpp
   SerializedDiagnosticPrinter.cpp
   SerializedDiagnosticReader.cpp
   TestModuleFileExtension.cpp
@@ -54,5 +60,6 @@ add_clang_library(clangFrontend
   clangLex
   clangParse
   clangSema
+  clangCAS
   clangSerialization
   )

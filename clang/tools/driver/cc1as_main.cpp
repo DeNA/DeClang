@@ -134,8 +134,12 @@ struct AssemblerInvocation {
   unsigned NoExecStack : 1;
   unsigned FatalWarnings : 1;
   unsigned NoWarn : 1;
+  unsigned NoTypeCheck : 1;
   unsigned IncrementalLinkerCompatible : 1;
   unsigned EmbedBitcode : 1;
+
+  /// Whether to emit DWARF unwind info.
+  EmitDwarfUnwindType EmitDwarfUnwind;
 
   /// The name of the relocation model to use.
   std::string RelocationModel;
@@ -144,6 +148,19 @@ struct AssemblerInvocation {
   /// otherwise.
   std::string TargetABI;
 
+  /// Darwin target variant triple, the variant of the deployment target
+  /// for which the code is being compiled.
+  llvm::Optional<llvm::Triple> DarwinTargetVariantTriple;
+
+  /// The ptrauth ABI version targeted by the backend.
+  unsigned PointerAuthABIVersion;
+  /// Whether the ptrauth ABI version represents a kernel ABI.
+  unsigned PointerAuthKernelABIVersion : 1;
+  /// Whether the assembler should encode the ptrauth ABI version.
+  unsigned PointerAuthABIVersionEncoded : 1;
+
+  /// The name of a file to use with \c .secure_log_unique directives.
+  std::string AsSecureLogFile;
   /// @}
 
 public:
@@ -160,10 +177,12 @@ public:
     NoExecStack = 0;
     FatalWarnings = 0;
     NoWarn = 0;
+    NoTypeCheck = 0;
     IncrementalLinkerCompatible = 0;
     Dwarf64 = 0;
     DwarfVersion = 0;
     EmbedBitcode = 0;
+    EmitDwarfUnwind = EmitDwarfUnwindType::Default;
   }
 
   static bool CreateFromArgs(AssemblerInvocation &Res,
@@ -209,6 +228,9 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
 
   // Target Options
   Opts.Triple = llvm::Triple::normalize(Args.getLastArgValue(OPT_triple));
+  if (Arg *A = Args.getLastArg(options::OPT_darwin_target_variant_triple))
+    Opts.DarwinTargetVariantTriple = llvm::Triple(A->getValue());
+
   Opts.CPU = std::string(Args.getLastArgValue(OPT_target_cpu));
   Opts.Features = Args.getAllArgValues(OPT_target_feature);
 
@@ -227,8 +249,8 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
     Opts.CompressDebugSections =
         llvm::StringSwitch<llvm::DebugCompressionType>(A->getValue())
             .Case("none", llvm::DebugCompressionType::None)
-            .Case("zlib", llvm::DebugCompressionType::Z)
-            .Case("zlib-gnu", llvm::DebugCompressionType::GNU)
+            .Case("zlib", llvm::DebugCompressionType::Zlib)
+            .Case("zstd", llvm::DebugCompressionType::Zstd)
             .Default(llvm::DebugCompressionType::None);
   }
 
@@ -295,12 +317,21 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
   Opts.NoExecStack = Args.hasArg(OPT_mno_exec_stack);
   Opts.FatalWarnings = Args.hasArg(OPT_massembler_fatal_warnings);
   Opts.NoWarn = Args.hasArg(OPT_massembler_no_warn);
+  Opts.NoTypeCheck = Args.hasArg(OPT_mno_type_check);
   Opts.RelocationModel =
       std::string(Args.getLastArgValue(OPT_mrelocation_model, "pic"));
   Opts.TargetABI = std::string(Args.getLastArgValue(OPT_target_abi));
   Opts.IncrementalLinkerCompatible =
       Args.hasArg(OPT_mincremental_linker_compatible);
   Opts.SymbolDefs = Args.getAllArgValues(OPT_defsym);
+
+  Opts.PointerAuthABIVersionEncoded =
+      Args.hasArg(OPT_fptrauth_abi_version_EQ) ||
+      Args.hasArg(OPT_fptrauth_kernel_abi_version);
+  Opts.PointerAuthABIVersion =
+    getLastArgIntValue(Args, OPT_fptrauth_abi_version_EQ, 0, Diags);
+  Opts.PointerAuthKernelABIVersion =
+      Args.hasArg(OPT_fptrauth_kernel_abi_version);
 
   // EmbedBitcode Option. If -fembed-bitcode is enabled, set the flag.
   // EmbedBitcode behaves the same for all embed options for assembly files.
@@ -311,6 +342,16 @@ bool AssemblerInvocation::CreateFromArgs(AssemblerInvocation &Opts,
                             .Case("marker", 1)
                             .Default(0);
   }
+
+  if (auto *A = Args.getLastArg(OPT_femit_dwarf_unwind_EQ)) {
+    Opts.EmitDwarfUnwind =
+        llvm::StringSwitch<EmitDwarfUnwindType>(A->getValue())
+            .Case("always", EmitDwarfUnwindType::Always)
+            .Case("no-compact-unwind", EmitDwarfUnwindType::NoCompactUnwind)
+            .Case("default", EmitDwarfUnwindType::Default);
+  }
+
+  Opts.AsSecureLogFile = Args.getLastArgValue(OPT_as_secure_log_file);
 
   return Success;
 }
@@ -362,6 +403,9 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
   assert(MRI && "Unable to create target register info!");
 
   MCTargetOptions MCOptions;
+  MCOptions.EmitDwarfUnwind = Opts.EmitDwarfUnwind;
+  MCOptions.AsSecureLogFile = Opts.AsSecureLogFile;
+
   std::unique_ptr<MCAsmInfo> MAI(
       TheTarget->createMCAsmInfo(*MRI, Opts.Triple, MCOptions));
   assert(MAI && "Unable to create target asm info!");
@@ -408,6 +452,8 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
   // MCObjectFileInfo needs a MCContext reference in order to initialize itself.
   std::unique_ptr<MCObjectFileInfo> MOFI(
       TheTarget->createMCObjectFileInfo(Ctx, PIC));
+  if (Opts.DarwinTargetVariantTriple)
+    MOFI->setDarwinTargetVariantTriple(*Opts.DarwinTargetVariantTriple);
   Ctx.setObjectFileInfo(MOFI.get());
 
   if (Opts.SaveTemporaryLabels)
@@ -447,6 +493,7 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
 
   MCOptions.MCNoWarn = Opts.NoWarn;
   MCOptions.MCFatalWarnings = Opts.FatalWarnings;
+  MCOptions.MCNoTypeCheck = Opts.NoTypeCheck;
   MCOptions.ABIName = Opts.TargetABI;
 
   // FIXME: There is a bit of code duplication with addPassesToEmitFile.
@@ -456,7 +503,7 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
 
     std::unique_ptr<MCCodeEmitter> CE;
     if (Opts.ShowEncoding)
-      CE.reset(TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx));
+      CE.reset(TheTarget->createMCCodeEmitter(*MCII, Ctx));
     std::unique_ptr<MCAsmBackend> MAB(
         TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions));
 
@@ -476,7 +523,7 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
     }
 
     std::unique_ptr<MCCodeEmitter> CE(
-        TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx));
+        TheTarget->createMCCodeEmitter(*MCII, Ctx));
     std::unique_ptr<MCAsmBackend> MAB(
         TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions));
     assert(MAB && "Unable to create asm backend!");
@@ -498,12 +545,17 @@ static bool ExecuteAssemblerImpl(AssemblerInvocation &Opts,
   if (Opts.EmbedBitcode && Ctx.getObjectFileType() == MCContext::IsMachO) {
     MCSection *AsmLabel = Ctx.getMachOSection(
         "__LLVM", "__asm", MachO::S_REGULAR, 4, SectionKind::getReadOnly());
-    Str.get()->SwitchSection(AsmLabel);
+    Str.get()->switchSection(AsmLabel);
     Str.get()->emitZeros(1);
   }
 
   // Assembly to object compilation should leverage assembly info.
   Str->setUseAssemblerInfoForParsing(true);
+
+  // Emit the ptrauth ABI version, if any.
+  if (Opts.PointerAuthABIVersionEncoded)
+    Str->EmitPtrAuthABIVersion(Opts.PointerAuthABIVersion,
+                               Opts.PointerAuthKernelABIVersion);
 
   bool Failed = false;
 

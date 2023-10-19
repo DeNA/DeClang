@@ -15,7 +15,8 @@
 
 #include "LLDBMemoryReader.h"
 #include "SwiftLanguageRuntime.h"
-#include "swift/Reflection/TypeLowering.h"
+#include "SwiftMetadataCache.h"
+#include "swift/RemoteInspection/TypeLowering.h"
 #include "llvm/Support/Memory.h"
 
 namespace swift {
@@ -106,8 +107,7 @@ public:
   llvm::Optional<size_t> GetBitAlignment(CompilerType type,
                                          ExecutionContextScope *exe_scope);
 
-  SwiftLanguageRuntime::MetadataPromiseSP
-  GetMetadataPromise(lldb::addr_t addr, ValueObject &for_object);
+  CompilerType GetTypeFromMetadata(TypeSystemSwift &tss, Address address);
 
   llvm::Optional<uint64_t>
   GetMemberVariableOffsetRemoteAST(CompilerType instance_type,
@@ -122,7 +122,7 @@ public:
                                                    Status *error);
 
   llvm::Optional<unsigned> GetNumChildren(CompilerType type,
-                                          ValueObject *valobj);
+                                          ExecutionContextScope *exe_scope);
 
   llvm::Optional<unsigned> GetNumFields(CompilerType type,
                                         ExecutionContext *exe_ctx);
@@ -143,6 +143,10 @@ public:
       uint32_t &child_bitfield_bit_offset, bool &child_is_base_class,
       bool &child_is_deref_of_parent, ValueObject *valobj,
       uint64_t &language_flags);
+
+  CompilerType BindGenericTypeParameters(
+      CompilerType unbound_type,
+      std::function<CompilerType(unsigned, unsigned)> type_resolver);
 
   /// Like \p BindGenericTypeParameters but for TypeSystemSwiftTypeRef.
   CompilerType BindGenericTypeParameters(StackFrame &stack_frame,
@@ -191,6 +195,8 @@ public:
     std::function<const swift::reflection::TypeRef *()> get_typeref;
   };
 
+  Process &GetProcess() const;
+
   /// An abstract interface to swift::reflection::ReflectionContext
   /// objects of varying pointer sizes.  This class encapsulates all
   /// traffic to ReflectionContext and abstracts the detail that
@@ -201,24 +207,26 @@ public:
     /// Return a 32-bit reflection context.
     static std::unique_ptr<ReflectionContextInterface>
     CreateReflectionContext32(
-        std::shared_ptr<swift::remote::MemoryReader> reader, bool ObjCInterop);
+        std::shared_ptr<swift::remote::MemoryReader> reader, bool ObjCInterop,
+        SwiftMetadataCache *swift_metadata_cache);
 
     /// Return a 64-bit reflection context.
     static std::unique_ptr<ReflectionContextInterface>
     CreateReflectionContext64(
-        std::shared_ptr<swift::remote::MemoryReader> reader, bool ObjCInterop);
+        std::shared_ptr<swift::remote::MemoryReader> reader, bool ObjCInterop,
+        SwiftMetadataCache *swift_metadata_cache);
 
     virtual ~ReflectionContextInterface();
 
-    virtual bool addImage(
+    virtual llvm::Optional<uint32_t> addImage(
         llvm::function_ref<std::pair<swift::remote::RemoteRef<void>, uint64_t>(
             swift::ReflectionSectionKind)>
             find_section,
         llvm::SmallVector<llvm::StringRef, 1> likely_module_names = {}) = 0;
-    virtual bool addImage(
+    virtual llvm::Optional<uint32_t> addImage(
         swift::remote::RemoteAddress image_start,
         llvm::SmallVector<llvm::StringRef, 1> likely_module_names = {}) = 0;
-    virtual bool
+    virtual llvm::Optional<uint32_t>
     readELF(swift::remote::RemoteAddress ImageStart,
             llvm::Optional<llvm::sys::MemoryBlock> FileBuffer,
             llvm::SmallVector<llvm::StringRef, 1> likely_module_names = {}) = 0;
@@ -243,9 +251,40 @@ public:
     virtual swift::reflection::TypeRefBuilder &getBuilder() = 0;
     virtual llvm::Optional<bool> isValueInlinedInExistentialContainer(
         swift::remote::RemoteAddress existential_address) = 0;
+    virtual swift::remote::RemoteAbsolutePointer
+    stripSignedPointer(swift::remote::RemoteAbsolutePointer pointer) = 0;
+  };
+
+  /// A wrapper around TargetReflectionContext, which holds a lock to ensure
+  /// exclusive access.
+  struct ThreadSafeReflectionContext {
+    ThreadSafeReflectionContext(ReflectionContextInterface *reflection_ctx,
+                             std::recursive_mutex &mutex)
+        : m_reflection_ctx(reflection_ctx), m_lock(mutex, std::adopt_lock) {}
+
+    ReflectionContextInterface *operator->() const {
+      return m_reflection_ctx;
+    }
+
+    operator bool() const {
+      return m_reflection_ctx != nullptr;
+    }
+
+  private:
+    ReflectionContextInterface *m_reflection_ctx;
+    // This lock operates on a recursive mutex because the initialization
+    // of ReflectionContext recursive calls itself (see
+    // SwiftLanguageRuntimeImpl::SetupReflection).
+    std::lock_guard<std::recursive_mutex> m_lock;
   };
 
 protected:
+  static void
+  ForEachGenericParameter(swift::Demangle::NodePointer node,
+                          std::function<void(unsigned, unsigned)> callback) {
+    SwiftLanguageRuntime::ForEachGenericParameter(node, callback);
+  }
+
   /// Use the reflection context to build a TypeRef object.
   const swift::reflection::TypeRef *
   GetTypeRef(CompilerType type, TypeSystemSwiftTypeRef *module_holder);
@@ -260,13 +299,21 @@ protected:
   // Classes that inherit from SwiftLanguageRuntime can see and modify these
   Value::ValueType GetValueType(ValueObject &in_value,
                                 CompilerType dynamic_type,
+                                Value::ValueType static_value_type,
                                 bool is_indirect_enum_case);
+  bool GetDynamicTypeAndAddress_Pack(ValueObject &in_value,
+                                     CompilerType pack_type,
+                                     lldb::DynamicValueType use_dynamic,
+                                     TypeAndOrName &class_type_or_name,
+                                     Address &address,
+                                     Value::ValueType &value_type);
 
   bool GetDynamicTypeAndAddress_Class(ValueObject &in_value,
                                       CompilerType class_type,
                                       lldb::DynamicValueType use_dynamic,
                                       TypeAndOrName &class_type_or_name,
-                                      Address &address);
+                                      Address &address,
+                                      Value::ValueType &value_type);
 
   bool GetDynamicTypeAndAddress_Protocol(ValueObject &in_value,
                                          CompilerType protocol_type,
@@ -274,15 +321,22 @@ protected:
                                          TypeAndOrName &class_type_or_name,
                                          Address &address);
 
+  bool GetDynamicTypeAndAddress_ExistentialMetatype(
+      ValueObject &in_value, CompilerType meta_type,
+      lldb::DynamicValueType use_dynamic, TypeAndOrName &class_type_or_name,
+      Address &address);
+
   bool GetDynamicTypeAndAddress_Value(ValueObject &in_value,
                                       CompilerType &bound_type,
                                       lldb::DynamicValueType use_dynamic,
                                       TypeAndOrName &class_type_or_name,
-                                      Address &address);
+                                      Address &address,
+                                      Value::ValueType &value_type);
 
   bool GetDynamicTypeAndAddress_IndirectEnumCase(
       ValueObject &in_value, lldb::DynamicValueType use_dynamic,
-      TypeAndOrName &class_type_or_name, Address &address);
+      TypeAndOrName &class_type_or_name, Address &address,
+      Value::ValueType &value_type);
 
   bool GetDynamicTypeAndAddress_ClangType(ValueObject &in_value,
                                           lldb::DynamicValueType use_dynamic,
@@ -290,7 +344,26 @@ protected:
                                           Address &address,
                                           Value::ValueType &value_type);
 
-  SwiftLanguageRuntime::MetadataPromiseSP
+  /// A proxy object to support lazy binding of Archetypes.
+  class MetadataPromise {
+    friend class SwiftLanguageRuntimeImpl;
+
+    MetadataPromise(ValueObject &, SwiftLanguageRuntimeImpl &, lldb::addr_t);
+
+    lldb::ValueObjectSP m_for_object_sp;
+    SwiftLanguageRuntimeImpl &m_swift_runtime;
+    lldb::addr_t m_metadata_location;
+    llvm::Optional<swift::MetadataKind> m_metadata_kind;
+    llvm::Optional<CompilerType> m_compiler_type;
+
+  public:
+    CompilerType FulfillTypePromise(Status *error = nullptr);
+  };
+  typedef std::shared_ptr<MetadataPromise> MetadataPromiseSP;
+
+  MetadataPromiseSP GetMetadataPromise(lldb::addr_t addr,
+                                       ValueObject &for_object);
+  MetadataPromiseSP
   GetPromiseForTypeNameAndFrame(const char *type_name, StackFrame *frame);
 
   llvm::Optional<lldb::addr_t>
@@ -321,7 +394,7 @@ protected:
   std::shared_ptr<LLDBMemoryReader> m_memory_reader_sp;
 
   llvm::DenseMap<std::pair<swift::ASTContext *, lldb::addr_t>,
-                 SwiftLanguageRuntime::MetadataPromiseSP>
+                 MetadataPromiseSP>
       m_promises_map;
 
   llvm::DenseMap<swift::ASTContext *,
@@ -357,11 +430,18 @@ private:
   /// Lazily initialize and return \p m_dynamic_exclusivity_flag_addr.
   llvm::Optional<lldb::addr_t> GetDynamicExclusivityFlagAddr();
 
-  /// Lazily initialize the reflection context. Return \p nullptr on failure.
-  ReflectionContextInterface *GetReflectionContext();
+  /// Lazily initialize the reflection context. Returns a
+  /// ThreadSafeReflectionContext with a \p nullptr on failure.
+  ThreadSafeReflectionContext GetReflectionContext();
+
+  // Add the modules in m_modules_to_add to the Reflection Context. The
+  // ModulesDidLoad() callback appends to m_modules_to_add.
+  void ProcessModulesToAdd();
 
   /// Lazily initialize and return \p m_SwiftNativeNSErrorISA.
   llvm::Optional<lldb::addr_t> GetSwiftNativeNSErrorISA();
+
+  SwiftMetadataCache *GetSwiftMetadataCache();
 
   /// These members are used to track and toggle the state of the "dynamic
   /// exclusivity enforcement flag" in the swift runtime. This flag is set to
@@ -380,10 +460,14 @@ private:
   /// \{
   std::unique_ptr<ReflectionContextInterface> m_reflection_ctx;
 
+  /// Mutex guarding accesses to the reflection context.
+  std::recursive_mutex m_reflection_ctx_mutex;
+
+  SwiftMetadataCache m_swift_metadata_cache;
+
   /// Record modules added through ModulesDidLoad, which are to be
   /// added to the reflection context once it's being initialized.
   ModuleList m_modules_to_add;
-  std::recursive_mutex m_add_module_mutex;
 
   /// Add the image to the reflection context.
   /// \return true on success.
@@ -398,8 +482,9 @@ private:
 
   /// Add the reflections sections to the reflection context by extracting
   /// the directly from the object file.
-  /// \return true on success.
-  bool AddObjectFileToReflectionContext(
+  /// \return the info id of the newly registered reflection info on success, or
+  /// llvm::None otherwise.
+  llvm::Optional<uint32_t> AddObjectFileToReflectionContext(
       lldb::ModuleSP module,
       llvm::SmallVector<llvm::StringRef, 1> likely_module_names);
 

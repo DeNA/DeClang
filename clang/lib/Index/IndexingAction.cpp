@@ -460,11 +460,11 @@ private:
 
   virtual void InclusionDirective(
       SourceLocation HashLoc, const Token &IncludeTok, StringRef FileName,
-      bool IsAngled, CharSourceRange FilenameRange, const FileEntry *File,
+      bool IsAngled, CharSourceRange FilenameRange, Optional<FileEntryRef> File,
       StringRef SearchPath, StringRef RelativePath, const Module *Imported,
       SrcMgr::CharacteristicKind FileType) override {
-    if (HashLoc.isFileID() && File && File->isValid())
-      addInclude(HashLoc, File);
+    if (HashLoc.isFileID() && File)
+      addInclude(HashLoc, *File);
   }
 };
 
@@ -995,7 +995,7 @@ static bool produceIndexDataForModuleFile(serialization::ModuleFile &Mod,
   // get rebuilt along with their index data).
   auto IsUptodateOpt =
       ParentUnitWriter.isUnitUpToDateForOutputFile(Mod.FileName, None, Error);
-  if (!IsUptodateOpt.hasValue()) {
+  if (!IsUptodateOpt) {
     unsigned DiagID = Diag.getCustomDiagID(DiagnosticsEngine::Error,
                                            "failed file status check: %0");
     Diag.Report(DiagID) << Error;

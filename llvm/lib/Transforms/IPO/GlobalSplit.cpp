@@ -134,9 +134,9 @@ static bool splitGlobal(GlobalVariable &GV) {
   }
 
   // Finally, remove the original global. Any remaining uses refer to invalid
-  // elements of the global, so replace with undef.
+  // elements of the global, so replace with poison.
   if (!GV.use_empty())
-    GV.replaceAllUsesWith(UndefValue::get(GV.getType()));
+    GV.replaceAllUsesWith(PoisonValue::get(GV.getType()));
   GV.eraseFromParent();
   return true;
 }
@@ -149,16 +149,17 @@ static bool splitGlobals(Module &M) {
       M.getFunction(Intrinsic::getName(Intrinsic::type_test));
   Function *TypeCheckedLoadFunc =
       M.getFunction(Intrinsic::getName(Intrinsic::type_checked_load));
+  Function *TypeCheckedLoadRelativeFunc =
+      M.getFunction(Intrinsic::getName(Intrinsic::type_checked_load_relative));
   if ((!TypeTestFunc || TypeTestFunc->use_empty()) &&
-      (!TypeCheckedLoadFunc || TypeCheckedLoadFunc->use_empty()))
+      (!TypeCheckedLoadFunc || TypeCheckedLoadFunc->use_empty()) &&
+      (!TypeCheckedLoadRelativeFunc ||
+       TypeCheckedLoadRelativeFunc->use_empty()))
     return false;
 
   bool Changed = false;
-  for (auto I = M.global_begin(); I != M.global_end();) {
-    GlobalVariable &GV = *I;
-    ++I;
+  for (GlobalVariable &GV : llvm::make_early_inc_range(M.globals()))
     Changed |= splitGlobal(GV);
-  }
   return Changed;
 }
 

@@ -1,3 +1,5 @@
+include(GNUInstallDirs)
+
 function(lldb_tablegen)
   # Syntax:
   # lldb_tablegen output-file [tablegen-arg ...] SOURCE source-file
@@ -18,6 +20,11 @@ function(lldb_tablegen)
   endif()
 
   set(LLVM_TARGET_DEFINITIONS ${LTG_SOURCE})
+
+  if (LLVM_USE_SANITIZER MATCHES ".*Address.*")
+    list(APPEND LTG_UNPARSED_ARGUMENTS -DLLDB_SANITIZED)
+  endif()
+
   tablegen(LLDB ${LTG_UNPARSED_ARGUMENTS})
 
   if(LTG_TARGET)
@@ -103,7 +110,7 @@ function(add_lldb_library name)
   # this may result in the wrong install DESTINATION. The FRAMEWORK property
   # must be set earlier.
   if(PARAM_FRAMEWORK)
-    set_target_properties(liblldb PROPERTIES FRAMEWORK ON)
+    set_target_properties(${name} PROPERTIES FRAMEWORK ON)
   endif()
 
   if(PARAM_SHARED)
@@ -113,7 +120,7 @@ function(add_lldb_library name)
     endif()
     # RUNTIME is relevant for DLL platforms, FRAMEWORK for macOS
     install(TARGETS ${name} COMPONENT ${name}
-      RUNTIME DESTINATION bin
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
       LIBRARY DESTINATION ${install_dest}
       ARCHIVE DESTINATION ${install_dest}
       FRAMEWORK DESTINATION ${install_dest})
@@ -129,12 +136,6 @@ function(add_lldb_library name)
   # headers without negatively impacting much of anything.
   if(NOT LLDB_BUILT_STANDALONE)
     add_dependencies(${name} clang-tablegen-targets)
-
-    # BEGIN Swift Mods
-	if(swift IN_LIST LLVM_EXTERNAL_PROJECTS)
-      add_dependencies(${name} swift-syntax-generated-headers)
-    endif()
-    # END Swift Mods
   endif()
 
   # Add in any extra C++ compilation flags for this library.
@@ -152,34 +153,76 @@ function(add_lldb_library name)
 endfunction(add_lldb_library)
 
 # BEGIN Swift Mods
-function(add_properties_for_swift_modules target)
-  if (BOOTSTRAPPING_MODE)
+function(add_properties_for_swift_modules target reldir)
+  # The relative directory for build can be passed as an optional
+  # extra argument. Retrieve it, or use reldir instead.
+  list(LENGTH ARGN num_optional_arguments)
+  if (${num_optional_arguments} GREATER 0)
+    list(GET ARGN 0 build_reldir)
+  else()
+    set(build_reldir ${reldir})
+  endif()
+
+  if (NOT BOOTSTRAPPING_MODE)
+    if (SWIFT_SWIFT_PARSER)
+      set(APSM_BOOTSTRAPPING_MODE "HOSTTOOLS")
+    endif()
+  else()
+    set(APSM_BOOTSTRAPPING_MODE "${BOOTSTRAPPING_MODE}")
+  endif()
+
+  if (APSM_BOOTSTRAPPING_MODE)
     if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
-      if(BOOTSTRAPPING_MODE MATCHES "HOSTTOOLS|.*HOSTLIBS")
+      if(APSM_BOOTSTRAPPING_MODE MATCHES "HOSTTOOLS|.*HOSTLIBS")
         target_link_directories(${target} PRIVATE
             "${CMAKE_OSX_SYSROOT}/usr/lib/swift"
             "${LLDB_SWIFT_LIBS}/macosx")
-        set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH
-            "/usr/lib/swift")
-      elseif(BOOTSTRAPPING_MODE STREQUAL "BOOTSTRAPPING")
+	set(SWIFT_BUILD_RPATH "/usr/lib/swift")
+	set(SWIFT_INSTALL_RPATH "/usr/lib/swift")
+      elseif(APSM_BOOTSTRAPPING_MODE STREQUAL "BOOTSTRAPPING")
         target_link_directories(${target} PRIVATE "${LLDB_SWIFT_LIBS}/macosx")
-        set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH
-            "${LLDB_SWIFT_LIBS}/macosx")
+	set(SWIFT_BUILD_RPATH "${LLDB_SWIFT_LIBS}/macosx")
+	set(SWIFT_INSTALL_RPATH "${LLDB_SWIFT_LIBS}/macosx")
       else()
-        message(FATAL_ERROR "Unknown BOOTSTRAPPING_MODE '${BOOTSTRAPPING_MODE}'")
+        message(FATAL_ERROR "Unknown APSM_BOOTSTRAPPING_MODE '${APSM_BOOTSTRAPPING_MODE}'")
       endif()
 
       # Workaround for a linker crash related to autolinking: rdar://77839981
       set_property(TARGET ${target} APPEND_STRING PROPERTY
                    LINK_FLAGS " -lobjc ")
-    elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
-      string(REGEX MATCH "^[^-]*" arch ${TARGET_TRIPLE})
+
+    set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${SWIFT_BUILD_RPATH}")
+    set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "${SWIFT_INSTALL_RPATH}")
+    elseif (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|OpenBSD|FreeBSD")
+      string(REGEX MATCH "^[^-]*" arch ${LLVM_TARGET_TRIPLE})
       target_link_libraries(${target} PRIVATE swiftCore-linux-${arch})
-  
-      # TODO: add "${LLDB_SWIFT_LIBS}/linux" to BUILD_RPATH and not INSTALL_RPATH.
-      # This does not work for some reason.
-      set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH
-          "${LLDB_SWIFT_LIBS}/linux;$ORIGIN/../lib/swift/linux")
+      string(TOLOWER ${CMAKE_SYSTEM_NAME} platform)
+      set(SWIFT_BUILD_RPATH "${LLDB_SWIFT_LIBS}/${platform}")
+      set(SWIFT_INSTALL_RPATH "$ORIGIN/${reldir}lib/swift/${platform}")
+      set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${SWIFT_BUILD_RPATH}")
+      set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "${SWIFT_INSTALL_RPATH}")
+    elseif(CMAKE_SYSTEM_NAME MATCHES Windows)
+      if(CMAKE_SYSTEM_PROCESSOR MATCHES AMD64|amd64|x86_64)
+        target_link_directories(${target} PRIVATE
+          ${SWIFT_PATH_TO_SWIFT_SDK}/usr/lib/swift/windows/x86_64)
+      elseif(CMAKE_SYSTEM_PROCESSOR MATCHES ARM64|arm64|aarch64)
+        target_link_directories(${target} PRIVATE
+          ${SWIFT_PATH_TO_SWIFT_SDK}/usr/lib/swift/windows/aarch64)
+      endif()
+    endif()
+
+    if (SWIFT_SWIFT_PARSER)
+      if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
+        set_property(TARGET ${target}
+          APPEND PROPERTY BUILD_RPATH "@loader_path/${build_reldir}lib/swift/host")
+        set_property(TARGET ${target}
+          APPEND PROPERTY INSTALL_RPATH "@loader_path/${reldir}lib/swift/host")
+      elseif (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|OpenBSD|FreeBSD")
+        set_property(TARGET ${target}
+          APPEND PROPERTY BUILD_RPATH "$ORIGIN/${build_reldir}lib/swift/host")
+        set_property(TARGET ${target}
+          APPEND PROPERTY INSTALL_RPATH "$ORIGIN/${reldir}lib/swift/host")
+      endif()
     endif()
   endif()
 endfunction()
@@ -281,6 +324,14 @@ function(lldb_add_to_buildtree_lldb_framework name subdir)
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${name}> ${copy_dest}
     COMMENT "Copy ${name} to ${copy_dest}"
   )
+
+  # Create a custom target to remove the copy again from LLDB.framework in the
+  # build tree.
+  add_custom_target(${name}-cleanup
+    COMMAND ${CMAKE_COMMAND} -E remove ${copy_dest}
+    COMMENT "Removing ${name} from LLDB.framework")
+  add_dependencies(lldb-framework-cleanup
+    ${name}-cleanup)
 endfunction()
 
 # Add extra install steps for dSYM creation and stripping for the given target.
@@ -376,6 +427,25 @@ function(lldb_find_system_debugserver path)
       message(WARNING "System debugserver requested, but not found. "
                       "Candidates don't exist: ${path_shared}\n${path_private}")
     endif()
+  endif()
+endfunction()
+
+function(lldb_find_python_module module)
+  set(MODULE_FOUND PY_${module}_FOUND)
+  if (DEFINED ${MODULE_FOUND})
+    return()
+  endif()
+
+  execute_process(COMMAND "${Python3_EXECUTABLE}" "-c" "import ${module}"
+    RESULT_VARIABLE status
+    ERROR_QUIET)
+
+  if (status)
+    set(${MODULE_FOUND} OFF CACHE BOOL "Failed to find python module '${module}'")
+    message(STATUS "Could NOT find Python module '${module}'")
+  else()
+    set(${MODULE_FOUND} ON CACHE BOOL "Found python module '${module}'")
+    message(STATUS "Found Python module '${module}'")
   endif()
 endfunction()
 

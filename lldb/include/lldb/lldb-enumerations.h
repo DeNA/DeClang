@@ -9,6 +9,7 @@
 #ifndef LLDB_LLDB_ENUMERATIONS_H
 #define LLDB_LLDB_ENUMERATIONS_H
 
+#include <cstdint>
 #include <type_traits>
 
 #ifndef SWIG
@@ -433,6 +434,9 @@ FLAGS_ENUM(WatchpointEventType){
 /// specification for ease of use and consistency.
 /// The enum -> string code is in Language.cpp, don't change this
 /// table without updating that code as well.
+///
+/// This datatype is used in SBExpressionOptions::SetLanguage() which
+/// makes this type API. Do not change its underlying storage type!
 enum LanguageType {
   eLanguageTypeUnknown = 0x0000,        ///< Unknown or invalid language value.
   eLanguageTypeC89 = 0x0001,            ///< ISO C:1989.
@@ -472,13 +476,25 @@ enum LanguageType {
   eLanguageTypeC_plus_plus_14 = 0x0021, ///< ISO C++:2014.
   eLanguageTypeFortran03 = 0x0022,      ///< ISO Fortran 2003.
   eLanguageTypeFortran08 = 0x0023,      ///< ISO Fortran 2008.
+  eLanguageTypeRenderScript = 0x0024,
+  eLanguageTypeBLISS = 0x0025,
+  eLanguageTypeKotlin = 0x0026,
+  eLanguageTypeZig = 0x0027,
+  eLanguageTypeCrystal = 0x0028,
+  eLanguageTypeC_plus_plus_17 = 0x002a, ///< ISO C++:2017.
+  eLanguageTypeC_plus_plus_20 = 0x002b, ///< ISO C++:2020.
+  eLanguageTypeC17 = 0x002c,
+  eLanguageTypeFortran18 = 0x002d,
+  eLanguageTypeAda2005 = 0x002e,
+  eLanguageTypeAda2012 = 0x002f,
+
   // Vendor Extensions
   // Note: Language::GetNameForLanguageType
   // assumes these can be used as indexes into array language_names, and
   // Language::SetLanguageFromCString and Language::AsCString assume these can
   // be used as indexes into array g_languages.
-  eLanguageTypeMipsAssembler = 0x0024,   ///< Mips_Assembler.
-  eLanguageTypeExtRenderScript = 0x0025, ///< RenderScript.
+  eLanguageTypeMipsAssembler,           ///< Mips_Assembler.
+  eLanguageTypeExtRenderScript,         ///< GOOGLE_RenderScript.
   eNumLanguageTypes
 };
 
@@ -496,6 +512,16 @@ enum DynamicValueType {
   eDynamicCanRunTarget = 1,
   eDynamicDontRunTarget = 2
 };
+
+// BEGIN SWIFT
+//  Enumeration to control whether generic type parameters should be bound or
+//  not in expression evaluation.
+enum BindGenericTypes { 
+  eBindAuto = 0, 
+  eBind = 1, 
+  eDontBind = 2 
+};
+// END SWIFT
 
 enum StopShowColumn {
   eStopShowColumnAnsiOrCaret = 0,
@@ -602,6 +628,16 @@ enum CommandArgumentType {
   eArgTypeColumnNum,
   eArgTypeModuleUUID,
   eArgTypeSaveCoreStyle,
+  eArgTypeLogHandler,
+  eArgTypeSEDStylePair,
+  eArgTypeRecognizerID,
+  eArgTypeConnectURL,
+  eArgTypeTargetID,
+  eArgTypeStopHookID,
+  // BEGIN SWIFT
+  eArgTypeBindGenTypeParamValue,
+  // END SWIFT
+  eArgTypeCompletionType,
   eArgTypeLastArg // Always keep this entry as the last entry in this
                   // enumeration!!
 };
@@ -751,6 +787,7 @@ enum BasicType {
   eBasicTypeUnsignedWChar,
   eBasicTypeChar16,
   eBasicTypeChar32,
+  eBasicTypeChar8,
   eBasicTypeShort,
   eBasicTypeUnsignedShort,
   eBasicTypeInt,
@@ -823,6 +860,15 @@ enum TemplateArgumentKind {
   eTemplateArgumentKindExpression,
   eTemplateArgumentKindPack,
   eTemplateArgumentKindNullPtr,
+};
+
+/// Type of match to be performed when looking for a formatter for a data type.
+/// Used by classes like SBTypeNameSpecifier or lldb_private::TypeMatcher.
+enum FormatterMatchType {
+  eFormatterMatchExact,
+  eFormatterMatchRegex,
+
+  eLastFormatterMatchType = eFormatterMatchRegex,
 };
 
 /// Kind of argument for generics, either bound or unbound.
@@ -972,20 +1018,30 @@ enum ExpressionEvaluationPhase {
 /// control flow of a trace.
 ///
 /// A single instruction can match one or more of these categories.
-FLAGS_ENUM(TraceInstructionControlFlowType){
-    /// Any instruction.
-    eTraceInstructionControlFlowTypeInstruction = (1u << 1),
-    /// A conditional or unconditional branch/jump.
-    eTraceInstructionControlFlowTypeBranch = (1u << 2),
-    /// A conditional or unconditional branch/jump that changed
-    /// the control flow of the program.
-    eTraceInstructionControlFlowTypeTakenBranch = (1u << 3),
-    /// A call to a function.
-    eTraceInstructionControlFlowTypeCall = (1u << 4),
-    /// A return from a function.
-    eTraceInstructionControlFlowTypeReturn = (1u << 5)};
-
-LLDB_MARK_AS_BITMASK_ENUM(TraceInstructionControlFlowType)
+enum InstructionControlFlowKind {
+  /// The instruction could not be classified.
+  eInstructionControlFlowKindUnknown = 0,
+  /// The instruction is something not listed below, i.e. it's a sequential
+  /// instruction that doesn't affect the control flow of the program.
+  eInstructionControlFlowKindOther,
+  /// The instruction is a near (function) call.
+  eInstructionControlFlowKindCall,
+  /// The instruction is a near (function) return.
+  eInstructionControlFlowKindReturn,
+  /// The instruction is a near unconditional jump.
+  eInstructionControlFlowKindJump,
+  /// The instruction is a near conditional jump.
+  eInstructionControlFlowKindCondJump,
+  /// The instruction is a call-like far transfer.
+  /// E.g. SYSCALL, SYSENTER, or FAR CALL.
+  eInstructionControlFlowKindFarCall,
+  /// The instruction is a return-like far transfer.
+  /// E.g. SYSRET, SYSEXIT, IRET, or FAR RET.
+  eInstructionControlFlowKindFarReturn,
+  /// The instruction is a jump-like far transfer.
+  /// E.g. FAR JMP.
+  eInstructionControlFlowKindFarJump
+};
 
 /// Watchpoint Kind.
 ///
@@ -1059,8 +1115,9 @@ FLAGS_ENUM(TypeFlags){
     eTypeIsProtocol = (1u << 25),
     eTypeIsTuple = (1u << 26),
     eTypeIsMetatype = (1u << 27),
-    eTypeIsGeneric = (1u << 28),
-    eTypeIsBound = (1u << 29)};
+    eTypeHasUnboundGeneric = (1u << 28),
+    eTypeHasDynamicSelf = (1u << 29),
+    eTypeIsPack = (1u << 30)};
 
 FLAGS_ENUM(CommandFlags){
     /// eCommandRequiresTarget
@@ -1154,6 +1211,94 @@ enum SaveCoreStyle {
   eSaveCoreFull = 1,
   eSaveCoreDirtyOnly = 2,
   eSaveCoreStackOnly = 3,
+};
+
+/// Events that might happen during a trace session.
+enum TraceEvent {
+  /// Tracing was disabled for some time due to a software trigger.
+  eTraceEventDisabledSW,
+  /// Tracing was disable for some time due to a hardware trigger.
+  eTraceEventDisabledHW,
+  /// Event due to CPU change for a thread. This event is also fired when
+  /// suddenly it's not possible to identify the cpu of a given thread.
+  eTraceEventCPUChanged,
+  /// Event due to a CPU HW clock tick.
+  eTraceEventHWClockTick,
+  /// The underlying tracing technology emitted a synchronization event used by
+  /// trace processors.
+  eTraceEventSyncPoint,
+};
+
+// Enum used to identify which kind of item a \a TraceCursor is pointing at
+enum TraceItemKind {
+  eTraceItemKindError = 0,
+  eTraceItemKindEvent,
+  eTraceItemKindInstruction,
+};
+
+/// Enum to indicate the reference point when invoking
+/// \a TraceCursor::Seek().
+/// The following values are inspired by \a std::istream::seekg.
+enum TraceCursorSeekType {
+  /// The beginning of the trace, i.e the oldest item.
+  eTraceCursorSeekTypeBeginning = 0,
+  /// The current position in the trace.
+  eTraceCursorSeekTypeCurrent,
+  /// The end of the trace, i.e the most recent item.
+  eTraceCursorSeekTypeEnd
+};
+
+/// Enum to control the verbosity level of `dwim-print` execution.
+enum DWIMPrintVerbosity {
+  /// Run `dwim-print` with no verbosity.
+  eDWIMPrintVerbosityNone,
+  /// Print a message when `dwim-print` uses `expression` evaluation.
+  eDWIMPrintVerbosityExpression,
+  /// Always print a message indicating how `dwim-print` is evaluating its
+  /// expression.
+  eDWIMPrintVerbosityFull,
+};
+
+enum WatchpointValueKind {
+  eWatchPointValueKindInvalid = 0,
+  ///< Watchpoint was created watching a variable
+  eWatchPointValueKindVariable = 1,
+  ///< Watchpoint was created watching the result of an expression that was
+  ///< evaluated at creation time.
+  eWatchPointValueKindExpression = 2,
+};
+
+enum CompletionType {
+  eNoCompletion = 0u,
+  eSourceFileCompletion = (1u << 0),
+  eDiskFileCompletion = (1u << 1),
+  eDiskDirectoryCompletion = (1u << 2),
+  eSymbolCompletion = (1u << 3),
+  eModuleCompletion = (1u << 4),
+  eSettingsNameCompletion = (1u << 5),
+  ePlatformPluginCompletion = (1u << 6),
+  eArchitectureCompletion = (1u << 7),
+  eVariablePathCompletion = (1u << 8),
+  eRegisterCompletion = (1u << 9),
+  eBreakpointCompletion = (1u << 10),
+  eProcessPluginCompletion = (1u << 11),
+  eDisassemblyFlavorCompletion = (1u << 12),
+  eTypeLanguageCompletion = (1u << 13),
+  eFrameIndexCompletion = (1u << 14),
+  eModuleUUIDCompletion = (1u << 15),
+  eStopHookIDCompletion = (1u << 16),
+  eThreadIndexCompletion = (1u << 17),
+  eWatchpointIDCompletion = (1u << 18),
+  eBreakpointNameCompletion = (1u << 19),
+  eProcessIDCompletion = (1u << 20),
+  eProcessNameCompletion = (1u << 21),
+  eRemoteDiskFileCompletion = (1u << 22),
+  eRemoteDiskDirectoryCompletion = (1u << 23),
+  eTypeCategoryNameCompletion = (1u << 24),
+  // This item serves two purposes.  It is the last element in the enum, so
+  // you can add custom enums starting from here in your Option class. Also
+  // if you & in this bit the base code will not process the option.
+  eCustomCompletion = (1u << 25)
 };
 
 } // namespace lldb

@@ -27,11 +27,8 @@ using namespace lldb;
 using namespace lldb_private;
 
 ScriptInterpreter::ScriptInterpreter(
-    Debugger &debugger, lldb::ScriptLanguage script_lang,
-    lldb::ScriptedProcessInterfaceUP scripted_process_interface_up)
-    : m_debugger(debugger), m_script_lang(script_lang),
-      m_scripted_process_interface_up(
-          std::move(scripted_process_interface_up)) {}
+    Debugger &debugger, lldb::ScriptLanguage script_lang)
+    : m_debugger(debugger), m_script_lang(script_lang) {}
 
 void ScriptInterpreter::CollectDataForBreakpointCommandCallback(
     std::vector<std::reference_wrapper<BreakpointOptions>> &bp_options_vec,
@@ -79,6 +76,22 @@ ScriptInterpreter::GetDataExtractorFromSBData(const lldb::SBData &data) const {
   return data.m_opaque_sp;
 }
 
+lldb::BreakpointSP ScriptInterpreter::GetOpaqueTypeFromSBBreakpoint(
+    const lldb::SBBreakpoint &breakpoint) const {
+  return breakpoint.m_opaque_wp.lock();
+}
+
+lldb::ProcessAttachInfoSP ScriptInterpreter::GetOpaqueTypeFromSBAttachInfo(
+    const lldb::SBAttachInfo &attach_info) const {
+  return attach_info.m_opaque_sp;
+}
+
+lldb::ProcessLaunchInfoSP ScriptInterpreter::GetOpaqueTypeFromSBLaunchInfo(
+    const lldb::SBLaunchInfo &launch_info) const {
+  return std::make_shared<ProcessLaunchInfo>(
+      *reinterpret_cast<ProcessLaunchInfo *>(launch_info.m_opaque_sp.get()));
+}
+
 Status
 ScriptInterpreter::GetStatusFromSBError(const lldb::SBError &error) const {
   if (error.m_opaque_up)
@@ -109,13 +122,14 @@ ScriptInterpreter::StringToLanguage(const llvm::StringRef &language) {
 Status ScriptInterpreter::SetBreakpointCommandCallback(
     std::vector<std::reference_wrapper<BreakpointOptions>> &bp_options_vec,
     const char *callback_text) {
-  Status return_error;
+  Status error;
   for (BreakpointOptions &bp_options : bp_options_vec) {
-    return_error = SetBreakpointCommandCallback(bp_options, callback_text);
-    if (return_error.Success())
+    error = SetBreakpointCommandCallback(bp_options, callback_text,
+                                         /*is_callback=*/false);
+    if (!error.Success())
       break;
   }
-  return return_error;
+  return error;
 }
 
 Status ScriptInterpreter::SetBreakpointCommandCallbackFunction(

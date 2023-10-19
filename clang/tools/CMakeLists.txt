@@ -8,11 +8,14 @@ add_clang_subdirectory(clang-format)
 add_clang_subdirectory(clang-format-vs)
 add_clang_subdirectory(clang-fuzzer)
 add_clang_subdirectory(clang-import-test)
-add_clang_subdirectory(clang-nvlink-wrapper)
+add_clang_subdirectory(clang-linker-wrapper)
+add_clang_subdirectory(clang-offload-packager)
 add_clang_subdirectory(clang-offload-bundler)
-add_clang_subdirectory(clang-offload-wrapper)
 add_clang_subdirectory(clang-scan-deps)
-add_clang_subdirectory(clang-repl)
+if(HAVE_CLANG_REPL_SUPPORT)
+  add_clang_subdirectory(clang-repl)
+endif()
+add_clang_subdirectory(clang-cas-test)
 
 add_clang_subdirectory(c-index-test)
 add_clang_subdirectory(IndexStore)
@@ -47,6 +50,9 @@ endif()
 # to keep the primary Clang repository small and focused.
 # It also may be included by LLVM_EXTERNAL_CLANG_TOOLS_EXTRA_SOURCE_DIR.
 add_llvm_external_project(clang-tools-extra extra)
+
+# add tapi.
+add_llvm_external_project(tapi)
 
 # libclang may require clang-tidy in clang-tools-extra.
 add_clang_subdirectory(libclang)

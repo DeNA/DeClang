@@ -9,6 +9,14 @@
 //===----------------------------------------------------------------------===//
 /// Define scheduler resources associated with def operands.
 
+// 3.6 Vector Byte Length vlenb
+def WriteRdVLENB      : SchedWrite;
+
+// 6. Configuration-Setting Instructions
+def WriteVSETVLI      : SchedWrite;
+def WriteVSETIVLI     : SchedWrite;
+def WriteVSETVL       : SchedWrite;
+
 // 7. Vector Loads and Stores
 // 7.4. Vector Unit-Stride Instructions
 def WriteVLDE8        : SchedWrite;
@@ -53,6 +61,20 @@ def WriteVLDFF8       : SchedWrite;
 def WriteVLDFF16      : SchedWrite;
 def WriteVLDFF32      : SchedWrite;
 def WriteVLDFF64      : SchedWrite;
+// 7.8. Vector Segment Instructions
+foreach nf=2-8 in {
+  foreach eew = [8, 16, 32, 64] in {
+    def WriteVLSEG # nf # e # eew : SchedWrite;
+    def WriteVSSEG # nf # e # eew : SchedWrite;
+    def WriteVLSEGFF # nf # e # eew : SchedWrite;
+    def WriteVLSSEG # nf # e # eew : SchedWrite;
+    def WriteVSSSEG # nf # e # eew : SchedWrite;
+    def WriteVLUXSEG # nf # e # eew : SchedWrite;
+    def WriteVLOXSEG # nf # e # eew : SchedWrite;
+    def WriteVSUXSEG # nf # e # eew : SchedWrite;
+    def WriteVSOXSEG # nf # e # eew : SchedWrite;
+  }
+}
 // 7.9. Vector Whole Register Instructions
 def WriteVLD1R8       : SchedWrite;
 def WriteVLD1R16      : SchedWrite;
@@ -190,7 +212,6 @@ def WriteVFMovV       : SchedWrite;
 // 13.17. Single-Width Floating-Point/Integer Type-Convert Instructions
 def WriteVFCvtIToFV   : SchedWrite;
 def WriteVFCvtFToIV   : SchedWrite;
-def WriteVFCvtFToFV   : SchedWrite;
 // 13.18. Widening Floating-Point/Integer Type-Convert Instructions
 def WriteVFWCvtIToFV  : SchedWrite;
 def WriteVFWCvtFToIV  : SchedWrite;
@@ -254,6 +275,10 @@ def WriteVMov8V       : SchedWrite;
 
 //===----------------------------------------------------------------------===//
 /// Define scheduler resources associated with use operands.
+
+// 6. Configuration-Setting Instructions
+def ReadVSETVLI       : SchedRead;
+def ReadVSETVL        : SchedRead;
 
 // 7. Vector Loads and Stores
 def ReadVLDX          : SchedRead;
@@ -479,6 +504,14 @@ def ReadVMask         : SchedRead;
 multiclass UnsupportedSchedV {
 let Unsupported = true in {
 
+// 3.6 Vector Byte Length vlenb
+def : WriteRes<WriteRdVLENB, []>;
+
+// 6. Configuration-Setting Instructions
+def : WriteRes<WriteVSETVLI, []>;
+def : WriteRes<WriteVSETIVLI, []>;
+def : WriteRes<WriteVSETVL, []>;
+
 // 7. Vector Loads and Stores
 def : WriteRes<WriteVLDE8, []>;
 def : WriteRes<WriteVLDE16, []>;
@@ -538,6 +571,20 @@ def : WriteRes<WriteVST1R, []>;
 def : WriteRes<WriteVST2R, []>;
 def : WriteRes<WriteVST4R, []>;
 def : WriteRes<WriteVST8R, []>;
+// Vector Segment Loads and Stores
+foreach nf=2-8 in {
+  foreach eew = [8, 16, 32, 64] in {
+    def : WriteRes <!cast<SchedWrite>("WriteVLSEG" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVLSEGFF" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVSSEG" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVLSSEG" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVSSSEG" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVLUXSEG" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVLOXSEG" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVSUXSEG" # nf # "e" # eew), []>;
+    def : WriteRes <!cast<SchedWrite>("WriteVSOXSEG" # nf # "e" # eew), []>;
+  }
+}
 
 // 12. Vector Integer Arithmetic Instructions
 def : WriteRes<WriteVIALUV, []>;
@@ -617,7 +664,6 @@ def : WriteRes<WriteVFMergeV, []>;
 def : WriteRes<WriteVFMovV, []>;
 def : WriteRes<WriteVFCvtIToFV, []>;
 def : WriteRes<WriteVFCvtFToIV, []>;
-def : WriteRes<WriteVFCvtFToFV, []>;
 def : WriteRes<WriteVFWCvtIToFV, []>;
 def : WriteRes<WriteVFWCvtFToIV, []>;
 def : WriteRes<WriteVFWCvtFToFV, []>;
@@ -658,6 +704,10 @@ def : WriteRes<WriteVMov1V, []>;
 def : WriteRes<WriteVMov2V, []>;
 def : WriteRes<WriteVMov4V, []>;
 def : WriteRes<WriteVMov8V, []>;
+
+// 6. Configuration-Setting Instructions
+def : ReadAdvance<ReadVSETVLI, 0>;
+def : ReadAdvance<ReadVSETVL, 0>;
 
 // 7. Vector Loads and Stores
 def : ReadAdvance<ReadVLDX, 0>;

@@ -47,6 +47,12 @@ def create_parser():
     if sys.platform == 'darwin':
         group.add_argument('--apple-sdk', metavar='apple_sdk', dest='apple_sdk', default="", help=textwrap.dedent(
             '''Specify the name of the Apple SDK (macosx, macosx.internal, iphoneos, iphoneos.internal, or path to SDK) and use the appropriate tools from that SDK's toolchain.'''))
+    group.add_argument('--libcxx-include-dir', help=textwrap.dedent(
+        'Specify the path to a custom libc++ include directory. Must be used in conjunction with --libcxx-library-dir.'))
+    group.add_argument('--libcxx-include-target-dir', help=textwrap.dedent(
+        'Specify the path to a custom libc++ include target directory to use in addition to --libcxx-include-dir. Optional.'))
+    group.add_argument('--libcxx-library-dir', help=textwrap.dedent(
+        'Specify the path to a custom libc++ library directory. Must be used in conjunction with --libcxx-include-dir.'))
     # FIXME? This won't work for different extra flags according to each arch.
     group.add_argument(
         '-E',
@@ -162,6 +168,11 @@ def create_parser():
         dest='clang_module_cache_dir',
         metavar='The clang module cache directory used by Clang',
         help='The clang module cache directory used in the Make files by Clang while building tests. Defaults to <test build directory>/module-cache-clang.')
+    group.add_argument(
+        '--swift-libs-dir',
+        dest='swift_libs_dir',
+        metavar='The lib directory inside the Swift build directory',
+        help='The lib directory inside the Swift build directory.')
     group.add_argument(
         '--lldb-libs-dir',
         dest='lldb_libs_dir',

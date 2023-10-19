@@ -80,6 +80,8 @@ public:
   size_t GetSoftwareBreakpointTrapOpcode(Target &target,
                                          BreakpointSite *bp_site) override;
 
+  std::vector<ArchSpec> m_supported_architectures;
+
 private:
   std::unique_ptr<lldb_private::UtilityFunction>
   MakeLoadImageUtilityFunction(lldb_private::ExecutionContext &context,
@@ -88,7 +90,6 @@ private:
   lldb_private::Status EvaluateLoaderExpression(lldb_private::Process *process,
                                                 const char *expression,
                                                 lldb::ValueObjectSP &value);
-  std::vector<ArchSpec> m_supported_architectures;
 };
 
 } // namespace lldb_private

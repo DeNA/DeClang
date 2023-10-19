@@ -72,7 +72,7 @@ struct E {
 };
 
 template<typename T> requires requires(T t) { typename E<T>::non_default_constructible{}; }
-// expected-note@-1 {{because 'typename E<T>::non_default_constructible({})' would be invalid: no matching constructor for initialization of 'typename E<int>::non_default_constructible'}}
+// expected-note@-1 {{because 'typename E<T>::non_default_constructible{}' would be invalid: no matching constructor for initialization of 'typename E<int>::non_default_constructible'}}
 struct r6 {};
 
 using r6i1 = r6<int>;
@@ -88,7 +88,7 @@ using r7i1 = r7<int>;
 // C++ [expr.prim.req.simple] Example
 namespace std_example {
   template<typename T> concept C =
-    requires (T a, T b) { // expected-note{{because substituted constraint expression is ill-formed: argument may not have 'void' type}}
+    requires (T a, T b) { // expected-note{{because 'a' would be invalid: argument may not have 'void' type}}
       a + b; // expected-note{{because 'a + b' would be invalid: invalid operands to binary expression ('int *' and 'int *')}}
     };
 

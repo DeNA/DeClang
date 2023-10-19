@@ -59,176 +59,6 @@ bool SwiftASTManipulator::VariableInfo::GetIsCaptureList() const {
     return m_is_capture_list;
 }
 
-void SwiftASTManipulator::WrapExpression(
-    lldb_private::Stream &wrapped_stream, const char *orig_text,
-    bool needs_object_ptr,
-    bool static_method,
-    bool is_class,
-    bool weak_self,
-    const EvaluateExpressionOptions &options,
-    llvm::StringRef os_version,
-    uint32_t &first_body_line) {
-    first_body_line = 0; // set to invalid
-  // TODO make the extension private so we're not polluting the class
-  static unsigned int counter = 0;
-  unsigned int current_counter = counter++;
-
-  const bool playground = options.GetPlaygroundTransformEnabled();
-  const bool repl = options.GetREPLEnabled();
-  const bool generate_debug_info = options.GetGenerateDebugInfo();
-  const char *pound_file = options.GetPoundLineFilePath();
-  const uint32_t pound_line = options.GetPoundLineLine();
-  const char *text = orig_text;
-  StreamString fixed_text;
-
-  if (playground) {
-    const char *playground_logger_declarations = R"(
-@_silgen_name ("playground_logger_initialize") func __builtin_logger_initialize ()
-@_silgen_name ("playground_log_hidden") func __builtin_log_with_id<T> (_ object : T, _ name : String, _ id : Int, _ sl : Int, _ el : Int, _ sc : Int, _ ec: Int, _ moduleID: Int, _ fileID: Int) -> AnyObject
-@_silgen_name ("playground_log_scope_entry") func __builtin_log_scope_entry (_ sl : Int, _ el : Int, _ sc : Int, _ ec: Int, _ moduleID: Int, _ fileID: Int) -> AnyObject
-@_silgen_name ("playground_log_scope_exit") func __builtin_log_scope_exit (_ sl : Int, _ el : Int, _ sc : Int, _ ec: Int, _ moduleID: Int, _ fileID: Int) -> AnyObject
-@_silgen_name ("playground_log_postprint") func __builtin_postPrint (_ sl : Int, _ el : Int, _ sc : Int, _ ec: Int, _ moduleID: Int, _ fileID: Int) -> AnyObject
-@_silgen_name ("DVTSendPlaygroundLogData") func __builtin_send_data (_ :  AnyObject!)
-__builtin_logger_initialize()
-)";
-
-    // The debug function declarations need only be declared once per session -
-    // on the first REPL call.  This code assumes that the first call is the
-    // first REPL call; don't call playground once then playground || repl
-    // again
-    bool first_expression = options.GetPreparePlaygroundStubFunctions();
-
-    const char *playground_prefix =
-        first_expression ? playground_logger_declarations : "";
-
-    if (pound_file && pound_line) {
-      wrapped_stream.Printf("%s#sourceLocation(file: \"%s\", line: %u)\n%s\n",
-                            playground_prefix, pound_file, pound_line,
-                            orig_text);
-    } else {
-      // In 2017+, xcode playgrounds send orig_text that starts with a module
-      // loading prefix (not the above prefix), then a sourceLocation specifier
-      // that indicates the page name, and then the page body text.  The
-      // first_body_line mechanism in this function cannot be used to
-      // compensate for the playground_prefix added here, since it incorrectly
-      // continues to apply even after sourceLocation directives are read from
-      // the orig_text.  To make sure playgrounds work correctly whether or not
-      // they supply their own sourceLocation, create a dummy sourceLocation
-      // here with a fake filename that starts counting the first line of
-      // orig_text as line 1.
-      wrapped_stream.Printf("%s#sourceLocation(file: \"%s\", line: %u)\n%s\n",
-                            playground_prefix, "Playground.swift", 1,
-                            orig_text);
-    }
-    first_body_line = 1;
-    return;
-  }
-
-  assert(!playground && "Playground mode not expected");
-
-  if (repl) {
-    if (pound_file && pound_line) {
-      wrapped_stream.Printf("#sourceLocation(file: \"%s\", line:  %u)\n%s\n",
-                            llvm::sys::path::filename(pound_file).str().c_str(),
-                            pound_line, orig_text);
-    } else {
-      wrapped_stream.Printf("%s", orig_text);
-    }
-    first_body_line = 1;
-    return;
-  }
-
-  assert(!playground && !repl && "Playground/REPL mode not expected");
-
-  if (pound_file && pound_line) {
-    fixed_text.Printf("#sourceLocation(file: \"%s\", line: %u)\n%s\n",
-                      pound_file, pound_line, orig_text);
-    text = fixed_text.GetString().data();
-  } else if (generate_debug_info) {
-    std::string expr_source_path;
-    if (SwiftASTManipulator::SaveExpressionTextToTempFile(orig_text, options,
-                                                          expr_source_path)) {
-      fixed_text.Printf("#sourceLocation(file: \"%s\", line: 1)\n%s\n",
-                        expr_source_path.c_str(), orig_text);
-      text = fixed_text.GetString().data();
-    }
-  }
-
-  // Note: All the wrapper functions we make are marked with the
-  // @LLDBDebuggerFunction macro so that the compiler can do whatever special
-  // treatment it need to do on them.  If you add new variants be sure to mark
-  // them this way.  Also, any function that might end up being in an extension
-  // of swift class needs to be marked final, since otherwise the compiler
-  // might try to dispatch them dynamically, which it can't do correctly for
-  // these functions.
-
-  std::string availability = "";
-  if (!os_version.empty())
-    availability = (llvm::Twine("@available(") + os_version + ", *)").str();
-
-  StreamString wrapped_expr_text;
-
-  // Avoid indenting user code: this makes column information from compiler
-  // errors match up with what the user typed.
-  wrapped_expr_text.Printf(R"(
-do {
-%s%s%s
-} catch (let __lldb_tmp_error) {
-  var %s = __lldb_tmp_error
-}
-)",
-                           GetUserCodeStartMarker(), text,
-                           GetUserCodeEndMarker(), GetErrorName());
-
-  if (needs_object_ptr || static_method) {
-    const char *func_decorator = "";
-    if (static_method) {
-      if (is_class)
-        func_decorator = "final class";
-      else
-        func_decorator = "static";
-    } else if (is_class && !weak_self) {
-      func_decorator = "final";
-    } else {
-      func_decorator = "mutating";
-    }
-
-    const char *optional_extension =
-        weak_self ? "Swift.Optional where Wrapped == " : "";
-
-    // The expression text is inserted into the body of $__lldb_wrapped_expr_%u.
-    wrapped_stream.Printf(R"(
-extension %s$__lldb_context {
-  @LLDBDebuggerFunction %s
-  %s func $__lldb_wrapped_expr_%u(_ $__lldb_arg : UnsafeMutablePointer<Any>) {
-    %s
-  }
-}
-@LLDBDebuggerFunction %s
-func $__lldb_expr(_ $__lldb_arg : UnsafeMutablePointer<Any>) {
-  do {
-    $__lldb_injected_self.$__lldb_wrapped_expr_%u(
-      $__lldb_arg
-    )
-  }
-}
-)",
-                          optional_extension, availability.c_str(),
-                          func_decorator, current_counter,
-                          wrapped_expr_text.GetData(), availability.c_str(),
-                          current_counter);
-
-    first_body_line = 5;
-  } else {
-    wrapped_stream.Printf(
-        "@LLDBDebuggerFunction %s\n"
-        "func $__lldb_expr(_ $__lldb_arg : UnsafeMutablePointer<Any>) {\n"
-        "%s" // This is the expression text (with newlines).
-        "}\n",
-        availability.c_str(), wrapped_expr_text.GetData());
-    first_body_line = 4;
-  }
-}
 
 SwiftASTManipulatorBase::VariableMetadataResult::~VariableMetadataResult() {}
 
@@ -243,10 +73,10 @@ void SwiftASTManipulatorBase::VariableInfo::Print(
   else
     stream.PutCString("<no type>");
 
-  if (MetadataIs<VariableMetadataResult>())
+  if (llvm::isa<VariableMetadataResult>(m_metadata.get()))
     stream.Printf(", is_result");
 
-  if (MetadataIs<VariableMetadataError>())
+  if (llvm::isa<VariableMetadataError>(m_metadata.get()))
     stream.Printf(", is_error");
 
   stream.PutChar(']');
@@ -261,32 +91,49 @@ void SwiftASTManipulatorBase::DoInitialization() {
   struct FuncAndExtensionFinder : public swift::ASTWalker {
     /// This is the toplevel entry function for the expression. It may
     /// call into \c ext_method_decl or hold the entire expression.
-    swift::FuncDecl *toplevel_decl = nullptr;
+    swift::FuncDecl *entrypoint_decl = nullptr;
     /// This is optional.
     swift::FuncDecl *ext_method_decl = nullptr;
-    /// This is an optional extension holding the above function.
+    /// When evaluating a generic expression this is the inner
+    /// function containing the user expression.
+    swift::FuncDecl *user_expr_decl = nullptr;
+    /// When evaluating self as generic, this is the trampoline function that
+    /// calls the ext_method_decl.
+    swift::FuncDecl *trampoline_decl = nullptr;
+    /// When evaluating self as generic, this is the sink function
+    /// that the top level entry function calls in the AST level.
+    swift::FuncDecl *sink_decl = nullptr;
+
+    /// This is an optional extension holding method decl if not null.
     swift::ExtensionDecl *extension_decl = nullptr;
 
-    bool walkToDeclPre(swift::Decl *D) override {
+    PreWalkAction walkToDeclPre(swift::Decl *D) override {
       auto *FD = llvm::dyn_cast<swift::FuncDecl>(D);
       // Traverse into any non-function-decls.
       if (!FD)
-        return true;
+        return Action::Continue();
 
       if (!FD->getAttrs().hasAttribute<swift::LLDBDebuggerFunctionAttr>())
-        return false;
+        return Action::SkipChildren();
 
       // Walk up the DeclContext chain, searching for an extension.
       for (auto *DC = FD->getDeclContext(); DC; DC = DC->getParent()) {
         if (auto *extension = llvm::dyn_cast<swift::ExtensionDecl>(DC)) {
           extension_decl = extension;
           ext_method_decl = FD;
-          return false;
+          return Action::SkipChildren();
         }
       }
-      // Not in an extenstion,
-      toplevel_decl = FD;
-      return false;
+      // Not in an extension.
+      if (FD->getNameStr().equals("$__lldb_trampoline"))
+        trampoline_decl = FD;
+      else if (FD->getNameStr().equals("$__lldb_expr"))
+        entrypoint_decl = FD;
+      else if (FD->getNameStr().equals("$__lldb_sink"))
+        sink_decl = FD;
+      else if (FD->getNameStr().equals("$__lldb_user_expr"))
+        user_expr_decl = FD;
+      return Action::SkipChildren();
     }
   };
 
@@ -294,14 +141,17 @@ void SwiftASTManipulatorBase::DoInitialization() {
   m_source_file.walk(func_finder);
 
   m_extension_decl = func_finder.extension_decl;
-  if (m_extension_decl) {
+  if (func_finder.ext_method_decl) {
     m_function_decl = func_finder.ext_method_decl;
-    m_wrapper_decl = func_finder.toplevel_decl;
-  } else {
-    m_function_decl = func_finder.toplevel_decl;
-    m_wrapper_decl = nullptr;
-  }
-
+    m_entrypoint_decl = func_finder.entrypoint_decl;
+  } else if (func_finder.user_expr_decl) {
+    m_function_decl = func_finder.user_expr_decl;
+    m_entrypoint_decl = func_finder.entrypoint_decl;
+  } else
+    m_function_decl = func_finder.entrypoint_decl;
+  m_entrypoint_decl = func_finder.entrypoint_decl;
+  m_trampoline_decl = func_finder.trampoline_decl;
+  m_sink_decl = func_finder.sink_decl;
   assert(m_function_decl);
 
   // Find the body in the function
@@ -339,9 +189,10 @@ swift::BraceStmt *SwiftASTManipulatorBase::GetUserBody() {
   return do_body;
 }
 
-SwiftASTManipulator::SwiftASTManipulator(swift::SourceFile &source_file,
-                                         bool repl)
-    : SwiftASTManipulatorBase(source_file, repl) {}
+SwiftASTManipulator::SwiftASTManipulator(
+    swift::SourceFile &source_file, bool repl,
+    lldb::BindGenericTypes bind_generic_types)
+    : SwiftASTManipulatorBase(source_file, repl, bind_generic_types) {}
 
 void SwiftASTManipulator::FindSpecialNames(
     llvm::SmallVectorImpl<swift::Identifier> &names, llvm::StringRef prefix) {
@@ -354,7 +205,7 @@ void SwiftASTManipulator::FindSpecialNames(
     SpecialNameFinder(NameVector &names, llvm::StringRef &prefix)
         : m_names(names), m_prefix(prefix) {}
 
-    std::pair<bool, swift::Expr *> walkToExprPre(swift::Expr *E) override {
+    PreWalkResult<swift::Expr *> walkToExprPre(swift::Expr *E) override {
       if (auto *UDRE = llvm::dyn_cast<swift::UnresolvedDeclRefExpr>(E)) {
         swift::Identifier name = UDRE->getName().getBaseIdentifier();
 
@@ -362,7 +213,7 @@ void SwiftASTManipulator::FindSpecialNames(
           m_names.push_back(name);
       }
 
-      return {true, E};
+      return Action::Continue(E);
     }
 
   private:
@@ -476,9 +327,9 @@ bool SwiftASTManipulator::RewriteResult() {
       m_decl_context = decl_context;
     }
 
-    bool walkToDeclPre(swift::Decl *D) override {
+    PreWalkAction walkToDeclPre(swift::Decl *D) override {
       switch (D->getKind()) {
-      default: return true;
+      default: return Action::Continue();
 
       // Don't step into function declarations, they may have returns, but we
       // don't want to instrument them.
@@ -486,34 +337,34 @@ bool SwiftASTManipulator::RewriteResult() {
       case swift::DeclKind::Func:
       case swift::DeclKind::Class:
       case swift::DeclKind::Struct:
-        return false;
+        return Action::SkipChildren();
       }
     }
 
-    std::pair<bool, swift::Expr *> walkToExprPre(swift::Expr *expr) override {
+    PreWalkResult<swift::Expr *> walkToExprPre(swift::Expr *expr) override {
       switch (expr->getKind()) {
-      default: return {true, expr};
+      default: return Action::Continue(expr);
 
       // Don't step into closure definitions, they may have returns, but we
       // don't want to instrument them either.
       case swift::ExprKind::Closure:
-        return {false, expr};
+        return Action::SkipChildren(expr);
       }
     }
 
-    swift::Stmt *walkToStmtPost(swift::Stmt *S) override {
+    PostWalkResult<swift::Stmt *> walkToStmtPost(swift::Stmt *S) override {
       auto *RS = swift::dyn_cast<swift::ReturnStmt>(S);
       if (!RS || !RS->getResult())
-        return S;
+        return Action::Continue(S);
 
       if (swift::Expr *RE = RS->getResult()) {
         if (swift::Stmt *S =
                 m_manipulator.ConvertExpressionToTmpReturnVarAccess(
                     RE, RS->getStartLoc(), /*add_return=*/true, m_decl_context))
-          return S;
+          return Action::Continue(S);
       }
 
-      return S;
+      return Action::Continue(S);
     }
 
   private:
@@ -629,9 +480,9 @@ void SwiftASTManipulator::MakeDeclarationsPublic() {
       return true;
     }
 
-    bool walkToDeclPre(swift::Decl *D) override {
+    PreWalkAction walkToDeclPre(swift::Decl *D) override {
       if (!canMakePublic(D))
-        return true;
+        return Action::Continue();
 
       if (auto *VD = llvm::dyn_cast<swift::ValueDecl>(D)) {
         auto access = swift::AccessLevel::Public;
@@ -650,7 +501,7 @@ void SwiftASTManipulator::MakeDeclarationsPublic() {
         if (auto *ASD = llvm::dyn_cast<swift::AbstractStorageDecl>(D))
           ASD->overwriteSetterAccess(access);
       }
-      return true;
+      return Action::Continue();
     }
   };
 
@@ -853,23 +704,22 @@ bool SwiftASTManipulator::FixupResultAfterTypeChecking(Status &error) {
   swift::Type result_type;
   for (size_t i = 0; i < num_results; i++) {
     swift::VarDecl *the_decl = m_result_info[i].tmp_var_decl;
-    if (the_decl->hasInterfaceType()) {
-      swift::Type its_type = the_decl->getType();
-      if (result_type.isNull()) {
-        result_type = its_type;
-      } else if (!its_type.getPointer()->isEqual(result_type)) {
-        std::string prev_type_name = result_type.getPointer()->getString();
-        std::string cur_type_name = its_type.getPointer()->getString();
-
-        error.SetErrorStringWithFormat(
-            "Type for %zuth return value is inconsistent, previous type: %s, "
-            "current type: %s.",
-            i, prev_type_name.c_str(), cur_type_name.c_str());
-        return false;
-      }
-    } else {
+    if (!the_decl->hasInterfaceType()) {
       error.SetErrorStringWithFormat(
           "Type of %zuth return value could not be determined.", i);
+      return false;
+    }
+    swift::Type its_type = the_decl->getType();
+    if (result_type.isNull()) {
+      result_type = its_type;
+    } else if (!its_type.getPointer()->isEqual(result_type)) {
+      std::string prev_type_name = result_type.getPointer()->getString();
+      std::string cur_type_name = its_type.getPointer()->getString();
+
+      error.SetErrorStringWithFormat(
+          "Type for %zuth return value is inconsistent, previous type: %s, "
+          "current type: %s.",
+          i, prev_type_name.c_str(), cur_type_name.c_str());
       return false;
     }
   }
@@ -883,7 +733,6 @@ bool SwiftASTManipulator::FixupResultAfterTypeChecking(Status &error) {
   }
 
   swift::ASTContext &ast_context = m_source_file.getASTContext();
-
   CompilerType return_ast_type = ToCompilerType(result_type.getPointer());
   swift::Identifier result_var_name =
       ast_context.getIdentifier(GetResultName());
@@ -1009,6 +858,146 @@ GetPatternBindingForVarDecl(swift::VarDecl *var_decl,
   return pattern_binding;
 }
 
+swift::FuncDecl *SwiftASTManipulator::GetFunctionToInjectVariableInto(
+    const SwiftASTManipulator::VariableInfo &variable) const {
+  // We always inject self in the wrapper, so we can
+  // call the function declared in the type extension.
+  if (variable.IsSelf())
+    return m_entrypoint_decl;
+
+  // When not binding generic type parameters, we want to inject the metadata
+  // pointers in the wrapper, so we can pass them as opaque pointers in the
+  // trampoline function later on.
+  if (m_bind_generic_types == lldb::eDontBind &&
+      (variable.IsMetadataPointer() || variable.IsPackCount() ||
+       variable.IsUnboundPack()))
+    return m_entrypoint_decl;
+
+  return m_function_decl;
+}
+
+llvm::Optional<swift::Type> SwiftASTManipulator::GetSwiftTypeForVariable(
+    const SwiftASTManipulator::VariableInfo &variable) const {
+  auto type_system_swift =
+      variable.m_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
+
+  if (!type_system_swift)
+    return {};
+
+  // When injecting a value pack or pack count into the outer
+  // lldb_expr function, treat it as an opaque raw pointer.
+  if (m_bind_generic_types == lldb::eDontBind && variable.IsUnboundPack()) {
+    auto swift_ast_ctx = type_system_swift->GetSwiftASTContext();
+    if (swift_ast_ctx) {
+      auto it = m_type_aliases.find("$__lldb_builtin_ptr_t");
+      if (it == m_type_aliases.end())
+        return {};
+      return swift::Type(it->second);
+    }
+    return {};
+  }
+
+  // This might be a referenced type, which will confuse the type checker.
+  // The access pattern for these types is the same as for the referent
+  // type, so it is fine to just strip it off.
+  CompilerType referent_type =
+      type_system_swift->GetReferentType(variable.m_type.GetOpaqueQualType());
+
+  swift::Type swift_type = GetSwiftType(referent_type);
+  if (!swift_type)
+    return {};
+
+  // One tricky bit here is that this var may be an argument to the
+  // function whose context we are emulating, and that argument might be
+  // of "inout" type.  We need to strip the inout off the type or the
+  // initial parse will fail.  Fortunately, the variable access goes the
+  // same regardless of whether it is inout or not, so we don't have to do
+  // anything more to get this to work.
+  swift_type = swift_type->getWithoutSpecifierType();
+
+  if (variable.IsSelf()) {
+    // Another tricky bit is that the Metatype types we get have the
+    // "Representation" already attached (i.e.
+    // "@thick", "@thin".)  But the representation is a SIL level thing,
+    // and if it is attached to types that we hand the parser, it throws a
+    // verifier error & aborts.  So we strip it off here:
+    swift::MetatypeType *metatype_type =
+        llvm::dyn_cast<swift::MetatypeType>(swift_type.getPointer());
+    if (metatype_type) {
+      swift_type = swift::Type(
+          swift::MetatypeType::get(metatype_type->getInstanceType()));
+    }
+  }
+
+  if (swift_type->hasArchetype())
+    swift_type = swift_type->mapTypeOutOfContext();
+
+  return {swift_type};
+}
+
+swift::VarDecl *SwiftASTManipulator::GetVarDeclForVariableInFunction(
+    const SwiftASTManipulator::VariableInfo &variable,
+    swift::FuncDecl *containing_function) {
+  const auto maybe_swift_type = GetSwiftTypeForVariable(variable);
+
+  if (!maybe_swift_type)
+    return {};
+
+  const auto &swift_type = *maybe_swift_type;
+
+  const swift::SourceLoc loc = containing_function->getBody()->getLBraceLoc();
+  const swift::Identifier name = variable.GetName();
+  // We may need to mutate the self variable later, so hardcode it to a var
+  // in that case.
+  const auto introducer = (variable.IsSelf() || variable.IsUnboundPack())
+                              ? swift::VarDecl::Introducer::Var
+                              : variable.GetVarIntroducer();
+
+  const swift::ASTContext &ast_context = m_source_file.getASTContext();
+  swift::VarDecl *redirected_var_decl = new (ast_context) swift::VarDecl(
+      /*is_static*/ false, introducer, loc, name, containing_function);
+
+  redirected_var_decl->setInterfaceType(swift_type);
+  redirected_var_decl->setDebuggerVar(true);
+  redirected_var_decl->setImplicit(true);
+  redirected_var_decl->setImplInfo(swift::StorageImplInfo(
+      swift::ReadImplKind::Stored, swift::WriteImplKind::Stored,
+      swift::ReadWriteImplKind::Stored));
+
+  // This avoids having local variables filtered out by
+  // swift::namelookup::filterForDiscriminator().
+  redirected_var_decl->overwriteAccess(swift::AccessLevel::Public);
+
+  if (swift_type->getAs<swift::WeakStorageType>()) {
+    redirected_var_decl->getAttrs().add(
+        new (ast_context) swift::ReferenceOwnershipAttr(
+            swift::SourceRange(), swift::ReferenceOwnership::Weak));
+  }
+
+  return redirected_var_decl;
+}
+
+/// Adds the new nodes to the beginning of the function.
+static void AddNodesToBeginningFunction(
+    swift::FuncDecl *function,
+    const llvm::SmallVectorImpl<swift::ASTNode> &new_nodes,
+    swift::ASTContext &ast_context) {
+  swift::BraceStmt *body = function->getBody();
+  llvm::ArrayRef<swift::ASTNode> current_elements = body->getElements();
+
+  llvm::SmallVector<swift::ASTNode, 3> new_elements(current_elements.begin(),
+                                                    current_elements.end());
+
+  // Make sure to add the new nodes at the beginning of the function.
+  new_elements.insert(new_elements.begin(), new_nodes.begin(), new_nodes.end());
+  auto *new_function_body = swift::BraceStmt::create(
+      ast_context, body->getLBraceLoc(), ast_context.AllocateCopy(new_elements),
+      body->getRBraceLoc());
+
+  function->setBody(new_function_body, function->getBodyKind());
+  function->setHasSingleExpressionBody(false);
+}
+
 bool SwiftASTManipulator::AddExternalVariables(
     llvm::MutableArrayRef<VariableInfo> variables) {
   if (!IsValid())
@@ -1043,7 +1032,7 @@ bool SwiftASTManipulator::AddExternalVariables(
 
     swift::VarDecl *redirected_var_decl = new (ast_context)
         swift::VarDecl(is_static, introducer, loc, name,
-                       &m_source_file);
+                       &m_source_file);    
     redirected_var_decl->setInterfaceType(var_type);
     redirected_var_decl->setTopLevelGlobal(true);
 
@@ -1085,127 +1074,36 @@ bool SwiftASTManipulator::AddExternalVariables(
 
     m_variables.push_back(variable);
   } else {
-    swift::BraceStmt *body = m_function_decl->getBody();
-    llvm::ArrayRef<swift::ASTNode> body_elements = body->getElements();
-
-    llvm::SmallVector<swift::ASTNode, 3> elements(body_elements.begin(),
-                                                  body_elements.end());
-    llvm::SmallVectorImpl<swift::ASTNode>::iterator element_iterator =
-        elements.begin();
-    const bool is_static = false;
+    // The new nodes that should be added to each function.
+    std::unordered_map<swift::FuncDecl *, llvm::SmallVector<swift::ASTNode, 3>>
+        injected_nodes;
 
     for (SwiftASTManipulator::VariableInfo &variable : variables) {
-      swift::SourceLoc loc = m_function_decl->getBody()->getLBraceLoc();
-      swift::FuncDecl *containing_function = m_function_decl;
-      swift::Identifier name = variable.m_name;
-      auto introducer = variable.GetVarIntroducer();
-
-      bool is_self = !variable.m_name.str().compare("$__lldb_injected_self");
-
-      if (is_self) {
-        if (!m_wrapper_decl)
-          continue;
-
-        // We need to mutate the $__lldb_wrapped_expr_%d member of self later.
-        introducer = swift::VarDecl::Introducer::Var;
-        loc = m_wrapper_decl->getBody()->getLBraceLoc();
-        containing_function = m_wrapper_decl;
-      }
-
-      // This might be a referenced type, which will confuse the type checker.
-      // The access pattern for these types is the same as for the referent
-      // type, so it is fine to
-      // just strip it off.
-      auto *swift_ast_ctx = llvm::dyn_cast_or_null<TypeSystemSwift>(
-          variable.m_type.GetTypeSystem());
-
-      CompilerType referent_type;
-      if (swift_ast_ctx)
-        referent_type =
-            swift_ast_ctx->GetReferentType(variable.m_type.GetOpaqueQualType());
-      if (!referent_type)
+      swift::FuncDecl *containing_function =
+          GetFunctionToInjectVariableInto(variable);
+      assert(containing_function && "No function to inject variable into!");
+      if (!containing_function)
         continue;
 
-      swift::Type swift_referent_type = GetSwiftType(referent_type);
-      if (!swift_referent_type) 
+      swift::VarDecl *redirected_var_decl =
+          GetVarDeclForVariableInFunction(variable, containing_function);
+      if (!redirected_var_decl) {
+        LLDB_LOG(log, "No var decl.");
         continue;
-      
-      // One tricky bit here is that this var may be an argument to the function
-      // whose context we are
-      // emulating, and that argument might be of "inout" type.  We need to
-      // strip the inout off the type
-      // or the initial parse will fail.  Fortunately, the variable access goes
-      // the same regardless of whether
-      // it is inout or not, so we don't have to do anything more to get this to
-      // work.
-      swift::Type var_type =
-          swift_referent_type->getWithoutSpecifierType();
-      if (is_self) {
-        // Another tricky bit is that the Metatype types we get have the
-        // "Representation" already attached (i.e.
-        // "@thick", "@thin".)  But the representation is a SIL level thing, and
-        // if it is attached to types that
-        // we hand the parser, it throws a verifier error & aborts.  So we strip
-        // it off here:
-        swift::MetatypeType *metatype_type =
-            llvm::dyn_cast<swift::MetatypeType>(var_type.getPointer());
-        if (metatype_type) {
-          var_type = swift::Type(
-              swift::MetatypeType::get(metatype_type->getInstanceType()));
-        }
       }
-
-      swift::VarDecl *redirected_var_decl = new (ast_context) swift::VarDecl(
-          is_static, introducer, loc, name,
-          containing_function);
-      auto interface_type = var_type;
-      if (interface_type->hasArchetype())
-        interface_type = interface_type->mapTypeOutOfContext();
-      redirected_var_decl->setInterfaceType(interface_type);
-      redirected_var_decl->setDebuggerVar(true);
-      redirected_var_decl->setImplicit(true);
-      // This avoids having local variables filtered out by
-      // swift::namelookup::filterForDiscriminator().
-      redirected_var_decl->overwriteAccess(swift::AccessLevel::Public);
-
       swift::PatternBindingDecl *pattern_binding =
           GetPatternBindingForVarDecl(redirected_var_decl, containing_function);
-
-      if (var_type->getAs<swift::WeakStorageType>()) {
-        redirected_var_decl->getAttrs().add(
-            new (ast_context) swift::ReferenceOwnershipAttr(
-                swift::SourceRange(), swift::ReferenceOwnership::Weak));
+      if (!pattern_binding) {
+        LLDB_LOG(log, "No pattern binding.");
+        continue;
       }
 
-      if (is_self) {
-        // we need to inject into the wrapper
-
-        swift::BraceStmt *wrapper_body = m_wrapper_decl->getBody();
-        llvm::ArrayRef<swift::ASTNode> wrapper_elements =
-            wrapper_body->getElements();
-
-        llvm::SmallVector<swift::ASTNode, 3> wrapper_elements_copy(
-            wrapper_elements.begin(), wrapper_elements.end());
-        llvm::SmallVectorImpl<swift::ASTNode>::iterator
-            wrapper_element_iterator = wrapper_elements_copy.begin();
-
-        wrapper_element_iterator = wrapper_elements_copy.insert(
-            wrapper_element_iterator, swift::ASTNode(pattern_binding));
-        wrapper_element_iterator = wrapper_elements_copy.insert(
-            wrapper_element_iterator, swift::ASTNode(redirected_var_decl));
-
-        auto *new_wrapper_body = swift::BraceStmt::create(
-            ast_context, wrapper_body->getLBraceLoc(),
-            ast_context.AllocateCopy(wrapper_elements_copy),
-            wrapper_body->getRBraceLoc());
-        m_wrapper_decl->setBody(new_wrapper_body,
-                                m_wrapper_decl->getBodyKind());
-      } else {
-        element_iterator =
-            elements.insert(element_iterator, swift::ASTNode(pattern_binding));
-        element_iterator = elements.insert(element_iterator,
-                                           swift::ASTNode(redirected_var_decl));
-      }
+      // Push the var decl and pattern binding so we add them to the function
+      // later.
+      injected_nodes[containing_function].push_back(
+          swift::ASTNode(pattern_binding));
+      injected_nodes[containing_function].push_back(
+          swift::ASTNode(redirected_var_decl));
 
       variable.m_decl = redirected_var_decl;
 
@@ -1215,18 +1113,20 @@ bool SwiftASTManipulator::AddExternalVariables(
         variable.m_decl->dump(ss);
         ss.flush();
 
-        log->Printf(
-            "[SwiftASTManipulator::AddExternalVariables] Injected variable %s",
-            s.c_str());
+        LLDB_LOG(log,
+                 "[SwiftASTManipulator::AddExternalVariables] Injected "
+                 "variable {0} into {1}",
+                 s, containing_function->getName().getBaseIdentifier().str());
       }
 
       m_variables.push_back(variable);
     }
 
-    auto *new_function_body = swift::BraceStmt::create(
-        ast_context, body->getLBraceLoc(), ast_context.AllocateCopy(elements),
-        body->getRBraceLoc());
-    m_function_decl->setBody(new_function_body, m_function_decl->getBodyKind());
+    for (auto &pair : injected_nodes) {
+      auto *containing_function = pair.first;
+      auto &new_nodes = pair.second;
+      AddNodesToBeginningFunction(containing_function, new_nodes, ast_context);
+    }
   }
 
   return true;
@@ -1275,13 +1175,13 @@ bool SwiftASTManipulator::FixCaptures() {
       FindArgInFunction(ast_context, m_function_decl);
   swift::VarDecl *wrapper_arg_decl = nullptr;
 
-  if (m_wrapper_decl)
-    wrapper_arg_decl = FindArgInFunction(ast_context, m_wrapper_decl);
+  if (m_entrypoint_decl)
+    wrapper_arg_decl = FindArgInFunction(ast_context, m_entrypoint_decl);
 
   if (!function_arg_decl)
     return false;
 
-  if (m_wrapper_decl && (!wrapper_arg_decl))
+  if (m_entrypoint_decl && (!wrapper_arg_decl))
     return false;
 
   for (VariableInfo &variable : m_variables) {
@@ -1305,7 +1205,7 @@ bool SwiftASTManipulator::FixCaptures() {
     if (decl_context == (swift::DeclContext *)m_function_decl) {
       AppendToCaptures(ast_context, getter_decl, function_arg_decl);
       AppendToCaptures(ast_context, setter_decl, function_arg_decl);
-    } else if (decl_context == (swift::DeclContext *)m_wrapper_decl) {
+    } else if (decl_context == (swift::DeclContext *)m_entrypoint_decl) {
       AppendToCaptures(ast_context, getter_decl, wrapper_arg_decl);
       AppendToCaptures(ast_context, setter_decl, wrapper_arg_decl);
     } else {
@@ -1316,16 +1216,22 @@ bool SwiftASTManipulator::FixCaptures() {
   return true;
 }
 
-swift::ValueDecl *SwiftASTManipulator::MakeGlobalTypealias(
-    swift::Identifier name, CompilerType &type, bool make_private) {
+swift::TypeAliasDecl *
+SwiftASTManipulator::MakeTypealias(swift::Identifier name, CompilerType &type,
+                                   bool make_private,
+                                   swift::DeclContext *decl_ctx) {
   if (!IsValid())
     return nullptr;
+
+  // If no DeclContext was passed in make this a global typealias.
+  if (!decl_ctx)
+    decl_ctx = &m_source_file;
 
   swift::ASTContext &ast_context = m_source_file.getASTContext();
 
   swift::TypeAliasDecl *type_alias_decl = new (ast_context)
       swift::TypeAliasDecl(swift::SourceLoc(), swift::SourceLoc(), name,
-                           swift::SourceLoc(), nullptr, &m_source_file);
+                           swift::SourceLoc(), nullptr, decl_ctx);
   swift::Type underlying_type = GetSwiftType(type);
   if (!underlying_type)
     return nullptr;
@@ -1335,6 +1241,15 @@ swift::ValueDecl *SwiftASTManipulator::MakeGlobalTypealias(
   type_alias_decl->setImplicit(true);
 
   Log *log = GetLog(LLDBLog::Expressions);
+
+  if (!type_alias_decl) {
+    LLDB_LOGF(log,
+              "Could not make typealias from %s to %s in decl context (%p) and "
+              "context (%p)",
+              name.get(), type.GetMangledTypeName().GetCString(),
+              static_cast<void *>(decl_ctx), static_cast<void *>(&ast_context));
+    return nullptr;
+  }
   if (log) {
 
     std::string s;
@@ -1342,18 +1257,27 @@ swift::ValueDecl *SwiftASTManipulator::MakeGlobalTypealias(
     type_alias_decl->dump(ss);
     ss.flush();
 
-    log->Printf("Made global type alias for %s (%p) in context (%p):\n%s",
-                name.get(), static_cast<void *>(GetSwiftType(type).getPointer()),
+    log->Printf("Made type alias for %s (%p) in decl context (%p) and context "
+                "(%p):\n%s",
+                name.get(),
+                static_cast<void *>(GetSwiftType(type).getPointer()),
+                static_cast<void *>(decl_ctx),
                 static_cast<void *>(&ast_context), s.c_str());
   }
 
-  if (type_alias_decl) {
-    if (make_private) {
-      type_alias_decl->overwriteAccess(swift::AccessLevel::Private);
-    }
+  if (make_private)
+    type_alias_decl->overwriteAccess(swift::AccessLevel::Private);
+
+  if (auto *f = llvm::dyn_cast<swift::FuncDecl>(decl_ctx)) {
+    llvm::SmallVector<swift::ASTNode, 1> node;
+    node.push_back(type_alias_decl);
+    AddNodesToBeginningFunction(f, node, ast_context);
+  } else {
     m_source_file.addTopLevelDecl(type_alias_decl);
   }
 
+  m_type_aliases.insert(
+      {name.str(), type_alias_decl->getStructuralType().getPointer()});
   return type_alias_decl;
 }
 

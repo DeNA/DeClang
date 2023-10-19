@@ -16,6 +16,7 @@
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/LangStandard.h"
+#include "clang/CAS/CASOptions.h"
 #include "clang/Frontend/DependencyOutputOptions.h"
 #include "clang/Frontend/FrontendOptions.h"
 #include "clang/Frontend/MigratorOptions.h"
@@ -41,6 +42,11 @@ namespace vfs {
 class FileSystem;
 
 } // namespace vfs
+
+namespace cas {
+
+class ObjectStore;
+}
 
 } // namespace llvm
 
@@ -141,6 +147,9 @@ protected:
   /// Options controlling API notes.
   APINotesOptions APINotesOpts;
 
+  /// Options configuring the CAS.
+  CASOptions CASOpts;
+
   /// Options controlling IRgen and the backend.
   CodeGenOptions CodeGenOpts;
 
@@ -157,6 +166,9 @@ protected:
   PreprocessorOutputOptions PreprocessorOutputOpts;
 
 public:
+  CASOptions &getCASOpts() { return CASOpts; }
+  const CASOptions &getCASOpts() const { return CASOpts; }
+
   MigratorOptions &getMigratorOpts() { return MigratorOpts; }
   const MigratorOptions &getMigratorOpts() const { return MigratorOpts; }
 
@@ -226,25 +238,12 @@ public:
   /// executable), for finding the builtin compiler path.
   static std::string GetResourcesPath(const char *Argv0, void *MainAddr);
 
-  /// Set language defaults for the given input language and
-  /// language standard in the given LangOptions object.
-  ///
-  /// \param Opts - The LangOptions object to set up.
-  /// \param IK - The input language.
-  /// \param T - The target triple.
-  /// \param Includes - The affected list of included files.
-  /// \param LangStd - The input language standard.
-  static void
-  setLangDefaults(LangOptions &Opts, InputKind IK, const llvm::Triple &T,
-                  std::vector<std::string> &Includes,
-                  LangStandard::Kind LangStd = LangStandard::lang_unspecified);
-
   /// Retrieve a module hash string that is suitable for uniquely
   /// identifying the conditions under which the module was built.
   std::string getModuleHash(DiagnosticsEngine &Diags) const;
 
   using StringAllocator = llvm::function_ref<const char *(const llvm::Twine &)>;
-  /// Generate a cc1-compatible command line arguments from this instance.
+  /// Generate cc1-compatible command line arguments from this instance.
   ///
   /// \param [out] Args - The generated arguments. Note that the caller is
   /// responsible for inserting the path to the clang executable and "-cc1" if
@@ -254,6 +253,40 @@ public:
   /// The returned pointer is what gets appended to Args.
   void generateCC1CommandLine(llvm::SmallVectorImpl<const char *> &Args,
                               StringAllocator SA) const;
+
+  /// Generate cc1-compatible command line arguments from this instance,
+  /// wrapping the result as a std::vector<std::string>.
+  ///
+  /// This is a (less-efficient) wrapper over generateCC1CommandLine().
+  std::vector<std::string> getCC1CommandLine() const;
+
+  /// Check that \p Args can be parsed and re-serialized without change,
+  /// emiting diagnostics for any differences.
+  ///
+  /// This check is only suitable for command-lines that are expected to already
+  /// be canonical.
+  ///
+  /// \return false if there are any errors.
+  static bool checkCC1RoundTrip(ArrayRef<const char *> Args,
+                                DiagnosticsEngine &Diags,
+                                const char *Argv0 = nullptr);
+
+  /// Reset all of the options that are not considered when building a
+  /// module.
+  void resetNonModularOptions();
+
+  /// Disable implicit modules and canonicalize options that are only used by
+  /// implicit modules.
+  void clearImplicitModuleBuildOptions();
+
+  /// Parse command line options that map to \p CASOptions.
+  static bool ParseCASArgs(CASOptions &Opts, const llvm::opt::ArgList &Args,
+                           DiagnosticsEngine &Diags);
+
+  /// Generate command line options from CASOptions.
+  static void GenerateCASArgs(const CASOptions &Opts,
+                              SmallVectorImpl<const char *> &Args,
+                              CompilerInvocation::StringAllocator SA);
 
 private:
   static bool CreateFromArgsImpl(CompilerInvocation &Res,
@@ -271,18 +304,23 @@ private:
                             std::vector<std::string> &Includes,
                             DiagnosticsEngine &Diags);
 
+public:
   /// Generate command line options from LangOptions.
   static void GenerateLangArgs(const LangOptions &Opts,
                                SmallVectorImpl<const char *> &Args,
                                StringAllocator SA, const llvm::Triple &T,
                                InputKind IK);
 
+private:
   /// Parse command line options that map to CodeGenOptions.
   static bool ParseCodeGenArgs(CodeGenOptions &Opts, llvm::opt::ArgList &Args,
                                InputKind IK, DiagnosticsEngine &Diags,
                                const llvm::Triple &T,
                                const std::string &OutputFile,
-                               const LangOptions &LangOptsRef);
+                               const LangOptions &LangOptsRef,
+                               const FileSystemOptions &FSOpts,
+                               const FrontendOptions &FEOpts,
+                               const CASOptions &CASOpts);
 
   // Generate command line options from CodeGenOptions.
   static void GenerateCodeGenArgs(const CodeGenOptions &Opts,
@@ -292,13 +330,18 @@ private:
                                   const LangOptions *LangOpts);
 };
 
-IntrusiveRefCntPtr<llvm::vfs::FileSystem>
-createVFSFromCompilerInvocation(const CompilerInvocation &CI,
-                                DiagnosticsEngine &Diags);
+IntrusiveRefCntPtr<llvm::vfs::FileSystem> createVFSFromCompilerInvocation(
+    const CompilerInvocation &CI, DiagnosticsEngine &Diags,
+    std::shared_ptr<llvm::cas::ObjectStore> OverrideCAS = nullptr);
 
 IntrusiveRefCntPtr<llvm::vfs::FileSystem> createVFSFromCompilerInvocation(
     const CompilerInvocation &CI, DiagnosticsEngine &Diags,
     IntrusiveRefCntPtr<llvm::vfs::FileSystem> BaseFS);
+
+IntrusiveRefCntPtr<llvm::vfs::FileSystem>
+createVFSFromOverlayFiles(ArrayRef<std::string> VFSOverlayFiles,
+                          DiagnosticsEngine &Diags,
+                          IntrusiveRefCntPtr<llvm::vfs::FileSystem> BaseFS);
 
 } // namespace clang
 

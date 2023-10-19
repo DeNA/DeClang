@@ -1,4 +1,4 @@
-//===-- SwiftArray.cpp ------------------------------------------*- C++ -*-===//
+//===-- SwiftArray.cpp ----------------------------------------------------===//
 //
 // This source file is part of the Swift.org open source project
 //
@@ -14,7 +14,7 @@
 
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
@@ -22,9 +22,6 @@
 
 // FIXME: we should not need this
 #include "Plugins/Language/ObjC/Cocoa.h"
-
-#include "swift/AST/ASTContext.h"
-#include "llvm/ADT/StringRef.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -140,12 +137,11 @@ SwiftArrayBridgedBufferHandler::SwiftArrayBridgedBufferHandler(
     ProcessSP process_sp, lldb::addr_t native_ptr)
     : SwiftArrayBufferHandler(), m_elem_type(), m_synth_array_sp(),
       m_frontend(nullptr) {
-  TypeSystemClang *clang_ast_context =
+  TypeSystemClangSP clang_ts_sp =
         ScratchTypeSystemClang::GetForTarget(process_sp->GetTarget());
-  if (!clang_ast_context)
+  if (!clang_ts_sp)
     return;
-  m_elem_type = clang_ast_context->GetBasicType(
-          lldb::eBasicTypeObjCID);
+  m_elem_type = clang_ts_sp->GetBasicType(lldb::eBasicTypeObjCID);
   InferiorSizedWord isw(native_ptr, *process_sp);
   m_synth_array_sp = ValueObjectConstResult::CreateValueObjectFromData(
       "_", isw.GetAsData(process_sp->GetByteOrder()), *process_sp, m_elem_type);
@@ -284,33 +280,25 @@ bool SwiftSyntheticFrontEndBufferHandler::IsValid() {
 }
 
 std::unique_ptr<SwiftArrayBufferHandler>
-SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
+SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &static_valobj) {
+  lldb::ValueObjectSP valobj_sp =
+      static_valobj.GetDynamicValue(lldb::eDynamicCanRunTarget);
+  ValueObject &valobj = valobj_sp ? *valobj_sp : static_valobj;
   llvm::StringRef valobj_typename(
       valobj.GetCompilerType().GetTypeName().AsCString(""));
 
   if (!valobj.GetTargetSP())
     return nullptr;
-  TypeSystemClang *clang_ast_context =
+  TypeSystemClangSP clang_ts_sp =
       ScratchTypeSystemClang::GetForTarget(*valobj.GetTargetSP());
-  if (!clang_ast_context)
+  if (!clang_ts_sp)
     return nullptr;
-
-  if (valobj_typename.startswith("Swift._NSSwiftArray")) {
-    CompilerType anyobject_type = clang_ast_context->GetBasicType(
-            lldb::eBasicTypeObjCID);
-    auto handler = std::unique_ptr<SwiftArrayBufferHandler>(
-        new SwiftArrayNativeBufferHandler(valobj, valobj.GetPointerValue(),
-                                          anyobject_type));
-    if (handler && handler->IsValid())
-      return handler;
-    return nullptr;
-  }
 
   // For now we have to keep the old mangled name since the Objc->Swift bindings
   // that are in Foundation don't get the new mangling.
   if (valobj_typename.startswith("_TtCs23_ContiguousArrayStorage") ||
       valobj_typename.startswith("Swift._ContiguousArrayStorage")) {
-    CompilerType anyobject_type = clang_ast_context->GetBasicType(
+    CompilerType anyobject_type = clang_ts_sp->GetBasicType(
             lldb::eBasicTypeObjCID);
     auto handler = std::unique_ptr<SwiftArrayBufferHandler>(
         new SwiftArrayNativeBufferHandler(
@@ -339,22 +327,24 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
     if (error.Fail() || argmetadata_ptr == LLDB_INVALID_ADDRESS)
       return nullptr;
 
+    // Get the type of the array elements.
+    CompilerType argument_type;
+    auto scratch_ctx_reader = valobj.GetSwiftScratchContext();
+    if (!scratch_ctx_reader)
+      return nullptr;
+    auto *ts = scratch_ctx_reader->get();
+    if (!ts)
+      return nullptr;
     auto *swift_runtime = SwiftLanguageRuntime::Get(process_sp);
     if (!swift_runtime)
       return nullptr;
 
-    CompilerType argument_type;
+    if (CompilerType type =
+            swift_runtime->GetTypeFromMetadata(*ts, argmetadata_ptr))
+      if (auto ts = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>())
+        argument_type = ts->GetGenericArgumentType(type.GetOpaqueQualType(), 0);
 
-    SwiftLanguageRuntime::MetadataPromiseSP promise_sp(
-        swift_runtime->GetMetadataPromise(argmetadata_ptr, valobj));
-    if (promise_sp)
-      if (CompilerType type = promise_sp->FulfillTypePromise())
-        if (TypeSystemSwift *type_system =
-                llvm::dyn_cast<TypeSystemSwift>(type.GetTypeSystem()))
-          argument_type =
-              type_system->GetGenericArgumentType(type.GetOpaqueQualType(), 0);
-
-    if (!argument_type.IsValid())
+    if (!argument_type)
       return nullptr;
 
     auto handler = std::unique_ptr<SwiftArrayBufferHandler>(
@@ -387,8 +377,10 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
     if (handler && handler->IsValid())
       return handler;
     return nullptr;
-  } else if (valobj_typename.startswith("Swift.ArraySlice<")) {
-    // Swift.ArraySlice
+  } else if (valobj_typename.startswith("Swift.ArraySlice<") ||
+             (valobj_typename.startswith("Swift.Array<") &&
+              valobj_typename.endswith(">.SubSequence"))) {
+    // ArraySlice or Array<T>.SubSequence, which is a typealias to ArraySlice.
     static ConstString g_buffer("_buffer");
 
     ValueObjectSP buffer_sp(

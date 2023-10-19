@@ -20,6 +20,7 @@ add_lldb_library(lldbTarget
   Memory.cpp
   MemoryHistory.cpp
   MemoryRegionInfo.cpp
+  MemoryTagMap.cpp
   ModuleCache.cpp
   OperatingSystem.cpp
   PathMappingList.cpp
@@ -64,6 +65,7 @@ add_lldb_library(lldbTarget
   ThreadPlanStepOverRange.cpp
   ThreadPlanStepRange.cpp
   ThreadPlanStepThrough.cpp
+  ThreadPlanStepThroughGenericTrampoline.cpp
   ThreadPlanStepUntil.cpp
   ThreadPlanTracer.cpp
   ThreadPlanStack.cpp
@@ -71,7 +73,7 @@ add_lldb_library(lldbTarget
   Trace.cpp
   TraceCursor.cpp
   TraceExporter.cpp
-  TraceInstructionDumper.cpp
+  TraceDumper.cpp
   UnixSignals.cpp
   UnwindAssembly.cpp
   UnwindLLDB.cpp

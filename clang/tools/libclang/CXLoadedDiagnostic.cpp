@@ -225,6 +225,12 @@ protected:
                                       unsigned Timestamp,
                                       StringRef Name) override;
 
+  std::error_code visitSourceFileContentsRecord(
+      unsigned ID,
+      const serialized_diags::Location &OriginalStartLoc,
+      const serialized_diags::Location &OriginalEndLoc,
+      StringRef Contents) override;
+
   std::error_code visitFixitRecord(const serialized_diags::Location &Start,
                                    const serialized_diags::Location &End,
                                    StringRef CodeToInsert) override;
@@ -235,7 +241,7 @@ protected:
 
 public:
   DiagLoader(enum CXLoadDiag_Error *e, CXString *es)
-      : SerializedDiagnosticReader(), error(e), errorString(es) {
+      : error(e), errorString(es) {
     if (error)
       *error = CXLoadDiag_None;
     if (errorString)
@@ -243,6 +249,9 @@ public:
   }
 
   CXDiagnosticSet load(const char *file);
+  CXDiagnosticSet load(llvm::MemoryBufferRef Buffer);
+
+  CXDiagnosticSet reportError(std::error_code EC);
 };
 } // end anonymous namespace
 
@@ -250,22 +259,36 @@ CXDiagnosticSet DiagLoader::load(const char *file) {
   TopDiags = std::make_unique<CXLoadedDiagnosticSetImpl>();
 
   std::error_code EC = readDiagnostics(file);
-  if (EC) {
-    switch (EC.value()) {
-    case static_cast<int>(serialized_diags::SDError::HandlerFailed):
-      // We've already reported the problem.
-      break;
-    case static_cast<int>(serialized_diags::SDError::CouldNotLoad):
-      reportBad(CXLoadDiag_CannotLoad, EC.message());
-      break;
-    default:
-      reportInvalidFile(EC.message());
-      break;
-    }
-    return nullptr;
-  }
+  if (EC)
+    return reportError(EC);
 
   return (CXDiagnosticSet)TopDiags.release();
+}
+
+CXDiagnosticSet DiagLoader::load(llvm::MemoryBufferRef Buffer) {
+  TopDiags = std::make_unique<CXLoadedDiagnosticSetImpl>();
+
+  std::error_code EC = readDiagnostics(Buffer);
+  if (EC)
+    return reportError(EC);
+
+  return (CXDiagnosticSet)TopDiags.release();
+}
+
+CXDiagnosticSet DiagLoader::reportError(std::error_code EC) {
+  assert(EC);
+  switch (EC.value()) {
+  case static_cast<int>(serialized_diags::SDError::HandlerFailed):
+    // We've already reported the problem.
+    break;
+  case static_cast<int>(serialized_diags::SDError::CouldNotLoad):
+    reportBad(CXLoadDiag_CannotLoad, EC.message());
+    break;
+  default:
+    reportInvalidFile(EC.message());
+    break;
+  }
+  return nullptr;
 }
 
 std::error_code
@@ -347,6 +370,28 @@ std::error_code DiagLoader::visitFilenameRecord(unsigned ID, unsigned Size,
   return std::error_code();
 }
 
+std::error_code DiagLoader::visitSourceFileContentsRecord(
+    unsigned ID,
+    const serialized_diags::Location &OriginalStartLoc,
+    const serialized_diags::Location &OriginalEndLoc,
+    StringRef Contents
+) {
+  CXSourceRange OriginalSourceRange;
+  if (std::error_code EC = readRange(
+          OriginalStartLoc, OriginalEndLoc, OriginalSourceRange))
+    return EC;
+
+  auto file = const_cast<FileEntry *>(TopDiags->Files[ID]);
+  if (!file)
+    return reportInvalidFile("Source file contents for unknown file ID");
+
+  StringRef CopiedContents(TopDiags->copyString(Contents),
+                           Contents.size());
+
+  TopDiags->recordSourceFileContents(file, CopiedContents, OriginalSourceRange);
+  return std::error_code();
+}
+
 std::error_code
 DiagLoader::visitSourceRangeRecord(const serialized_diags::Location &Start,
                                    const serialized_diags::Location &End) {
@@ -391,4 +436,11 @@ CXDiagnosticSet clang_loadDiagnostics(const char *file,
                                       CXString *errorString) {
   DiagLoader L(error, errorString);
   return L.load(file);
+}
+
+CXDiagnosticSet clang::loadCXDiagnosticsFromBuffer(llvm::MemoryBufferRef buffer,
+                                                   enum CXLoadDiag_Error *error,
+                                                   CXString *errorString) {
+  DiagLoader L(error, errorString);
+  return L.load(buffer);
 }

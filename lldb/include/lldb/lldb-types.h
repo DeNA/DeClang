@@ -80,6 +80,12 @@ typedef bool (*ExpressionCancelCallback)(ExpressionEvaluationPhase phase,
 #define LLDB_INVALID_PIPE ((lldb::pipe_t)-1)
 
 namespace lldb {
+typedef void (*LogOutputCallback)(const char *, void *baton);
+typedef bool (*CommandOverrideCallback)(void *baton, const char **argv);
+typedef bool (*ExpressionCancelCallback)(ExpressionEvaluationPhase phase,
+                                         void *baton);
+typedef void *ScriptObjectPtr;
+
 typedef uint64_t addr_t;
 typedef uint64_t user_id_t;
 typedef uint64_t pid_t;
@@ -89,6 +95,7 @@ typedef int32_t break_id_t;
 typedef int32_t watch_id_t;
 typedef void *opaque_compiler_type_t;
 typedef uint64_t queue_id_t;
+typedef uint32_t cpu_id_t; // CPU core id
 } // namespace lldb
 
 #endif // LLDB_LLDB_TYPES_H

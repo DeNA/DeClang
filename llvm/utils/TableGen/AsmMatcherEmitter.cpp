@@ -95,6 +95,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CodeGenInstruction.h"
 #include "CodeGenTarget.h"
 #include "SubtargetFeatureInfo.h"
 #include "Types.h"
@@ -594,8 +595,9 @@ struct MatchableInfo {
   /// findAsmOperandNamed - Find the first AsmOperand with the specified name.
   /// This does not check the suboperand index.
   int findAsmOperandNamed(StringRef N, int LastIdx = -1) const {
-    auto I = std::find_if(AsmOperands.begin() + LastIdx + 1, AsmOperands.end(),
-                     [&](const AsmOperand &Op) { return Op.SrcOpName == N; });
+    auto I =
+        llvm::find_if(llvm::drop_begin(AsmOperands, LastIdx + 1),
+                      [&](const AsmOperand &Op) { return Op.SrcOpName == N; });
     return (I != AsmOperands.end()) ? I - AsmOperands.begin() : -1;
   }
 
@@ -3394,7 +3396,7 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
                         StringTable.GetOrAddStringOffset(LenMnemonic, false));
   }
 
-  OS << "static const char *const MnemonicTable =\n";
+  OS << "static const char MnemonicTable[] =\n";
   StringTable.EmitString(OS);
   OS << ";\n\n";
 
@@ -3924,8 +3926,7 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
 
   if (HasDeprecation) {
     OS << "    std::string Info;\n";
-    OS << "    if (!getParser().getTargetParser().\n";
-    OS << "        getTargetOptions().MCNoDeprecatedWarn &&\n";
+    OS << "    if (!getParser().getTargetParser().getTargetOptions().MCNoDeprecatedWarn &&\n";
     OS << "        MII.getDeprecatedInfo(Inst, getSTI(), Info)) {\n";
     OS << "      SMLoc Loc = ((" << Target.getName()
        << "Operand &)*Operands[0]).getStartLoc();\n";

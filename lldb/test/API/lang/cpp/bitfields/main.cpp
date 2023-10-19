@@ -97,7 +97,7 @@ WithVTable with_vtable;
 
 struct WithVTableAndUnnamed {
   virtual ~WithVTableAndUnnamed() {}
-  unsigned a : 4;
+  unsigned : 4;
   unsigned b : 4;
   unsigned c : 4;
 };
@@ -112,6 +112,12 @@ struct HasBaseWithVTable : BaseWithVTable {
   unsigned c : 4;
 };
 HasBaseWithVTable base_with_vtable;
+
+struct DerivedWithVTable : public Base {
+  virtual ~DerivedWithVTable() {}
+  unsigned a : 1;
+};
+DerivedWithVTable derived_with_vtable;
 
 int main(int argc, char const *argv[]) {
   lba.a = 2;
@@ -146,13 +152,15 @@ int main(int argc, char const *argv[]) {
   with_vtable.b = 0;
   with_vtable.c = 5;
 
-  with_vtable_and_unnamed.a = 5;
   with_vtable_and_unnamed.b = 0;
   with_vtable_and_unnamed.c = 5;
 
   base_with_vtable.a = 5;
   base_with_vtable.b = 0;
   base_with_vtable.c = 5;
+
+  derived_with_vtable.b_a = 2;
+  derived_with_vtable.a = 1;
 
   return 0; // break here
 }

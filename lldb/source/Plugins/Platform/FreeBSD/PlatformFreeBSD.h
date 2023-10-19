@@ -10,6 +10,7 @@
 #define LLDB_SOURCE_PLUGINS_PLATFORM_FREEBSD_PLATFORMFREEBSD_H
 
 #include "Plugins/Platform/POSIX/PlatformPOSIX.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
 namespace lldb_private {
 namespace platform_freebsd {
@@ -54,7 +55,13 @@ public:
                                   unsigned flags, lldb::addr_t fd,
                                   lldb::addr_t offset) override;
 
+  CompilerType GetSiginfoType(const llvm::Triple &triple) override;
+
   std::vector<ArchSpec> m_supported_architectures;
+
+private:
+  std::mutex m_mutex;
+  std::shared_ptr<TypeSystemClang> m_type_system;
 };
 
 } // namespace platform_freebsd

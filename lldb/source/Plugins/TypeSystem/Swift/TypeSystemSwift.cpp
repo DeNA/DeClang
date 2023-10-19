@@ -12,6 +12,7 @@
 
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
 
+#include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "lldb/Core/PluginManager.h"
 #include <lldb/lldb-enumerations.h>
@@ -66,10 +67,6 @@ void TypeSystemSwift::Initialize() {
 void TypeSystemSwift::Terminate() {
   PluginManager::UnregisterPlugin(CreateTypeSystemInstance);
   SwiftLanguageRuntime::Terminate();
-}
-
-ConstString TypeSystemSwift::GetPluginNameStatic() {
-  return ConstString("swift");
 }
 
 /// \}
@@ -138,7 +135,7 @@ lldb::Format TypeSystemSwift::GetFormat(opaque_compiler_type_t type) {
   if (swift_flags & eTypeIsClass)
     return eFormatHex;
 
-  if (swift_flags & eTypeIsGeneric)
+  if (swift_flags & eTypeIsGenericTypeParam)
     return eFormatUnsigned;
 
   if (swift_flags & eTypeIsFuncPrototype || swift_flags & eTypeIsBlock)
@@ -146,3 +143,22 @@ lldb::Format TypeSystemSwift::GetFormat(opaque_compiler_type_t type) {
 
   return eFormatBytes;
 }
+
+namespace llvm {
+llvm::raw_ostream &
+operator<<(llvm::raw_ostream &os,
+           TypeSystemSwift::NonTriviallyManagedReferenceKind k) {
+  switch (k) {
+  case TypeSystemSwift::NonTriviallyManagedReferenceKind::eWeak:
+    os << "eWeak";
+    break;
+  case TypeSystemSwift::NonTriviallyManagedReferenceKind:: eUnowned:
+    os << "eUnowned";
+    break;
+  case TypeSystemSwift::NonTriviallyManagedReferenceKind::eUnmanaged:
+    os << "eUnmanaged";
+    break;
+  }
+  return os;
+}
+} // namespace llvm

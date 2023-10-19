@@ -3,16 +3,20 @@ add_lldb_unittest(TargetTests
   DynamicRegisterInfoTest.cpp
   ExecutionContextTest.cpp
   MemoryRegionInfoTest.cpp
+  MemoryTest.cpp
+  MemoryTagMapTest.cpp
   ModuleCacheTest.cpp
   PathMappingListTest.cpp
   RemoteAwarePlatformTest.cpp
   StackFrameRecognizerTest.cpp
+  FindFileTest.cpp
 
   LINK_LIBS
       lldbCore
       lldbHost
       lldbPluginObjectFileELF
       lldbPluginPlatformLinux
+      lldbPluginPlatformMacOSX
       lldbPluginSymbolFileSymtab
       lldbTarget
       lldbSymbol

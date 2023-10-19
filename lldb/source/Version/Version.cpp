@@ -19,7 +19,7 @@ static const char *GetLLDBVersion() {
 #ifdef LLDB_FULL_VERSION_STRING
   return LLDB_FULL_VERSION_STRING;
 #else
-  return "lldb version " CLANG_VERSION_STRING;
+  return "lldb version " LLDB_VERSION_STRING;
 #endif
 }
 
@@ -78,7 +78,7 @@ const char *lldb_private::GetVersion() {
       g_version_str += "\n  llvm revision ";
       g_version_str += llvm_rev;
     }
-#endif
+#endif // LLDB_ENABLE_SWIFT
   }
 
   return g_version_str.c_str();

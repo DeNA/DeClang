@@ -45,9 +45,8 @@ add_llvm_component_library(LLVMScalarOpts
   LoopStrengthReduce.cpp
   LoopUnrollPass.cpp
   LoopUnrollAndJamPass.cpp
-  LoopUnswitch.cpp
   LoopVersioningLICM.cpp
-  LowerAtomic.cpp
+  LowerAtomicPass.cpp
   LowerConstantIntrinsics.cpp
   LowerExpectIntrinsic.cpp
   LowerGuardIntrinsic.cpp
@@ -60,7 +59,6 @@ add_llvm_component_library(LLVMScalarOpts
   NaryReassociate.cpp
   NewGVN.cpp
   PartiallyInlineLibCalls.cpp
-  PlaceSafepoints.cpp
   Reassociate.cpp
   Reg2Mem.cpp
   RewriteStatepointsForGC.cpp
@@ -77,6 +75,7 @@ add_llvm_component_library(LLVMScalarOpts
   StraightLineStrengthReduce.cpp
   StructurizeCFG.cpp
   TailRecursionElimination.cpp
+  TLSVariableHoist.cpp
   WarnMissedTransforms.cpp
 
   ADDITIONAL_HEADER_DIRS

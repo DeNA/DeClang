@@ -13,7 +13,9 @@
 #include "SwiftLanguageRuntime.h"
 #include "Plugins/LanguageRuntime/Swift/LLDBMemoryReader.h"
 #include "SwiftLanguageRuntimeImpl.h"
+#include "SwiftMetadataCache.h"
 
+#include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #include "Plugins/Process/Utility/RegisterContext_x86.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Utility/ARM64_DWARF_Registers.h"
@@ -23,7 +25,10 @@
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Progress.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Core/ValueObject.h"
+#include "lldb/Core/ValueObjectCast.h"
 #include "lldb/Core/ValueObjectConstResult.h"
+#include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
@@ -33,6 +38,7 @@
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Target/RegisterContext.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/OptionParsing.h"
 #include "lldb/Utility/Timer.h"
@@ -41,7 +47,7 @@
 #include "swift/AST/Decl.h"
 #include "swift/AST/Module.h"
 #include "swift/Demangling/Demangle.h"
-#include "swift/Reflection/ReflectionContext.h"
+#include "swift/RemoteInspection/ReflectionContext.h"
 #include "swift/RemoteAST/RemoteAST.h"
 
 #include "clang/AST/ASTContext.h"
@@ -100,7 +106,7 @@ AppleObjCRuntimeV2 *
 SwiftLanguageRuntime::GetObjCRuntime(lldb_private::Process &process) {
   if (auto objc_runtime = ObjCLanguageRuntime::Get(process)) {
     if (objc_runtime->GetPluginName() ==
-        AppleObjCRuntimeV2::GetPluginNameStatic().GetStringRef())
+        AppleObjCRuntimeV2::GetPluginNameStatic())
       return (AppleObjCRuntimeV2 *)objc_runtime;
   }
   return nullptr;
@@ -261,8 +267,7 @@ public:
     return addr;
   }
 
-  SwiftLanguageRuntime::MetadataPromiseSP
-  GetMetadataPromise(lldb::addr_t addr, ValueObject &for_object) {
+  CompilerType GetTypeFromMetadata(TypeSystemSwift &tss, Address addr) {
     STUB_LOG();
     return {};
   }
@@ -288,7 +293,7 @@ public:
   }
 
   llvm::Optional<unsigned> GetNumChildren(CompilerType type,
-                                          ValueObject *valobj) {
+                                          ExecutionContextScope *exe_scopej) {
     STUB_LOG();
     return {};
   }
@@ -340,6 +345,13 @@ public:
 
   CompilerType BindGenericTypeParameters(StackFrame &stack_frame,
                                          CompilerType base_type) {
+    STUB_LOG();
+    return {};
+  }
+
+  CompilerType BindGenericTypeParameters(
+      CompilerType unbound_type,
+      std::function<CompilerType(unsigned, unsigned)> type_finder) {
     STUB_LOG();
     return {};
   }
@@ -435,37 +447,67 @@ static bool HasReflectionInfo(ObjectFile *obj_file) {
   return hasReflectionSection;
 }
 
-SwiftLanguageRuntimeImpl::ReflectionContextInterface *
+SwiftLanguageRuntimeImpl::ThreadSafeReflectionContext 
 SwiftLanguageRuntimeImpl::GetReflectionContext() {
-  if (!m_initialized_reflection_ctx)
-    SetupReflection();
-  return m_reflection_ctx.get();
+  m_reflection_ctx_mutex.lock();
+  SetupReflection();
+  // SetupReflection can potentially fail.
+  if (m_initialized_reflection_ctx)
+    ProcessModulesToAdd();
+  return {m_reflection_ctx.get(), m_reflection_ctx_mutex};
 }
 
-void SwiftLanguageRuntimeImpl::SetupReflection() {
-  LLDB_SCOPED_TIMER();
- 
-  // SetupABIBit() iterates of the Target's images and thus needs to
-  // acquire that ModuleList's lock. We need to acquire this before
-  // locking m_add_module_mutex, since ModulesDidLoad can also be
-  // called from a place where that lock is already held:
-  // +   lldb_private::DynamicLoaderDarwin::AddModulesUsingImageInfos()
-  // +     lldb_private::ModuleList::AppendIfNeeded()
-  // +       lldb_private::Target::NotifyModuleAdded()
-  // +         lldb_private::Target::ModulesDidLoad()
+void SwiftLanguageRuntimeImpl::ProcessModulesToAdd() {
+  // A snapshot of the modules to be processed. This is necessary because
+  // AddModuleToReflectionContext may recursively call into this function again.
+  ModuleList modules_to_add_snapshot;
+  modules_to_add_snapshot.Swap(m_modules_to_add);
 
-  // The global ABI bit is read by the Swift runtime library.
-  SetupABIBit();
-  
-  std::lock_guard<std::recursive_mutex> lock(m_add_module_mutex);
-  if (m_initialized_reflection_ctx)
+  if (modules_to_add_snapshot.IsEmpty())
     return;
 
   auto &target = m_process.GetTarget();
   auto exe_module = target.GetExecutableModule();
+  Progress progress(
+      llvm::formatv("Setting up Swift reflection for '{0}'",
+                    exe_module->GetFileSpec().GetFilename().AsCString()),
+      modules_to_add_snapshot.GetSize());
 
+  size_t completion = 0;
+
+  // Add all defered modules to reflection context that were added to
+  // the target since this SwiftLanguageRuntime was created.
+  modules_to_add_snapshot.ForEach([&](const ModuleSP &module_sp) -> bool {
+    AddModuleToReflectionContext(module_sp);
+    progress.Increment(++completion);
+    return true;
+  });
+}
+
+SwiftMetadataCache *
+SwiftLanguageRuntimeImpl::GetSwiftMetadataCache() {
+  if (!m_swift_metadata_cache.is_enabled())
+    return {};
+  return &m_swift_metadata_cache;
+}
+
+void SwiftLanguageRuntimeImpl::SetupReflection() {
+  LLDB_SCOPED_TIMER();
+
+
+  std::lock_guard<std::recursive_mutex> lock(m_reflection_ctx_mutex);
+  if (m_initialized_reflection_ctx)
+    return;
+ 
+  // The global ABI bit is read by the Swift runtime library.
+  SetupABIBit();
+
+  auto &target = m_process.GetTarget();
+  auto exe_module = target.GetExecutableModule();
+
+  auto *log = GetLog(LLDBLog::Types);
   if (!exe_module) {
-    LLDB_LOGF(GetLog(LLDBLog::Types), "%s: Failed to get executable module",
+    LLDB_LOGF(log, "%s: Failed to get executable module",
               LLVM_PRETTY_FUNCTION);
     m_initialized_reflection_ctx = false;
     return;
@@ -476,41 +518,29 @@ void SwiftLanguageRuntimeImpl::SetupReflection() {
       objc_interop ? "with Objective-C interopability" : "Swift only";
 
   auto &triple = exe_module->GetArchitecture().GetTriple();
-  if (triple.isArch64Bit()) {
-    LLDB_LOGF(GetLog(LLDBLog::Types),
-              "Initializing a 64-bit reflection context (%s) for \"%s\"",
+  auto byte_size = m_process.GetAddressByteSize();
+  if (byte_size == 8) {
+    LLDB_LOGF(log, "Initializing a 64-bit reflection context (%s) for \"%s\"",
               triple.str().c_str(), objc_interop_msg);
     m_reflection_ctx = ReflectionContextInterface::CreateReflectionContext64(
-        this->GetMemoryReader(), objc_interop);
-  } else if (triple.isArch32Bit()) {
-    LLDB_LOGF(GetLog(LLDBLog::Types),
+        this->GetMemoryReader(), objc_interop, GetSwiftMetadataCache());
+  } else if (byte_size == 4) {
+    LLDB_LOGF(log,
               "Initializing a 32-bit reflection context (%s) for \"%s\"",
               triple.str().c_str(), objc_interop_msg);
     m_reflection_ctx = ReflectionContextInterface::CreateReflectionContext32(
-        this->GetMemoryReader(), objc_interop);
+        this->GetMemoryReader(), objc_interop, GetSwiftMetadataCache());
   } else {
-    LLDB_LOGF(GetLog(LLDBLog::Types),
+    LLDB_LOGF(log,
               "Could not initialize reflection context for \"%s\"",
               triple.str().c_str());
   }
-
+  // We set m_initialized_reflection_ctx to true here because
+  // AddModuleToReflectionContext can potentially call into SetupReflection
+  // again (which will early exit). This is safe to do since every other thread
+  // using reflection context will have to wait until all the modules are added,
+  // since the thread performing the initialization locked the mutex.
   m_initialized_reflection_ctx = true;
-
-  Progress progress(
-      llvm::formatv("Setting up Swift reflection for '{0}'",
-                    exe_module->GetFileSpec().GetFilename().AsCString()),
-      m_modules_to_add.GetSize());
-
-  size_t completion = 0;
-
-  // Add all defered modules to reflection context that were added to
-  // the target since this SwiftLanguageRuntime was created.
-  m_modules_to_add.ForEach([&](const ModuleSP &module_sp) -> bool {
-    AddModuleToReflectionContext(module_sp);
-    progress.Increment(++completion);
-    return true;
-  });
-  m_modules_to_add.Clear();
 }
 
 bool SwiftLanguageRuntimeImpl::IsABIStable() {
@@ -649,7 +679,7 @@ bool SwiftLanguageRuntimeImpl::AddJitObjectFileToReflectionContext(
   if (!obj_file_format)
     return false;
 
-  return m_reflection_ctx->addImage(
+  auto reflection_info_id = m_reflection_ctx->addImage(
       [&](swift::ReflectionSectionKind section_kind)
           -> std::pair<swift::remote::RemoteRef<void>, uint64_t> {
         auto section_name = obj_file_format->getSectionName(section_kind);
@@ -676,9 +706,13 @@ bool SwiftLanguageRuntimeImpl::AddJitObjectFileToReflectionContext(
         return {};
       },
       likely_module_names);
+  // We don't care to cache modules generated by the jit, because they will
+  // only be used by the current process.
+  return reflection_info_id.has_value();
 }
 
-bool SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
+llvm::Optional<uint32_t>
+SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
     ModuleSP module,
     llvm::SmallVector<llvm::StringRef, 1> likely_module_names) {
   auto obj_format_type =
@@ -750,6 +784,9 @@ bool SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
   std::tie(start_address, end_address) = *maybe_start_and_end;
 
   auto *section_list = object_file->GetSectionList();
+  if (section_list->GetSize() == 0)
+    return false;
+
   auto segment_iter = llvm::find_if(*section_list, [&](auto segment) {
     return segment->GetName() == segment_name.begin();
   });
@@ -792,11 +829,12 @@ bool SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
         std::memcpy(Buf, data.begin(), size);
 
         // The section's address is the start address for this image
-        // added with the section's virtual address. We need to use the
-        // virtual address instead of the file offset because the offsets
-        // encoded in the reflection section are calculated in the virtual
-        // address space.
-        auto address = start_address + section->GetFileAddress();
+        // added with the section's virtual address subtracting the start of the
+        // module's address. We need to use the virtual address instead of the
+        // file offset because the offsets encoded in the reflection section are
+        // calculated in the virtual address space.
+        auto address = start_address + section->GetFileAddress() -
+                       section_list->GetSectionAtIndex(0)->GetFileAddress();
         assert(address <= end_address && "Address outside of range!");
 
         swift::remote::RemoteRef<void> remote_ref(address, Buf);
@@ -850,12 +888,14 @@ bool SwiftLanguageRuntimeImpl::AddModuleToReflectionContext(
   }
   bool found = HasReflectionInfo(obj_file);
   LLDB_LOGF(GetLog(LLDBLog::Types), "%s reflection metadata in \"%s\"",
-            found ? "Adding" : "No", obj_file->GetFileSpec().GetCString());
+            found ? "Adding" : "No", obj_file->GetFileSpec().GetPath().c_str());
   if (!found)
     return true;
 
   auto read_from_file_cache =
       GetMemoryReader()->readMetadataFromFileCacheEnabled();
+
+  llvm::Optional<uint32_t> info_id;
   // When dealing with ELF, we need to pass in the contents of the on-disk
   // file, since the Section Header Table is not present in the child process
   if (obj_file->GetPluginName().equals("elf")) {
@@ -863,40 +903,38 @@ bool SwiftLanguageRuntimeImpl::AddModuleToReflectionContext(
     auto size = obj_file->GetData(0, obj_file->GetByteSize(), extractor);
     const uint8_t *file_data = extractor.GetDataStart();
     llvm::sys::MemoryBlock file_buffer((void *)file_data, size);
-    m_reflection_ctx->readELF(
+    info_id = m_reflection_ctx->readELF(
         swift::remote::RemoteAddress(load_ptr),
         llvm::Optional<llvm::sys::MemoryBlock>(file_buffer),
         likely_module_names);
   } else if (read_from_file_cache &&
              obj_file->GetPluginName().equals("mach-o")) {
-    if (!AddObjectFileToReflectionContext(module_sp, likely_module_names)) {
-      m_reflection_ctx->addImage(swift::remote::RemoteAddress(load_ptr),
+    info_id = AddObjectFileToReflectionContext(module_sp, likely_module_names);
+    if (!info_id)
+      info_id = m_reflection_ctx->addImage(swift::remote::RemoteAddress(load_ptr),
                                  likely_module_names);
-    }
   } else {
-    m_reflection_ctx->addImage(swift::remote::RemoteAddress(load_ptr),
+    info_id = m_reflection_ctx->addImage(swift::remote::RemoteAddress(load_ptr),
                                likely_module_names);
   }
+
+  if (info_id)
+    if (auto *swift_metadata_cache = GetSwiftMetadataCache())
+      swift_metadata_cache->registerModuleWithReflectionInfoID(module_sp,
+                                                               *info_id);
+
   return true;
 }
 
 void SwiftLanguageRuntimeImpl::ModulesDidLoad(const ModuleList &module_list) {
-  // If the reflection context hasn't been initialized, add them to
-  // the list of deferred modules so they are added in
-  // SetupReflection(), otherwise add them directly.
-  std::lock_guard<std::recursive_mutex> lock(m_add_module_mutex);
-  if (!m_initialized_reflection_ctx)
-    m_modules_to_add.AppendIfNeeded(module_list);
-  else
-    module_list.ForEach([&](const ModuleSP &module_sp) -> bool {
-      AddModuleToReflectionContext(module_sp);
-      return true;
-    });
+  // The modules will be lazily processed on the next call to
+  // GetReflectionContext.
+  m_modules_to_add.AppendIfNeeded(module_list);
 }
 
 std::string 
 SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Result(ValueObject &object) {
-  Log *log(GetLog(LLDBLog::DataFormatters));
+  Log *log(GetLog(LLDBLog::DataFormatters | LLDBLog::Expressions));
   std::string expr_string
       = llvm::formatv("Swift._DebuggerSupport.stringForPrintObject({0})",
                       object.GetName().GetCString()).str();
@@ -908,7 +946,7 @@ SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Result(ValueObject &object) {
 
 std::string 
 SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Ref(ValueObject &object) {
-  Log *log(GetLog(LLDBLog::DataFormatters));
+  Log *log(GetLog(LLDBLog::DataFormatters | LLDBLog::Expressions));
 
   StreamString expr_string;
   std::string expr_str 
@@ -932,7 +970,7 @@ std::string
 SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Copy(ValueObject &object,
     lldb::addr_t &copy_location)
 {
-  Log *log(GetLog(LLDBLog::DataFormatters));
+  Log *log(GetLog(LLDBLog::DataFormatters | LLDBLog::Expressions));
 
   ValueObjectSP static_sp(object.GetStaticValue());
 
@@ -947,10 +985,11 @@ SwiftLanguageRuntimeImpl::GetObjectDescriptionExpr_Copy(ValueObject &object,
   StackFrameSP frame_sp = object.GetFrameSP();
   if (!frame_sp)
       frame_sp 
-          = m_process.GetThreadList().GetSelectedThread()->GetSelectedFrame();
+          = m_process.GetThreadList().GetSelectedThread()
+              ->GetSelectedFrame(DoNoSelectMostRelevantFrame);
 
-  auto *swift_ast_ctx =
-      llvm::dyn_cast_or_null<TypeSystemSwift>(static_type.GetTypeSystem());
+  auto swift_ast_ctx =
+      static_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
   if (swift_ast_ctx) {
     SwiftScratchContextLock lock(GetSwiftExeCtx(object));
     static_type = BindGenericTypeParameters(*frame_sp, static_type);
@@ -1000,18 +1039,23 @@ SwiftLanguageRuntimeImpl::RunObjectDescriptionExpr(ValueObject &object,
     std::string &expr_string, 
     Stream &result)
 {
-  Log *log(GetLog(LLDBLog::DataFormatters));
+  Log *log(GetLog(LLDBLog::DataFormatters | LLDBLog::Expressions));
   ValueObjectSP result_sp;
   EvaluateExpressionOptions eval_options;
   eval_options.SetLanguage(lldb::eLanguageTypeSwift);
-  eval_options.SetResultIsInternal(true);
+  eval_options.SetSuppressPersistentResult(true);
   eval_options.SetGenerateDebugInfo(true);
   eval_options.SetTimeout(m_process.GetUtilityExpressionTimeout());
   
   StackFrameSP frame_sp = object.GetFrameSP();
   if (!frame_sp)
     frame_sp 
-        = m_process.GetThreadList().GetSelectedThread()->GetSelectedFrame();
+        = m_process.GetThreadList().GetSelectedThread()
+            ->GetSelectedFrame(DoNoSelectMostRelevantFrame);
+  if (!frame_sp) {
+    log->Printf("no execution context to run expression in");
+    return false;
+  }
   auto eval_result = m_process.GetTarget().EvaluateExpression(
       expr_string,
       frame_sp.get(),
@@ -1075,6 +1119,13 @@ SwiftLanguageRuntimeImpl::RunObjectDescriptionExpr(ValueObject &object,
   }
 }
 
+static bool IsVariable(ValueObject &object) {
+  if (object.IsSynthetic())
+    return IsVariable(*object.GetNonSyntheticValue());
+
+  return bool(object.GetVariable());
+}
+
 static bool IsSwiftResultVariable(ConstString name) {
   if (name) {
     llvm::StringRef name_sr(name.GetStringRef());
@@ -1088,7 +1139,7 @@ static bool IsSwiftResultVariable(ConstString name) {
 
 static bool IsSwiftReferenceType(ValueObject &object) {
   CompilerType object_type(object.GetCompilerType());
-  if (llvm::dyn_cast_or_null<TypeSystemSwift>(object_type.GetTypeSystem())) {
+  if (object_type.GetTypeSystem().isa_and_nonnull<TypeSystemSwift>()) {
     Flags type_flags(object_type.GetTypeInfo());
     if (type_flags.AllSet(eTypeIsClass | eTypeHasValue |
                           eTypeInstanceIsPointer))
@@ -1105,10 +1156,9 @@ bool SwiftLanguageRuntimeImpl::GetObjectDescription(Stream &str,
   }
 
   std::string expr_string;
-  
-  if (::IsSwiftResultVariable(object.GetName())) {
-    // if this thing is a Swift expression result variable, it has two
-    // properties:
+
+  if (::IsVariable(object) || ::IsSwiftResultVariable(object.GetName())) {
+    // if the object is a Swift variable, it has two properties:
     // a) its name is something we can refer to in expressions for free
     // b) its type may be something we can't actually talk about in expressions
     // so, just use the result variable's name in the expression and be done
@@ -1310,7 +1360,7 @@ ValueObjectSP SwiftLanguageRuntime::CalculateErrorValueObjectFromValue(
     return error_valobj_sp;
 
   auto *ast_context =
-      llvm::dyn_cast_or_null<TypeSystemSwift>(&*type_system_or_err);
+      llvm::dyn_cast_or_null<TypeSystemSwift>(type_system_or_err->get());
   if (!ast_context)
     return error_valobj_sp;
 
@@ -1431,7 +1481,7 @@ void SwiftLanguageRuntime::RegisterGlobalError(Target &target, ConstString name,
   }
 
   auto *ast_context = llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
-      &*type_system_or_err);
+      type_system_or_err->get());
   if (ast_context && !ast_context->HasFatalErrors()) {
     std::string module_name = "$__lldb_module_for_";
     module_name.append(&name.GetCString()[1]);
@@ -1461,7 +1511,7 @@ void SwiftLanguageRuntime::RegisterGlobalError(Target &target, ConstString name,
       if (!persistent_state)
         return;
 
-      persistent_state->RegisterSwiftPersistentDecl(var_decl);
+      persistent_state->RegisterSwiftPersistentDecl({ast_context, var_decl});
 
       ConstString mangled_name;
 
@@ -1596,7 +1646,7 @@ public:
     int32_t byte_offset;
 
     FieldProjection(CompilerType parent_type, ExecutionContext *exe_ctx,
-                    size_t idx) {
+                    size_t idx, ValueObject *valobj) {
       const bool transparent_pointers = false;
       const bool omit_empty_base_classes = true;
       const bool ignore_array_bounds = false;
@@ -1613,7 +1663,7 @@ public:
           exe_ctx, idx, transparent_pointers, omit_empty_base_classes,
           ignore_array_bounds, child_name, child_byte_size, byte_offset,
           child_bitfield_bit_size, child_bitfield_bit_offset,
-          child_is_base_class, child_is_deref_of_parent, nullptr,
+          child_is_base_class, child_is_deref_of_parent, valobj,
           language_flags);
 
       if (child_is_base_class)
@@ -1746,7 +1796,7 @@ SwiftLanguageRuntimeImpl::GetBridgedSyntheticChildProvider(
         // if a projection fails, keep going - we have offsets here, so it
         // should be OK to skip some members
         if (auto projection = ProjectionSyntheticChildren::FieldProjection(
-                swift_type, &exe_ctx, idx)) {
+                swift_type, &exe_ctx, idx, &valobj)) {
           any_projected = true;
           type_projection->field_projections.push_back(projection);
         }
@@ -1764,6 +1814,56 @@ SwiftLanguageRuntimeImpl::GetBridgedSyntheticChildProvider(
   }
 
   return nullptr;
+}
+
+lldb::ValueObjectSP SwiftLanguageRuntime::ExtractSwiftValueObjectFromCxxWrapper(
+    ValueObject &valobj) {
+  ValueObjectSP swift_valobj;
+
+  // There are two flavors of c++ wrapper classes:
+  // - Reference types wrappers, which have no ivars, and have one super class
+  // which contains an opaque pointer to the swift instance.
+  // - Value type wrappers, which has one ivar, a single char array with the
+  // swift value embedded directly in it.
+  // In both cases the valobj should have exactly one child.
+  if (valobj.GetNumChildren() != 1)
+    return swift_valobj;
+
+  auto child_valobj = valobj.GetChildAtIndex(0, true);
+  auto child_type = child_valobj->GetCompilerType();
+  // If this is a reference wrapper, the first child is actually the super
+  // class.
+  if (child_type.GetMangledTypeName() == "swift::_impl::RefCountedClass") {
+    // The super class should have exactly one ivar, the opaque pointer that
+    // points to the Swift instance.
+    if (child_valobj->GetNumChildren() != 1)
+      return swift_valobj;
+
+    auto opaque_ptr_valobj = child_valobj->GetChildAtIndex(0, true);
+    swift_valobj = opaque_ptr_valobj;
+  } else if (child_type.GetMangledTypeName() == "swift::_impl::OpaqueStorage") {
+    if (child_valobj->GetNumChildren() != 1)
+      return swift_valobj;
+
+    auto opaque_ptr_valobj = child_valobj->GetChildAtIndex(0, true);
+
+    Status error;
+    opaque_ptr_valobj = opaque_ptr_valobj->Dereference(error);
+    if (error.Success())
+      swift_valobj = opaque_ptr_valobj;
+    else
+      LLDB_LOGF(GetLog(LLDBLog::Types),
+                "Could not dereference opaque storage value object, error: %s",
+                error.AsCString());
+  } else {
+    CompilerType element_type;
+    if (child_type.IsArrayType(&element_type)) {
+      if (element_type.IsCharType()) {
+        swift_valobj = valobj.GetSP();
+      }
+    }
+  }
+  return swift_valobj;
 }
 
 void SwiftLanguageRuntimeImpl::WillStartExecutingUserExpression(
@@ -1793,13 +1893,18 @@ void SwiftLanguageRuntimeImpl::WillStartExecutingUserExpression(
   if (!type_system_or_err) {
     LLDB_LOG_ERROR(
         log, type_system_or_err.takeError(),
-        "SwiftLanguageRuntime: Unable to get pointer to type system");
+        "SwiftLanguageRuntime: Unable to get pointer to type system: {0}");
     return;
   }
 
+  auto ts = *type_system_or_err;
+  if (!ts) {
+    LLDB_LOG(log, "type system no longer live");
+    return;
+  }    
   ConstString BoolName("bool");
   llvm::Optional<uint64_t> bool_size =
-      type_system_or_err->GetBuiltinTypeByName(BoolName).GetByteSize(nullptr);
+      ts->GetBuiltinTypeByName(BoolName).GetByteSize(nullptr);
   if (!bool_size)
     return;
 
@@ -1863,13 +1968,18 @@ void SwiftLanguageRuntimeImpl::DidFinishExecutingUserExpression(
   if (!type_system_or_err) {
     LLDB_LOG_ERROR(
         log, type_system_or_err.takeError(),
-        "SwiftLanguageRuntime: Unable to get pointer to type system");
+        "SwiftLanguageRuntime: Unable to get pointer to type system: {0}");
     return;
   }
 
+  auto ts = *type_system_or_err;
+  if (!ts) {
+    LLDB_LOG(log, "type system no longer live");
+    return;
+  }    
   ConstString BoolName("bool");
   llvm::Optional<uint64_t> bool_size =
-      type_system_or_err->GetBuiltinTypeByName(BoolName).GetByteSize(nullptr);
+      ts->GetBuiltinTypeByName(BoolName).GetByteSize(nullptr);
   if (!bool_size)
     return;
 
@@ -2001,7 +2111,10 @@ public:
       : CommandObjectParsed(interpreter, "demangle",
                             "Demangle a Swift mangled name",
                             "language swift demangle"),
-        m_options() {}
+        m_options() {
+    CommandArgumentData mangled_name_arg{eArgTypeSymbol};
+    m_arguments.push_back({mangled_name_arg});
+  }
 
   ~CommandObjectSwift_Demangle() {}
 
@@ -2051,15 +2164,16 @@ protected:
     for (size_t i = 0; i < command.GetArgumentCount(); i++) {
       StringRef name = command.GetArgumentAtIndex(i);
       if (!name.empty()) {
-        swift::Demangle::Context demangle_ctx;
+        Context ctx;
         NodePointer node_ptr = nullptr;
         // Match the behavior of swift-demangle and accept Swift symbols without
         // the leading `$`. This makes symbol copy & paste more convenient.
         if (name.startswith("S") || name.startswith("s")) {
           std::string correctedName = std::string("$") + name.str();
-          node_ptr = demangle_ctx.demangleSymbolAsNode(correctedName);
+          node_ptr =
+              SwiftLanguageRuntime::DemangleSymbolAsNode(correctedName, ctx);
         } else {
-          node_ptr = demangle_ctx.demangleSymbolAsNode(name);
+          node_ptr = SwiftLanguageRuntime::DemangleSymbolAsNode(name, ctx);
         }
         if (node_ptr) {
           if (m_options.m_expand)
@@ -2115,7 +2229,7 @@ private:
 
     EvaluateExpressionOptions eval_options;
     eval_options.SetLanguage(lldb::eLanguageTypeSwift);
-    eval_options.SetResultIsInternal(true);
+    eval_options.SetSuppressPersistentResult(true);
     ValueObjectSP result_valobj_sp;
     std::string Expr =
         (llvm::Twine("Swift._get") + Kind + llvm::Twine("RetainCount(") +
@@ -2140,7 +2254,7 @@ protected:
     StackFrameSP frame_sp(m_exe_ctx.GetFrameSP());
     EvaluateExpressionOptions options;
     options.SetLanguage(lldb::eLanguageTypeSwift);
-    options.SetResultIsInternal(true);
+    options.SetSuppressPersistentResult(true);
     ValueObjectSP result_valobj_sp;
 
     // We want to evaluate first the object we're trying to get the
@@ -2221,11 +2335,6 @@ void SwiftLanguageRuntime::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-lldb_private::ConstString SwiftLanguageRuntime::GetPluginNameStatic() {
-  static ConstString g_name("swift");
-  return g_name;
-}
-
 #define FORWARD(METHOD, ...)                                                   \
   assert(m_impl || m_stub);                                                    \
   return m_impl ? m_impl->METHOD(__VA_ARGS__) : m_stub->METHOD(__VA_ARGS__);
@@ -2236,6 +2345,12 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
     Value::ValueType &value_type) {
   FORWARD(GetDynamicTypeAndAddress, in_value, use_dynamic, class_type_or_name,
           address, value_type);
+}
+
+CompilerType SwiftLanguageRuntime::BindGenericTypeParameters(
+    CompilerType unbound_type,
+    std::function<CompilerType(unsigned, unsigned)> type_resolver) {
+  FORWARD(BindGenericTypeParameters, unbound_type, type_resolver);
 }
 
 void SwiftLanguageRuntime::DumpTyperef(CompilerType type,
@@ -2266,10 +2381,9 @@ lldb::addr_t SwiftLanguageRuntime::FixupAddress(lldb::addr_t addr,
   FORWARD(FixupAddress, addr, type, error);
 }
 
-SwiftLanguageRuntime::MetadataPromiseSP
-SwiftLanguageRuntime::GetMetadataPromise(lldb::addr_t addr,
-                                         ValueObject &for_object) {
-  FORWARD(GetMetadataPromise, addr, for_object);
+CompilerType SwiftLanguageRuntime::GetTypeFromMetadata(TypeSystemSwift &tss,
+                                                       Address addr) {
+  FORWARD(GetTypeFromMetadata, tss, addr);
 }
 
 bool SwiftLanguageRuntime::IsStoredInlineInBuffer(CompilerType type) {
@@ -2283,8 +2397,9 @@ llvm::Optional<uint64_t> SwiftLanguageRuntime::GetMemberVariableOffset(
 }
 
 llvm::Optional<unsigned>
-SwiftLanguageRuntime::GetNumChildren(CompilerType type, ValueObject *valobj) {
-  FORWARD(GetNumChildren, type, valobj);
+SwiftLanguageRuntime::GetNumChildren(CompilerType type,
+                                     ExecutionContextScope *exe_scope) {
+  FORWARD(GetNumChildren, type, exe_scope);
 }
 
 llvm::Optional<std::string> SwiftLanguageRuntime::GetEnumCaseName(

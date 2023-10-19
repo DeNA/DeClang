@@ -15,6 +15,7 @@
 #include "llvm/Support/JSON.h"
 #include <atomic>
 #include <chrono>
+#include <ratio>
 #include <string>
 #include <vector>
 
@@ -99,11 +100,25 @@ struct ModuleStats {
   std::string path;
   std::string uuid;
   std::string triple;
+  // Path separate debug info file, or empty if none.
+  std::string symfile_path;
+  // If the debug info is contained in multiple files where each one is
+  // represented as a separate lldb_private::Module, then these are the
+  // identifiers of these modules in the global module list. This allows us to
+  // track down all of the stats that contribute to this module.
+  std::vector<intptr_t> symfile_modules;
   double symtab_parse_time = 0.0;
   double symtab_index_time = 0.0;
   double debug_parse_time = 0.0;
   double debug_index_time = 0.0;
   uint64_t debug_info_size = 0;
+  bool symtab_loaded_from_cache = false;
+  bool symtab_saved_to_cache = false;
+  bool debug_info_index_loaded_from_cache = false;
+  bool debug_info_index_saved_to_cache = false;
+  bool debug_info_enabled = true;
+  bool symtab_stripped = false;
+  bool debug_info_had_variable_errors = false;
 };
 
 struct ConstStringStats {
@@ -119,6 +134,7 @@ public:
   void SetLaunchOrAttachTime();
   void SetFirstPrivateStopTime();
   void SetFirstPublicStopTime();
+  void IncreaseSourceMapDeduceCount();
 
   StatsDuration &GetCreateTime() { return m_create_time; }
   StatsSuccessFail &GetExpressionStats() { return m_expr_eval; }
@@ -132,6 +148,7 @@ protected:
   StatsSuccessFail m_expr_eval{"expressionEvaluation"};
   StatsSuccessFail m_frame_var{"frameVariable"};
   std::vector<intptr_t> m_module_identifiers;
+  uint32_t m_source_map_deduce_count = 0;
   void CollectStats(Target &target);
 };
 

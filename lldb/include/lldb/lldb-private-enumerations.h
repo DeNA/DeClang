@@ -128,16 +128,10 @@ enum InstructionType {
 
 /// Format category entry types
 enum FormatCategoryItem {
-  eFormatCategoryItemSummary = 0x0001,
-  eFormatCategoryItemRegexSummary = 0x0002,
-  eFormatCategoryItemFilter = 0x0004,
-  eFormatCategoryItemRegexFilter = 0x0008,
-  eFormatCategoryItemSynth = 0x0010,
-  eFormatCategoryItemRegexSynth = 0x0020,
-  eFormatCategoryItemValue = 0x0040,
-  eFormatCategoryItemRegexValue = 0x0080,
-  eFormatCategoryItemValidator = 0x0100,
-  eFormatCategoryItemRegexValidator = 0x0200
+  eFormatCategoryItemSummary = 1,
+  eFormatCategoryItemFilter = 1 << 1,
+  eFormatCategoryItemSynth = 1 << 2,
+  eFormatCategoryItemFormat = 1 << 3,
 };
 
 /// Expression execution policies
@@ -175,6 +169,14 @@ typedef enum SwiftModuleLoadingMode {
   eSwiftModuleLoadingModeOnlySerialized,   // Load via .swiftmodule only
   eSwiftModuleLoadingModeOnlyInterface,    // Load via .swiftinterface only
 } SwiftModuleLoadingMode;
+
+// BEGIN SWIFT
+enum EnableSwiftCxxInterop {
+  eAutoDetectSwiftCxxInterop,
+  eEnableSwiftCxxInterop,
+  eDisableSwiftCxxInterop
+};
+// END SWIFT
 
 // Loading modules from memory
 enum MemoryModuleLoadLevel {
@@ -233,6 +235,20 @@ enum StatisticKind {
   StatisticMax = 4
 };
 
+// Enumeration that can be used to specify a log handler.
+enum LogHandlerKind {
+  eLogHandlerStream,
+  eLogHandlerCallback,
+  eLogHandlerCircular,
+  eLogHandlerSystem,
+  eLogHandlerDefault = eLogHandlerStream,
+};
+
+enum LoadDependentFiles {
+  eLoadDependentsDefault,
+  eLoadDependentsYes,
+  eLoadDependentsNo,
+};
 
 inline std::string GetStatDescription(lldb_private::StatisticKind K) {
    switch (K) {
@@ -271,5 +287,10 @@ template <> struct format_provider<lldb_private::Vote> {
   }
 };
 }
+
+enum SelectMostRelevant : bool {
+  SelectMostRelevantFrame = true,
+  DoNoSelectMostRelevantFrame = false,
+};
 
 #endif // LLDB_LLDB_PRIVATE_ENUMERATIONS_H

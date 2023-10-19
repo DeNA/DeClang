@@ -6,16 +6,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_TOOLING_DEPENDENCY_SCANNING_WORKER_H
-#define LLVM_CLANG_TOOLING_DEPENDENCY_SCANNING_WORKER_H
+#ifndef LLVM_CLANG_TOOLING_DEPENDENCYSCANNING_DEPENDENCYSCANNINGWORKER_H
+#define LLVM_CLANG_TOOLING_DEPENDENCYSCANNING_DEPENDENCYSCANNINGWORKER_H
 
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Frontend/PCHContainerOperations.h"
-#include "clang/Lex/PreprocessorExcludedConditionalDirectiveSkipMapping.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningService.h"
 #include "clang/Tooling/DependencyScanning/ModuleDepCollector.h"
+#include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include <string>
@@ -27,11 +27,27 @@ class DependencyOutputOptions;
 namespace tooling {
 namespace dependencies {
 
+using CachingOnDiskFileSystemPtr =
+    llvm::IntrusiveRefCntPtr<llvm::cas::CachingOnDiskFileSystem>;
+
 class DependencyScanningWorkerFilesystem;
+
+/// A command-line tool invocation that is part of building a TU.
+///
+/// \see TranslationUnitDeps::Commands.
+struct Command {
+  std::string Executable;
+  std::vector<std::string> Arguments;
+
+  /// The \c ActionCache key for this translation unit, if any.
+  std::optional<std::string> TUCacheKey;
+};
 
 class DependencyConsumer {
 public:
   virtual ~DependencyConsumer() {}
+
+  virtual void handleBuildCommand(Command Cmd) {}
 
   virtual void
   handleDependencyOutputOpts(const DependencyOutputOptions &Opts) = 0;
@@ -43,6 +59,45 @@ public:
   virtual void handleModuleDependency(ModuleDeps MD) = 0;
 
   virtual void handleContextHash(std::string Hash) = 0;
+
+  virtual void handleCASFileSystemRootID(std::string ID) {}
+
+  virtual void handleIncludeTreeID(std::string ID) {}
+};
+
+/// Dependency scanner callbacks that are used during scanning to influence the
+/// behaviour of the scan - for example, to customize the scanned invocations.
+class DependencyActionController {
+public:
+  virtual ~DependencyActionController();
+
+  virtual std::string lookupModuleOutput(const ModuleID &ID,
+                                         ModuleOutputKind Kind) = 0;
+
+  virtual llvm::Error initialize(CompilerInstance &ScanInstance,
+                                 CompilerInvocation &NewInvocation) {
+    return llvm::Error::success();
+  }
+
+  virtual llvm::Error finalize(CompilerInstance &ScanInstance,
+                               CompilerInvocation &NewInvocation) {
+    return llvm::Error::success();
+  }
+
+  virtual llvm::Error
+  initializeModuleBuild(CompilerInstance &ModuleScanInstance) {
+    return llvm::Error::success();
+  }
+
+  virtual llvm::Error
+  finalizeModuleBuild(CompilerInstance &ModuleScanInstance) {
+    return llvm::Error::success();
+  }
+
+  virtual llvm::Error finalizeModuleInvocation(CompilerInvocation &CI,
+                                               const ModuleDeps &MD) {
+    return llvm::Error::success();
+  }
 };
 
 /// An individual dependency scanning worker that is able to run on its own
@@ -53,46 +108,79 @@ public:
 /// using the regular processing run.
 class DependencyScanningWorker {
 public:
-  DependencyScanningWorker(DependencyScanningService &Service);
+  DependencyScanningWorker(DependencyScanningService &Service,
+                           llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS);
 
   /// Run the dependency scanning tool for a given clang driver command-line,
   /// and report the discovered dependencies to the provided consumer. If \p
   /// ModuleName isn't empty, this function reports the dependencies of module
   /// \p ModuleName.
   ///
+  /// \returns false if clang errors occurred (with diagnostics reported to
+  /// \c DiagConsumer), true otherwise.
+  bool computeDependencies(StringRef WorkingDirectory,
+                           const std::vector<std::string> &CommandLine,
+                           DependencyConsumer &DepConsumer,
+                           DependencyActionController &Controller,
+                           DiagnosticConsumer &DiagConsumer,
+                           llvm::Optional<StringRef> ModuleName = None);
   /// \returns A \c StringError with the diagnostic output if clang errors
   /// occurred, success otherwise.
-  llvm::Error computeDependencies(StringRef WorkingDirectory,
-                                  const std::vector<std::string> &CommandLine,
-                                  DependencyConsumer &Consumer,
-                                  llvm::Optional<StringRef> ModuleName = None);
+  llvm::Error computeDependencies(
+      StringRef WorkingDirectory, const std::vector<std::string> &CommandLine,
+      DependencyConsumer &Consumer, DependencyActionController &Controller,
+      llvm::Optional<StringRef> ModuleName = None);
 
-  ScanningOutputFormat getFormat() const { return Format; }
+  /// Scan from a compiler invocation.
+  /// If \p DiagGenerationAsCompilation is true it will generate error
+  /// diagnostics same way as the normal compilation, with "N errors generated"
+  /// message and the serialized diagnostics file emitted if the
+  /// \p DiagOpts.DiagnosticSerializationFile setting is set for the invocation.
+  void computeDependenciesFromCompilerInvocation(
+      std::shared_ptr<CompilerInvocation> Invocation,
+      StringRef WorkingDirectory, DependencyConsumer &Consumer,
+      DependencyActionController &Controller, DiagnosticConsumer &DiagsConsumer,
+      raw_ostream *VerboseOS, bool DiagGenerationAsCompilation);
 
-  llvm::StringSet<> AlreadySeen;
+  ScanningOutputFormat getScanningFormat() const { return Format; }
+
+  CachingOnDiskFileSystemPtr getCASFS() { return CacheFS; }
+  const CASOptions &getCASOpts() const { return CASOpts; }
+  std::shared_ptr<cas::ObjectStore> getCAS() const { return CAS; }
+
+  /// If \p DependencyScanningService enabled sharing of \p FileManager this
+  /// will return the same instance, otherwise it will create a new one for
+  /// each invocation.
+  llvm::IntrusiveRefCntPtr<FileManager> getOrCreateFileManager() const;
+
+  bool shouldEagerLoadModules() const { return EagerLoadModules; }
 
 private:
   std::shared_ptr<PCHContainerOperations> PCHContainerOps;
-  std::unique_ptr<ExcludedPreprocessorDirectiveSkipMapping> PPSkipMappings;
-
-  /// The physical filesystem overlaid by `InMemoryFS`.
-  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> RealFS;
-  /// The in-memory filesystem laid on top the physical filesystem in `RealFS`.
-  llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> InMemoryFS;
-  /// The file system that is used by each worker when scanning for
-  /// dependencies. This filesystem persists across multiple compiler
-  /// invocations.
+  /// The file system to be used during the scan.
+  /// This is either \c FS passed in the constructor (when performing canonical
+  /// preprocessing), or \c DepFS (when performing dependency directives scan).
+  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> BaseFS;
+  /// When performing dependency directives scan, this is the caching (and
+  /// dependency-directives-extracting) filesystem overlaid on top of \c FS
+  /// (passed in the constructor).
   llvm::IntrusiveRefCntPtr<DependencyScanningWorkerFilesystem> DepFS;
-  /// The file manager that is reused across multiple invocations by this
-  /// worker. If null, the file manager will not be reused.
-  llvm::IntrusiveRefCntPtr<FileManager> Files;
   ScanningOutputFormat Format;
   /// Whether to optimize the modules' command-line arguments.
   bool OptimizeArgs;
+  /// Whether to set up command-lines to load PCM files eagerly.
+  bool EagerLoadModules;
+
+  /// The caching file system.
+  CachingOnDiskFileSystemPtr CacheFS;
+  /// The CAS Dependency Filesytem. This is not set at the sametime as DepFS;
+  llvm::IntrusiveRefCntPtr<DependencyScanningCASFilesystem> DepCASFS;
+  CASOptions CASOpts;
+  std::shared_ptr<cas::ObjectStore> CAS;
 };
 
 } // end namespace dependencies
 } // end namespace tooling
 } // end namespace clang
 
-#endif // LLVM_CLANG_TOOLING_DEPENDENCY_SCANNING_WORKER_H
+#endif // LLVM_CLANG_TOOLING_DEPENDENCYSCANNING_DEPENDENCYSCANNINGWORKER_H

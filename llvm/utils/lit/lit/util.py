@@ -127,6 +127,23 @@ def usable_core_count():
 
     return n
 
+def abs_path_preserve_drive(path):
+    """Return the absolute path without resolving drive mappings on Windows.
+
+    """
+    if platform.system() == "Windows":
+        # Windows has limitations on path length (MAX_PATH) that
+        # can be worked around using substitute drives, which map
+        # a drive letter to a longer path on another drive.
+        # Since Python 3.8, os.path.realpath resolves sustitute drives,
+        # so we should not use it. In Python 3.7, os.path.realpath
+        # was implemented as os.path.abspath.
+        return os.path.abspath(path)
+    else:
+        # On UNIX, the current directory always has symbolic links resolved,
+        # so any program accepting relative paths cannot preserve symbolic
+        # links in paths and we should always use os.path.realpath.
+        return os.path.realpath(path)
 
 def mkdir(path):
     try:
@@ -232,7 +249,7 @@ def which(command, paths=None):
         for ext in pathext:
             p = os.path.join(path, command + ext)
             if os.path.exists(p) and not os.path.isdir(p):
-                return os.path.normcase(os.path.normpath(p))
+                return os.path.normcase(os.path.abspath(p))
 
     return None
 
@@ -314,7 +331,8 @@ class ExecuteCommandTimeoutException(Exception):
 kUseCloseFDs = not (platform.system() == 'Windows')
 
 
-def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
+def executeCommand(command, cwd=None, env=None, input=None, timeout=0,
+                   redirect_stderr=False):
     """Execute command ``command`` (list of arguments or string) with.
 
     * working directory ``cwd`` (str), use None to use the current
@@ -323,6 +341,7 @@ def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
     * Input to the command ``input`` (str), use string to pass
       no input.
     * Max execution time ``timeout`` (int) seconds. Use 0 for no timeout.
+    * ``redirect_stderr`` (bool), use True if redirect stderr to stdout
 
     Returns a tuple (out, err, exitCode) where
     * ``out`` (str) is the standard output of running the command
@@ -335,10 +354,11 @@ def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
     """
     if input is not None:
         input = to_bytes(input)
+    err_out = subprocess.STDOUT if redirect_stderr else subprocess.PIPE
     p = subprocess.Popen(command, cwd=cwd,
                          stdin=subprocess.PIPE,
                          stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE,
+                         stderr=err_out,
                          env=env, close_fds=kUseCloseFDs)
     timerObject = None
     # FIXME: Because of the way nested function scopes work in Python 2.x we
@@ -365,7 +385,7 @@ def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
 
     # Ensure the resulting output is always of string type.
     out = to_string(out)
-    err = to_string(err)
+    err = '' if redirect_stderr else to_string(err)
 
     if hitTimeOut[0]:
         raise ExecuteCommandTimeoutException(
@@ -381,28 +401,13 @@ def executeCommand(command, cwd=None, env=None, input=None, timeout=0):
 
     return out, err, exitCode
 
-# A predicate to determine whether or not a specific config's target_triple is
-# referring to macOS. The reason that this is useful is that macOS has multiple
-# valid triples. This just centralizes the query into a convenient place.
-def isMacOSTriple(target):
-    arches = [
-        'x86_64',
-        'i386',
-        'x86_64h'
-    ]
 
-    names = [
-        'darwin',
-        'macosx'
-    ]
+def isMacOSTriple(target_triple):
+    """Whether the given target triple is for macOS,
+       e.g. x86_64-apple-darwin, arm64-apple-macos
+    """
+    return 'darwin' in target_triple or 'macos' in target_triple
 
-    for a in arches:
-        for n in names:
-            triple = '%s-apple-%s' % (a,n)
-            if triple not in target:
-                continue
-            return True
-    return False
 
 def usePlatformSdkOnDarwin(config, lit_config):
     # On Darwin, support relocatable SDKs by providing Clang with a
@@ -423,7 +428,7 @@ def usePlatformSdkOnDarwin(config, lit_config):
 
 
 def findPlatformSdkVersionOnMacOS(config, lit_config):
-    if 'darwin' in config.target_triple:
+    if isMacOSTriple(config.target_triple):
         try:
             cmd = subprocess.Popen(['xcrun', '--show-sdk-version', '--sdk', 'macosx'],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)

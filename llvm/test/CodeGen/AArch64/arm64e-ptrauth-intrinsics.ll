@@ -31,7 +31,7 @@ define i64 @test_auth_ia(i64 %arg, i64 %arg1) {
 ; TRAP-NEXT:    brk #0xc470
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 0, i64 %arg1)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 0, i64 %arg1)
   ret i64 %tmp
 }
 
@@ -61,7 +61,7 @@ define i64 @test_auth_ia_zero(i64 %arg) {
 ; TRAP-NEXT:    brk #0xc470
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 0, i64 0)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 0, i64 0)
   ret i64 %tmp
 }
 
@@ -91,7 +91,7 @@ define i64 @test_auth_ib(i64 %arg, i64 %arg1) {
 ; TRAP-NEXT:    brk #0xc471
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 1, i64 %arg1)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 1, i64 %arg1)
   ret i64 %tmp
 }
 
@@ -121,7 +121,7 @@ define i64 @test_auth_ib_zero(i64 %arg) {
 ; TRAP-NEXT:    brk #0xc471
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 1, i64 0)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 1, i64 0)
   ret i64 %tmp
 }
 
@@ -151,7 +151,7 @@ define i64 @test_auth_da(i64 %arg, i64 %arg1) {
 ; TRAP-NEXT:    brk #0xc472
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 2, i64 %arg1)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 2, i64 %arg1)
   ret i64 %tmp
 }
 
@@ -181,7 +181,7 @@ define i64 @test_auth_da_zero(i64 %arg) {
 ; TRAP-NEXT:    brk #0xc472
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 2, i64 0)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 2, i64 0)
   ret i64 %tmp
 }
 
@@ -211,7 +211,7 @@ define i64 @test_auth_db(i64 %arg, i64 %arg1) {
 ; TRAP-NEXT:    brk #0xc473
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 3, i64 %arg1)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 3, i64 %arg1)
   ret i64 %tmp
 }
 
@@ -241,88 +241,7 @@ define i64 @test_auth_db_zero(i64 %arg) {
 ; TRAP-NEXT:    brk #0xc473
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 3, i64 0)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_ia(i64 %arg, i64 %arg1) {
-; ALL-LABEL: test_sign_ia:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacia x0, x1
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 0, i64 %arg1)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_ia_zero(i64 %arg) {
-; ALL-LABEL: test_sign_ia_zero:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    paciza x0
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 0, i64 0)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_ib(i64 %arg, i64 %arg1) {
-; ALL-LABEL: test_sign_ib:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacib x0, x1
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 1, i64 %arg1)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_ib_zero(i64 %arg) {
-; ALL-LABEL: test_sign_ib_zero:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacizb x0
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 1, i64 0)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_da(i64 %arg, i64 %arg1) {
-; ALL-LABEL: test_sign_da:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacda x0, x1
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 2, i64 %arg1)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_da_zero(i64 %arg) {
-; ALL-LABEL: test_sign_da_zero:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacdza x0
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 2, i64 0)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_db(i64 %arg, i64 %arg1) {
-; ALL-LABEL: test_sign_db:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacdb x0, x1
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 3, i64 %arg1)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_db_zero(i64 %arg) {
-; ALL-LABEL: test_sign_db_zero:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacdzb x0
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 3, i64 0)
-  ret i64 %tmp
-}
-
-define i64 @test_sign_generic(i64 %arg, i64 %arg1) {
-; ALL-LABEL: test_sign_generic:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacga x0, x0, x1
-; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.sign.generic.i64(i64 %arg, i64 %arg1)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 3, i64 0)
   ret i64 %tmp
 }
 
@@ -361,7 +280,7 @@ define i64 @test_resign_ia_ia(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacia x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 0, i64 %arg1, i32 0, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 0, i64 %arg1, i32 0, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -398,7 +317,7 @@ define i64 @test_resign_ib_ia(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacia x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 1, i64 %arg1, i32 0, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 1, i64 %arg1, i32 0, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -435,7 +354,7 @@ define i64 @test_resign_da_ia(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacia x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 2, i64 %arg1, i32 0, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 2, i64 %arg1, i32 0, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -472,7 +391,7 @@ define i64 @test_resign_db_ia(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacia x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 3, i64 %arg1, i32 0, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 3, i64 %arg1, i32 0, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -509,7 +428,7 @@ define i64 @test_resign_db_ib(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacib x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 3, i64 %arg1, i32 1, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 3, i64 %arg1, i32 1, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -546,7 +465,7 @@ define i64 @test_resign_db_da(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacda x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 3, i64 %arg1, i32 2, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 3, i64 %arg1, i32 2, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -583,7 +502,7 @@ define i64 @test_resign_db_db(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacdb x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 3, i64 %arg1, i32 3, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 3, i64 %arg1, i32 3, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -620,7 +539,7 @@ define i64 @test_resign_iza_db(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacdb x16, x2
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 0, i64 0, i32 3, i64 %arg2)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 0, i64 0, i32 3, i64 %arg2)
   ret i64 %tmp
 }
 
@@ -657,7 +576,7 @@ define i64 @test_resign_da_dzb(i64 %arg, i64 %arg1, i64 %arg2) {
 ; TRAP-NEXT:    pacdzb x16
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.resign.i64(i64 %arg, i32 2, i64 %arg1, i32 3, i64 0)
+  %tmp = call i64 @llvm.ptrauth.resign(i64 %arg, i32 2, i64 %arg1, i32 3, i64 0)
   ret i64 %tmp
 }
 
@@ -666,7 +585,7 @@ define i64 @test_strip(i64 %arg) {
 ; ALL:       ; %bb.0:
 ; ALL-NEXT:    xpaci x0
 ; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.strip.i64(i64 %arg, i32 0)
+  %tmp = call i64 @llvm.ptrauth.strip(i64 %arg, i32 0)
   ret i64 %tmp
 }
 
@@ -675,7 +594,7 @@ define i64 @test_blend(i64 %arg, i64 %arg1) {
 ; ALL:       ; %bb.0:
 ; ALL-NEXT:    bfi x0, x1, #48, #16
 ; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.blend.i64(i64 %arg, i64 %arg1)
+  %tmp = call i64 @llvm.ptrauth.blend(i64 %arg, i64 %arg1)
   ret i64 %tmp
 }
 
@@ -684,7 +603,7 @@ define i64 @test_blend_constant(i64 %arg) {
 ; ALL:       ; %bb.0:
 ; ALL-NEXT:    movk x0, #12345, lsl #48
 ; ALL-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.blend.i64(i64 %arg, i64 12345)
+  %tmp = call i64 @llvm.ptrauth.blend(i64 %arg, i64 12345)
   ret i64 %tmp
 }
 
@@ -715,20 +634,8 @@ define i64 @test_auth_cse(i64 %arg, i64 %arg1) {
 ; TRAP-NEXT:    brk #0xc470
 ; TRAP-NEXT:    add x0, x16, x16
 ; TRAP-NEXT:    ret
-  %tmp0 = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 0, i64 %arg1)
-  %tmp1 = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 0, i64 %arg1)
-  %tmp2 = add i64 %tmp0, %tmp1
-  ret i64 %tmp2
-}
-
-define i64 @test_sign_cse(i64 %arg, i64 %arg1) {
-; ALL-LABEL: test_sign_cse:
-; ALL:       ; %bb.0:
-; ALL-NEXT:    pacia x0, x1
-; ALL-NEXT:    add x0, x0, x0
-; ALL-NEXT:    ret
-  %tmp0 = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 0, i64 %arg1)
-  %tmp1 = call i64 @llvm.ptrauth.sign.i64(i64 %arg, i32 0, i64 %arg1)
+  %tmp0 = call i64 @llvm.ptrauth.auth(i64 %arg, i32 0, i64 %arg1)
+  %tmp1 = call i64 @llvm.ptrauth.auth(i64 %arg, i32 0, i64 %arg1)
   %tmp2 = add i64 %tmp0, %tmp1
   ret i64 %tmp2
 }
@@ -739,8 +646,8 @@ define i64 @test_blend_cse(i64 %arg, i64 %arg1) {
 ; ALL-NEXT:    bfi x0, x1, #48, #16
 ; ALL-NEXT:    add x0, x0, x0
 ; ALL-NEXT:    ret
-  %tmp0 = call i64 @llvm.ptrauth.blend.i64(i64 %arg, i64 %arg1)
-  %tmp1 = call i64 @llvm.ptrauth.blend.i64(i64 %arg, i64 %arg1)
+  %tmp0 = call i64 @llvm.ptrauth.blend(i64 %arg, i64 %arg1)
+  %tmp1 = call i64 @llvm.ptrauth.blend(i64 %arg, i64 %arg1)
   %tmp2 = add i64 %tmp0, %tmp1
   ret i64 %tmp2
 }
@@ -776,13 +683,11 @@ define i64 @test_auth_trap_attribute(i64 %arg, i64 %arg1) "ptrauth-auth-traps" {
 ; TRAP-NEXT:    brk #0xc470
 ; TRAP-NEXT:    mov x0, x16
 ; TRAP-NEXT:    ret
-  %tmp = call i64 @llvm.ptrauth.auth.i64(i64 %arg, i32 0, i64 %arg1)
+  %tmp = call i64 @llvm.ptrauth.auth(i64 %arg, i32 0, i64 %arg1)
   ret i64 %tmp
 }
 
-declare i64 @llvm.ptrauth.auth.i64(i64, i32, i64)
-declare i64 @llvm.ptrauth.sign.i64(i64, i32, i64)
-declare i64 @llvm.ptrauth.sign.generic.i64(i64, i64)
-declare i64 @llvm.ptrauth.resign.i64(i64, i32, i64, i32, i64)
-declare i64 @llvm.ptrauth.strip.i64(i64, i32)
-declare i64 @llvm.ptrauth.blend.i64(i64, i64)
+declare i64 @llvm.ptrauth.auth(i64, i32, i64)
+declare i64 @llvm.ptrauth.resign(i64, i32, i64, i32, i64)
+declare i64 @llvm.ptrauth.strip(i64, i32)
+declare i64 @llvm.ptrauth.blend(i64, i64)

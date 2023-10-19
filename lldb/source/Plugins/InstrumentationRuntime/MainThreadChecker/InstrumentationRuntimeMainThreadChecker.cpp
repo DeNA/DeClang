@@ -61,11 +61,6 @@ void InstrumentationRuntimeMainThreadChecker::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-lldb_private::ConstString
-InstrumentationRuntimeMainThreadChecker::GetPluginNameStatic() {
-  return ConstString("MainThreadChecker");
-}
-
 lldb::InstrumentationRuntimeType
 InstrumentationRuntimeMainThreadChecker::GetTypeStatic() {
   return eInstrumentationRuntimeTypeMainThreadChecker;
@@ -101,7 +96,7 @@ static std::string TranslateObjCNameToSwiftName(std::string className,
     return "";
   }
 
-  auto *ts = llvm::dyn_cast_or_null<TypeSystemSwift>(&*type_system_or_err);
+  auto *ts = llvm::dyn_cast_or_null<TypeSystemSwift>(type_system_or_err->get());
   if (!ts)
     return "";
   auto *ctx = ts->GetSwiftASTContext();
@@ -172,7 +167,8 @@ InstrumentationRuntimeMainThreadChecker::RetrieveReportData(
     return StructuredData::ObjectSP();
 
   ThreadSP thread_sp = exe_ctx_ref.GetThreadSP();
-  StackFrameSP frame_sp = thread_sp->GetSelectedFrame();
+  StackFrameSP frame_sp =
+      thread_sp->GetSelectedFrame(DoNoSelectMostRelevantFrame);
   ModuleSP runtime_module_sp = GetRuntimeModuleSP();
   Target &target = process_sp->GetTarget();
 
@@ -191,14 +187,14 @@ InstrumentationRuntimeMainThreadChecker::RetrieveReportData(
   if (!apiname_ptr)
     return StructuredData::ObjectSP();
 
-  std::string apiName = "";
+  std::string apiName;
   Status read_error;
   target.ReadCStringFromMemory(apiname_ptr, apiName, read_error);
   if (read_error.Fail())
     return StructuredData::ObjectSP();
 
-  std::string className = "";
-  std::string selector = "";
+  std::string className;
+  std::string selector;
   if (apiName.substr(0, 2) == "-[") {
     size_t spacePos = apiName.find(' ');
     if (spacePos != std::string::npos) {
@@ -316,8 +312,9 @@ void InstrumentationRuntimeMainThreadChecker::Activate() {
           .CreateBreakpoint(symbol_address, /*internal=*/true,
                             /*hardware=*/false)
           .get();
+  const bool sync = false;
   breakpoint->SetCallback(
-      InstrumentationRuntimeMainThreadChecker::NotifyBreakpointHit, this, true);
+      InstrumentationRuntimeMainThreadChecker::NotifyBreakpointHit, this, sync);
   breakpoint->SetBreakpointKind("main-thread-checker-report");
   SetBreakpointID(breakpoint->GetID());
 

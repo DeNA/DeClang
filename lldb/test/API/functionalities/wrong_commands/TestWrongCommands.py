@@ -8,10 +8,8 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
+
 class UnknownCommandTestCase(TestBase):
-
-    mydir = TestBase.compute_mydir(__file__)
-
     @no_debug_info_test
     def test_ambiguous_command(self):
         command_interpreter = self.dbg.GetCommandInterpreter()
@@ -20,7 +18,9 @@ class UnknownCommandTestCase(TestBase):
 
         command_interpreter.HandleCommand("g", result)
         self.assertFalse(result.Succeeded())
-        self.assertRegexpMatches(result.GetError(), "Ambiguous command 'g'. Possible matches:")
+        self.assertRegexpMatches(
+            result.GetError(), "Ambiguous command 'g'. Possible matches:"
+        )
         self.assertRegexpMatches(result.GetError(), "gui")
         self.assertRegexpMatches(result.GetError(), "gdb-remote")
         self.assertEquals(1, result.GetError().count("gdb-remote"))

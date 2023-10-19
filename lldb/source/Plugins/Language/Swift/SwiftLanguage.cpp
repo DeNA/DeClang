@@ -27,6 +27,8 @@
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/Variable.h"
 #include "lldb/Symbol/VariableList.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/LLDBLog.h"
 
 #include "LogChannelSwift.h"
 #include "ObjCRuntimeSyntheticProvider.h"
@@ -102,11 +104,6 @@ void SwiftLanguage::Terminate() {
       .erase(g_NSArrayClass1);
 
   PluginManager::UnregisterPlugin(CreateInstance);
-}
-
-lldb_private::ConstString SwiftLanguage::GetPluginNameStatic() {
-  static ConstString g_name("swift");
-  return g_name;
 }
 
 bool SwiftLanguage::SymbolNameFitsToLanguage(Mangled mangled) const {
@@ -293,10 +290,6 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
                 lldb_private::formatters::swift::Array_SummaryProvider,
                 "Swift.Array summary provider",
                 ConstString("^Swift.Array<.+>$"), summary_flags, true);
-  AddCXXSummary(swift_category_sp,
-                lldb_private::formatters::swift::Array_SummaryProvider,
-                "Swift.Array summary provider",
-                ConstString("Swift._NSSwiftArray"), summary_flags, false);
   AddCXXSummary(
       swift_category_sp, lldb_private::formatters::swift::Array_SummaryProvider,
       "Swift.ContiguousArray summary provider",
@@ -346,11 +339,6 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
       lldb_private::formatters::swift::ArraySyntheticFrontEndCreator,
       "Swift.Array synthetic children", ConstString("^Swift.Array<.+>$"),
       synth_flags, true);
-  AddCXXSynthetic(
-      swift_category_sp,
-      lldb_private::formatters::swift::ArraySyntheticFrontEndCreator,
-      "Swift.Array synthetic children", ConstString("Swift._NSSwiftArray"),
-      synth_flags, false);
   AddCXXSynthetic(
       swift_category_sp,
       lldb_private::formatters::swift::ArraySyntheticFrontEndCreator,
@@ -432,9 +420,21 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
   AddCXXSummary(swift_category_sp, string_summary_provider,
                 "Swift.String summary provider", ConstString("Swift.String"),
                 summary_flags);
+  AddCXXSummary(swift_category_sp,
+                lldb_private::formatters::swift::StringIndex_SummaryProvider,
+                "Swift String.Index summary provider",
+                ConstString("Swift.String.Index"), summary_flags);
   bool (*staticstring_summary_provider)(ValueObject &, Stream &,
                                         const TypeSummaryOptions &) =
       lldb_private::formatters::swift::StaticString_SummaryProvider;
+  {
+    TypeSummaryImpl::Flags substring_summary_flags = summary_flags;
+    substring_summary_flags.SetDontShowChildren(false);
+    AddCXXSummary(swift_category_sp,
+                  lldb_private::formatters::swift::Substring_SummaryProvider,
+                  "Swift.Substring summary provider",
+                  ConstString("Swift.Substring"), substring_summary_flags);
+  }
   AddCXXSummary(swift_category_sp, staticstring_summary_provider,
                 "Swift.StaticString summary provider",
                 ConstString("Swift.StaticString"), summary_flags);
@@ -476,8 +476,6 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
 
   // do not move the relative order of these - @unchecked needs to come first or
   // else pain will ensue
-  AddSummary(swift_category_sp, swift_unchecked_optional_summary_sp,
-             ConstString("^Swift.ImplicitlyUnwrappedOptional<.+>$"), true);
   AddSummary(swift_category_sp, swift_optional_summary_sp,
              ConstString("^Swift.Optional<.+>$"), true);
 
@@ -491,12 +489,6 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
   AddSummary(swift_category_sp, swift_optional_summary_sp, ConstString("()?"),
              false);
 
-  AddCXXSynthetic(swift_category_sp,
-                  lldb_private::formatters::swift::
-                      SwiftUncheckedOptionalSyntheticFrontEndCreator,
-                  "Swift.Optional synthetic children",
-                  ConstString("^Swift.ImplicitlyUnwrappedOptional<.+>$"),
-                  optional_synth_flags, true);
   AddCXXSynthetic(
       swift_category_sp,
       lldb_private::formatters::swift::SwiftOptionalSyntheticFrontEndCreator,
@@ -571,22 +563,12 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
                 "GLKit summary provider", ConstString(GLKitTypes),
                 simd_summary_flags, true);
 
-  TypeSummaryImpl::Flags nil_summary_flags;
-  nil_summary_flags.SetCascades(true)
-      .SetDontShowChildren(true)
-      .SetDontShowValue(true)
-      .SetHideItemNames(false)
-      .SetShowMembersOneLiner(false)
-      .SetSkipPointers(true)
-      .SetSkipReferences(false);
-
-  AddStringSummary(swift_category_sp, "nil", ConstString("Swift._Nil"),
-                   nil_summary_flags);
-
   AddStringSummary(swift_category_sp, "${var.native}",
                    ConstString("CoreGraphics.CGFloat"), summary_flags);
   AddStringSummary(swift_category_sp, "${var.native}",
                    ConstString("Foundation.CGFloat"), summary_flags);
+  AddStringSummary(swift_category_sp, "${var.native}",
+                   ConstString("CoreFoundation.CGFloat"), summary_flags);
 }
 
 static void
@@ -652,6 +634,11 @@ LoadFoundationValueTypesFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
       swift_category_sp,
       lldb_private::formatters::swift::Decimal_SummaryProvider,
       "Decimal summary provider", ConstString("Foundation.Decimal"),
+      TypeSummaryImpl::Flags(summary_flags).SetDontShowChildren(true));
+
+  lldb_private::formatters::AddCXXSummary(
+      swift_category_sp, lldb_private::formatters::NSTimeZoneSummaryProvider,
+      "NSTimeZone summary provider", ConstString("Foundation._NSSwiftTimeZone"),
       TypeSummaryImpl::Flags(summary_flags).SetDontShowChildren(true));
 
   lldb_private::formatters::AddCXXSynthetic(
@@ -751,6 +738,147 @@ SwiftLanguage::GetHardcodedSummaries() {
   return g_formatters;
 }
 
+static llvm::StringRef
+ExtractSwiftTypeNameFromCxxInteropType(CompilerType type) {
+  // Try to recognize a Swift type wrapped in a C++ interop wrapper class.
+  // These types have a typedef from a char to the swift mangled name, and a
+  // static constexpr char field whose type is the typedef, and whose name
+  // is __swift_mangled_name.
+  // These classes will look something like:
+  // class CxxBridgedClass {
+  //   [Layout specific variables]
+  //   typedef char $sClassMangledNameHere;
+  //   static inline constexpr $sClassMangledNameHere __swift_mangled_name = 0;
+  // }
+
+  Log *log(GetLog(LLDBLog::DataFormatters));
+  // This only makes sense for Clang types.
+  auto tsc = type.GetTypeSystem().dyn_cast_or_null<TypeSystemClang>();
+  if (!tsc)
+    return {};
+
+  // We operate directly on the qualified type because the TypeSystem
+  // interface doesn't allow us to check for static constexpr members.
+  auto qual_type = TypeSystemClang::GetQualType(type.GetOpaqueQualType());
+  auto *record_type =
+      llvm::dyn_cast_or_null<clang::RecordType>(qual_type.getTypePtrOrNull());
+  if (!record_type) {
+    LLDB_LOGV(log, "[ExtractSwiftTypeFromCxxInteropType] "
+                   "Type is not a record type.");
+    return {};
+  }
+
+  const clang::RecordDecl *record_decl = record_type->getDecl();
+  for (auto *child_decl : record_decl->decls()) {
+    auto *var_decl = llvm::dyn_cast<clang::VarDecl>(child_decl);
+    if (!var_decl)
+      continue;
+
+    auto name = var_decl->getName();
+    if (name != "__swift_mangled_name")
+      continue;
+
+    const auto *typedef_type =
+        llvm::dyn_cast<clang::TypedefType>(var_decl->getType());
+    if (!typedef_type)
+      break;
+
+    auto *decl = typedef_type->getDecl();
+    if (!decl)
+      break;
+
+    return decl->getName();
+  }
+  return {};
+}
+
+static CompilerType ExtractSwiftTypeFromCxxInteropTypeName(
+    CompilerType type, llvm::StringRef swift_name, TypeSystemSwift &ts,
+    SwiftLanguageRuntime &swift_runtime) {
+  if (!swift::Demangle::isMangledName(swift_name))
+    return {};
+
+  CompilerType swift_type =
+      ts.GetTypeFromMangledTypename(ConstString(swift_name));
+  if (!swift_type)
+    return {};
+
+  auto bound_type = swift_runtime.BindGenericTypeParameters(
+      swift_type, [&](unsigned depth, unsigned index) -> CompilerType {
+        assert(depth == 0 && "Unexpected depth! C++ interop does not support "
+                             "nested generic parameters");
+        if (depth > 0)
+          return {};
+
+        CompilerType templated_type = type.GetTypeTemplateArgument(index);
+        CompilerType substituted_type = ExtractSwiftTypeFromCxxInteropTypeName(
+            templated_type,
+            ExtractSwiftTypeNameFromCxxInteropType(templated_type), ts,
+            swift_runtime);
+
+        // The generic type might also not be a user defined type which
+        // ExtractSwiftTypeFromCxxInteropType can find, but which is still
+        // convertible to Swift (for example, int -> Int32). Attempt to
+        // convert it to a Swift type.
+        if (!substituted_type)
+          substituted_type = ts.ConvertClangTypeToSwiftType(templated_type);
+        return substituted_type;
+      });
+  return bound_type;
+}
+
+/// Synthetic child that wraps a value object.
+class ValueObjectWrapperSyntheticChildren : public SyntheticChildren {
+  class ValueObjectWrapperFrontEndProvider : public SyntheticChildrenFrontEnd {
+  public:
+    ValueObjectWrapperFrontEndProvider(ValueObject &backend)
+        : SyntheticChildrenFrontEnd(backend) {}
+
+    size_t CalculateNumChildren() override {
+      return 1;
+    }
+
+    lldb::ValueObjectSP GetChildAtIndex(size_t idx) override {
+      return idx == 0 ? m_backend.GetSP() : nullptr;
+    }
+
+    size_t GetIndexOfChildWithName(ConstString name) override {
+      return m_backend.GetName() == name ? 0 : UINT32_MAX;
+    }
+
+    bool Update() override { return false; }
+
+    bool MightHaveChildren() override { return true; }
+
+    ConstString GetSyntheticTypeName() override {
+      return m_backend.GetCompilerType().GetTypeName();
+    }
+  };
+
+public:
+  ValueObjectWrapperSyntheticChildren(ValueObjectSP valobj, const Flags &flags) 
+      : SyntheticChildren(flags), m_valobj(valobj) {}
+
+  SyntheticChildrenFrontEnd::AutoPointer
+  GetFrontEnd(ValueObject &backend) override {
+    if (!m_valobj)
+      return nullptr;
+    // We ignore the backend parameter here, as we have a more specific one
+    // available.
+    return std::make_unique<ValueObjectWrapperFrontEndProvider>(*m_valobj); 
+  }
+
+  bool IsScripted() override { return false; }
+
+  std::string GetDescription() override {
+    return "C++ bridged synthetic children";
+  }
+
+private:
+  ValueObjectSP m_valobj;
+};
+
+
 HardcodedFormatters::HardcodedSyntheticFinder
 SwiftLanguage::GetHardcodedSynthetics() {
   static std::once_flag g_initialize;
@@ -789,9 +917,8 @@ SwiftLanguage::GetHardcodedSynthetics() {
               bool is_imported = false;
 
               if (type.IsValid()) {
-                TypeSystemSwift *swift_ast_ctx =
-                    llvm::dyn_cast_or_null<TypeSystemSwift>(
-                        type.GetTypeSystem());
+                auto swift_ast_ctx =
+                    type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
                 if (swift_ast_ctx && swift_ast_ctx->IsImportedType(
                                          type.GetOpaqueQualType(), nullptr))
                   is_imported = true;
@@ -877,6 +1004,149 @@ SwiftLanguage::GetHardcodedSynthetics() {
           }
           return nullptr;
         });
+    g_formatters.push_back([](lldb_private::ValueObject &valobj,
+                              lldb::DynamicValueType dyn_type,
+                              FormatManager &format_manager)
+                               -> lldb::SyntheticChildrenSP {
+      Log *log(GetLog(LLDBLog::DataFormatters));
+      auto type = valobj.GetCompilerType();
+
+      // First, check whether this is a C++ wrapped Swift type.
+      llvm::StringRef swift_type_name =
+          ExtractSwiftTypeNameFromCxxInteropType(type);
+      if (swift_type_name.empty()) {
+        LLDB_LOGV(log, "[Matching CxxBridgedSyntheticChildProvider] - "
+                       "Did not find Swift type.");
+        return nullptr;
+      }
+
+      // Extract the Swift type.
+      ProcessSP process_sp(valobj.GetProcessSP());
+      auto *swift_runtime = SwiftLanguageRuntime::Get(process_sp);
+      if (!swift_runtime)
+        LLDB_LOGV(log, "[Matching CxxBridgedSyntheticChildProvider] - "
+                       "Could not get the swift runtime.");
+
+      llvm::Optional<SwiftScratchContextReader> scratch_ctx_reader =
+          valobj.GetSwiftScratchContext();
+      if (!scratch_ctx_reader || !scratch_ctx_reader->get()) {
+        LLDB_LOGV(log, "[Matching CxxBridgedSyntheticChildProvider] - "
+                       "Could not get the Swift scratch context.");
+        return nullptr;
+      }
+      auto &ts = *scratch_ctx_reader->get();
+      CompilerType swift_type = ExtractSwiftTypeFromCxxInteropTypeName(
+          type, swift_type_name, ts, *swift_runtime);
+      if (!swift_type) {
+        LLDB_LOGV(log,
+                  "[Matching CxxBridgedSyntheticChildProvider] - "
+                  "Did not find Swift type for type name \"{0}\".",
+                  swift_type_name);
+        return nullptr;
+      }
+
+      auto swift_valobj =
+          SwiftLanguageRuntime::ExtractSwiftValueObjectFromCxxWrapper(valobj);
+      if (!swift_valobj) {
+        StreamString clang_desc;
+        type.DumpTypeDescription(&clang_desc);
+
+        StreamString swift_desc;
+        type.DumpTypeDescription(&swift_desc);
+
+        LLDB_LOGF(log,
+                  "[Matching CxxBridgedSyntheticChildProvider] - "
+                  "Was not able to extract Swift value object. Clang type: %s. "
+                  "Swift type: %s",
+                  clang_desc.GetData(), swift_desc.GetData());
+        return nullptr;
+      }
+      // Cast it to a Swift type since thhe swift runtime expects a Swift value
+      // object.
+      auto casted_to_swift = swift_valobj->Cast(swift_type);
+      if (!casted_to_swift) {
+        LLDB_LOGF(log, "[Matching CxxBridgedSyntheticChildProvider] - "
+                       "Could not cast value object to swift type.");
+        return nullptr;
+      }
+
+      TypeAndOrName type_or_name;
+      Address address;
+      Value::ValueType value_type;
+      // Try to find the dynamic type of the Swift type.
+      // TODO: find a way to get the dyamic value type from the
+      // command.
+      if (swift_runtime->GetDynamicTypeAndAddress(
+              *casted_to_swift.get(),
+              lldb::DynamicValueType::eDynamicCanRunTarget, type_or_name,
+              address, value_type)) {
+        if (type_or_name.HasCompilerType()) {
+          swift_type = type_or_name.GetCompilerType();
+          // Cast it to the more specific type.
+          casted_to_swift = casted_to_swift->Cast(swift_type);
+          if (!casted_to_swift) {
+            LLDB_LOGF(log,
+                      "[Matching CxxBridgedSyntheticChildProvider] - "
+                      "Could not cast value object to dynamic swift type.");
+            return nullptr;
+          }
+        }
+      }
+
+      casted_to_swift->SetName(ConstString("Swift_Type"));
+
+      SyntheticChildrenSP synth_sp =
+          SyntheticChildrenSP(new ValueObjectWrapperSyntheticChildren(
+              casted_to_swift, SyntheticChildren::Flags()));
+      return synth_sp;
+    });
+    g_formatters.push_back([](lldb_private::ValueObject &valobj,
+                              lldb::DynamicValueType,
+                              FormatManager &) -> lldb::SyntheticChildrenSP {
+      // If C++ interop is enabled, format imported clang types as clang types,
+      // instead of attempting to disguise them as Swift types.
+
+      Log *log(GetLog(LLDBLog::DataFormatters));
+
+      if (!valobj.GetTargetSP()->IsSwiftCxxInteropEnabled())
+        return nullptr;
+
+      CompilerType type(valobj.GetCompilerType());
+      auto swift_type_system =
+          type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
+      if (!swift_type_system)
+        return nullptr;
+
+      CompilerType original_type;
+      if (!swift_type_system->IsImportedType(type.GetOpaqueQualType(),
+                                        &original_type))
+        return nullptr;
+
+      if (!original_type.GetTypeSystem().isa_and_nonnull<TypeSystemClang>())
+        return nullptr;
+
+      auto qual_type =
+          TypeSystemClang::GetQualType(original_type.GetOpaqueQualType());
+      auto *decl = qual_type->getAsCXXRecordDecl();
+      if (!decl) {
+        LLDB_LOGV(log, "[Matching Clang imported type] - "
+                       "Could not get decl from clang type");
+        return nullptr;
+      }
+      auto casted = valobj.Cast(original_type);
+      if (!casted) {
+        LLDB_LOGV(log, "[Matching Clang imported type] - "
+                       "Could not cast value object to clang type");
+        return nullptr;
+      }
+
+      casted->SetName(ConstString("Clang_Type"));
+
+      SyntheticChildrenSP synth_sp =
+          SyntheticChildrenSP(new ValueObjectWrapperSyntheticChildren(
+              casted, SyntheticChildren::Flags()));
+      return synth_sp;
+    });
   });
 
   return g_formatters;
@@ -965,10 +1235,9 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
           auto as_type = m_result.GetAs<CompilerType>();
           auto as_decl = m_result.GetAs<swift::Decl *>();
 
-          if (as_type.hasValue() && as_type.getValue()) {
-            TypeSystem *type_system = as_type->GetTypeSystem();
-            if (TypeSystemSwift *swift_ast_ctx =
-                    llvm::dyn_cast_or_null<TypeSystemSwift>(type_system))
+          if (as_type.has_value() && as_type.value()) {
+            if (auto swift_ast_ctx = as_type->GetTypeSystem()
+                                         .dyn_cast_or_null<TypeSystemSwift>())
               swift_ast_ctx->DumpTypeDescription(
                   as_type->GetOpaqueQualType(), &stream,
                   print_help_if_available, true, eDescriptionLevelFull,
@@ -977,10 +1246,10 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
               as_type->DumpTypeDescription(
                   &stream, eDescriptionLevelFull,
                   exe_scope); // we should always have a swift type here..
-          } else if (as_decl.hasValue() && as_decl.getValue()) {
+          } else if (as_decl.has_value() && as_decl.value()) {
             std::string buffer;
             llvm::raw_string_ostream str_stream(buffer);
-            swift::Decl *decl = as_decl.getValue();
+            swift::Decl *decl = as_decl.value();
             decl->print(str_stream,
                         SwiftASTContext::GetUserVisibleTypePrintingOptions(
                             print_help_if_available));
@@ -1124,8 +1393,8 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
                             candidate = ast_ctx->FindTypeOrDecl(
                                 name_parts[0].str().c_str(), module);
                           }
-                          if (candidate.hasValue()) {
-                            TypesOrDecls candidates{candidate.getValue()};
+                          if (candidate.has_value()) {
+                            TypesOrDecls candidates{candidate.value()};
                             for (; idx_of_deeper < name_parts.size();
                                  idx_of_deeper++) {
                               TypesOrDecls new_candidates;
@@ -1298,7 +1567,7 @@ LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
   auto swift_ty = GetCanonicalSwiftType(valobj.GetCompilerType());
   CompilerType valobj_type = ToCompilerType(swift_ty);
   Flags type_flags(valobj_type.GetTypeInfo());
-  if (llvm::isa<TypeSystemSwift>(valobj_type.GetTypeSystem())) {
+  if (valobj_type.GetTypeSystem().isa_and_nonnull<TypeSystemSwift>()) {
     if (type_flags.AllSet(eTypeIsStructUnion) &&
         valobj_type.GetTypeName() == g_SwiftBool) {
       ValueObjectSP your_value_sp(valobj.GetChildMemberWithName(g_value, true));

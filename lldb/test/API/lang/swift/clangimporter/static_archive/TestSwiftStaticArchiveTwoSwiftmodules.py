@@ -17,15 +17,16 @@ import lldbsuite.test.lldbutil as lldbutil
 import os
 import unittest2
 
-class TestSwiftStaticArchiveTwoSwiftmodules(TestBase):
 
+class TestSwiftStaticArchiveTwoSwiftmodules(TestBase):
     mydir = TestBase.compute_mydir(__file__)
 
     def setUp(self):
         TestBase.setUp(self)
 
     # Don't run ClangImporter tests if Clangimporter is disabled.
-    @skipIf(setting=('symbols.use-swift-clangimporter', 'false'))
+    @skipIf(setting=("symbols.use-swift-clangimporter", "false"))
+    @skipIf(archs=no_match("arm64"), bugnumber="rdar://104429667")  # linker crash
     @skipUnlessDarwin
     @swiftTest
     def test(self):
@@ -39,9 +40,11 @@ class TestSwiftStaticArchiveTwoSwiftmodules(TestBase):
 
         # Set the breakpoints.
         foo_breakpoint = target.BreakpointCreateBySourceRegex(
-            'break here', lldb.SBFileSpec('Foo.swift'))
+            "break here", lldb.SBFileSpec("Foo.swift")
+        )
         bar_breakpoint = target.BreakpointCreateBySourceRegex(
-            'break here', lldb.SBFileSpec('Bar.swift'))
+            "break here", lldb.SBFileSpec("Bar.swift")
+        )
         self.assertTrue(foo_breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
         self.assertTrue(bar_breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
 
@@ -51,7 +54,7 @@ class TestSwiftStaticArchiveTwoSwiftmodules(TestBase):
         # This test tests that the search paths from all swiftmodules
         # that are part of the main binary are honored.
         self.expect("fr var foo", "expected result", substrs=["23"])
-        self.expect("p foo", "expected result", substrs=["$R0", "i", "23"])
+        self.expect("expression foo", "expected result", substrs=["$R0", "i", "23"])
         process.Continue()
         self.expect("fr var bar", "expected result", substrs=["42"])
-        self.expect("p bar", "expected result", substrs=["j", "42"])
+        self.expect("expression bar", "expected result", substrs=["j", "42"])

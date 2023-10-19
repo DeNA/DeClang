@@ -24,6 +24,9 @@ public:
 
   SBStructuredData(const lldb_private::StructuredDataImpl &impl);
 
+  SBStructuredData(const lldb::SBScriptObject obj,
+                   const lldb::SBDebugger &debugger);
+
   ~SBStructuredData();
 
   lldb::SBStructuredData &operator=(const lldb::SBStructuredData &rhs);
@@ -89,7 +92,11 @@ public:
   ///     \a dst in all cases.
   size_t GetStringValue(char *dst, size_t dst_len) const;
 
+  /// Return the generic pointer if this data structure is a generic type.
+  lldb::SBScriptObject GetGenericValue() const;
+
 protected:
+  friend class SBAttachInfo;
   friend class SBLaunchInfo;
   friend class SBDebugger;
   friend class SBTarget;

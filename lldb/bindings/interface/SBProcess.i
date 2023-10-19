@@ -241,6 +241,9 @@ public:
     void
     SendAsyncInterrupt();
 
+    void
+    ForceScriptedState(StateType new_state);
+
     %feature("autodoc", "
     Reads memory from the current process's address space and removes any
     traps that may have been inserted into the memory. It returns the byte
@@ -341,8 +344,17 @@ public:
     lldb::SBBroadcaster
     GetBroadcaster () const;
 
+    static const char *
+    GetBroadcasterClass();
+
     bool
     GetDescription (lldb::SBStream &description);
+
+    %feature("autodoc", "
+    Returns the implementation object of the process plugin if available. None
+    otherwise.") GetScriptedImplementation;
+    lldb::SBScriptObject
+    GetScriptedImplementation();
 
     %feature("autodoc", "
     Returns the process' extended crash information.") GetExtendedCrashInformation;
@@ -398,6 +410,9 @@ public:
     IsInstrumentationRuntimePresent(lldb::InstrumentationRuntimeType type);
 
     lldb::SBError
+    SaveCore(const char *file_name, const char *flavor, lldb::SaveCoreStyle core_style);
+
+    lldb::SBError
     SaveCore(const char *file_name);
 
     lldb::SBError
@@ -419,7 +434,7 @@ public:
 
     %feature("autodoc", "
     Allocates a block of memory within the process, with size and
-    access permissions specified in the arguments. The permisssions
+    access permissions specified in the arguments. The permissions
     argument is an or-combination of zero or more of
     lldb.ePermissionsWritable, lldb.ePermissionsReadable, and
     lldb.ePermissionsExecutable. Returns the address
@@ -440,6 +455,18 @@ public:
 
 #ifdef SWIGPYTHON
     %pythoncode %{
+        def WriteMemoryAsCString(self, addr, str, error):
+            '''
+              WriteMemoryAsCString(self, addr, str, error):
+                This functions the same as `WriteMemory` except a null-terminator is appended
+                to the end of the buffer if it is not there already.
+            '''
+            if not str or len(str) == 0:
+                return 0
+            if not str[-1] == '\0':
+                str += '\0'
+            return self.WriteMemory(addr, str, error)
+
         def __get_is_alive__(self):
             '''Returns "True" if the process is currently alive, "False" otherwise'''
             s = self.GetState()

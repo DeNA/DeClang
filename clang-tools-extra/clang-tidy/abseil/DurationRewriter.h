@@ -33,16 +33,16 @@ llvm::StringRef getDurationFactoryForScale(DurationScale Scale);
 
 /// Given a 'Scale', return the appropriate factory function call for
 /// constructing a `Time` for that scale.
-llvm::StringRef getTimeFactoryForScale(DurationScale scale);
+llvm::StringRef getTimeFactoryForScale(DurationScale Scale);
 
 // Determine if `Node` represents a literal floating point or integral zero.
-bool IsLiteralZero(const ast_matchers::MatchFinder::MatchResult &Result,
+bool isLiteralZero(const ast_matchers::MatchFinder::MatchResult &Result,
                    const Expr &Node);
 
 /// Possibly strip a floating point cast expression.
 ///
 /// If `Node` represents an explicit cast to a floating point type, return
-/// the textual context of the cast argument, otherwise `None`.
+/// the textual context of the cast argument, otherwise `std::nullopt`.
 llvm::Optional<std::string>
 stripFloatCast(const ast_matchers::MatchFinder::MatchResult &Result,
                const Expr &Node);
@@ -50,7 +50,7 @@ stripFloatCast(const ast_matchers::MatchFinder::MatchResult &Result,
 /// Possibly remove the fractional part of a floating point literal.
 ///
 /// If `Node` represents a floating point literal with a zero fractional part,
-/// return the textual context of the integral part, otherwise `None`.
+/// return the textual context of the integral part, otherwise `std::nullopt`.
 llvm::Optional<std::string>
 stripFloatLiteralFraction(const ast_matchers::MatchFinder::MatchResult &Result,
                           const Expr &Node);
@@ -63,11 +63,11 @@ simplifyDurationFactoryArg(const ast_matchers::MatchFinder::MatchResult &Result,
                            const Expr &Node);
 
 /// Given the name of an inverse Duration function (e.g., `ToDoubleSeconds`),
-/// return its `DurationScale`, or `None` if a match is not found.
+/// return its `DurationScale`, or `std::nullopt` if a match is not found.
 llvm::Optional<DurationScale> getScaleForDurationInverse(llvm::StringRef Name);
 
 /// Given the name of an inverse Time function (e.g., `ToUnixSeconds`),
-/// return its `DurationScale`, or `None` if a match is not found.
+/// return its `DurationScale`, or `std::nullopt` if a match is not found.
 llvm::Optional<DurationScale> getScaleForTimeInverse(llvm::StringRef Name);
 
 /// Given a `Scale` return the fully qualified inverse functions for it.
@@ -77,7 +77,7 @@ const std::pair<llvm::StringRef, llvm::StringRef> &
 getDurationInverseForScale(DurationScale Scale);
 
 /// Returns the Time inverse function name for a given `Scale`.
-llvm::StringRef getTimeInverseForScale(DurationScale scale);
+llvm::StringRef getTimeInverseForScale(DurationScale Scale);
 
 /// Assuming `Node` has type `double` or `int` representing a time interval of
 /// `Scale`, return the expression to make it a suitable `Duration`.
@@ -138,4 +138,4 @@ AST_MATCHER_FUNCTION_P(ast_matchers::internal::Matcher<Stmt>,
 } // namespace tidy
 } // namespace clang
 
-#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_ABSEIL_DURATIONCOMPARISONCHECK_H
+#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_ABSEIL_DURATIONREWRITER_H

@@ -229,7 +229,6 @@ bool SBFunction::GetIsOptimized() {
   }
   return false;
 }
-
 // BEGIN SWIFT
 bool SBFunction::GetCanThrow() {
   if (m_opaque_ptr) {

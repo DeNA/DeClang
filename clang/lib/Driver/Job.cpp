@@ -204,6 +204,15 @@ rewriteIncludes(const llvm::ArrayRef<const char *> &Args, size_t Idx,
 
 void Command::Print(raw_ostream &OS, const char *Terminator, bool Quote,
                     CrashReportInfo *CrashInfo) const {
+  // Print the environment to display, if relevant.
+  if (!EnvironmentDisplay.empty()) {
+    OS << " env";
+    for (const char *NameValue : EnvironmentDisplay) {
+      OS << ' ';
+      llvm::sys::printArg(OS, NameValue, /*Quote=*/true);
+    }
+  }
+
   // Always quote the exe.
   OS << ' ';
   llvm::sys::printArg(OS, Executable, /*Quote=*/true);
@@ -324,6 +333,16 @@ void Command::setEnvironment(llvm::ArrayRef<const char *> NewEnvironment) {
   Environment.push_back(nullptr);
 }
 
+void Command::setEnvironmentDisplay(llvm::ArrayRef<const char *> Display) {
+  EnvironmentDisplay.reserve(Display.size());
+  EnvironmentDisplay.assign(Display.begin(), Display.end());
+}
+
+void Command::setRedirectFiles(
+    const std::vector<Optional<std::string>> &Redirects) {
+  RedirectFiles = Redirects;
+}
+
 void Command::PrintFileNames() const {
   if (PrintInputFilenames) {
     for (const auto &Arg : InputInfoList)
@@ -375,6 +394,22 @@ int Command::Execute(ArrayRef<llvm::Optional<StringRef>> Redirects,
   }
 
   auto Args = llvm::toStringRefArray(Argv.data());
+
+  // Use Job-specific redirect files if they are present.
+  if (!RedirectFiles.empty()) {
+    std::vector<Optional<StringRef>> RedirectFilesOptional;
+    for (const auto &Ele : RedirectFiles)
+      if (Ele)
+        RedirectFilesOptional.push_back(Optional<StringRef>(*Ele));
+      else
+        RedirectFilesOptional.push_back(None);
+
+    return llvm::sys::ExecuteAndWait(Executable, Args, Env,
+                                     makeArrayRef(RedirectFilesOptional),
+                                     /*secondsToWait=*/0, /*memoryLimit=*/0,
+                                     ErrMsg, ExecutionFailed, &ProcStat);
+  }
+
   return llvm::sys::ExecuteAndWait(Executable, Args, Env, Redirects,
                                    /*secondsToWait*/ 0, /*memoryLimit*/ 0,
                                    ErrMsg, ExecutionFailed, &ProcStat);
@@ -411,6 +446,8 @@ int CC1Command::Execute(ArrayRef<llvm::Optional<StringRef>> Redirects,
   Argv.push_back(getExecutable());
   Argv.append(getArguments().begin(), getArguments().end());
   Argv.push_back(nullptr);
+  Argv.pop_back(); // The terminating null element shall not be part of the
+                   // slice (main() behavior).
 
   // This flag simply indicates that the program couldn't start, which isn't
   // applicable here.

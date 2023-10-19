@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_FRONTEND_SERIALIZE_DIAGNOSTICS_H_
-#define LLVM_CLANG_FRONTEND_SERIALIZE_DIAGNOSTICS_H_
+#ifndef LLVM_CLANG_FRONTEND_SERIALIZEDDIAGNOSTICS_H
+#define LLVM_CLANG_FRONTEND_SERIALIZEDDIAGNOSTICS_H
 
 #include "llvm/Bitstream/BitCodes.h"
 
@@ -32,8 +32,9 @@ enum RecordIDs {
   RECORD_CATEGORY,
   RECORD_FILENAME,
   RECORD_FIXIT,
+  RECORD_SOURCE_FILE_CONTENTS,
   RECORD_FIRST = RECORD_VERSION,
-  RECORD_LAST = RECORD_FIXIT
+  RECORD_LAST = RECORD_SOURCE_FILE_CONTENTS
 };
 
 /// A stable version of DiagnosticIDs::Level.

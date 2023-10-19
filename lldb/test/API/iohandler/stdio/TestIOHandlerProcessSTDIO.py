@@ -3,14 +3,14 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.lldbpexpect import PExpectTest
 
-class TestIOHandlerProcessSTDIO(PExpectTest):
 
-    mydir = TestBase.compute_mydir(__file__)
+class TestIOHandlerProcessSTDIO(PExpectTest):
     NO_DEBUG_INFO_TESTCASE = True
 
     # PExpect uses many timeouts internally and doesn't play well
     # under ASAN on a loaded machine..
     @skipIfAsan
+    @skipIf(oslist=["linux"], archs=["arm", "aarch64"])
     def test(self):
         self.build()
         self.launch(executable=self.getBuildArtifact("a.out"))
@@ -25,6 +25,5 @@ class TestIOHandlerProcessSTDIO(PExpectTest):
         self.child.send("baz\n")
         self.child.expect_exact("stdout: baz")
 
-        self.child.sendcontrol('d')
-        self.expect_prompt()
+        self.child.sendcontrol("d")
         self.quit()

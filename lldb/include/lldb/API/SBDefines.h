@@ -15,6 +15,20 @@
 #include "lldb/lldb-types.h"
 #include "lldb/lldb-versioning.h"
 
+#include <cstdio> // For FILE *
+
+#ifndef LLDB_API
+#if defined(_WIN32)
+#if defined(LLDB_IN_LIBLLDB)
+#define LLDB_API __declspec(dllexport)
+#else
+#define LLDB_API __declspec(dllimport)
+#endif
+#else // defined (_WIN32)
+#define LLDB_API
+#endif
+#endif
+
 // Forward Declarations
 namespace lldb {
 
@@ -59,10 +73,12 @@ class LLDB_API SBMemoryRegionInfoList;
 class LLDB_API SBModule;
 class LLDB_API SBModuleSpec;
 class LLDB_API SBModuleSpecList;
+class LLDB_API SBPlatform;
 class LLDB_API SBProcess;
 class LLDB_API SBProcessInfo;
 class LLDB_API SBQueue;
 class LLDB_API SBQueueItem;
+class LLDB_API SBScriptObject;
 class LLDB_API SBSection;
 class LLDB_API SBSourceManager;
 class LLDB_API SBStream;
@@ -76,6 +92,7 @@ class LLDB_API SBThread;
 class LLDB_API SBThreadCollection;
 class LLDB_API SBThreadPlan;
 class LLDB_API SBTrace;
+class LLDB_API SBTraceCursor;
 class LLDB_API SBType;
 class LLDB_API SBTypeCategory;
 class LLDB_API SBTypeEnumMember;

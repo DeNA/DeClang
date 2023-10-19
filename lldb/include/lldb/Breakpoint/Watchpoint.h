@@ -75,7 +75,7 @@ public:
   bool IsHardware() const override;
 
   bool ShouldStop(StoppointCallbackContext *context) override;
-
+  
   bool WatchpointRead() const;
   bool WatchpointWrite() const;
   uint32_t GetIgnoreCount() const;
@@ -89,6 +89,40 @@ public:
   bool IsWatchVariable() const;
   void SetWatchVariable(bool val);
   bool CaptureWatchedValue(const ExecutionContext &exe_ctx);
+
+  /// \struct WatchpointVariableContext
+  /// \brief Represents the context of a watchpoint variable.
+  ///
+  /// This struct encapsulates the information related to a watchpoint variable,
+  /// including the watch ID and the execution context in which it is being
+  /// used. This struct is passed as a Baton to the \b
+  /// VariableWatchpointDisabler breakpoint callback.
+  struct WatchpointVariableContext {
+    /// \brief Constructor for WatchpointVariableContext.
+    /// \param watch_id The ID of the watchpoint.
+    /// \param exe_ctx The execution context associated with the watchpoint.
+    WatchpointVariableContext(lldb::watch_id_t watch_id,
+                              ExecutionContext exe_ctx)
+        : watch_id(watch_id), exe_ctx(exe_ctx) {}
+
+    lldb::watch_id_t watch_id; ///< The ID of the watchpoint.
+    ExecutionContext
+        exe_ctx; ///< The execution context associated with the watchpoint.
+  };
+
+  class WatchpointVariableBaton : public TypedBaton<WatchpointVariableContext> {
+  public:
+    WatchpointVariableBaton(std::unique_ptr<WatchpointVariableContext> Data)
+        : TypedBaton(std::move(Data)) {}
+  };
+
+  bool SetupVariableWatchpointDisabler(lldb::StackFrameSP frame_sp) const;
+
+  /// Callback routine to disable the watchpoint set on a local variable when
+  ///  it goes out of scope.
+  static bool VariableWatchpointDisabler(
+      void *baton, lldb_private::StoppointCallbackContext *context,
+      lldb::user_id_t break_id, lldb::user_id_t break_loc_id);
 
   void GetDescription(Stream *s, lldb::DescriptionLevel level);
   void Dump(Stream *s) const override;
@@ -157,11 +191,14 @@ public:
 private:
   friend class Target;
   friend class WatchpointList;
+  friend class StopInfoWatchpoint; // This needs to call UndoHitCount()
 
   void ResetHistoricValues() {
     m_old_value_sp.reset();
     m_new_value_sp.reset();
   }
+
+  void UndoHitCount() { m_hit_counter.Decrement(); }
 
   Target &m_target;
   bool m_enabled;           // Is this watchpoint enabled

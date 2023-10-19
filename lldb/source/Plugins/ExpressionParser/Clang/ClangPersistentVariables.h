@@ -96,7 +96,7 @@ public:
   GetCompilerTypeFromPersistentDecl(ConstString type_name) override;
 
   void RegisterPersistentDecl(ConstString name, clang::NamedDecl *decl,
-                              TypeSystemClang *ctx);
+                              std::shared_ptr<TypeSystemClang> ctx);
 
   clang::NamedDecl *GetPersistentDecl(ConstString name);
 
@@ -144,7 +144,7 @@ private:
     /// The persistent decl.
     clang::NamedDecl *m_decl = nullptr;
     /// The TypeSystemClang for the ASTContext of m_decl.
-    TypeSystemClang *m_context = nullptr;
+    lldb::TypeSystemWP m_context;
   };
 
   typedef llvm::DenseMap<const char *, PersistentDecl> PersistentDeclMap;

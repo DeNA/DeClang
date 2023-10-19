@@ -21,7 +21,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/IR/DebugInfo.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/TrackingMDRef.h"
 #include "llvm/Support/Casting.h"
@@ -221,6 +221,23 @@ namespace llvm {
     /// \param SizeInBits  Size of the type.
     DIStringType *createStringType(StringRef Name, uint64_t SizeInBits);
 
+    /// Create debugging information entry for Fortran
+    /// assumed length string type.
+    /// \param Name            Type name.
+    /// \param StringLength    String length expressed as DIVariable *.
+    /// \param StrLocationExp  Optional memory location of the string.
+    DIStringType *createStringType(StringRef Name, DIVariable *StringLength,
+                                   DIExpression *StrLocationExp = nullptr);
+
+    /// Create debugging information entry for Fortran
+    /// assumed length string type.
+    /// \param Name             Type name.
+    /// \param StringLengthExp  String length expressed in DIExpression form.
+    /// \param StrLocationExp   Optional memory location of the string.
+    DIStringType *createStringType(StringRef Name,
+                                   DIExpression *StringLengthExp,
+                                   DIExpression *StrLocationExp = nullptr);
+
     /// Create debugging information entry for a qualified
     /// type, e.g. 'const int'.
     /// \param Tag         Tag identifing type, e.g. dwarf::TAG_volatile_type
@@ -233,9 +250,12 @@ namespace llvm {
     /// \param AlignInBits       Alignment. (optional)
     /// \param DWARFAddressSpace DWARF address space. (optional)
     /// \param Name              Pointer type name. (optional)
-    DIDerivedType *createPointerType(
-        DIType *PointeeTy, uint64_t SizeInBits, uint32_t AlignInBits = 0,
-        Optional<unsigned> DWARFAddressSpace = None, StringRef Name = "");
+    /// \param Annotations       Member annotations.
+    DIDerivedType *
+    createPointerType(DIType *PointeeTy, uint64_t SizeInBits,
+                      uint32_t AlignInBits = 0,
+                      Optional<unsigned> DWARFAddressSpace = None,
+                      StringRef Name = "", DINodeArray Annotations = nullptr);
 
     /// Create a __ptrauth qualifier.
     DIDerivedType *createPtrAuthQualifiedType(DIType *FromTy, unsigned Key,
@@ -267,10 +287,12 @@ namespace llvm {
     /// \param LineNo      Line number.
     /// \param Context     The surrounding context for the typedef.
     /// \param AlignInBits Alignment. (optional)
+    /// \param Flags       Flags to describe inheritance attribute, e.g. private
     /// \param Annotations Annotations. (optional)
     DIDerivedType *createTypedef(DIType *Ty, StringRef Name, DIFile *File,
                                  unsigned LineNo, DIScope *Context,
                                  uint32_t AlignInBits = 0,
+                                 DINode::DIFlags Flags = DINode::FlagZero,
                                  DINodeArray Annotations = nullptr);
 
     /// Create debugging information entry for a 'friend'.
@@ -500,10 +522,10 @@ namespace llvm {
     /// \param Name         Value parameter name.
     /// \param Ty           Parameter type.
     /// \param Val          The fully qualified name of the template.
-    DITemplateValueParameter *createTemplateTemplateParameter(DIScope *Scope,
-                                                              StringRef Name,
-                                                              DIType *Ty,
-                                                              StringRef Val);
+    /// \param IsDefault    Parameter is default or not.
+    DITemplateValueParameter *
+    createTemplateTemplateParameter(DIScope *Scope, StringRef Name, DIType *Ty,
+                                    StringRef Val, bool IsDefault = false);
 
     /// Create debugging information for a template parameter pack.
     /// \param Scope        Scope in which this type is defined.
@@ -714,7 +736,6 @@ namespace llvm {
     /// variable which has a complex address expression for its address.
     /// \param Addr        An array of complex address operations.
     DIExpression *createExpression(ArrayRef<uint64_t> Addr = None);
-    DIExpression *createExpression(ArrayRef<int64_t> Addr);
 
     /// Create an expression for a variable that does not have an address, but
     /// does have a constant value.
@@ -738,6 +759,8 @@ namespace llvm {
     /// \param TParams       Function template parameters.
     /// \param ThrownTypes   Exception types this function may throw.
     /// \param Annotations   Attribute Annotations.
+    /// \param TargetFuncName The name of the target function if this is
+    ///                       a trampoline.
     DISubprogram *
     createFunction(DIScope *Scope, StringRef Name, StringRef LinkageName,
                    DIFile *File, unsigned LineNo, DISubroutineType *Ty,
@@ -746,7 +769,8 @@ namespace llvm {
                    DITemplateParameterArray TParams = nullptr,
                    DISubprogram *Decl = nullptr,
                    DITypeArray ThrownTypes = nullptr,
-                   DINodeArray Annotations = nullptr);
+                   DINodeArray Annotations = nullptr,
+                   StringRef TargetFuncName = "");
 
     /// Identical to createFunction,
     /// except that the resulting DbgNode is meant to be RAUWed.

@@ -60,7 +60,7 @@ def no_odr: F<"no-odr">,
   Group<grp_general>;
 
 def dump_debug_map: F<"dump-debug-map">,
-  HelpText<"Parse and dump the debug map to standard output. Not DWARF link will take place.">,
+  HelpText<"Parse and dump the debug map to standard output. No DWARF link will take place.">,
   Group<grp_general>;
 
 def yaml_input: Flag<["-", "--"], "y">,
@@ -89,6 +89,10 @@ def flat: F<"flat">,
 def: Flag<["-"], "f">,
   Alias<flat>,
   HelpText<"Alias for --flat">,
+  Group<grp_general>;
+
+def fat64: F<"fat64">,
+  HelpText<"Use a 64-bit header when emitting universal binaries.">,
   Group<grp_general>;
 
 def update: F<"update">,
@@ -143,7 +147,7 @@ def: Joined<["--", "-"], "arch=">, Alias<arch>;
 
 def accelerator: Separate<["--", "-"], "accelerator">,
   MetaVarName<"<accelerator type>">,
-  HelpText<"Specify the desired type of accelerator table. Valid options are 'Apple' (.apple_names, .apple_namespaces, .apple_types, .apple_objc), 'Dwarf' (.debug_names), 'Pub' (.debug_pubnames, .debug_pubtypes) and 'Default'">,
+  HelpText<"Specify the desired type of accelerator table. Valid options are 'Apple' (.apple_names, .apple_namespaces, .apple_types, .apple_objc), 'Dwarf' (.debug_names), 'Pub' (.debug_pubnames, .debug_pubtypes), 'Default' and 'None'">,
   Group<grp_general>;
 def: Joined<["--", "-"], "accelerator=">, Alias<accelerator>;
 
@@ -161,13 +165,19 @@ def: Separate<["-"], "j">,
   HelpText<"Alias for --num-threads">,
   Group<grp_general>;
 
+def reproducer: Separate<["--", "-"], "reproducer">,
+  MetaVarName<"<mode>">,
+  HelpText<"Specify the reproducer generation mode. Valid options are 'GenerateOnExit', 'GenerateOnCrash', 'Use', 'Off'.">,
+  Group<grp_general>;
+def: Joined<["--", "-"], "reproducer=">, Alias<reproducer>;
+
 def gen_reproducer: F<"gen-reproducer">,
-  HelpText<"Generate a reproducer consisting of the input object files.">,
+  HelpText<"Generate a reproducer consisting of the input object files. Alias for --reproducer=GenerateOnExit.">,
   Group<grp_general>;
 
 def use_reproducer: Separate<["--", "-"], "use-reproducer">,
   MetaVarName<"<path>">,
-  HelpText<"Use the object files from the given reproducer path.">,
+  HelpText<"Use the object files from the given reproducer path. Alias for --reproducer=Use.">,
   Group<grp_general>;
 def: Joined<["--", "-"], "use-reproducer=">, Alias<use_reproducer>;
 

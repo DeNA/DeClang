@@ -24,9 +24,8 @@ using namespace lldb_private;
 OptionValueFileColonLine::OptionValueFileColonLine() = default;
 
 OptionValueFileColonLine::OptionValueFileColonLine(llvm::StringRef input)
-    : m_line_number(LLDB_INVALID_LINE_NUMBER),
-      m_column_number(LLDB_INVALID_COLUMN_NUMBER),
-      m_completion_mask(CommandCompletions::eSourceFileCompletion) {
+
+{
   SetValueFromString(input, eVarSetOperationAssign);
 }
 
@@ -133,6 +132,6 @@ Status OptionValueFileColonLine::SetValueFromString(llvm::StringRef value,
 
 void OptionValueFileColonLine::AutoComplete(CommandInterpreter &interpreter,
                                             CompletionRequest &request) {
-  CommandCompletions::InvokeCommonCompletionCallbacks(
+  lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
       interpreter, m_completion_mask, request, nullptr);
 }

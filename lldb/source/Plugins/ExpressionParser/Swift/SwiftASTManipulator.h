@@ -20,6 +20,8 @@
 #include "swift/AST/Decl.h"
 #include "swift/Basic/SourceLoc.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Casting.h"
+
 
 namespace swift {
 class CaseStmt;
@@ -38,9 +40,9 @@ class SwiftASTManipulatorBase {
 public:
   class VariableMetadata {
   public:
-    VariableMetadata() {}
-    virtual ~VariableMetadata() {}
-    virtual unsigned GetType() = 0;
+    VariableMetadata() = default;
+    virtual ~VariableMetadata() = default;
+    virtual unsigned GetType() const = 0;
   };
 
   class VariableMetadataResult
@@ -48,7 +50,10 @@ public:
   public:
     virtual ~VariableMetadataResult();
     constexpr static unsigned Type() { return 'Resu'; }
-    unsigned GetType() override { return Type(); }
+    unsigned GetType() const override { return Type(); }
+    static bool classof(const VariableMetadata *VM) {
+      return VM->GetType() == Type();
+    }
   };
 
   class VariableMetadataError
@@ -56,7 +61,39 @@ public:
   public:
     virtual ~VariableMetadataError();
     constexpr static unsigned Type() { return 'Erro'; }
-    unsigned GetType() override { return Type(); }
+    unsigned GetType() const override { return Type(); }
+    static bool classof(const VariableMetadata *VM) {
+      return VM->GetType() == Type();
+    }
+  };
+
+  class VariableMetadataPersistent
+      : public SwiftASTManipulatorBase::VariableMetadata {
+  public:
+    VariableMetadataPersistent(
+        lldb::ExpressionVariableSP &persistent_variable_sp)
+        : m_persistent_variable_sp(persistent_variable_sp) {}
+
+    static constexpr unsigned Type() { return 'Pers'; }
+    unsigned GetType() const override { return Type(); }
+    static bool classof(const VariableMetadata *VM) {
+      return VM->GetType() == Type();
+    }
+    lldb::ExpressionVariableSP m_persistent_variable_sp;
+  };
+
+  class VariableMetadataVariable
+      : public SwiftASTManipulatorBase::VariableMetadata {
+  public:
+    VariableMetadataVariable(lldb::VariableSP &variable_sp)
+        : m_variable_sp(variable_sp) {}
+
+    static constexpr unsigned Type() { return 'Vari'; }
+    unsigned GetType() const override { return Type(); }
+    static bool classof(const VariableMetadata *VM) {
+      return VM->GetType() == Type();
+    }
+    lldb::VariableSP m_variable_sp;
   };
 
   typedef std::shared_ptr<VariableMetadata> VariableMetadataSP;
@@ -67,19 +104,27 @@ public:
     swift::VarDecl *GetDecl() const { return m_decl; }
     swift::VarDecl::Introducer GetVarIntroducer() const;
     bool GetIsCaptureList() const;
+    bool IsMetadataPointer() const { return m_name.str().startswith("$τ"); }
+    bool IsOutermostMetadataPointer() const {
+      return m_name.str().startswith("$τ_0_");
+    }
+    bool IsSelf() const {
+      return m_name.str().equals("$__lldb_injected_self");
+    }
+    bool IsPackCount() const {
+      return m_name.str().startswith("$pack_count_");
+    }
+    bool IsUnboundPack() const { return m_is_unbound_pack; }
 
     VariableInfo() : m_type(), m_name(), m_metadata() {}
 
     VariableInfo(CompilerType &type, swift::Identifier name,
-                 VariableMetadataSP metadata, 
-                 swift::VarDecl::Introducer introducer, 
-                 bool is_capture_list = false)
+                 VariableMetadataSP metadata,
+                 swift::VarDecl::Introducer introducer,
+                 bool is_capture_list = false, bool is_unbound_pack = false)
         : m_type(type), m_name(name), m_var_introducer(introducer),
-          m_is_capture_list(is_capture_list), m_metadata(metadata) {}
-
-    template <class T> bool MetadataIs() const {
-      return (m_metadata && m_metadata->GetType() == T::Type());
-    }
+          m_is_capture_list(is_capture_list),
+          m_is_unbound_pack(is_unbound_pack), m_metadata(metadata) {}
 
     void Print(Stream &stream) const;
 
@@ -94,13 +139,16 @@ public:
     swift::VarDecl::Introducer m_var_introducer =
         swift::VarDecl::Introducer::Var;
     bool m_is_capture_list = false;
+    bool m_is_unbound_pack = false;
 
   public:
     VariableMetadataSP m_metadata;
   };
 
-  SwiftASTManipulatorBase(swift::SourceFile &source_file, bool repl)
-      : m_source_file(source_file), m_variables(), m_repl(repl) {
+  SwiftASTManipulatorBase(swift::SourceFile &source_file, bool repl,
+                          lldb::BindGenericTypes bind_generic_types)
+      : m_source_file(source_file), m_variables(), m_repl(repl),
+        m_bind_generic_types(bind_generic_types) {
     DoInitialization();
   }
 
@@ -108,7 +156,7 @@ public:
 
   bool IsValid() {
     return m_repl || (m_function_decl &&
-                      (m_wrapper_decl || (!m_extension_decl)) && m_do_stmt);
+                      (m_entrypoint_decl || (!m_extension_decl)) && m_do_stmt);
   }
 
   swift::BraceStmt *GetUserBody();
@@ -122,10 +170,19 @@ protected:
 
   bool m_repl = false;
 
+  lldb::BindGenericTypes m_bind_generic_types = lldb::eBindAuto;
+
   /// The function containing the expression's code.
   swift::FuncDecl *m_function_decl = nullptr;
-  /// The wrapper that invokes the right generic function.
-  swift::FuncDecl *m_wrapper_decl = nullptr;
+  /// The entrypoint function. Null if evaluating an expression outside a
+  /// method, $__lldb_expr otherswise.
+  swift::FuncDecl *m_entrypoint_decl = nullptr;
+  /// If evaluating in a generic context, the trampoline function that calls the
+  /// method with the user's expression, null otherwise.
+  swift::FuncDecl *m_trampoline_decl = nullptr;
+  /// If evaluating in a generic context, the sink function the entrypoint calls
+  /// in the AST, null otherwise.
+  swift::FuncDecl *m_sink_decl = nullptr;
   /// The extension m_function_decl lives in, if it's a method.
   swift::ExtensionDecl *m_extension_decl = nullptr;
   /// The do{}catch(){} statement whose body is the main body.
@@ -137,16 +194,8 @@ protected:
 
 class SwiftASTManipulator : public SwiftASTManipulatorBase {
 public:
-  SwiftASTManipulator(swift::SourceFile &source_file, bool repl);
-
-  static void WrapExpression(Stream &wrapped_stream, const char *text,
-                             bool needs_object_ptr,
-                             bool static_method,
-                             bool is_class,
-                             bool weak_self,
-                             const EvaluateExpressionOptions &options,
-                             llvm::StringRef os_version,
-                             uint32_t &first_body_line);
+  SwiftASTManipulator(swift::SourceFile &source_file, bool repl,
+                      lldb::BindGenericTypes bind_generic_types);
 
   void FindSpecialNames(llvm::SmallVectorImpl<swift::Identifier> &names,
                         llvm::StringRef prefix);
@@ -154,6 +203,14 @@ public:
   swift::VarDecl *AddExternalVariable(swift::Identifier name,
                                       CompilerType &type,
                                       VariableMetadataSP &metadata_sp);
+
+  swift::FuncDecl *GetFunctionToInjectVariableInto(
+      const SwiftASTManipulator::VariableInfo &variable) const;
+  swift::VarDecl *GetVarDeclForVariableInFunction(
+      const SwiftASTManipulator::VariableInfo &variable,
+      swift::FuncDecl *containing_function);
+  llvm::Optional<swift::Type> GetSwiftTypeForVariable(
+      const SwiftASTManipulator::VariableInfo &variable) const;
 
   bool AddExternalVariables(llvm::MutableArrayRef<VariableInfo> variables);
 
@@ -170,27 +227,38 @@ public:
 
   bool FixCaptures();
 
-  swift::ValueDecl *MakeGlobalTypealias(swift::Identifier name,
-                                        CompilerType &type,
-                                        bool make_private = true);
+  /// Makes a typealias binding name to type in the scope of the decl_ctx. If
+  /// decl_ctx is a nullptr this is a global typealias.
+  swift::TypeAliasDecl *MakeTypealias(swift::Identifier name,
+                                      CompilerType &type,
+                                      bool make_private = true,
+                                      swift::DeclContext *decl_ctx = nullptr);
 
   bool FixupResultAfterTypeChecking(Status &error);
 
   static const char *GetArgumentName() { return "$__lldb_arg"; }
   static const char *GetResultName() { return "$__lldb_result"; }
   static const char *GetErrorName() { return "$__lldb_error_result"; }
-  static const char *GetUserCodeStartMarker() {
-    return "/*__LLDB_USER_START__*/\n";
-  }
-  static const char *GetUserCodeEndMarker() {
-    return "\n/*__LLDB_USER_END__*/";
-  }
 
   static bool
   SaveExpressionTextToTempFile(llvm::StringRef text,
                                const EvaluateExpressionOptions &options,
                                std::string &expr_source_path);
 
+  swift::FuncDecl *GetEntrypointDecl() const {
+    return m_entrypoint_decl;
+  }
+
+  swift::FuncDecl *GetFuncDecl() const {
+    return m_function_decl;
+  }
+  swift::FuncDecl *GetTrampolineDecl() const {
+    return m_trampoline_decl;
+  }
+
+  swift::FuncDecl *GetSinkDecl() const {
+    return m_sink_decl;
+  }
 private:
   uint32_t m_tmpname_idx = 0;
 
@@ -225,6 +293,7 @@ private:
   void InsertError(swift::VarDecl *error_var, swift::Type &error_type);
 
   std::vector<ResultLocationInfo> m_result_info;
+  llvm::StringMap<swift::TypeBase *> m_type_aliases;
 };
 }
 

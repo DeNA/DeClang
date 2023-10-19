@@ -15,6 +15,7 @@ add_llvm_component_library(LLVMInstrumentation
   PGOMemOPSizeOpt.cpp
   PoisonChecking.cpp
   SanitizerCoverage.cpp
+  SanitizerBinaryMetadata.cpp
   SoftPointerAuth.cpp
   ValueProfileCollector.cpp
   ThreadSanitizer.cpp
@@ -29,6 +30,7 @@ add_llvm_component_library(LLVMInstrumentation
   LINK_COMPONENTS
   Analysis
   Core
+  Demangle
   MC
   Support
   TransformUtils

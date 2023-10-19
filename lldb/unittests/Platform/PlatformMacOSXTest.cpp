@@ -22,7 +22,6 @@ class PlatformMacOSXTest : public ::testing::Test {
 };
 
 #ifdef __APPLE__
-
 static bool containsArch(const std::vector<ArchSpec> &archs,
                          const ArchSpec &arch) {
   return std::find_if(archs.begin(), archs.end(), [&](const ArchSpec &other) {
@@ -52,6 +51,4 @@ TEST_F(PlatformMacOSXTest, TestGetSupportedArchitectures) {
                             arm64_ios_arch));
 #endif
 }
-
 #endif
-

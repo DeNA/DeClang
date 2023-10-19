@@ -72,12 +72,6 @@ enum LoadCWDlldbinitFile {
   eLoadCWDlldbinitWarn
 };
 
-enum LoadDependentFiles {
-  eLoadDependentsDefault,
-  eLoadDependentsYes,
-  eLoadDependentsNo,
-};
-
 enum ImportStdModule {
   eImportStdModuleFalse,
   eImportStdModuleFallback,
@@ -160,6 +154,8 @@ public:
 
   PathMappingList &GetSourcePathMap() const;
 
+  bool GetAutoSourceMapRelative() const;
+
   FileSpecList GetExecutableSearchPaths();
 
   void AppendExecutableSearchPaths(const FileSpec &);
@@ -176,8 +172,6 @@ public:
 
   llvm::StringRef GetSwiftExtraClangFlags() const;
 
-  bool GetSwiftCreateModuleContextsInParallel() const;
-
   bool GetSwiftReadMetadataFromFileCache() const;
 
   bool GetSwiftUseReflectionSymbols() const;
@@ -187,6 +181,10 @@ public:
   bool GetSwiftDiscoverImplicitSearchPaths() const;
 
   bool GetSwiftEnableBareSlashRegex() const;
+
+  EnableSwiftCxxInterop GetEnableSwiftCxxInterop() const;
+
+  Args GetSwiftPluginServerForPath() const;
 
   bool GetSwiftAutoImportFrameworks() const;
 
@@ -206,7 +204,7 @@ public:
 
   bool GetEnableNotifyAboutFixIts() const;
 
-  bool GetEnableSaveObjects() const;
+  FileSpec GetSaveJITObjectsDir() const;
 
   bool GetEnableSyntheticValue() const;
 
@@ -293,6 +291,12 @@ public:
 
   bool GetDebugUtilityExpression() const;
 
+  /// Trampoline support includes stepping through trampolines directly to their
+  /// targets, stepping out of trampolines directly to their callers, and
+  /// automatically filtering out trampolines as possible breakpoint locations
+  /// when set by name.
+  bool GetEnableTrampolineSupport() const;
+
 private:
   // Callbacks for m_launch_info.
   void Arg0ValueChangedCallback();
@@ -305,6 +309,9 @@ private:
   void DisableASLRValueChangedCallback();
   void InheritTCCValueChangedCallback();
   void DisableSTDIOValueChangedCallback();
+
+  // Settings checker for target.jit-save-objects-dir:
+  void CheckJITObjectsDir();
 
   Environment ComputeEnvironment() const;
 
@@ -432,6 +439,22 @@ public:
       m_language = lldb::eLanguageTypeSwift;
   }
 
+  lldb::BindGenericTypes GetBindGenericTypes() const {
+    return m_bind_generic_types;
+  }
+
+  void SetBindGenericTypes(lldb::BindGenericTypes b) {
+    m_bind_generic_types = b;
+  }
+
+  bool GetPlaygroundTransformHighPerformance() const {
+    return m_playground_transforms_hp;
+  }
+
+  void SetPlaygroundTransformHighPerformance(bool b) {
+    m_playground_transforms_hp = b;
+  }
+
   void SetCancelCallback(lldb::ExpressionCancelCallback callback, void *baton) {
     m_cancel_callback_baton = baton;
     m_cancel_callback = callback;
@@ -463,9 +486,11 @@ public:
 
   uint32_t GetExpressionNumber() const;
 
-  void SetResultIsInternal(bool b) { m_result_is_internal = b; }
+  void SetSuppressPersistentResult(bool b) { m_suppress_persistent_result = b; }
 
-  bool GetResultIsInternal() const { return m_result_is_internal; }
+  bool GetSuppressPersistentResult() const {
+    return m_suppress_persistent_result;
+  }
 
   void SetAutoApplyFixIts(bool b) { m_auto_apply_fixits = b; }
 
@@ -499,14 +524,17 @@ private:
   bool m_trap_exceptions = true;
   bool m_repl = false;
   bool m_playground = false;
+  bool m_playground_transforms_hp = true;
   bool m_generate_debug_info = false;
   bool m_ansi_color_errors = false;
-  bool m_result_is_internal = false;
+  bool m_suppress_persistent_result = false;
   bool m_auto_apply_fixits = true;
   uint64_t m_retries_with_fixits = 1;
   /// True if the executed code should be treated as utility code that is only
   /// used by LLDB internally.
   bool m_running_utility_expression = false;
+
+  lldb::BindGenericTypes m_bind_generic_types = lldb::eBindAuto;
 
   lldb::DynamicValueType m_use_dynamic = lldb::eNoDynamicValues;
   Timeout<std::micro> m_timeout = default_timeout;
@@ -520,7 +548,7 @@ private:
   // #line %u "%s" before the expression content to remap where the source
   // originates
   mutable std::string m_pound_line_file;
-  mutable uint32_t m_pound_line_line;
+  mutable uint32_t m_pound_line_line = 0;
   bool m_prepare_playground_stub_functions = true;
 };
 
@@ -540,7 +568,8 @@ public:
     eBroadcastBitModulesLoaded = (1 << 1),
     eBroadcastBitModulesUnloaded = (1 << 2),
     eBroadcastBitWatchpointChanged = (1 << 3),
-    eBroadcastBitSymbolsLoaded = (1 << 4)
+    eBroadcastBitSymbolsLoaded = (1 << 4),
+    eBroadcastBitSymbolsChanged = (1 << 5),
   };
 
   // These two functions fill out the Broadcaster interface:
@@ -840,6 +869,9 @@ public:
 
   bool RemoveBreakpointByID(lldb::break_id_t break_id);
 
+  /// Resets the hit count of all breakpoints.
+  void ResetBreakpointHitCounts();
+
   // The flag 'end_to_end', default to true, signifies that the operation is
   // performed end to end, for both the debugger and the debuggee.
 
@@ -1043,6 +1075,9 @@ public:
 
   const ArchSpec &GetArchitecture() const { return m_arch.GetSpec(); }
 
+  /// Returns the name of the target's ABI plugin.
+  llvm::StringRef GetABIName() const;
+
   /// Set the architecture for this target.
   ///
   /// If the current target has no Images read in, then this just sets the
@@ -1066,9 +1101,14 @@ public:
   ///     currently selected platform isn't compatible (in case it might be
   ///     manually set following this function call).
   ///
+  /// \param[in] merged
+  ///     If true, arch_spec is merged with the current
+  ///     architecture. Otherwise it's replaced.
+  ///
   /// \return
-  ///     \b true if the architecture was successfully set, \bfalse otherwise.
-  bool SetArchitecture(const ArchSpec &arch_spec, bool set_platform = false);
+  ///     \b true if the architecture was successfully set, \b false otherwise.
+  bool SetArchitecture(const ArchSpec &arch_spec, bool set_platform = false,
+                       bool merge = true);
 
   bool MergeArchitecture(const ArchSpec &arch_spec);
 
@@ -1100,6 +1140,37 @@ public:
   size_t ReadCStringFromMemory(const Address &addr, char *dst,
                                size_t dst_max_len, Status &result_error,
                                bool force_live_memory = false);
+
+  /// Read a NULL terminated string from memory
+  ///
+  /// This function will read a cache page at a time until a NULL string
+  /// terminator is found. It will stop reading if an aligned sequence of NULL
+  /// termination \a type_width bytes is not found before reading \a
+  /// cstr_max_len bytes.  The results are always guaranteed to be NULL
+  /// terminated, and that no more than (max_bytes - type_width) bytes will be
+  /// read.
+  ///
+  /// \param[in] addr
+  ///     The address to start the memory read.
+  ///
+  /// \param[in] dst
+  ///     A character buffer containing at least max_bytes.
+  ///
+  /// \param[in] max_bytes
+  ///     The maximum number of bytes to read.
+  ///
+  /// \param[in] error
+  ///     The error status of the read operation.
+  ///
+  /// \param[in] type_width
+  ///     The size of the null terminator (1 to 4 bytes per
+  ///     character).  Defaults to 1.
+  ///
+  /// \return
+  ///     The error status or the number of bytes prior to the null terminator.
+  size_t ReadStringFromMemory(const Address &addr, char *dst, size_t max_bytes,
+                              Status &error, size_t type_width,
+                              bool force_live_memory = true);
 
   size_t ReadScalarIntegerFromMemory(const Address &addr, uint32_t byte_size,
                                      bool is_signed, Scalar &scalar,
@@ -1135,12 +1206,13 @@ public:
 
   PathMappingList &GetImageSearchPathList();
 
-  llvm::Expected<TypeSystem &>
+  llvm::Expected<lldb::TypeSystemSP>
   GetScratchTypeSystemForLanguage(lldb::LanguageType language,
                                   bool create_on_demand = true,
                                   const char *compiler_options = nullptr);
 
-  std::vector<TypeSystem *> GetScratchTypeSystems(bool create_on_demand = true);
+  std::vector<lldb::TypeSystemSP>
+  GetScratchTypeSystems(bool create_on_demand = true);
 
   PersistentExpressionState *
   GetPersistentExpressionStateForLanguage(lldb::LanguageType language);
@@ -1185,7 +1257,7 @@ public:
 
 #ifdef LLDB_ENABLE_SWIFT
   /// Get the lock guarding the scratch typesystem from being re-initialized.
-  SharedMutex &GetSwiftScratchContextLock() {
+  std::shared_mutex &GetSwiftScratchContextLock() {
     return m_scratch_typesystem_lock;
   }
 
@@ -1196,6 +1268,7 @@ public:
   /// Return whether this is the Swift REPL.
   bool IsSwiftREPL();
 
+  bool IsSwiftCxxInteropEnabled();
 private:
   void DisplayFallbackSwiftContextErrors(
       SwiftASTContextForExpressions *swift_ast_ctx);
@@ -1356,7 +1429,7 @@ public:
 
   class StopHookCommandLine : public StopHook {
   public:
-    virtual ~StopHookCommandLine() = default;
+    ~StopHookCommandLine() override = default;
 
     StringList &GetCommands() { return m_commands; }
     void SetActionFromString(const std::string &strings);
@@ -1379,7 +1452,7 @@ public:
 
   class StopHookScripted : public StopHook {
   public:
-    virtual ~StopHookScripted() = default;
+    ~StopHookScripted() override = default;
     StopHookResult HandleStop(ExecutionContext &exc_ctx,
                               lldb::StreamSP output) override;
 
@@ -1490,6 +1563,44 @@ public:
     return *m_frame_recognizer_manager_up;
   }
 
+  void SaveScriptedLaunchInfo(lldb_private::ProcessInfo &process_info);
+
+  /// Add a signal for the target.  This will get copied over to the process
+  /// if the signal exists on that target.  Only the values with Yes and No are
+  /// set, Calculate values will be ignored.
+protected:
+  struct DummySignalValues {
+    LazyBool pass = eLazyBoolCalculate;
+    LazyBool notify = eLazyBoolCalculate;
+    LazyBool stop = eLazyBoolCalculate;
+    DummySignalValues(LazyBool pass, LazyBool notify, LazyBool stop)
+        : pass(pass), notify(notify), stop(stop) {}
+    DummySignalValues() = default;
+  };
+  using DummySignalElement = llvm::StringMapEntry<DummySignalValues>;
+  static bool UpdateSignalFromDummy(lldb::UnixSignalsSP signals_sp,
+                                    const DummySignalElement &element);
+  static bool ResetSignalFromDummy(lldb::UnixSignalsSP signals_sp,
+                                   const DummySignalElement &element);
+
+public:
+  /// Add a signal to the Target's list of stored signals/actions.  These
+  /// values will get copied into any processes launched from
+  /// this target.
+  void AddDummySignal(llvm::StringRef name, LazyBool pass, LazyBool print,
+                      LazyBool stop);
+  /// Updates the signals in signals_sp using the stored dummy signals.
+  /// If warning_stream_sp is not null, if any stored signals are not found in
+  /// the current process, a warning will be emitted here.
+  void UpdateSignalsFromDummy(lldb::UnixSignalsSP signals_sp,
+                              lldb::StreamSP warning_stream_sp);
+  /// Clear the dummy signals in signal_names from the target, or all signals
+  /// if signal_names is empty.  Also remove the behaviors they set from the
+  /// process's signals if it exists.
+  void ClearDummySignals(Args &signal_names);
+  /// Print all the signals set in this target.
+  void PrintDummySignals(Stream &strm, Args &signals);
+
 protected:
   /// Implementing of ModuleList::Notifier.
 
@@ -1519,6 +1630,7 @@ protected:
     ArchSpec m_spec;
     std::unique_ptr<Architecture> m_plugin_up;
   };
+
   // Member variables.
   Debugger &m_debugger;
   lldb::PlatformSP m_platform_sp; ///< The platform for this target.
@@ -1570,6 +1682,10 @@ protected:
   lldb::TraceSP m_trace_sp;
   /// Stores the frame recognizers of this target.
   lldb::StackFrameRecognizerManagerUP m_frame_recognizer_manager_up;
+  /// These are used to set the signal state when you don't have a process and
+  /// more usefully in the Dummy target where you can't know exactly what
+  /// signals you will have.
+  llvm::StringMap<DummySignalValues> m_dummy_signals;
 
   bool m_use_scratch_typesystem_per_module = false;
   bool m_did_display_scratch_fallback_warning = false;
@@ -1578,7 +1694,7 @@ protected:
       m_scratch_typesystem_for_module;
 
   /// Guards the scratch typesystem from being re-initialized.
-  SharedMutex m_scratch_typesystem_lock;
+  std::shared_mutex m_scratch_typesystem_lock;
 
   static void ImageSearchPathsChanged(const PathMappingList &path_list,
                                       void *baton);
@@ -1623,8 +1739,17 @@ private:
 
   void FinalizeFileActions(ProcessLaunchInfo &info);
 
+  /// Return a recommended size for memory reads at \a addr, optimizing for
+  /// cache usage.
+  lldb::addr_t GetReasonableReadSize(const Address &addr);
+
   Target(const Target &) = delete;
   const Target &operator=(const Target &) = delete;
+
+#ifdef LLDB_ENABLE_SWIFT
+  LazyBool m_is_swift_cxx_interop_enabled = eLazyBoolCalculate;
+#endif // LLDB_ENABLE_SWIFT
+
 };
 
 } // namespace lldb_private

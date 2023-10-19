@@ -63,7 +63,7 @@ class LLVM_LIBRARY_VISIBILITY Linker : public MachOTool {
   bool NeedsTempPath(const InputInfoList &Inputs) const;
   void AddLinkArgs(Compilation &C, const llvm::opt::ArgList &Args,
                    llvm::opt::ArgStringList &CmdArgs,
-                   const InputInfoList &Inputs, unsigned Version[5],
+                   const InputInfoList &Inputs, VersionTuple Version,
                    bool LinkerIsLLD) const;
 
 public:
@@ -147,6 +147,9 @@ private:
   mutable std::unique_ptr<tools::darwin::Dsymutil> Dsymutil;
   mutable std::unique_ptr<tools::darwin::VerifyDebug> VerifyDebug;
 
+  /// The version of the linker known to be available in the tool chain.
+  mutable Optional<VersionTuple> LinkerVersion;
+
 public:
   MachO(const Driver &D, const llvm::Triple &Triple,
         const llvm::opt::ArgList &Args);
@@ -158,6 +161,10 @@ public:
   /// Get the "MachO" arch name for a particular compiler invocation. For
   /// example, Apple treats different ARM variations as distinct architectures.
   StringRef getMachOArchName(const llvm::opt::ArgList &Args) const;
+
+  /// Get the version of the linker known to be available for a particular
+  /// compiler invocation (via the `-mlinker-version=` arg).
+  VersionTuple getLinkerVersion(const llvm::opt::ArgList &Args) const;
 
   /// Add the linker arguments to link the ARC runtime library.
   virtual void AddLinkARCArgs(const llvm::opt::ArgList &Args,
@@ -247,14 +254,15 @@ public:
 
   bool UseObjCMixedDispatch() const override { return true; }
 
-  bool IsUnwindTablesDefault(const llvm::opt::ArgList &Args) const override;
+  UnwindTableLevel
+  getDefaultUnwindTableLevel(const llvm::opt::ArgList &Args) const override;
 
   RuntimeLibType GetDefaultRuntimeLibType() const override {
     return ToolChain::RLT_CompilerRT;
   }
 
   bool isPICDefault() const override;
-  bool isPIEDefault() const override;
+  bool isPIEDefault(const llvm::opt::ArgList &Args) const override;
   bool isPICDefaultForced() const override;
 
   bool SupportsProfiling() const override;
@@ -292,7 +300,8 @@ public:
     IPhoneOS,
     TvOS,
     WatchOS,
-    LastDarwinPlatform = WatchOS
+    DriverKit,
+    LastDarwinPlatform = DriverKit
   };
   enum DarwinEnvironmentKind {
     NativeEnvironment,
@@ -310,6 +319,9 @@ public:
 
   /// The information about the darwin SDK that was used.
   mutable Optional<DarwinSDKInfo> SDKInfo;
+
+  /// The target variant triple that was specified (if any).
+  mutable Optional<llvm::Triple> TargetVariantTriple;
 
   CudaInstallationDetector CudaInstallation;
   RocmInstallationDetector RocmInstallation;
@@ -339,7 +351,7 @@ public:
 
   bool isKernelStatic() const override {
     return (!(isTargetIPhoneOS() && !isIPhoneOSVersionLT(6, 0)) &&
-            !isTargetWatchOS());
+            !isTargetWatchOS() && !isTargetDriverKit());
   }
 
   void addProfileRTLibs(const llvm::opt::ArgList &Args,
@@ -425,6 +437,11 @@ public:
     return TargetPlatform == WatchOS;
   }
 
+  bool isTargetDriverKit() const {
+    assert(TargetInitialized && "Target not initialized!");
+    return TargetPlatform == DriverKit;
+  }
+
   bool isTargetMacCatalyst() const {
     return TargetPlatform == IPhoneOS && TargetEnvironment == MacCatalyst;
   }
@@ -479,6 +496,12 @@ public:
                 : TargetVersion) < VersionTuple(V0, V1, V2);
   }
 
+  /// Returns the darwin target variant triple, the variant of the deployment
+  /// target for which the code is being compiled.
+  Optional<llvm::Triple> getTargetVariantTriple() const override {
+    return TargetVariantTriple;
+  }
+
 protected:
   /// Return true if c++17 aligned allocation/deallocation functions are not
   /// implemented in the c++ standard library of the deployment target we are
@@ -528,7 +551,7 @@ public:
   GetDefaultStackProtectorLevel(bool KernelOrKext) const override {
     // Stack protectors default to on for user code on 10.5,
     // and for everything in 10.6 and beyond
-    if (isTargetIOSBased() || isTargetWatchOSBased())
+    if (isTargetIOSBased() || isTargetWatchOSBased() || isTargetDriverKit())
       return LangOptions::SSPOn;
     else if (isTargetMacOSBased() && !isMacosxVersionLT(10, 6))
       return LangOptions::SSPOn;
@@ -610,7 +633,8 @@ private:
                                    llvm::StringRef ArchDir,
                                    llvm::StringRef BitDir) const;
 
-  llvm::StringRef GetHeaderSysroot(const llvm::opt::ArgList &DriverArgs) const;
+  llvm::SmallString<128>
+  GetEffectiveSysroot(const llvm::opt::ArgList &DriverArgs) const;
 };
 
 } // end namespace toolchains

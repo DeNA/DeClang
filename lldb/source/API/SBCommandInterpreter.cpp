@@ -47,6 +47,10 @@ public:
         auto_repeat_command == nullptr
             ? llvm::None
             : llvm::Optional<std::string>(auto_repeat_command);
+    // We don't know whether any given command coming from this interface takes
+    // arguments or not so here we're just disabling the basic args check.
+    CommandArgumentData none_arg{eArgTypeNone, eArgRepeatStar};
+    m_arguments.push_back({none_arg});
   }
 
   bool IsRemovable() const override { return true; }
@@ -113,6 +117,13 @@ bool SBCommandInterpreter::CommandExists(const char *cmd) {
                                           : false);
 }
 
+bool SBCommandInterpreter::UserCommandExists(const char *cmd) {
+  LLDB_INSTRUMENT_VA(this, cmd);
+
+  return (((cmd != nullptr) && IsValid()) ? m_opaque_ptr->UserCommandExists(cmd)
+                                          : false);
+}
+
 bool SBCommandInterpreter::AliasExists(const char *cmd) {
   LLDB_INSTRUMENT_VA(this, cmd);
 
@@ -129,7 +140,13 @@ bool SBCommandInterpreter::IsActive() {
 bool SBCommandInterpreter::WasInterrupted() const {
   LLDB_INSTRUMENT_VA(this);
 
-  return (IsValid() ? m_opaque_ptr->WasInterrupted() : false);
+  return (IsValid() ? m_opaque_ptr->GetDebugger().InterruptRequested() : false);
+}
+
+bool SBCommandInterpreter::InterruptCommand() {
+  LLDB_INSTRUMENT_VA(this);
+  
+  return (IsValid() ? m_opaque_ptr->InterruptCommand() : false);
 }
 
 const char *SBCommandInterpreter::GetIOHandlerControlSequence(char ch) {
@@ -423,7 +440,7 @@ void SBCommandInterpreter::reset(
   m_opaque_ptr = interpreter;
 }
 
-void SBCommandInterpreter::SourceInitFileInHomeDirectory(
+void SBCommandInterpreter::SourceInitFileInGlobalDirectory(
     SBCommandReturnObject &result) {
   LLDB_INSTRUMENT_VA(this, result);
 
@@ -433,10 +450,17 @@ void SBCommandInterpreter::SourceInitFileInHomeDirectory(
     std::unique_lock<std::recursive_mutex> lock;
     if (target_sp)
       lock = std::unique_lock<std::recursive_mutex>(target_sp->GetAPIMutex());
-    m_opaque_ptr->SourceInitFileHome(result.ref());
+    m_opaque_ptr->SourceInitFileGlobal(result.ref());
   } else {
     result->AppendError("SBCommandInterpreter is not valid");
   }
+}
+
+void SBCommandInterpreter::SourceInitFileInHomeDirectory(
+    SBCommandReturnObject &result) {
+  LLDB_INSTRUMENT_VA(this, result);
+
+  SourceInitFileInHomeDirectory(result, /*is_repl=*/false);
 }
 
 void SBCommandInterpreter::SourceInitFileInHomeDirectory(

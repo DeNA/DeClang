@@ -68,7 +68,7 @@ framework module Redirecting {
 }
 @end
 // CHECK: @"_OBJC_$_INSTANCE_VARIABLES_ObjCInterface"
-// CHECK-SAME: [3 x %struct._ivar_t] [%struct._ivar_t { i64* @"OBJC_IVAR_$_ObjCInterface.ivarInExtension", {{.*}} }, %struct._ivar_t { i64* @"OBJC_IVAR_$_ObjCInterface.bitfieldIvarInExtension", {{.*}} }, %struct._ivar_t { i64* @"OBJC_IVAR_$_ObjCInterface.ivarInImplementation", {{.*}} }]
+// CHECK-SAME: [3 x %struct._ivar_t] [%struct._ivar_t { ptr @"OBJC_IVAR_$_ObjCInterface.ivarInExtension", {{.*}} }, %struct._ivar_t { ptr @"OBJC_IVAR_$_ObjCInterface.bitfieldIvarInExtension", {{.*}} }, %struct._ivar_t { ptr @"OBJC_IVAR_$_ObjCInterface.ivarInImplementation", {{.*}} }]
 
 
 //--- Frameworks/WithInlineIvar.framework/Headers/WithInlineIvar.h
@@ -104,7 +104,7 @@ framework module WithInlineIvar {
 }
 @end
 // CHECK: @"_OBJC_$_INSTANCE_VARIABLES_ObjCInterface"
-// CHECK-SAME: [3 x %struct._ivar_t] [%struct._ivar_t { i64* @"OBJC_IVAR_$_ObjCInterface.accessedIvar", {{.*}} }, %struct._ivar_t { i64* @"OBJC_IVAR_$_ObjCInterface.ivarInExtension", {{.*}} }, %struct._ivar_t { i64* @"OBJC_IVAR_$_ObjCInterface.bitfieldIvarInExtension", {{.*}} }]
+// CHECK-SAME: [3 x %struct._ivar_t] [%struct._ivar_t { ptr @"OBJC_IVAR_$_ObjCInterface.accessedIvar", {{.*}} }, %struct._ivar_t { ptr @"OBJC_IVAR_$_ObjCInterface.ivarInExtension", {{.*}} }, %struct._ivar_t { ptr @"OBJC_IVAR_$_ObjCInterface.bitfieldIvarInExtension", {{.*}} }]
 
 
 //--- Frameworks/WithProperty.framework/Headers/WithProperty.h
@@ -143,4 +143,4 @@ framework module BackingIvarInExtension {
 @synthesize propertyName = propertyBackingIvar;
 @end
 // CHECK: @"_OBJC_$_INSTANCE_VARIABLES_WithProperty"
-// CHECK-SAME: [1 x %struct._ivar_t] [%struct._ivar_t { i64* @"OBJC_IVAR_$_WithProperty.propertyBackingIvar", {{.*}} }]
+// CHECK-SAME: [1 x %struct._ivar_t] [%struct._ivar_t { ptr @"OBJC_IVAR_$_WithProperty.propertyBackingIvar", {{.*}} }]

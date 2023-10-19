@@ -42,6 +42,7 @@ class AAResults;
 class AllocaInst;
 class AtomicCmpXchgInst;
 class AtomicRMWInst;
+class AssumptionCache;
 class BasicBlock;
 class BranchInst;
 class CallInst;
@@ -190,8 +191,8 @@ public:
   static const unsigned LowestSDNodeOrder = 1;
 
   SelectionDAG &DAG;
-  const DataLayout *DL = nullptr;
   AAResults *AA = nullptr;
+  AssumptionCache *AC = nullptr;
   const TargetLibraryInfo *LibInfo;
 
   class SDAGSwitchLowering : public SwitchCG::SwitchLowering {
@@ -199,7 +200,7 @@ public:
     SDAGSwitchLowering(SelectionDAGBuilder *sdb, FunctionLoweringInfo &funcinfo)
         : SwitchCG::SwitchLowering(funcinfo), SDB(sdb) {}
 
-    virtual void addSuccessorWithProb(
+    void addSuccessorWithProb(
         MachineBasicBlock *Src, MachineBasicBlock *Dst,
         BranchProbability Prob = BranchProbability::getUnknown()) override {
       SDB->addSuccessorWithProb(Src, Dst, Prob);
@@ -245,7 +246,7 @@ public:
         SL(std::make_unique<SDAGSwitchLowering>(this, funcinfo)), FuncInfo(funcinfo),
         SwiftError(swifterror) {}
 
-  void init(GCFunctionInfo *gfi, AAResults *AA,
+  void init(GCFunctionInfo *gfi, AAResults *AA, AssumptionCache *AC,
             const TargetLibraryInfo *li);
 
   /// Clear out the current SelectionDAG and the associated state and prepare
@@ -285,7 +286,8 @@ public:
     return CurInst ? CurInst->getDebugLoc() : DebugLoc();
   }
 
-  void CopyValueToVirtualRegister(const Value *V, unsigned Reg);
+  void CopyValueToVirtualRegister(const Value *V, unsigned Reg,
+                                  ISD::NodeType ExtendType = ISD::ANY_EXTEND);
 
   void visit(const Instruction &I);
 
@@ -533,8 +535,8 @@ private:
   void visitInsertElement(const User &I);
   void visitShuffleVector(const User &I);
 
-  void visitExtractValue(const User &I);
-  void visitInsertValue(const User &I);
+  void visitExtractValue(const ExtractValueInst &I);
+  void visitInsertValue(const InsertValueInst &I);
   void visitLandingPad(const LandingPadInst &LP);
 
   void visitGetElementPtr(const User &I);
@@ -572,10 +574,19 @@ private:
   void visitIntrinsicCall(const CallInst &I, unsigned Intrinsic);
   void visitTargetIntrinsic(const CallInst &I, unsigned Intrinsic);
   void visitConstrainedFPIntrinsic(const ConstrainedFPIntrinsic &FPI);
-  void visitVPLoadGather(const VPIntrinsic &VPIntrin, EVT VT,
-                         SmallVector<SDValue, 7> &OpValues, bool isGather);
-  void visitVPStoreScatter(const VPIntrinsic &VPIntrin,
-                           SmallVector<SDValue, 7> &OpValues, bool isScatter);
+  void visitVPLoad(const VPIntrinsic &VPIntrin, EVT VT,
+                   SmallVector<SDValue, 7> &OpValues);
+  void visitVPStore(const VPIntrinsic &VPIntrin,
+                    SmallVector<SDValue, 7> &OpValues);
+  void visitVPGather(const VPIntrinsic &VPIntrin, EVT VT,
+                     SmallVector<SDValue, 7> &OpValues);
+  void visitVPScatter(const VPIntrinsic &VPIntrin,
+                      SmallVector<SDValue, 7> &OpValues);
+  void visitVPStridedLoad(const VPIntrinsic &VPIntrin, EVT VT,
+                          SmallVectorImpl<SDValue> &OpValues);
+  void visitVPStridedStore(const VPIntrinsic &VPIntrin,
+                           SmallVectorImpl<SDValue> &OpValues);
+  void visitVPCmp(const VPCmpIntrinsic &VPIntrin);
   void visitVectorPredicationIntrinsic(const VPIntrinsic &VPIntrin);
 
   void visitVAStart(const CallInst &I);
@@ -689,9 +700,7 @@ struct RegsForValue {
                const DataLayout &DL, unsigned Reg, Type *Ty,
                Optional<CallingConv::ID> CC);
 
-  bool isABIMangled() const {
-    return CallConv.hasValue();
-  }
+  bool isABIMangled() const { return CallConv.has_value(); }
 
   /// Add the specified values to this one.
   void append(const RegsForValue &RHS) {

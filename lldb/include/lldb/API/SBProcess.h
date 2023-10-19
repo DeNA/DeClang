@@ -182,6 +182,14 @@ public:
   ///   The stop event corresponding to stop ID.
   lldb::SBEvent GetStopEventForStopID(uint32_t stop_id);
 
+  /// If the process is a scripted process, changes its state to the new state.
+  /// No-op otherwise.
+  ///
+  /// \param [in] new_state
+  ///   The new state that the scripted process should be set to.
+  ///
+  void ForceScriptedState(StateType new_state);
+
   size_t ReadMemory(addr_t addr, void *buf, size_t size, lldb::SBError &error);
 
   size_t WriteMemory(addr_t addr, const void *buf, size_t size,
@@ -337,7 +345,21 @@ public:
 
   bool IsInstrumentationRuntimePresent(InstrumentationRuntimeType type);
 
-  /// Save the state of the process in a core file (or mini dump on Windows).
+  /// Save the state of the process in a core file.
+  ///
+  /// \param[in] file_name - The name of the file to save the core file to.
+  ///
+  /// \param[in] flavor - Specify the flavor of a core file plug-in to save.
+  /// Currently supported flavors include "mach-o" and "minidump"
+  ///
+  /// \param[in] core_style - Specify the style of a core file to save.
+  lldb::SBError SaveCore(const char *file_name, const char *flavor,
+                         SaveCoreStyle core_style);
+
+  /// Save the state of the process with the a flavor that matches the
+  /// current process' main executable (if supported).
+  ///
+  /// \param[in] file_name - The name of the file to save the core file to.
   lldb::SBError SaveCore(const char *file_name);
 
   /// Query the address load_addr and store the details of the memory
@@ -408,6 +430,8 @@ public:
   ///     deallocating.
   ///
   lldb::SBError DeallocateMemory(lldb::addr_t ptr);
+
+  lldb::SBScriptObject GetScriptedImplementation();
 
 protected:
   friend class SBAddress;

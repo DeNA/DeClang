@@ -9,6 +9,7 @@
 #include "mlir-c/Interfaces.h"
 
 #include "mlir/CAPI/IR.h"
+#include "mlir/CAPI/Support.h"
 #include "mlir/CAPI/Wrap.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -17,17 +18,17 @@ using namespace mlir;
 
 bool mlirOperationImplementsInterface(MlirOperation operation,
                                       MlirTypeID interfaceTypeID) {
-  const AbstractOperation *abstractOp =
-      unwrap(operation)->getAbstractOperation();
-  return abstractOp && abstractOp->hasInterface(unwrap(interfaceTypeID));
+  Optional<RegisteredOperationName> info =
+      unwrap(operation)->getRegisteredInfo();
+  return info && info->hasInterface(unwrap(interfaceTypeID));
 }
 
 bool mlirOperationImplementsInterfaceStatic(MlirStringRef operationName,
                                             MlirContext context,
                                             MlirTypeID interfaceTypeID) {
-  const AbstractOperation *abstractOp = AbstractOperation::lookup(
+  Optional<RegisteredOperationName> info = RegisteredOperationName::lookup(
       StringRef(operationName.data, operationName.length), unwrap(context));
-  return abstractOp && abstractOp->hasInterface(unwrap(interfaceTypeID));
+  return info && info->hasInterface(unwrap(interfaceTypeID));
 }
 
 MlirTypeID mlirInferTypeOpInterfaceTypeID() {
@@ -40,12 +41,12 @@ MlirLogicalResult mlirInferTypeOpInterfaceInferReturnTypes(
     intptr_t nRegions, MlirRegion *regions, MlirTypesCallback callback,
     void *userData) {
   StringRef name(opName.data, opName.length);
-  const AbstractOperation *abstractOp =
-      AbstractOperation::lookup(name, unwrap(context));
-  if (!abstractOp)
+  Optional<RegisteredOperationName> info =
+      RegisteredOperationName::lookup(name, unwrap(context));
+  if (!info)
     return mlirLogicalResultFailure();
 
-  llvm::Optional<Location> maybeLocation = llvm::None;
+  llvm::Optional<Location> maybeLocation;
   if (!mlirLocationIsNull(location))
     maybeLocation = unwrap(location);
   SmallVector<Value> unwrappedOperands;
@@ -68,7 +69,7 @@ MlirLogicalResult mlirInferTypeOpInterfaceInferReturnTypes(
   });
 
   SmallVector<Type> inferredTypes;
-  if (failed(abstractOp->getInterface<InferTypeOpInterface>()->inferReturnTypes(
+  if (failed(info->getInterface<InferTypeOpInterface>()->inferReturnTypes(
           unwrap(context), maybeLocation, unwrappedOperands, attributeDict,
           unwrappedRegions, inferredTypes)))
     return mlirLogicalResultFailure();

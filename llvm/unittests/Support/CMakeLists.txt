@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_llvm_unittest(SupportTests
+  AddressRangeTest.cpp
   AlignmentTest.cpp
   AlignOfTest.cpp
   AllocatorTest.cpp
@@ -23,6 +24,8 @@ add_llvm_unittest(SupportTests
   CompressionTest.cpp
   ConvertUTFTest.cpp
   CRCTest.cpp
+  CSKYAttributeParserTest.cpp
+  CSKYTargetParserTest.cpp
   DataExtractorTest.cpp
   DebugTest.cpp
   DebugCounterTest.cpp
@@ -37,6 +40,7 @@ add_llvm_unittest(SupportTests
   FileCollectorTest.cpp
   FileOutputBufferTest.cpp
   FileUtilitiesTest.cpp
+  FormatChkTest.cpp
   FormatVariadicTest.cpp
   FSUniqueIDTest.cpp
   GlobPatternTest.cpp
@@ -62,6 +66,7 @@ add_llvm_unittest(SupportTests
   OptimizedStructLayoutTest.cpp
   ParallelTest.cpp
   Path.cpp
+  PrefixMapperTest.cpp
   ProcessTest.cpp
   ProgramTest.cpp
   RegexTest.cpp
@@ -69,6 +74,7 @@ add_llvm_unittest(SupportTests
   ReplaceFileTest.cpp
   RISCVAttributeParserTest.cpp
   ScaledNumberTest.cpp
+  ScopedPrinterTest.cpp
   SHA256.cpp
   SourceMgrTest.cpp
   SpecialCaseListTest.cpp
@@ -82,6 +88,7 @@ add_llvm_unittest(SupportTests
   ThreadPool.cpp
   Threading.cpp
   TimerTest.cpp
+  TimeProfilerTest.cpp
   ToolOutputFileTest.cpp
   TypeNameTest.cpp
   TypeTraitsTest.cpp
@@ -90,6 +97,10 @@ add_llvm_unittest(SupportTests
   UnicodeTest.cpp
   VersionTupleTest.cpp
   VirtualFileSystemTest.cpp
+  VirtualOutputBackendTest.cpp
+  VirtualOutputBackendsTest.cpp
+  VirtualOutputConfigTest.cpp
+  VirtualOutputFileTest.cpp
   WithColorTest.cpp
   YAMLIOTest.cpp
   YAMLParserTest.cpp
@@ -97,6 +108,7 @@ add_llvm_unittest(SupportTests
   formatted_raw_ostream_test.cpp
   raw_fd_stream_test.cpp
   raw_ostream_test.cpp
+  raw_ostream_proxy_test.cpp
   raw_pwrite_stream_test.cpp
   raw_sha1_ostream_test.cpp
   xxhashTest.cpp

@@ -19,6 +19,7 @@
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/lldb-private.h"
+#include "swift/Demangling/Demangle.h"
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringSet.h"
@@ -73,9 +74,6 @@ protected:
   std::unique_ptr<SwiftLanguageRuntimeImpl> m_impl;
 
 public:
-  class MetadataPromise;
-  typedef std::shared_ptr<MetadataPromise> MetadataPromiseSP;
-
   static char ID;
 
   bool isA(const void *ClassID) const override {
@@ -90,7 +88,7 @@ public:
   static lldb_private::LanguageRuntime *
   CreateInstance(Process *process, lldb::LanguageType language);
 
-  static lldb_private::ConstString GetPluginNameStatic();
+  static llvm::StringRef GetPluginNameStatic() { return "swift"; }
 
   static bool classof(const LanguageRuntime *runtime) {
     return runtime->isA(&ID);
@@ -108,9 +106,7 @@ public:
   /// \}
 
   /// PluginInterface protocol.
-  llvm::StringRef GetPluginName() override {
-    return GetPluginNameStatic().GetStringRef();
-  }
+  llvm::StringRef GetPluginName() override { return GetPluginNameStatic(); }
 
   bool GetObjectDescription(Stream &str, Value &value,
                             ExecutionContextScope *exe_scope) override {
@@ -149,6 +145,12 @@ public:
   static std::string DemangleSymbolAsString(llvm::StringRef symbol,
                                             DemangleMode mode,
                                             const SymbolContext *sc = nullptr);
+
+  /// Demangle a symbol to a swift::Demangle node tree.
+  ///
+  /// This is a central point of access, for purposes such as logging.
+  static swift::Demangle::NodePointer
+  DemangleSymbolAsNode(llvm::StringRef symbol, swift::Demangle::Context &ctx);
 
   void DumpTyperef(CompilerType type, TypeSystemSwiftTypeRef *module_holder,
                    Stream *s);
@@ -213,6 +215,16 @@ public:
                                 TypeAndOrName &class_type_or_name,
                                 Address &address,
                                 Value::ValueType &value_type) override;
+
+  CompilerType BindGenericTypeParameters(
+      CompilerType unbound_type,
+      std::function<CompilerType(unsigned, unsigned)> finder);
+
+  /// Extract the value object which contains the Swift type's "contents".
+  /// Returns null if this is not a C++ wrapping a Swift type.
+  static lldb::ValueObjectSP
+  ExtractSwiftValueObjectFromCxxWrapper(ValueObject &valobj);
+
   TypeAndOrName FixUpDynamicType(const TypeAndOrName &type_and_or_name,
                                  ValueObject &static_value) override;
   lldb::BreakpointResolverSP CreateExceptionResolver(const lldb::BreakpointSP &bkpt,
@@ -223,24 +235,7 @@ public:
   CompilerType GetConcreteType(ExecutionContextScope *exe_scope,
                                ConstString abstract_type_name) override;
 
-  /// A proxy object to support lazy binding of Archetypes.
-  class MetadataPromise {
-    friend class SwiftLanguageRuntimeImpl;
-
-    MetadataPromise(ValueObject &, SwiftLanguageRuntimeImpl &, lldb::addr_t);
-
-    lldb::ValueObjectSP m_for_object_sp;
-    SwiftLanguageRuntimeImpl &m_swift_runtime;
-    lldb::addr_t m_metadata_location;
-    llvm::Optional<swift::MetadataKind> m_metadata_kind;
-    llvm::Optional<CompilerType> m_compiler_type;
-
-  public:
-    CompilerType FulfillTypePromise(Status *error = nullptr);
-  };
-
-  MetadataPromiseSP GetMetadataPromise(lldb::addr_t addr,
-                                       ValueObject &for_object);
+  CompilerType GetTypeFromMetadata(TypeSystemSwift &tss, Address address);
   /// Build the artificial type metadata variable name for \p swift_type.
   static bool GetAbstractTypeName(StreamString &name, swift::Type swift_type);
 
@@ -251,6 +246,53 @@ public:
   static void GetGenericParameterNamesForFunction(
       const SymbolContext &sc,
       llvm::DenseMap<ArchetypePath, llvm::StringRef> &dict);
+
+  /// Invoke callback for each DependentGenericParamType.
+  static void
+  ForEachGenericParameter(swift::Demangle::NodePointer node,
+                          std::function<void(unsigned, unsigned)> callback);
+
+  /// One element for each value pack / pack expansion in the signature.
+  struct GenericSignature {
+    /// Represents a single generic parameter.
+    struct GenericParam {
+      unsigned depth;
+      unsigned index;
+      /// A vector of |generic_params| bits, indicating which other
+      /// generic_params share the same shape.
+      llvm::BitVector same_shape;
+      bool is_pack = false;
+      GenericParam(unsigned d, unsigned i, unsigned nparams)
+          : depth(d), index(i), same_shape(nparams) {}
+    };
+
+    struct PackExpansion {
+      llvm::BitVector generic_params;
+      ConstString mangled_type;
+      unsigned shape;
+      PackExpansion(unsigned nparams, unsigned shape)
+          : generic_params(nparams), shape(shape) {}
+    };
+
+    llvm::SmallVector<GenericParam, 4> generic_params;
+    llvm::SmallVector<PackExpansion> pack_expansions;
+
+    llvm::SmallVector<unsigned, 4> count_for_value_pack;
+    llvm::SmallVector<unsigned, 4> count_for_type_pack;
+    unsigned dependent_generic_param_count = 0;
+    unsigned num_counts = 0;
+
+    unsigned GetNumValuePacks() { return count_for_value_pack.size(); }
+    unsigned GetNumTypePacks() { return count_for_type_pack.size(); }
+    unsigned GetCountForValuePack(unsigned i) {
+      return count_for_value_pack[i];
+    }
+    unsigned GetCountForTypePack(unsigned i) { return count_for_type_pack[i]; }
+  };
+  /// Extract the generic signature out of a mangled Swift function name.
+  static llvm::Optional<GenericSignature>
+  GetGenericSignature(llvm::StringRef function_name,
+                      TypeSystemSwiftTypeRef &ts);
 
   /// Using the generic type parameters of \p stack_frame return a
   /// version of \p base_type that replaces all generic type
@@ -272,7 +314,7 @@ public:
 
   /// Ask Remote Mirrors about the children of a composite type.
   llvm::Optional<unsigned> GetNumChildren(CompilerType type,
-                                          ValueObject *valobj);
+                                          ExecutionContextScope *exe_scope);
 
   /// Determine the enum case name for the \p data value of the enum \p type.
   /// This is performed using Swift reflection.
@@ -338,9 +380,7 @@ public:
   /// task is to strip those bits if necessary and return a pure
   /// pointer (or a tagged pointer).
   lldb::addr_t MaybeMaskNonTrivialReferencePointer(
-      lldb::addr_t,
-      SwiftASTContext::NonTriviallyManagedReferenceStrategy strategy);
-
+      lldb::addr_t, TypeSystemSwift::NonTriviallyManagedReferenceKind kind);
   /// \return true if this is a Swift tagged pointer (as opposed to an
   /// Objective-C tagged pointer).
   bool IsTaggedPointer(lldb::addr_t addr, CompilerType type);
@@ -399,6 +439,7 @@ public:
 
   lldb::SyntheticChildrenSP
   GetBridgedSyntheticChildProvider(ValueObject &valobj);
+
 
   /// Expression Callbacks.
   /// \{

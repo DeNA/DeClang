@@ -20,7 +20,7 @@ namespace abseil {
 
 // Given the name of a duration factory function, return the appropriate
 // `DurationScale` for that factory.  If no factory can be found for
-// `FactoryName`, return `None`.
+// `FactoryName`, return `std::nullopt`.
 static llvm::Optional<DurationScale>
 getScaleForFactory(llvm::StringRef FactoryName) {
   return llvm::StringSwitch<llvm::Optional<DurationScale>>(FactoryName)
@@ -30,7 +30,7 @@ getScaleForFactory(llvm::StringRef FactoryName) {
       .Case("Seconds", DurationScale::Seconds)
       .Case("Minutes", DurationScale::Minutes)
       .Case("Hours", DurationScale::Hours)
-      .Default(llvm::None);
+      .Default(std::nullopt);
 }
 
 // Given either an integer or float literal, return its value.
@@ -46,7 +46,7 @@ static double getValue(const IntegerLiteral *IntLit,
 
 // Given the scale of a duration and a `Multiplier`, determine if `Multiplier`
 // would produce a new scale.  If so, return a tuple containing the new scale
-// and a suitable Multiplier for that scale, otherwise `None`.
+// and a suitable Multiplier for that scale, otherwise `std::nullopt`.
 static llvm::Optional<std::tuple<DurationScale, double>>
 getNewScaleSingleStep(DurationScale OldScale, double Multiplier) {
   switch (OldScale) {
@@ -89,11 +89,11 @@ getNewScaleSingleStep(DurationScale OldScale, double Multiplier) {
     break;
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 // Given the scale of a duration and a `Multiplier`, determine if `Multiplier`
-// would produce a new scale.  If so, return it, otherwise `None`.
+// would produce a new scale.  If so, return it, otherwise `std::nullopt`.
 static llvm::Optional<DurationScale> getNewScale(DurationScale OldScale,
                                                  double Multiplier) {
   while (Multiplier != 1.0) {
@@ -107,7 +107,7 @@ static llvm::Optional<DurationScale> getNewScale(DurationScale OldScale,
     OldScale = std::get<0>(*Result);
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 void DurationFactoryScaleCheck::registerMatchers(MatchFinder *Finder) {
@@ -145,7 +145,7 @@ void DurationFactoryScaleCheck::check(const MatchFinder::MatchResult &Result) {
     return;
 
   // We first handle the cases of literal zero (both float and integer).
-  if (IsLiteralZero(Result, *Arg)) {
+  if (isLiteralZero(Result, *Arg)) {
     diag(Call->getBeginLoc(),
          "use ZeroDuration() for zero-length time intervals")
         << FixItHint::CreateReplacement(Call->getSourceRange(),
@@ -192,7 +192,7 @@ void DurationFactoryScaleCheck::check(const MatchFinder::MatchResult &Result) {
                  Result.Nodes.getNodeAs<BinaryOperator>("div_binop")) {
     // We next handle division.
     // For division, we only check the RHS.
-    const auto *FloatLit = llvm::dyn_cast<FloatingLiteral>(DivBinOp->getRHS());
+    const auto *FloatLit = llvm::cast<FloatingLiteral>(DivBinOp->getRHS());
 
     llvm::Optional<DurationScale> NewScale =
         getNewScale(Scale, 1.0 / FloatLit->getValueAsApproximateDouble());
@@ -221,7 +221,6 @@ void DurationFactoryScaleCheck::check(const MatchFinder::MatchResult &Result) {
                 tooling::fixit::getText(*Remainder, *Result.Context) + ")")
                    .str());
   }
-  return;
 }
 
 } // namespace abseil

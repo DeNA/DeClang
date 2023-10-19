@@ -53,6 +53,7 @@ add_lldb_tool(lldb-server
       lldbPluginInstructionARM
       lldbPluginInstructionMIPS
       lldbPluginInstructionMIPS64
+      lldbPluginInstructionRISCV
       ${LLDB_SYSTEM_LIBS}
 
     LINK_COMPONENTS
@@ -66,3 +67,9 @@ add_dependencies(lldb-server
 )
 target_include_directories(lldb-server PRIVATE "${LLDB_SOURCE_DIR}/source")
 target_link_libraries(lldb-server PRIVATE ${LLDB_SYSTEM_LIBS})
+
+# BEGIN Swift Mods
+if(SWIFT_SWIFT_PARSER)
+  add_properties_for_swift_modules(lldb-server "../")
+endif()
+# END Swift Mods

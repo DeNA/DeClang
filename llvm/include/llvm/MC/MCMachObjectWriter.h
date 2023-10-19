@@ -10,6 +10,7 @@
 #define LLVM_MC_MCMACHOBJECTWRITER_H
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/MC/MCExpr.h"
@@ -177,7 +178,9 @@ public:
   /// @}
 
   void writeHeader(MachO::HeaderFileType Type, unsigned NumLoadCommands,
-                   unsigned LoadCommandsSize, bool SubsectionsViaSymbols);
+                   unsigned LoadCommandsSize, bool SubsectionsViaSymbols,
+                   std::optional<unsigned> PtrAuthABIVersion,
+                   bool PtrAuthKernelABIVersion);
 
   /// Write a segment load command.
   ///
@@ -262,6 +265,8 @@ public:
                                               const MCSymbol &SymA,
                                               const MCFragment &FB, bool InSet,
                                               bool IsPCRel) const override;
+
+  void populateAddrSigSection(MCAssembler &Asm);
 
   uint64_t writeObject(MCAssembler &Asm, const MCAsmLayout &Layout) override;
 };

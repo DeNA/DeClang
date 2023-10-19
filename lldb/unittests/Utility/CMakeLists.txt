@@ -23,7 +23,6 @@ add_lldb_unittest(UtilityTests
   RangeTest.cpp
   RegisterValueTest.cpp
   RegularExpressionTest.cpp
-  ReproducerTest.cpp
   ScalarTest.cpp
   SharedClusterTest.cpp
   StateTest.cpp
@@ -39,6 +38,7 @@ add_lldb_unittest(UtilityTests
   TildeExpressionResolverTest.cpp
   TimeoutTest.cpp
   TimerTest.cpp
+  TraceGDBRemotePacketsTest.cpp
   UriParserTest.cpp
   UserIDResolverTest.cpp
   UUIDTest.cpp
@@ -54,6 +54,10 @@ add_lldb_unittest(UtilityTests
     Support
   )
 
-add_unittest_inputs(UtilityTests
+set(test_inputs
   StructuredData-basic.json
+  StructuredData-nested.json
+  StructuredData-full.json
   )
+
+add_unittest_inputs(UtilityTests "${test_inputs}")

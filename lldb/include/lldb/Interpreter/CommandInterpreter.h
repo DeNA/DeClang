@@ -239,6 +239,14 @@ public:
     eCommandTypesAllThem = 0xFFFF  //< all commands
   };
 
+  // The CommandAlias and CommandInterpreter both have a hand in 
+  // substituting for alias commands.  They work by writing special tokens
+  // in the template form of the Alias command, and then detecting them when the
+  // command is executed.  These are the special tokens:
+  static const char *g_no_argument;
+  static const char *g_need_argument;
+  static const char *g_argument;
+
   CommandInterpreter(Debugger &debugger, bool synchronous_execution);
 
   ~CommandInterpreter() override = default;
@@ -252,7 +260,8 @@ public:
   }
 
   void SourceInitFileCwd(CommandReturnObject &result);
-  void SourceInitFileHome(CommandReturnObject &result, bool is_repl = false);
+  void SourceInitFileHome(CommandReturnObject &result, bool is_repl);
+  void SourceInitFileGlobal(CommandReturnObject &result);
 
   bool AddCommand(llvm::StringRef name, const lldb::CommandObjectSP &cmd_sp,
                   bool can_replace);
@@ -342,9 +351,10 @@ public:
                      CommandReturnObject &result);
 
   bool HandleCommand(const char *command_line, LazyBool add_to_history,
-                     CommandReturnObject &result);
+                     CommandReturnObject &result,
+                     bool force_repeat_command = false);
 
-  bool WasInterrupted() const;
+  bool InterruptCommand();
 
   /// Execute a list of commands in sequence.
   ///
@@ -550,6 +560,9 @@ public:
   bool GetSaveSessionOnQuit() const;
   void SetSaveSessionOnQuit(bool enable);
 
+  bool GetOpenTranscriptInEditor() const;
+  void SetOpenTranscriptInEditor(bool enable);
+
   FileSpec GetSaveSessionDirectory() const;
   void SetSaveSessionDirectory(llvm::StringRef path);
 
@@ -587,7 +600,7 @@ public:
   /// \return True if the exit code was successfully set; false if the
   ///         interpreter doesn't allow custom exit codes.
   /// \see AllowExitCodeOnQuit
-  LLVM_NODISCARD bool SetQuitExitCode(int exit_code);
+  [[nodiscard]] bool SetQuitExitCode(int exit_code);
 
   /// Returns the exit code that the user has specified when running the
   /// 'quit' command.
@@ -621,8 +634,17 @@ public:
 
   bool IsInteractive();
 
+  bool IOHandlerInterrupt(IOHandler &io_handler) override;
+
+  Status PreprocessCommand(std::string &command);
+  Status PreprocessToken(std::string &token);
+
 protected:
   friend class Debugger;
+
+  // This checks just the RunCommandInterpreter interruption state.  It is only
+  // meant to be used in Debugger::InterruptRequested
+  bool WasInterrupted() const;
 
   // IOHandlerDelegate functions
   void IOHandlerInputComplete(IOHandler &io_handler,
@@ -633,8 +655,6 @@ protected:
       return ConstString("quit\n");
     return ConstString();
   }
-
-  bool IOHandlerInterrupt(IOHandler &io_handler) override;
 
   void GetProcessOutput();
 
@@ -653,8 +673,6 @@ private:
 
   void RestoreExecutionContext();
 
-  Status PreprocessCommand(std::string &command);
-
   void SourceInitFile(FileSpec file, CommandReturnObject &result);
 
   // Completely resolves aliases and abbreviations, returning a pointer to the
@@ -665,7 +683,7 @@ private:
 
   void FindCommandsForApropos(llvm::StringRef word, StringList &commands_found,
                               StringList &commands_help,
-                              CommandObject::CommandMap &command_map);
+                              const CommandObject::CommandMap &command_map);
 
   // An interruptible wrapper around the stream output
   void PrintCommandOutput(IOHandler &io_handler, llvm::StringRef str,
@@ -688,7 +706,6 @@ private:
 
   void StartHandlingCommand();
   void FinishHandlingCommand();
-  bool InterruptCommand();
 
   Debugger &m_debugger; // The debugger session that this interpreter is
                         // associated with

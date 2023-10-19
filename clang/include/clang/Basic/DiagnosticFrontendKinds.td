@@ -12,6 +12,7 @@ let Component = "Frontend" in {
 
 def err_fe_error_opening : Error<"error opening '%0': %1">;
 def err_fe_error_reading : Error<"error reading '%0'">;
+def err_fe_error_writing : Error<"error writing '%0': %1">;
 def err_fe_error_reading_stdin : Error<"error reading stdin: %0">;
 def err_fe_error_backend : Error<"error in backend: %0">, DefaultFatal;
 
@@ -47,6 +48,13 @@ def warn_fe_backend_unsupported_fp_rounding : Warning<
 def warn_fe_backend_unsupported_fp_exceptions : Warning<
     "overriding currently unsupported use of floating point exceptions "
     "on this target">, InGroup<UnsupportedFPOpt>;
+def warn_fe_backend_invalid_feature_flag : Warning<
+    "feature flag '%0' must start with either '+' to enable the feature or '-'"
+    " to disable it; flag ignored">, InGroup<InvalidCommandLineArgument>;
+
+def err_incompatible_fp_eval_method_options : Error<
+    "option 'ffp-eval-method' cannot be used with option "
+    "%select{'fapprox-func'|'mreassociate'|'freciprocal'}0">;
 
 def remark_fe_backend_optimization_remark : Remark<"%0">, BackendInfo,
     InGroup<BackendOptimizationRemark>;
@@ -123,6 +131,15 @@ def err_fe_invalid_exception_model
 def warn_fe_concepts_ts_flag : Warning<
   "-fconcepts-ts is deprecated - use '-std=c++20' for Concepts support">,
   InGroup<Deprecated>;
+def err_fe_invalid_source_date_epoch : Error<
+    "environment variable 'SOURCE_DATE_EPOCH' ('%0') must be a non-negative decimal integer <= %1">;
+
+def err_fe_incompatible_option_with_remote_cache : Error<
+  "'%0' is incompatible with remote caching backend">;
+def err_fe_unable_to_load_include_tree : Error<
+  "unable to load the CAS include-tree '%0': '%1'">;
+def err_unable_to_load_include_tree_node : Error<
+  "unable to load a node from the CAS include-tree: '%0'">;
 
 def err_fe_unable_to_load_basic_block_sections_file : Error<
     "unable to load basic block sections function list: '%0'">;
@@ -212,6 +229,8 @@ def err_missing_module_name : Error<
   DefaultFatal;
 def err_missing_module : Error<
   "no module named '%0' declared in module map file '%1'">, DefaultFatal;
+def err_missing_module_include_tree : Error<
+  "no module named '%0' declared in include-tree module map '%1'">, DefaultFatal;
 def err_no_submodule : Error<"no submodule named %0 in module '%1'">;
 def err_no_submodule_suggest : Error<
   "no submodule named %0 in module '%1'; did you mean '%2'?">;
@@ -233,8 +252,10 @@ def warn_module_config_macro_undef : Warning<
 def note_module_def_undef_here : Note<
   "macro was %select{defined|#undef'd}0 here">;
 def remark_module_build : Remark<"building module '%0' as '%1'">,
+  ShowInSystemHeader,
   InGroup<ModuleBuild>;
 def remark_module_build_done : Remark<"finished building module '%0'">,
+  ShowInSystemHeader,
   InGroup<ModuleBuild>;
 def remark_module_lock : Remark<"locking '%0' to build module '%1'">,
   InGroup<ModuleLock>;
@@ -282,6 +303,10 @@ def err_duplicate_mangled_name : Error<
   "definition with same mangled name '%0' as another definition">;
 def err_cyclic_alias : Error<
   "%select{alias|ifunc}0 definition is part of a cycle">;
+def err_hidden_visibility_dllexport : Error<
+  "hidden visibility cannot be applied to 'dllexport' declaration">;
+def err_non_default_visibility_dllimport : Error<
+  "non-default visibility cannot be applied to 'dllimport' declaration">;
 def err_ifunc_resolver_return : Error<
   "ifunc resolver function must return a pointer">;
 
@@ -315,6 +340,14 @@ def warn_profile_data_missing : Warning<
 def warn_profile_data_unprofiled : Warning<
   "no profile data available for file \"%0\"">,
   InGroup<ProfileInstrUnprofiled>;
+def warn_profile_data_misexpect : Warning<
+  "Potential performance regression from use of __builtin_expect(): "
+  "Annotation was correct on %0 of profiled executions.">,
+  BackendInfo,
+  InGroup<MisExpect>;
 } // end of instrumentation issue category
+
+def err_extract_api_ignores_file_not_found :
+  Error<"file '%0' specified by '--extract-api-ignores=' not found">, DefaultFatal;
 
 }

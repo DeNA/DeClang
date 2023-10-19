@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -emit-llvm %s  -o - | FileCheck -check-prefix=CHECK -check-prefix=NOPCH %s
-// RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -emit-pch %s -o %t.ast
-// RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -emit-llvm -x ast -o - %t.ast | FileCheck -check-prefix=CHECK -check-prefix=PCH %s
+// RUN: %clang_cc1 -no-opaque-pointers -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -emit-llvm %s  -o - | FileCheck -check-prefix=CHECK -check-prefix=NOPCH %s
+// RUN: %clang_cc1 -no-opaque-pointers -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -emit-pch %s -o %t.ast
+// RUN: %clang_cc1 -no-opaque-pointers -triple arm64-apple-ios -fptrauth-calls -fptrauth-intrinsics -emit-llvm -x ast -o - %t.ast | FileCheck -check-prefix=CHECK -check-prefix=PCH %s
 
 #define FNPTRKEY 0
 
@@ -57,7 +57,7 @@ void test_auth_peephole() {
   // CHECK:      [[T0:%.*]] = load void ()*, void ()** @fnptr,
   // CHECK-NEXT: [[T1:%.*]] = load i64, i64* @discriminator,
   // CHECK-NEXT: [[T2:%.*]] = ptrtoint void ()* [[T0]] to i64
-  // CHECK-NEXT: [[T3:%.*]] = call i64 @llvm.ptrauth.auth.i64(i64 [[T2]], i32 0, i64 [[T1]])
+  // CHECK-NEXT: [[T3:%.*]] = call i64 @llvm.ptrauth.auth(i64 [[T2]], i32 0, i64 [[T1]])
   // CHECK-NEXT: [[T4:%.*]] = inttoptr  i64 [[T3]] to void ()*
   // CHECK-NEXT: call void [[T4]]() [ "ptrauth"(i32 0, i64 0) ]
   // CHECK-NEXT: ret void

@@ -138,7 +138,7 @@ llvm::Optional<Token> getQualifyingToken(tok::TokenKind TK,
     if (Tok.is(tok::less))
       SawTemplate = true;
     else if (Tok.isOneOf(tok::greater, tok::greatergreater))
-      LastMatchAfterTemplate = None;
+      LastMatchAfterTemplate = std::nullopt;
     else if (Tok.is(TK)) {
       if (SawTemplate)
         LastMatchAfterTemplate = Tok;
@@ -146,8 +146,8 @@ llvm::Optional<Token> getQualifyingToken(tok::TokenKind TK,
         LastMatchBeforeTemplate = Tok;
     }
   }
-  return LastMatchAfterTemplate != None ? LastMatchAfterTemplate
-                                        : LastMatchBeforeTemplate;
+  return LastMatchAfterTemplate != std::nullopt ? LastMatchAfterTemplate
+                                                : LastMatchBeforeTemplate;
 }
 
 static bool breakAndReturnEnd(const Stmt &S) {
@@ -178,7 +178,7 @@ static SourceLocation getSemicolonAfterStmtEndLoc(const SourceLocation &EndLoc,
     // All macro issues are simply resolved by ensuring it's a semicolon.
     if (NextTok && NextTok->is(tok::TokenKind::semi)) {
       // Ideally this would return `F` with spelling location `;` (NextTok)
-      // following the examle above. For now simply return NextTok location.
+      // following the example above. For now simply return NextTok location.
       return NextTok->getLocation();
     }
 

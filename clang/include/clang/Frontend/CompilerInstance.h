@@ -21,8 +21,11 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/CAS/CASID.h"
+#include "llvm/CAS/CASOutputBackend.h"
 #include "llvm/Support/BuryPointer.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/VirtualOutputBackend.h"
 #include <cassert>
 #include <list>
 #include <memory>
@@ -41,8 +44,6 @@ class ASTReader;
 class CodeCompleteConsumer;
 class DiagnosticsEngine;
 class DiagnosticConsumer;
-class ExternalASTSource;
-class FileEntry;
 class FileManager;
 class FrontendAction;
 class InMemoryModuleCache;
@@ -84,8 +85,20 @@ class CompilerInstance : public ModuleLoader {
   /// Auxiliary Target info.
   IntrusiveRefCntPtr<TargetInfo> AuxTarget;
 
+  /// The CAS, if any.
+  std::shared_ptr<llvm::cas::ObjectStore> CAS;
+
+  /// The ActionCache, if any.
+  std::shared_ptr<llvm::cas::ActionCache> ActionCache;
+
+  /// The \c ActionCache key for this compilation, if caching is enabled.
+  Optional<cas::CASID> CompileJobCacheKey;
+
   /// The file manager.
   IntrusiveRefCntPtr<FileManager> FileMgr;
+
+  /// The output context.
+  IntrusiveRefCntPtr<llvm::vfs::OutputBackend> TheOutputBackend;
 
   /// The source manager.
   IntrusiveRefCntPtr<SourceManager> SourceMgr;
@@ -159,30 +172,21 @@ class CompilerInstance : public ModuleLoader {
   /// The stream for verbose output.
   raw_ostream *VerboseOutputStream = &llvm::errs();
 
-  /// Holds information about the output file.
-  ///
-  /// If TempFilename is not empty we must rename it to Filename at the end.
-  /// TempFilename may be empty and Filename non-empty if creating the temporary
-  /// failed.
-  struct OutputFile {
-    std::string Filename;
-    Optional<llvm::sys::fs::TempFile> File;
-
-    OutputFile(std::string filename, Optional<llvm::sys::fs::TempFile> file)
-        : Filename(std::move(filename)), File(std::move(file)) {}
-  };
-
   /// The list of active output files.
-  std::list<OutputFile> OutputFiles;
+  std::list<llvm::vfs::OutputFile> OutputFiles;
 
-  /// \brief An optional callback function used to wrap all FrontendActions
+  using GenModuleActionWrapperFunc =
+      std::function<std::unique_ptr<FrontendAction>(
+          const FrontendOptions &opts, std::unique_ptr<FrontendAction> action)>;
+
+  /// An optional callback function used to wrap all FrontendActions
   /// produced to generate imported modules before they are executed.
-  std::function<std::unique_ptr<FrontendAction>
-    (const FrontendOptions &opts, std::unique_ptr<FrontendAction> action)>
-    GenModuleActionWrapper;
+  GenModuleActionWrapperFunc GenModuleActionWrapper;
 
   /// Force an output buffer.
   std::unique_ptr<llvm::raw_pwrite_stream> OutputStream;
+
+  void createCASDatabases();
 
   CompilerInstance(const CompilerInstance &) = delete;
   void operator=(const CompilerInstance &) = delete;
@@ -224,6 +228,9 @@ public:
   // FIXME: Eliminate the llvm_shutdown requirement, that should either be part
   // of the context or else not CompilerInstance specific.
   bool ExecuteAction(FrontendAction &Act);
+
+  /// At the end of a compilation, print the number of warnings/errors.
+  void printDiagnosticStats();
 
   /// Load the list of plugins requested in the \c FrontendOptions.
   void LoadRequestedPlugins();
@@ -339,6 +346,22 @@ public:
     return Invocation->getTargetOpts();
   }
 
+  CASOptions &getCASOpts() {
+    return Invocation->getCASOpts();
+  }
+  const CASOptions &getCASOpts() const {
+    return Invocation->getCASOpts();
+  }
+
+  Optional<cas::CASID> getCompileJobCacheKey() const {
+    return CompileJobCacheKey;
+  }
+  void setCompileJobCacheKey(cas::CASID Key) {
+    assert(!CompileJobCacheKey || CompileJobCacheKey == Key);
+    CompileJobCacheKey = std::move(Key);
+  }
+  bool isSourceNonReproducible() const;
+
   /// }
   /// @name Diagnostics Engine
   /// {
@@ -426,6 +449,21 @@ public:
 
   /// Replace the current file manager and virtual file system.
   void setFileManager(FileManager *Value);
+
+  /// Set the output manager.
+  void setOutputBackend(IntrusiveRefCntPtr<llvm::vfs::OutputBackend> NewOutputs);
+
+  /// Create an output manager.
+  void createOutputBackend();
+
+  bool hasOutputBackend() const { return bool(TheOutputBackend); }
+
+  llvm::vfs::OutputBackend &getOutputBackend();
+  llvm::vfs::OutputBackend &getOrCreateOutputBackend();
+
+  /// Get the CAS, or create it using the configuration in CompilerInvocation.
+  llvm::cas::ObjectStore &getOrCreateObjectStore();
+  llvm::cas::ActionCache &getOrCreateActionCache();
 
   /// }
   /// @name Source Manager
@@ -673,7 +711,8 @@ public:
   void createPCHExternalASTSource(
       StringRef Path, DisableValidationForModuleKind DisableValidation,
       bool AllowPCHWithCompilerErrors, void *DeserializationListener,
-      bool OwnDeserializationListener);
+      bool OwnDeserializationListener,
+      std::unique_ptr<llvm::MemoryBuffer> PCHBuffer = nullptr);
 
   /// Create an external AST source to read a PCH file.
   ///
@@ -687,7 +726,9 @@ public:
       ArrayRef<std::shared_ptr<ModuleFileExtension>> Extensions,
       ArrayRef<std::shared_ptr<DependencyCollector>> DependencyCollectors,
       void *DeserializationListener, bool OwnDeserializationListener,
-      bool Preamble, bool UseGlobalModuleIndex);
+      bool Preamble, bool UseGlobalModuleIndex,
+      cas::ObjectStore &CAS, cas::ActionCache &Cache,
+      std::unique_ptr<llvm::MemoryBuffer> PCHBuffer = nullptr);
 
   /// Create a code completion consumer using the invocation; note that this
   /// will cause the source manager to truncate the input source file at the
@@ -824,20 +865,29 @@ public:
 
   bool lookupMissingImports(StringRef Name, SourceLocation TriggerLoc) override;
 
-  void setGenModuleActionWrapper(std::function<std::unique_ptr<FrontendAction>
-    (const FrontendOptions &Opts, std::unique_ptr<FrontendAction> Action)> Wrapper) {
+  void setGenModuleActionWrapper(GenModuleActionWrapperFunc Wrapper) {
     GenModuleActionWrapper = Wrapper;
-  };
+  }
 
-  std::function<std::unique_ptr<FrontendAction>
-    (const FrontendOptions &Opts, std::unique_ptr<FrontendAction> Action)>
-  getGenModuleActionWrapper() const { return GenModuleActionWrapper; }
+  GenModuleActionWrapperFunc getGenModuleActionWrapper() const {
+    return GenModuleActionWrapper;
+  }
 
   void addDependencyCollector(std::shared_ptr<DependencyCollector> Listener) {
     DependencyCollectors.push_back(std::move(Listener));
   }
 
   void setExternalSemaSource(IntrusiveRefCntPtr<ExternalSemaSource> ESS);
+
+  /// Adds a module to the \c InMemoryModuleCache at \p Path by retrieving the
+  /// pcm output from the \c ActionCache for \p CacheKey.
+  ///
+  /// \param Provider description of what provided this cache key, e.g.
+  /// "-fmodule-file-cache-key", or an imported pcm file. Used in diagnostics.
+  ///
+  /// \returns true on failure.
+  bool addCachedModuleFile(StringRef Path, StringRef CacheKey,
+                           StringRef Provider);
 
   InMemoryModuleCache &getModuleCache() const { return *ModuleCache; }
 };

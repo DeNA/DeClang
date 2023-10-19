@@ -14,6 +14,7 @@
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/SourceManager.h"
 #include "lldb/Host/OptionParser.h"
+#include "lldb/Interpreter/CommandOptionArgumentTable.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionArgParser.h"
 #include "lldb/Interpreter/OptionValueFileColonLine.h"
@@ -36,7 +37,7 @@ using namespace lldb_private;
 class CommandObjectSourceInfo : public CommandObjectParsed {
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options() {}
+    CommandOptions() = default;
 
     ~CommandOptions() override = default;
 
@@ -118,8 +119,7 @@ public:
             "Display source line information for the current target "
             "process.  Defaults to instruction pointer in current stack "
             "frame.",
-            nullptr, eCommandRequiresTarget),
-        m_options() {}
+            nullptr, eCommandRequiresTarget) {}
 
   ~CommandObjectSourceInfo() override = default;
 
@@ -539,14 +539,6 @@ protected:
   }
 
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    const size_t argc = command.GetArgumentCount();
-
-    if (argc != 0) {
-      result.AppendErrorWithFormat("'%s' takes no arguments, only flags.\n",
-                                   GetCommandName().str().c_str());
-      return false;
-    }
-
     Target *target = m_exe_ctx.GetTargetPtr();
     if (target == nullptr) {
       target = GetDebugger().GetSelectedTarget().get();
@@ -624,7 +616,7 @@ protected:
 class CommandObjectSourceList : public CommandObjectParsed {
   class CommandOptions : public Options {
   public:
-    CommandOptions() : Options() {}
+    CommandOptions() = default;
 
     ~CommandOptions() override = default;
 
@@ -723,8 +715,7 @@ public:
       : CommandObjectParsed(interpreter, "source list",
                             "Display source code for the current target "
                             "process as specified by options.",
-                            nullptr, eCommandRequiresTarget),
-        m_options() {}
+                            nullptr, eCommandRequiresTarget) {}
 
   ~CommandObjectSourceList() override = default;
 
@@ -757,7 +748,7 @@ protected:
     SourceInfo(ConstString name, const LineEntry &line_entry)
         : function(name), line_entry(line_entry) {}
 
-    SourceInfo() : function(), line_entry() {}
+    SourceInfo() = default;
 
     bool IsValid() const { return (bool)function && line_entry.IsValid(); }
 
@@ -926,14 +917,6 @@ protected:
   }
 
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    const size_t argc = command.GetArgumentCount();
-
-    if (argc != 0) {
-      result.AppendErrorWithFormat("'%s' takes no arguments, only flags.\n",
-                                   GetCommandName().str().c_str());
-      return false;
-    }
-
     Target *target = m_exe_ctx.GetTargetPtr();
 
     if (!m_options.symbol_name.empty()) {

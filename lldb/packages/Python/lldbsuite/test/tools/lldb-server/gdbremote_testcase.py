@@ -59,8 +59,7 @@ class GdbRemoteTestCaseFactory(type):
         return super(GdbRemoteTestCaseFactory, cls).__new__(
                 cls, name, bases, newattrs)
 
-@add_metaclass(GdbRemoteTestCaseFactory)
-class GdbRemoteTestCaseBase(Base):
+class GdbRemoteTestCaseBase(Base, metaclass=GdbRemoteTestCaseFactory):
 
     # Default time out in seconds. The timeout is increased tenfold under Asan.
     DEFAULT_TIMEOUT =  20 * (10 if ('ASAN_OPTIONS' in os.environ) else 1)
@@ -772,29 +771,20 @@ class GdbRemoteTestCaseBase(Base):
             thread_ids.extend(new_thread_infos)
         return thread_ids
 
-    def wait_for_thread_count(self, thread_count):
-        start_time = time.time()
-        timeout_time = start_time + self.DEFAULT_TIMEOUT
+    def launch_with_threads(self, thread_count):
+        procs = self.prep_debug_monitor_and_inferior(
+                inferior_args=["thread:new"]*(thread_count-1) + ["trap"])
 
-        actual_thread_count = 0
-        while actual_thread_count < thread_count:
-            self.reset_test_sequence()
-            self.add_threadinfo_collection_packets()
-
-            context = self.expect_gdbremote_sequence()
-            self.assertIsNotNone(context)
-
-            threads = self.parse_threadinfo_packets(context)
-            self.assertIsNotNone(threads)
-
-            actual_thread_count = len(threads)
-
-            if time.time() > timeout_time:
-                raise Exception(
-                    'timed out after {} seconds while waiting for theads: waiting for at least {} threads, found {}'.format(
-                        self.DEFAULT_TIMEOUT, thread_count, actual_thread_count))
-
-        return threads
+        self.test_sequence.add_log_lines([
+                "read packet: $c#00",
+                {"direction": "send",
+                    "regex": r"^\$T([0-9a-fA-F]{2})([^#]*)#..$",
+                    "capture": {1: "stop_signo", 2: "stop_reply_kv"}}], True)
+        self.add_threadinfo_collection_packets()
+        context = self.expect_gdbremote_sequence()
+        threads = self.parse_threadinfo_packets(context)
+        self.assertGreaterEqual(len(threads), thread_count)
+        return context, threads
 
     def add_set_breakpoint_packets(
             self,
@@ -851,6 +841,7 @@ class GdbRemoteTestCaseBase(Base):
         "qXfer:libraries:read",
         "qXfer:libraries-svr4:read",
         "qXfer:features:read",
+        "qXfer:siginfo:read",
         "qEcho",
         "QPassSignals",
         "multiprocess",
@@ -858,6 +849,8 @@ class GdbRemoteTestCaseBase(Base):
         "vfork-events",
         "memory-tagging",
         "qSaveCore",
+        "native-signals",
+        "QNonStop",
     ]
 
     def parse_qSupported_response(self, context):
@@ -893,28 +886,6 @@ class GdbRemoteTestCaseBase(Base):
                     key)
 
         return supported_dict
-
-    def run_process_then_stop(self, run_seconds=1):
-        # Tell the stub to continue.
-        self.test_sequence.add_log_lines(
-            ["read packet: $vCont;c#a8"],
-            True)
-        context = self.expect_gdbremote_sequence()
-
-        # Wait for run_seconds.
-        time.sleep(run_seconds)
-
-        # Send an interrupt, capture a T response.
-        self.reset_test_sequence()
-        self.test_sequence.add_log_lines(
-            ["read packet: {}".format(chr(3)),
-             {"direction": "send", "regex": r"^\$T([0-9a-fA-F]+)([^#]+)#[0-9a-fA-F]{2}$", "capture": {1: "stop_result"}}],
-            True)
-        context = self.expect_gdbremote_sequence()
-        self.assertIsNotNone(context)
-        self.assertIsNotNone(context.get("stop_result"))
-
-        return context
 
     def continue_process_and_wait_for_stop(self):
         self.test_sequence.add_log_lines(

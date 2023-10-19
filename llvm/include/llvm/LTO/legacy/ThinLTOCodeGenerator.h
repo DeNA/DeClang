@@ -20,16 +20,19 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/LTO/LTO.h"
+#include "llvm/RemoteCachingService/Client.h"
+#include "llvm/RemoteCachingService/RemoteCachingService.h"
 #include "llvm/Support/CachePruning.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Target/TargetOptions.h"
 
+#include <memory>
 #include <string>
 
 namespace llvm {
 class StringRef;
-class LLVMContext;
 class TargetMachine;
 
 /// Helper to gather options relevant to the target machine creation
@@ -42,6 +45,31 @@ struct TargetMachineBuilder {
   CodeGenOpt::Level CGOptLevel = CodeGenOpt::Aggressive;
 
   std::unique_ptr<TargetMachine> create() const;
+};
+
+// ThinLTOCacheEntry: manage caching for a single Module.
+class ModuleCacheEntry {
+public:
+  // Access the path to this entry in the cache.
+  virtual std::string getEntryPath() = 0;
+
+  virtual ErrorOr<std::unique_ptr<MemoryBuffer>> tryLoadingBuffer() = 0;
+  virtual void write(const MemoryBuffer &OutputBuffer) = 0;
+  virtual Error writeObject(const MemoryBuffer &OutputBuffer,
+                            StringRef OutputPath);
+  virtual Optional<std::unique_ptr<MemoryBuffer>> getMappedBuffer() {
+    return None;
+  }
+
+  virtual ~ModuleCacheEntry() {}
+protected:
+  Optional<std::string> computeCacheKey(
+      const ModuleSummaryIndex &Index, StringRef ModuleID,
+      const FunctionImporter::ImportMapTy &ImportList,
+      const FunctionImporter::ExportSetTy &ExportList,
+      const std::map<GlobalValue::GUID, GlobalValue::LinkageTypes> &ResolvedODR,
+      const GVSummaryMapTy &DefinedGVSummaries, unsigned OptLevel,
+      bool Freestanding, const TargetMachineBuilder &TMBuilder);
 };
 
 /// This class define an interface similar to the LTOCodeGenerator, but adapted
@@ -126,11 +154,28 @@ public:
   struct CachingOptions {
     std::string Path;                    // Path to the cache, empty to disable.
     CachePruningPolicy Policy;
+    enum class CacheType {
+      CacheDirectory,
+      CAS,
+      RemoteService,
+    } Type;
+    std::unique_ptr<cas::ObjectStore> CAS;
+    std::unique_ptr<cas::ActionCache> Cache;
+    Optional<cas::remote::ClientServices> Service;
   };
 
   /// Provide a path to a directory where to store the cached files for
   /// incremental build.
-  void setCacheDir(std::string Path) { CacheOptions.Path = std::move(Path); }
+  Error setCacheDir(std::string Path);
+
+  /// Create a cache entry for the module
+  std::unique_ptr<ModuleCacheEntry> createModuleCacheEntry(
+      const ModuleSummaryIndex &Index, StringRef ModuleID, StringRef OutputPath,
+      const FunctionImporter::ImportMapTy &ImportList,
+      const FunctionImporter::ExportSetTy &ExportList,
+      const std::map<GlobalValue::GUID, GlobalValue::LinkageTypes> &ResolvedODR,
+      const GVSummaryMapTy &DefinedGVSummaries, unsigned OptLevel,
+      bool Freestanding, const TargetMachineBuilder &TMBuilder);
 
   /// Cache policy: interval (seconds) between two prunes of the cache. Set to a
   /// negative value to disable pruning. A value of 0 will force pruning to
@@ -226,9 +271,6 @@ public:
     OptLevel = (NewOptLevel > 3) ? 3 : NewOptLevel;
   }
 
-  /// Enable or disable the new pass manager.
-  void setUseNewPM(unsigned Enabled) { UseNewPM = Enabled; }
-
   /// Enable or disable debug output for the new pass manager.
   void setDebugPassManager(unsigned Enabled) { DebugPassManager = Enabled; }
 
@@ -298,7 +340,8 @@ public:
    * to Cache directory if needed. Returns the path to the generated file in
    * SavedObjectsDirectoryPath.
    */
-  std::string writeGeneratedObject(int count, StringRef CacheEntryPath,
+  std::string writeGeneratedObject(StringRef OutputPath,
+                                   ModuleCacheEntry *CacheEntry,
                                    const MemoryBuffer &OutputBuffer);
   /**@}*/
 
@@ -347,10 +390,6 @@ private:
 
   /// IR Optimization Level [0-3].
   unsigned OptLevel = 3;
-
-  /// Flag to indicate whether the new pass manager should be used for IR
-  /// optimizations.
-  bool UseNewPM = LLVM_ENABLE_NEW_PASS_MANAGER;
 
   /// Flag to indicate whether debug output should be enabled for the new pass
   /// manager.

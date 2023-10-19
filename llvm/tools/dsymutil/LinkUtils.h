@@ -49,6 +49,9 @@ struct LinkOptions {
   /// function.
   bool KeepFunctionForStatic = false;
 
+  /// Use a 64-bit header when emitting universal binaries.
+  bool Fat64 = false;
+
   /// Number of threads.
   unsigned Threads = 1;
 
@@ -56,7 +59,7 @@ struct LinkOptions {
   OutputFileType FileType = OutputFileType::Object;
 
   /// The accelerator table kind
-  AccelTableKind TheAccelTableKind;
+  DwarfLinkerAccelTableKind TheAccelTableKind;
 
   /// -oso-prepend-path
   std::string PrependPath;

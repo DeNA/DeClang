@@ -38,6 +38,7 @@
 #include "lldb/API/SBFileSpec.h"
 #include "lldb/API/SBMemoryRegionInfo.h"
 #include "lldb/API/SBMemoryRegionInfoList.h"
+#include "lldb/API/SBScriptObject.h"
 #include "lldb/API/SBStream.h"
 #include "lldb/API/SBStringList.h"
 #include "lldb/API/SBStructuredData.h"
@@ -464,6 +465,16 @@ SBEvent SBProcess::GetStopEventForStopID(uint32_t stop_id) {
   }
 
   return sb_event;
+}
+
+void SBProcess::ForceScriptedState(StateType new_state) {
+  LLDB_INSTRUMENT_VA(this, new_state);
+
+  if (ProcessSP process_sp = GetSP()) {
+    std::lock_guard<std::recursive_mutex> guard(
+        process_sp->GetTarget().GetAPIMutex());
+    process_sp->ForceScriptedState(new_state);
+  }
 }
 
 StateType SBProcess::GetState() {
@@ -967,7 +978,12 @@ SBProcess::GetNumSupportedHardwareWatchpoints(lldb::SBError &sb_error) const {
   if (process_sp) {
     std::lock_guard<std::recursive_mutex> guard(
         process_sp->GetTarget().GetAPIMutex());
-    sb_error.SetError(process_sp->GetWatchpointSupportInfo(num));
+    std::optional<uint32_t> actual_num = process_sp->GetWatchpointSlotCount();
+    if (actual_num) {
+      num = *actual_num;
+    } else {
+      sb_error.SetErrorString("Unable to determine number of watchpoints");
+    }
   } else {
     sb_error.SetErrorString("SBProcess is invalid");
   }
@@ -1138,6 +1154,13 @@ bool SBProcess::IsInstrumentationRuntimePresent(
 
 lldb::SBError SBProcess::SaveCore(const char *file_name) {
   LLDB_INSTRUMENT_VA(this, file_name);
+  return SaveCore(file_name, "", SaveCoreStyle::eSaveCoreFull);
+}
+
+lldb::SBError SBProcess::SaveCore(const char *file_name,
+                                  const char *flavor,
+                                  SaveCoreStyle core_style) {
+  LLDB_INSTRUMENT_VA(this, file_name, flavor, core_style);
 
   lldb::SBError error;
   ProcessSP process_sp(GetSP());
@@ -1155,8 +1178,10 @@ lldb::SBError SBProcess::SaveCore(const char *file_name) {
   }
 
   FileSpec core_file(file_name);
-  SaveCoreStyle core_style = SaveCoreStyle::eSaveCoreFull;
-  error.ref() = PluginManager::SaveCore(process_sp, core_file, core_style, "");
+  FileSystem::Instance().Resolve(core_file);
+  error.ref() = PluginManager::SaveCore(process_sp, core_file, core_style,
+                                        flavor);
+
   return error;
 }
 
@@ -1253,4 +1278,12 @@ lldb::SBError SBProcess::DeallocateMemory(lldb::addr_t ptr) {
     sb_error.SetErrorString("SBProcess is invalid");
   }
   return sb_error;
+}
+
+lldb::SBScriptObject SBProcess::GetScriptedImplementation() {
+  LLDB_INSTRUMENT_VA(this);
+  ProcessSP process_sp(GetSP());
+  return lldb::SBScriptObject((process_sp) ? process_sp->GetImplementation()
+                                           : nullptr,
+                              eScriptLanguageDefault);
 }

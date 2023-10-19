@@ -74,7 +74,7 @@ public:
   bool IsExecutable() const override { return false; }
   ArchSpec GetArchitecture() override { return m_arch; }
   UUID GetUUID() override { return m_uuid; }
-  Symtab *GetSymtab() override { return m_symtab_up.get(); }
+  void ParseSymtab(lldb_private::Symtab &symtab) override {}
   bool IsStripped() override { return true; }
   ByteOrder GetByteOrder() const override { return m_arch.GetByteOrder(); }
 
@@ -191,12 +191,7 @@ void HashElfTextSection(ModuleSP module_sp, std::vector<uint8_t> &breakpad_uuid,
 
 } // namespace
 
-ConstString ProcessMinidump::GetPluginNameStatic() {
-  static ConstString g_name("minidump");
-  return g_name;
-}
-
-const char *ProcessMinidump::GetPluginDescriptionStatic() {
+llvm::StringRef ProcessMinidump::GetPluginDescriptionStatic() {
   return "Minidump plug-in.";
 }
 
@@ -238,7 +233,8 @@ ProcessMinidump::ProcessMinidump(lldb::TargetSP target_sp,
                                  const FileSpec &core_file,
                                  DataBufferSP core_data)
     : PostMortemProcess(target_sp, listener_sp), m_core_file(core_file),
-      m_core_data(std::move(core_data)), m_is_wow64(false) {}
+      m_core_data(std::move(core_data)), m_active_exception(nullptr),
+      m_is_wow64(false) {}
 
 ProcessMinidump::~ProcessMinidump() {
   Clear();
@@ -302,7 +298,7 @@ Status ProcessMinidump::DoLoadCore() {
                             GetTarget().GetDebugger().GetID());
     pid = 1;
   }
-  SetID(pid.getValue());
+  SetID(*pid);
 
   return error;
 }
@@ -445,8 +441,8 @@ void ProcessMinidump::BuildMemoryRegions() {
   llvm::sort(*m_memory_regions);
 }
 
-Status ProcessMinidump::GetMemoryRegionInfo(lldb::addr_t load_addr,
-                                            MemoryRegionInfo &region) {
+Status ProcessMinidump::DoGetMemoryRegionInfo(lldb::addr_t load_addr,
+                                              MemoryRegionInfo &region) {
   BuildMemoryRegions();
   region = MinidumpParser::GetMemoryRegionInfo(*m_memory_regions, load_addr);
   return Status();
@@ -572,7 +568,7 @@ void ProcessMinidump::ReadModuleList() {
       partial_module_spec.GetUUID().Clear();
       module_sp = GetOrCreateModule(uuid, name, partial_module_spec);
       if (!module_sp) {
-        partial_module_spec.GetFileSpec().GetDirectory().Clear();
+        partial_module_spec.GetFileSpec().ClearDirectory();
         module_sp = GetOrCreateModule(uuid, name, partial_module_spec);
       }
     }

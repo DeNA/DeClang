@@ -440,26 +440,28 @@ lldb::SBValue SBModule::FindFirstGlobalVariable(lldb::SBTarget &target,
 lldb::SBType SBModule::FindFirstType(const char *name_cstr) {
   LLDB_INSTRUMENT_VA(this, name_cstr);
 
-  SBType sb_type;
   ModuleSP module_sp(GetSP());
-  if (name_cstr && module_sp) {
-    SymbolContext sc;
-    const bool exact_match = false;
-    ConstString name(name_cstr);
+  if (!name_cstr || !module_sp)
+    return {};
+  SymbolContext sc;
+  const bool exact_match = false;
+  ConstString name(name_cstr);
 
-    sb_type = SBType(module_sp->FindFirstType(sc, name, exact_match));
+  SBType sb_type = SBType(module_sp->FindFirstType(sc, name, exact_match));
 
-    if (!sb_type.IsValid()) {
-      auto type_system_or_err =
-          module_sp->GetTypeSystemForLanguage(eLanguageTypeC);
-      if (auto err = type_system_or_err.takeError()) {
-        llvm::consumeError(std::move(err));
-        return SBType();
-      }
-      sb_type = SBType(type_system_or_err->GetBuiltinTypeByName(name));
-    }
+  if (sb_type.IsValid())
+    return sb_type;
+
+  auto type_system_or_err = module_sp->GetTypeSystemForLanguage(eLanguageTypeC);
+  if (auto err = type_system_or_err.takeError()) {
+    llvm::consumeError(std::move(err));
+    return {};
   }
-  return sb_type;
+
+  if (auto ts = *type_system_or_err)
+    return SBType(ts->GetBuiltinTypeByName(name));
+
+  return {};
 }
 
 lldb::SBType SBModule::GetBasicType(lldb::BasicType type) {
@@ -472,7 +474,8 @@ lldb::SBType SBModule::GetBasicType(lldb::BasicType type) {
     if (auto err = type_system_or_err.takeError()) {
       llvm::consumeError(std::move(err));
     } else {
-      return SBType(type_system_or_err->GetBasicTypeFromAST(type));
+      if (auto ts = *type_system_or_err)
+        return SBType(ts->GetBasicTypeFromAST(type));              
     }
   }
   return SBType();
@@ -498,10 +501,9 @@ lldb::SBTypeList SBModule::FindTypes(const char *type) {
       if (auto err = type_system_or_err.takeError()) {
         llvm::consumeError(std::move(err));
       } else {
-        CompilerType compiler_type =
-            type_system_or_err->GetBuiltinTypeByName(name);
-        if (compiler_type)
-          retval.Append(SBType(compiler_type));
+        if (auto ts = *type_system_or_err)
+          if (CompilerType compiler_type = ts->GetBuiltinTypeByName(name))
+            retval.Append(SBType(compiler_type));
       }
     } else {
       for (size_t idx = 0; idx < type_list.GetSize(); idx++) {
@@ -621,9 +623,9 @@ uint32_t SBModule::GetVersion(uint32_t *versions, uint32_t num_versions) {
   if (num_versions > 0)
     versions[0] = version.empty() ? UINT32_MAX : version.getMajor();
   if (num_versions > 1)
-    versions[1] = version.getMinor().getValueOr(UINT32_MAX);
+    versions[1] = version.getMinor().value_or(UINT32_MAX);
   if (num_versions > 2)
-    versions[2] = version.getSubminor().getValueOr(UINT32_MAX);
+    versions[2] = version.getSubminor().value_or(UINT32_MAX);
   for (uint32_t i = 3; i < num_versions; ++i)
     versions[i] = UINT32_MAX;
   return result;
@@ -666,7 +668,10 @@ lldb::SBError SBModule::IsTypeSystemCompatible(lldb::LanguageType language) {
       llvm::consumeError(type_system_or_err.takeError());
       return sb_error;
     }
-    sb_error.SetError(type_system_or_err->IsCompatible());
+    if (auto ts = *type_system_or_err)
+      sb_error.SetError(ts->IsCompatible());
+    else
+      sb_error.SetErrorString("type system no longer live");
   } else {
     sb_error.SetErrorString("invalid module");
   }

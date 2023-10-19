@@ -209,8 +209,8 @@ SBStructuredData SBTarget::GetStatistics() {
   if (!target_sp)
     return data;
   std::string json_str =
-      llvm::formatv("{0:2}", 
-          DebuggerStats::ReportStatistics(target_sp->GetDebugger(), 
+      llvm::formatv("{0:2}",
+          DebuggerStats::ReportStatistics(target_sp->GetDebugger(),
                                           target_sp.get())).str();
   data.m_impl_up->SetObjectSP(StructuredData::ParseJSON(json_str));
   return data;
@@ -439,7 +439,8 @@ lldb::SBProcess SBTarget::Attach(SBAttachInfo &sb_attach_info, SBError &error) {
 
   if (target_sp) {
     ProcessAttachInfo &attach_info = sb_attach_info.ref();
-    if (attach_info.ProcessIDIsValid() && !attach_info.UserIDIsValid()) {
+    if (attach_info.ProcessIDIsValid() && !attach_info.UserIDIsValid() &&
+        !attach_info.IsScriptedProcess()) {
       PlatformSP platform_sp = target_sp->GetPlatform();
       // See if we can pre-verify if a process exists or not
       if (platform_sp && platform_sp->IsConnected()) {
@@ -1152,8 +1153,8 @@ bool SBTarget::FindBreakpointsByName(const char *name,
     llvm::Expected<std::vector<BreakpointSP>> expected_vector =
         target_sp->GetBreakpointList().FindBreakpointsByName(name);
     if (!expected_vector) {
-      LLDB_LOG(GetLog(LLDBLog::Breakpoints), "invalid breakpoint name: {}",
-               llvm::toString(expected_vector.takeError()));
+      LLDB_LOG_ERROR(GetLog(LLDBLog::Breakpoints), expected_vector.takeError(),
+                     "invalid breakpoint name: {0}");
       return false;
     }
     for (BreakpointSP bkpt_sp : *expected_vector) {
@@ -1492,13 +1493,13 @@ void SBTarget::AppendImageSearchPath(const char *from, const char *to,
   if (!target_sp)
     return error.SetErrorString("invalid target");
 
-  const ConstString csFrom(from), csTo(to);
-  if (!csFrom)
+  llvm::StringRef srFrom = from, srTo = to;
+  if (srFrom.empty())
     return error.SetErrorString("<from> path can't be empty");
-  if (!csTo)
+  if (srTo.empty())
     return error.SetErrorString("<to> path can't be empty");
 
-  target_sp->GetImageSearchPathList().Append(csFrom, csTo, true);
+  target_sp->GetImageSearchPathList().Append(srFrom, srTo, true);
 }
 
 lldb::SBModule SBTarget::AddModule(const char *path, const char *triple,
@@ -1624,6 +1625,18 @@ const char *SBTarget::GetTriple() {
   return nullptr;
 }
 
+const char *SBTarget::GetABIName() {
+  LLDB_INSTRUMENT_VA(this);
+
+  TargetSP target_sp(GetSP());
+  if (target_sp) {
+    std::string abi_name(target_sp->GetABIName().str());
+    ConstString const_name(abi_name.c_str());
+    return const_name.GetCString();
+  }
+  return nullptr;
+}
+
 uint32_t SBTarget::GetDataByteSize() {
   LLDB_INSTRUMENT_VA(this);
 
@@ -1640,6 +1653,16 @@ uint32_t SBTarget::GetCodeByteSize() {
   TargetSP target_sp(GetSP());
   if (target_sp) {
     return target_sp->GetArchitecture().GetCodeByteSize();
+  }
+  return 0;
+}
+
+uint32_t SBTarget::GetMaximumNumberOfChildrenToDisplay() const {
+  LLDB_INSTRUMENT_VA(this);
+
+  TargetSP target_sp(GetSP());
+  if(target_sp){
+     return target_sp->GetMaximumNumberOfChildrenToDisplay();
   }
   return 0;
 }
@@ -1780,7 +1803,7 @@ lldb::SBType SBTarget::FindFirstType(const char *typename_cstr) {
       }
     }
 
-    // Didn't find the type in the symbols; Try the loaded language runtimes
+    // Didn't find the type in the symbols; Try the loaded language runtimes.
     // BEGIN SWIFT
     // FIXME: This depends on clang, but should be able to support any
     // TypeSystem/compiler.
@@ -1802,9 +1825,9 @@ lldb::SBType SBTarget::FindFirstType(const char *typename_cstr) {
     }
     // END SWIFT
 
-    // No matches, search for basic typename matches
-    for (auto *type_system : target_sp->GetScratchTypeSystems())
-      if (auto type = type_system->GetBuiltinTypeByName(const_typename))
+    // No matches, search for basic typename matches.
+    for (auto type_system_sp : target_sp->GetScratchTypeSystems())
+      if (auto type = type_system_sp->GetBuiltinTypeByName(const_typename))
         return SBType(type);
   }
 
@@ -1816,8 +1839,8 @@ SBType SBTarget::GetBasicType(lldb::BasicType type) {
 
   TargetSP target_sp(GetSP());
   if (target_sp) {
-    for (auto *type_system : target_sp->GetScratchTypeSystems())
-      if (auto compiler_type = type_system->GetBasicTypeFromAST(type))
+    for (auto type_system_sp : target_sp->GetScratchTypeSystems())
+      if (auto compiler_type = type_system_sp->GetBasicTypeFromAST(type))
         return SBType(compiler_type);
   }
   return SBType();
@@ -1868,9 +1891,9 @@ lldb::SBTypeList SBTarget::FindTypes(const char *typename_cstr) {
 
     if (sb_type_list.GetSize() == 0) {
       // No matches, search for basic typename matches
-      for (auto *type_system : target_sp->GetScratchTypeSystems())
+      for (auto type_system_sp : target_sp->GetScratchTypeSystems())
         if (auto compiler_type =
-                type_system->GetBuiltinTypeByName(const_typename))
+                type_system_sp->GetBuiltinTypeByName(const_typename))
           sb_type_list.Append(SBType(compiler_type));
     }
   }
@@ -2255,12 +2278,25 @@ lldb::SBValue SBTarget::EvaluateExpression(const char *expr,
     std::lock_guard<std::recursive_mutex> guard(target_sp->GetAPIMutex());
     ExecutionContext exe_ctx(m_opaque_sp.get());
 
-
     frame = exe_ctx.GetFramePtr();
     Target *target = exe_ctx.GetTargetPtr();
+    Process *process = exe_ctx.GetProcessPtr();
 
     if (target) {
-      target->EvaluateExpression(expr, frame, expr_value_sp, options.ref());
+      // If we have a process, make sure to lock the runlock:
+      if (process) {
+        Process::StopLocker stop_locker;
+        if (stop_locker.TryLock(&process->GetRunLock())) {
+          target->EvaluateExpression(expr, frame, expr_value_sp, options.ref());
+        } else {
+          Status error;
+          error.SetErrorString("can't evaluate expressions when the "
+                               "process is running.");
+          expr_value_sp = ValueObjectConstResult::Create(nullptr, error);
+        }
+      } else {
+        target->EvaluateExpression(expr, frame, expr_value_sp, options.ref());
+      }
 
       expr_result.SetSP(expr_value_sp, options.GetFetchDynamicValue());
     }

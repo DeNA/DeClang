@@ -222,6 +222,17 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
     // We may have set the plan up above in the FrameIsOlder section:
 
     if (!m_sub_plan_sp)
+      m_sub_plan_sp = thread.QueueThreadPlanForStepThroughGenericTrampoline(
+          false, m_stop_others, m_status);
+    if (log) {
+      if (m_sub_plan_sp)
+        LLDB_LOGF(log, "Found a generic step through plan: %s",
+                  m_sub_plan_sp->GetName());
+      else
+        LLDB_LOGF(log, "No generic step through plan found.");
+    }
+
+    if (!m_sub_plan_sp)
       m_sub_plan_sp = thread.QueueThreadPlanForStepThrough(
           m_stack_id, false, stop_others, m_status);
 
@@ -420,17 +431,13 @@ bool ThreadPlanStepInRange::FrameMatchesAvoidCriteria() {
           sc.GetFunctionName(Mangled::ePreferDemangledWithoutArguments)
               .GetCString();
       if (frame_function_name) {
-        llvm::SmallVector<llvm::StringRef, 2> matches;
-        bool return_value =
-            avoid_regexp_to_use->Execute(frame_function_name, &matches);
-        if (return_value && matches.size() > 1) {
-          std::string match = matches[1].str();
+        bool return_value = avoid_regexp_to_use->Execute(frame_function_name);
+        if (return_value) {
           LLDB_LOGF(GetLog(LLDBLog::Step),
-                    "Stepping out of function \"%s\" because it matches "
-                    "the avoid regexp \"%s\" - match substring: \"%s\".",
+                    "Stepping out of function \"%s\" because it matches the "
+                    "avoid regexp \"%s\".",
                     frame_function_name,
-                    avoid_regexp_to_use->GetText().str().c_str(),
-                    match.c_str());
+                    avoid_regexp_to_use->GetText().str().c_str());
         }
         return return_value;
       }

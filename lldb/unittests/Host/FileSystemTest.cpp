@@ -34,7 +34,7 @@ struct DummyFile : public vfs::File {
 
 class DummyFileSystem : public vfs::FileSystem {
   int FSID;   // used to produce UniqueIDs
-  int FileID; // used to produce UniqueIDs
+  int FileID = 0; // used to produce UniqueIDs
   std::string cwd;
   std::map<std::string, vfs::Status> FilesAndDirs;
 
@@ -44,13 +44,18 @@ class DummyFileSystem : public vfs::FileSystem {
   }
 
 public:
-  DummyFileSystem() : FSID(getNextFSID()), FileID(0) {}
+  DummyFileSystem() : FSID(getNextFSID()) {}
 
   ErrorOr<vfs::Status> status(const Twine &Path) override {
     std::map<std::string, vfs::Status>::iterator I =
         FilesAndDirs.find(Path.str());
     if (I == FilesAndDirs.end())
       return make_error_code(llvm::errc::no_such_file_or_directory);
+    // Simulate a broken symlink, where it points to a file/dir that
+    // does not exist.
+    if (I->second.isSymlink() &&
+        I->second.getPermissions() == sys::fs::perms::no_perms)
+      return std::error_code(ENOENT, std::generic_category());
     return I->second;
   }
   ErrorOr<std::unique_ptr<vfs::File>>
@@ -152,6 +157,13 @@ public:
                   sys::fs::file_type::symlink_file, sys::fs::all_all);
     addEntry(Path, S);
   }
+
+  void addBrokenSymlink(StringRef Path) {
+    vfs::Status S(Path, UniqueID(FSID, FileID++),
+                  std::chrono::system_clock::now(), 0, 0, 0,
+                  sys::fs::file_type::symlink_file, sys::fs::no_perms);
+    addEntry(Path, S);
+  }
 };
 } // namespace
 
@@ -178,6 +190,7 @@ static IntrusiveRefCntPtr<DummyFileSystem> GetSimpleDummyFS() {
   D->addRegularFile("/foo");
   D->addDirectory("/bar");
   D->addSymlink("/baz");
+  D->addBrokenSymlink("/lux");
   D->addRegularFile("/qux", ~sys::fs::perms::all_read);
   D->setCurrentWorkingDirectory("/");
   return D;

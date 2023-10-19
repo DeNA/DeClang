@@ -179,11 +179,16 @@ public:
     eInfoTypeISAAndImmediateSigned,
     eInfoTypeISA,
     eInfoTypeNoArgs
-  } InfoType;
+  };
 
   struct Context {
     ContextType type = eContextInvalid;
+
+  private:
     enum InfoType info_type = eInfoTypeNoArgs;
+
+  public:
+    enum InfoType GetInfoType() const { return info_type; }
     union {
       struct RegisterPlusOffset {
         RegisterInfo reg;      // base register
@@ -370,8 +375,8 @@ public:
   virtual bool TestEmulation(Stream *out_stream, ArchSpec &arch,
                              OptionValueDictionary *test_data) = 0;
 
-  virtual bool GetRegisterInfo(lldb::RegisterKind reg_kind, uint32_t reg_num,
-                               RegisterInfo &reg_info) = 0;
+  virtual llvm::Optional<RegisterInfo>
+  GetRegisterInfo(lldb::RegisterKind reg_kind, uint32_t reg_num) = 0;
 
   // Optional overrides
   virtual bool SetInstruction(const Opcode &insn_opcode,
@@ -383,16 +388,16 @@ public:
                                        uint32_t reg_num, std::string &reg_name);
 
   // RegisterInfo variants
-  bool ReadRegister(const RegisterInfo *reg_info, RegisterValue &reg_value);
+  llvm::Optional<RegisterValue> ReadRegister(const RegisterInfo &reg_info);
 
-  uint64_t ReadRegisterUnsigned(const RegisterInfo *reg_info,
+  uint64_t ReadRegisterUnsigned(const RegisterInfo &reg_info,
                                 uint64_t fail_value, bool *success_ptr);
 
-  bool WriteRegister(const Context &context, const RegisterInfo *ref_info,
+  bool WriteRegister(const Context &context, const RegisterInfo &ref_info,
                      const RegisterValue &reg_value);
 
   bool WriteRegisterUnsigned(const Context &context,
-                             const RegisterInfo *reg_info, uint64_t reg_value);
+                             const RegisterInfo &reg_info, uint64_t reg_value);
 
   // Register kind and number variants
   bool ReadRegister(lldb::RegisterKind reg_kind, uint32_t reg_num,

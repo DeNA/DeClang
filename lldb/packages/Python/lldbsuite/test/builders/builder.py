@@ -86,15 +86,6 @@ class Builder:
 
         return cmdline
 
-    def runBuildCommands(self, commands):
-        try:
-            lldbtest.system(commands)
-        except subprocess.CalledProcessError as called_process_error:
-            # Convert to a build-specific error.
-            # We don't do that in lldbtest.system() since that
-            # is more general purpose.
-            raise build_exception.BuildError(called_process_error)
-
     def getArchSpec(self, architecture):
         """
         Helper function to return the key-value string to specify the architecture
@@ -142,6 +133,22 @@ class Builder:
                 configuration.clang_module_cache_dir)]
         return []
 
+    def getLibCxxArgs(self):
+        if configuration.libcxx_include_dir and configuration.libcxx_library_dir:
+            libcpp_args = ["LIBCPP_INCLUDE_DIR={}".format(configuration.libcxx_include_dir),
+                           "LIBCPP_LIBRARY_DIR={}".format(configuration.libcxx_library_dir)]
+            if configuration.libcxx_include_target_dir:
+                libcpp_args.append("LIBCPP_INCLUDE_TARGET_DIR={}".format(
+                    configuration.libcxx_include_target_dir))
+            return libcpp_args
+        return []
+
+    def getLLDBSwiftLibs(self):
+        if configuration.swift_libs_dir:
+            return ["SWIFT_LIBS_DIR={}".format(
+                configuration.swift_libs_dir)]
+        return []
+
     def _getDebugInfoArgs(self, debug_info):
         if debug_info is None:
             return []
@@ -153,23 +160,24 @@ class Builder:
             return ["MAKE_DSYM=NO", "MAKE_GMODULES=YES"]
         return None
 
-    def build(self, debug_info, architecture=None, compiler=None,
-            dictionary=None, testdir=None, testname=None):
+    def getBuildCommand(self, debug_info, architecture=None, compiler=None,
+            dictionary=None, testdir=None, testname=None, make_targets=None):
         debug_info_args = self._getDebugInfoArgs(debug_info)
         if debug_info_args is None:
-            return False
-
+            return None
+        if make_targets is None:
+            make_targets = ["all"]
         command_parts = [
-            self.getMake(testdir, testname), debug_info_args, ["all"],
+            self.getMake(testdir, testname), debug_info_args, make_targets,
             self.getArchCFlags(architecture), self.getArchSpec(architecture),
             self.getSwiftTargetFlags(architecture), self.getCCSpec(compiler),
             self.getSwiftCSpec(), self.getExtraMakeArgs(),
             self.getSDKRootSpec(), self.getModuleCacheSpec(),
+            self.getLibCxxArgs(), self.getLLDBSwiftLibs(), 
             self.getCmdLine(dictionary)]
         command = list(itertools.chain(*command_parts))
 
-        self.runBuildCommands([command])
-        return True
+        return command
 
     def cleanup(self, dictionary=None):
         """Perform a platform-specific cleanup after the test."""

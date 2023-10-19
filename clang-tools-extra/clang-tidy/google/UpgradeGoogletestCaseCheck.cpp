@@ -37,7 +37,7 @@ getNewMacroName(llvm::StringRef MacroName) {
       return Mapping.second;
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 namespace {
@@ -195,6 +195,12 @@ void UpgradeGoogletestCaseCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
       usingDecl(hasAnyUsingShadowDecl(hasTargetDecl(TestCaseTypeAlias)))
           .bind("using"),
+      this);
+  Finder->addMatcher(
+      typeLoc(loc(usingType(hasUnderlyingType(
+                  typedefType(hasDeclaration(TestCaseTypeAlias))))),
+              unless(hasAncestor(decl(isImplicit()))), LocationFilter)
+          .bind("typeloc"),
       this);
 }
 

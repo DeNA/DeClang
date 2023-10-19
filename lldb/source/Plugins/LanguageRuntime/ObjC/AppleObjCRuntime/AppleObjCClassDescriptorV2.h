@@ -12,6 +12,7 @@
 #include <mutex>
 
 #include "AppleObjCRuntimeV2.h"
+#include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-private.h"
 
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
@@ -33,6 +34,8 @@ public:
   bool IsValid() override {
     return true; // any Objective-C v2 runtime class descriptor we vend is valid
   }
+
+  lldb::LanguageType GetImplementationLanguage() const override;
 
   // a custom descriptor is used for tagged pointers
   bool GetTaggedPointerInfo(uint64_t *info_bits = nullptr,
@@ -146,6 +149,9 @@ private:
     bool Read(Process *process, lldb::addr_t addr);
   };
 
+  std::optional<method_list_t>
+  GetMethodList(Process *process, lldb::addr_t method_list_ptr) const;
+
   struct method_t {
     lldb::addr_t m_name_ptr;
     lldb::addr_t m_types_ptr;
@@ -201,6 +207,21 @@ private:
     bool Read(Process *process, lldb::addr_t addr);
   };
 
+  struct relative_list_entry_t {
+    uint16_t m_image_index;
+    int64_t m_list_offset;
+
+    bool Read(Process *process, lldb::addr_t addr);
+  };
+
+  struct relative_list_list_t {
+    uint32_t m_entsize;
+    uint32_t m_count;
+    lldb::addr_t m_first_ptr;
+
+    bool Read(Process *process, lldb::addr_t addr);
+  };
+
   class iVarsStorage {
   public:
     iVarsStorage();
@@ -223,7 +244,8 @@ private:
   ClassDescriptorV2(AppleObjCRuntimeV2 &runtime,
                     ObjCLanguageRuntime::ObjCISA isa, const char *name)
       : m_runtime(runtime), m_objc_class_ptr(isa), m_name(name),
-        m_ivars_storage() {}
+        m_ivars_storage(), m_image_to_method_lists(), m_last_version_updated() {
+  }
 
   bool Read_objc_class(Process *process,
                        std::unique_ptr<objc_class_t> &objc_class) const;
@@ -232,6 +254,15 @@ private:
                       std::unique_ptr<class_ro_t> &class_ro,
                       std::unique_ptr<class_rw_t> &class_rw) const;
 
+  bool ProcessMethodList(std::function<bool(const char *, const char *)> const
+                             &instance_method_func,
+                         method_list_t &method_list) const;
+
+  bool ProcessRelativeMethodLists(
+      std::function<bool(const char *, const char *)> const
+          &instance_method_func,
+      lldb::addr_t relative_method_list_ptr) const;
+
   AppleObjCRuntimeV2
       &m_runtime; // The runtime, so we can read information lazily.
   lldb::addr_t m_objc_class_ptr; // The address of the objc_class_t.  (I.e.,
@@ -239,6 +270,10 @@ private:
                                  // their ISA)
   ConstString m_name;            // May be NULL
   iVarsStorage m_ivars_storage;
+
+  mutable std::map<uint16_t, std::vector<method_list_t>>
+      m_image_to_method_lists;
+  mutable std::optional<uint64_t> m_last_version_updated;
 };
 
 // tagged pointer descriptor
@@ -347,12 +382,12 @@ public:
 
 private:
   ConstString m_name;
-  uint8_t m_pointer_size;
-  bool m_valid;
-  uint64_t m_info_bits;
-  uint64_t m_value_bits;
-  int64_t m_value_bits_signed;
-  uint64_t m_payload;
+  uint8_t m_pointer_size = 0;
+  bool m_valid = false;
+  uint64_t m_info_bits = 0;
+  uint64_t m_value_bits = 0;
+  int64_t m_value_bits_signed = 0;
+  uint64_t m_payload = 0;
 };
 
 } // namespace lldb_private

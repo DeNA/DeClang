@@ -60,7 +60,7 @@ public:
 
   void DiscardAllPlans();
 
-  void DiscardConsultingMasterPlans();
+  void DiscardConsultingControllingPlans();
 
   lldb::ThreadPlanSP GetCurrentPlan() const;
 
@@ -266,10 +266,10 @@ private:
   using PlansStore = std::vector<std::unique_ptr<ThreadPlanStack>>;
   PlansStore m_plans_up_container;
   std::vector<ThreadPlanStack *> m_detached_plans;
-  
   mutable std::recursive_mutex m_stack_map_mutex;
   using PlansList = std::unordered_map<lldb::tid_t, ThreadPlanStack *>;
   PlansList m_plans_list;
+  
 };
 
 } // namespace lldb_private

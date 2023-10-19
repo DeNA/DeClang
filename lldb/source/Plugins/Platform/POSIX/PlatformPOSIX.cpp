@@ -8,6 +8,7 @@
 
 #include "PlatformPOSIX.h"
 
+#include "Plugins/Platform/gdb-server/PlatformRemoteGDBServer.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
@@ -307,7 +308,8 @@ Status PlatformPOSIX::ConnectRemote(Args &args) {
   } else {
     if (!m_remote_platform_sp)
       m_remote_platform_sp =
-          Platform::Create(ConstString("remote-gdb-server"), error);
+          platform_gdb_server::PlatformRemoteGDBServer::CreateInstance(
+              /*force=*/true, nullptr);
 
     if (m_remote_platform_sp && error.Success())
       error = m_remote_platform_sp->ConnectRemote(args);
@@ -398,6 +400,7 @@ lldb::ProcessSP PlatformPOSIX::Attach(ProcessAttachInfo &attach_info,
           attach_info.SetHijackListener(listener_sp);
         }
         process_sp->HijackProcessEvents(listener_sp);
+        process_sp->SetShadowListener(attach_info.GetShadowListener());
         error = process_sp->Attach(attach_info);
       }
     }
@@ -443,9 +446,8 @@ lldb::ProcessSP PlatformPOSIX::DebugProcess(ProcessLaunchInfo &launch_info,
 
   // Now create the gdb-remote process.
   LLDB_LOG(log, "having target create process with gdb-remote plugin");
-  process_sp =
-      target.CreateProcess(launch_info.GetListener(), "gdb-remote", nullptr,
-                            true);
+  process_sp = target.CreateProcess(launch_info.GetListener(), "gdb-remote",
+                                    nullptr, true);
 
   if (!process_sp) {
     error.SetErrorString("CreateProcess() failed for gdb-remote process");
@@ -454,15 +456,9 @@ lldb::ProcessSP PlatformPOSIX::DebugProcess(ProcessLaunchInfo &launch_info,
   }
 
   LLDB_LOG(log, "successfully created process");
-  // Adjust launch for a hijacker.
-  ListenerSP listener_sp;
-  if (!launch_info.GetHijackListener()) {
-    LLDB_LOG(log, "setting up hijacker");
-    listener_sp =
-        Listener::MakeListener("lldb.PlatformLinux.DebugProcess.hijack");
-    launch_info.SetHijackListener(listener_sp);
-    process_sp->HijackProcessEvents(listener_sp);
-  }
+
+  process_sp->HijackProcessEvents(launch_info.GetHijackListener());
+  process_sp->SetShadowListener(launch_info.GetShadowListener());
 
   // Log file actions.
   if (log) {
@@ -480,14 +476,6 @@ lldb::ProcessSP PlatformPOSIX::DebugProcess(ProcessLaunchInfo &launch_info,
   // Do the launch.
   error = process_sp->Launch(launch_info);
   if (error.Success()) {
-    // Handle the hijacking of process events.
-    if (listener_sp) {
-      const StateType state = process_sp->WaitForProcessToStop(
-          llvm::None, nullptr, false, listener_sp);
-
-      LLDB_LOG(log, "pid {0} state {0}", process_sp->GetID(), state);
-    }
-
     // Hook up process PTY if we have one (which we should for local debugging
     // with llgs).
     int pty_fd = launch_info.GetPTY().ReleasePrimaryFileDescriptor();
@@ -627,9 +615,9 @@ PlatformPOSIX::MakeLoadImageUtilityFunction(ExecutionContext &exe_ctx,
       std::move(expr), dlopen_wrapper_name, eLanguageTypeC_plus_plus, exe_ctx);
   if (!utility_fn_or_error) {
     std::string error_str = llvm::toString(utility_fn_or_error.takeError());
-    error.SetErrorStringWithFormat("dlopen error: could not create utility"
-                                   "function: %s",
-                                   error_str.c_str());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not create utility function: %s",
+        error_str.c_str());
     return nullptr;
   }
   std::unique_ptr<UtilityFunction> dlopen_utility_func_up =
@@ -640,15 +628,15 @@ PlatformPOSIX::MakeLoadImageUtilityFunction(ExecutionContext &exe_ctx,
   FunctionCaller *do_dlopen_function = nullptr;
 
   // Fetch the clang types we will need:
-  TypeSystemClang *ast =
+  TypeSystemClangSP scratch_ts_sp =
       ScratchTypeSystemClang::GetForTarget(process->GetTarget());
-  if (!ast)
+  if (!scratch_ts_sp)
     return nullptr;
 
-  CompilerType clang_void_pointer_type
-      = ast->GetBasicType(eBasicTypeVoid).GetPointerType();
-  CompilerType clang_char_pointer_type
-        = ast->GetBasicType(eBasicTypeChar).GetPointerType();
+  CompilerType clang_void_pointer_type =
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
+  CompilerType clang_char_pointer_type =
+      scratch_ts_sp->GetBasicType(eBasicTypeChar).GetPointerType();
 
   // We are passing four arguments, the basename, the list of places to look,
   // a buffer big enough for all the path + name combos, and
@@ -664,8 +652,9 @@ PlatformPOSIX::MakeLoadImageUtilityFunction(ExecutionContext &exe_ctx,
   do_dlopen_function = dlopen_utility_func_up->MakeFunctionCaller(
       clang_void_pointer_type, arguments, exe_ctx.GetThreadSP(), utility_error);
   if (utility_error.Fail()) {
-    error.SetErrorStringWithFormat("dlopen error: could not make function"
-                                   "caller: %s", utility_error.AsCString());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not make function caller: %s",
+        utility_error.AsCString());
     return nullptr;
   }
   
@@ -731,8 +720,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
                                                    permissions,
                                                    utility_error);
   if (path_addr == LLDB_INVALID_ADDRESS) {
-    error.SetErrorStringWithFormat("dlopen error: could not allocate memory"
-                                    "for path: %s", utility_error.AsCString());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not allocate memory for path: %s",
+        utility_error.AsCString());
     return LLDB_INVALID_IMAGE_TOKEN;
   }
 
@@ -744,8 +734,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
 
   process->WriteMemory(path_addr, path.c_str(), path_len, utility_error);
   if (utility_error.Fail()) {
-    error.SetErrorStringWithFormat("dlopen error: could not write path string:"
-                                    " %s", utility_error.AsCString());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not write path string: %s",
+        utility_error.AsCString());
     return LLDB_INVALID_IMAGE_TOKEN;
   }
   
@@ -756,8 +747,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
                                                       permissions,
                                                       utility_error);
   if (utility_error.Fail()) {
-    error.SetErrorStringWithFormat("dlopen error: could not allocate memory"
-                                    "for path: %s", utility_error.AsCString());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not allocate memory for path: %s",
+        utility_error.AsCString());
     return LLDB_INVALID_IMAGE_TOKEN;
   }
   
@@ -805,9 +797,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
                                               permissions,
                                               utility_error);
     if (path_array_addr == LLDB_INVALID_ADDRESS) {
-      error.SetErrorStringWithFormat("dlopen error: could not allocate memory"
-                                      "for path array: %s", 
-                                      utility_error.AsCString());
+      error.SetErrorStringWithFormat(
+          "dlopen error: could not allocate memory for path array: %s",
+          utility_error.AsCString());
       return LLDB_INVALID_IMAGE_TOKEN;
     }
     
@@ -821,8 +813,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
                          path_array.size(), utility_error);
 
     if (utility_error.Fail()) {
-      error.SetErrorStringWithFormat("dlopen error: could not write path array:"
-                                     " %s", utility_error.AsCString());
+      error.SetErrorStringWithFormat(
+          "dlopen error: could not write path array: %s",
+          utility_error.AsCString());
       return LLDB_INVALID_IMAGE_TOKEN;
     }
     // Now make spaces in the target for the buffer.  We need to add one for
@@ -833,9 +826,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
                                           permissions,
                                           utility_error);
     if (buffer_addr == LLDB_INVALID_ADDRESS) {
-      error.SetErrorStringWithFormat("dlopen error: could not allocate memory"
-                                      "for buffer: %s", 
-                                      utility_error.AsCString());
+      error.SetErrorStringWithFormat(
+          "dlopen error: could not allocate memory for buffer: %s",
+          utility_error.AsCString());
       return LLDB_INVALID_IMAGE_TOKEN;
     }
   
@@ -858,9 +851,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
                                                  func_args_addr,
                                                  arguments,
                                                  diagnostics)) {
-    error.SetErrorStringWithFormat("dlopen error: could not write function "
-                                   "arguments: %s", 
-                                   diagnostics.GetString().c_str());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not write function arguments: %s",
+        diagnostics.GetString().c_str());
     return LLDB_INVALID_IMAGE_TOKEN;
   }
   
@@ -885,24 +878,24 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
 
   Value return_value;
   // Fetch the clang types we will need:
-  TypeSystemClang *ast =
+  TypeSystemClangSP scratch_ts_sp =
       ScratchTypeSystemClang::GetForTarget(process->GetTarget());
-  if (!ast) {
+  if (!scratch_ts_sp) {
     error.SetErrorString("dlopen error: Unable to get TypeSystemClang");
     return LLDB_INVALID_IMAGE_TOKEN;
   }
 
-  CompilerType clang_void_pointer_type
-      = ast->GetBasicType(eBasicTypeVoid).GetPointerType();
+  CompilerType clang_void_pointer_type =
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
 
   return_value.SetCompilerType(clang_void_pointer_type);
   
   ExpressionResults results = do_dlopen_function->ExecuteFunction(
       exe_ctx, &func_args_addr, options, diagnostics, return_value);
   if (results != eExpressionCompleted) {
-    error.SetErrorStringWithFormat("dlopen error: failed executing "
-                                   "dlopen wrapper function: %s", 
-                                   diagnostics.GetString().c_str());
+    error.SetErrorStringWithFormat(
+        "dlopen error: failed executing dlopen wrapper function: %s",
+        diagnostics.GetString().c_str());
     return LLDB_INVALID_IMAGE_TOKEN;
   }
   
@@ -910,8 +903,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
   lldb::addr_t token = process->ReadPointerFromMemory(return_addr, 
                                                       utility_error);
   if (utility_error.Fail()) {
-    error.SetErrorStringWithFormat("dlopen error: could not read the return "
-                                    "struct: %s", utility_error.AsCString());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not read the return struct: %s",
+        utility_error.AsCString());
     return LLDB_INVALID_IMAGE_TOKEN;
   }
   
@@ -934,8 +928,9 @@ uint32_t PlatformPOSIX::DoLoadImage(lldb_private::Process *process,
   lldb::addr_t error_addr 
     = process->ReadPointerFromMemory(return_addr + addr_size, utility_error);
   if (utility_error.Fail()) {
-    error.SetErrorStringWithFormat("dlopen error: could not read error string: "
-                                    "%s", utility_error.AsCString());
+    error.SetErrorStringWithFormat(
+        "dlopen error: could not read error string: %s",
+        utility_error.AsCString());
     return LLDB_INVALID_IMAGE_TOKEN;
   }
   

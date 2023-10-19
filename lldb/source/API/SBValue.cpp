@@ -69,9 +69,7 @@ public:
     }
   }
 
-  ValueImpl(const ValueImpl &rhs)
-      : m_valobj_sp(rhs.m_valobj_sp), m_use_dynamic(rhs.m_use_dynamic),
-        m_use_synthetic(rhs.m_use_synthetic), m_name(rhs.m_name) {}
+  ValueImpl(const ValueImpl &rhs) = default;
 
   ValueImpl &operator=(const ValueImpl &rhs) {
     if (this != &rhs) {
@@ -116,6 +114,10 @@ public:
     lldb::ValueObjectSP value_sp = m_valobj_sp;
 
     Target *target = value_sp->GetTargetSP().get();
+    // If this ValueObject holds an error, then it is valuable for that.
+    if (value_sp->GetError().Fail()) 
+      return value_sp;
+
     if (!target)
       return ValueObjectSP();
 
@@ -332,7 +334,7 @@ size_t SBValue::GetByteSize() {
   ValueLocker locker;
   lldb::ValueObjectSP value_sp(GetSP(locker));
   if (value_sp) {
-    result = value_sp->GetByteSize().getValueOr(0);
+    result = value_sp->GetByteSize().value_or(0);
   }
 
   return result;
@@ -1049,7 +1051,12 @@ lldb::SBFrame SBValue::GetFrame() {
 }
 
 lldb::ValueObjectSP SBValue::GetSP(ValueLocker &locker) const {
-  if (!m_opaque_sp || !m_opaque_sp->IsValid()) {
+  // IsValid means that the SBValue has a value in it.  But that's not the
+  // only time that ValueObjects are useful.  We also want to return the value
+  // if there's an error state in it.
+  if (!m_opaque_sp || (!m_opaque_sp->IsValid() 
+      && (m_opaque_sp->GetRootSP() 
+          && !m_opaque_sp->GetRootSP()->GetError().Fail()))) {
     locker.GetError().SetErrorString("No value");
     return ValueObjectSP();
   }
@@ -1387,6 +1394,18 @@ bool SBValue::SetData(lldb::SBData &data, SBError &error) {
   }
 
   return ret;
+}
+
+lldb::SBValue SBValue::Clone(const char *new_name) {
+  LLDB_INSTRUMENT_VA(this, new_name);
+
+  ValueLocker locker;
+  lldb::ValueObjectSP value_sp(GetSP(locker));
+
+  if (value_sp)
+    return lldb::SBValue(value_sp->Clone(ConstString(new_name)));
+  else
+    return lldb::SBValue();
 }
 
 lldb::SBDeclaration SBValue::GetDeclaration() {

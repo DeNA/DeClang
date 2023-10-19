@@ -36,7 +36,7 @@
 # CHECK-NEXT:     CALL64pcrel32 @objc_retainAutoreleasedReturnValue, csr_64, implicit internal $rsp, implicit internal $ssp, implicit-def $rax
 # CHECK-NEXT:   }
 # CHECK-NEXT:   $rcx = frame-destroy POP64r implicit-def $rsp, implicit $rsp
-# CHECK-NEXT:   RETQ
+# CHECK-NEXT:   RET64
 #
 
 name:            test_objc_retainAutoreleaseReturnedValue
@@ -70,7 +70,7 @@ body:             |
 # CHECK-NEXT:     CALL64pcrel32 @objc_unsafeClaimAutoreleasedReturnValue, csr_64, implicit internal $rsp, implicit internal $ssp, implicit-def $rax
 # CHECK-NEXT:   }
 # CHECK-NEXT:   $rcx = frame-destroy POP64r implicit-def $rsp, implicit $rsp
-# CHECK-NEXT:   RETQ
+# CHECK-NEXT:   RET64
 #
 name:            test_objc_unsafeClaimAutoreleasedReturnValue
 alignment:       16
@@ -105,7 +105,7 @@ body:             |
 # CHECK-NEXT:     CALL64pcrel32 @objc_retainAutoreleasedReturnValue, csr_64, implicit internal $rsp, implicit internal $ssp, implicit-def dead $rax
 # CHECK-NEXT:  }
 # CHECK-NEXT:   $rax = frame-destroy POP64r implicit-def $rsp, implicit $rsp
-# CHECK-NEXT:   RETQ
+# CHECK-NEXT:   RET64
 #
 name:            test_objc_unsafeClaimAutoreleasedReturnValue_2_args
 alignment:       16
@@ -141,7 +141,7 @@ body:             |
 # CHECK-NEXT:     CALL64pcrel32 @objc_retainAutoreleasedReturnValue, csr_64, implicit internal $rsp, implicit internal $ssp, implicit-def dead $rax
 # CHECK-NEXT:  }
 # CHECK-NEXT:   $rax = frame-destroy POP64r implicit-def $rsp, implicit $rsp
-# CHECK-NEXT:   RETQ
+# CHECK-NEXT:   RET64
 #
 name:            test_ret_void
 alignment:       16

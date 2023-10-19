@@ -9,13 +9,13 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.lldbpexpect import PExpectTest
 
+
 class TestCase(PExpectTest):
-
-    mydir = TestBase.compute_mydir(__file__)
-
+    @skipIf(compiler="clang", compiler_version=["<", "11.0"])
+    @skipIf(oslist=["linux"], archs=["arm", "aarch64"])
     def test(self):
-        self.build(dictionary={"CXX_SOURCES":"cat.cpp"})
-        self.launch(executable=self.getBuildArtifact(), timeout=5)
+        self.build(dictionary={"CXX_SOURCES": "cat.cpp"})
+        self.launch(executable=self.getBuildArtifact())
 
         self.child.sendline("process launch")
         self.child.expect("Process .* launched")

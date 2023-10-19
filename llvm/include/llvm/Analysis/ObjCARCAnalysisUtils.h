@@ -171,8 +171,8 @@ bool IsPotentialRetainableObjPtr(const Value *Op, AAResults &AA);
 /// Helper for GetARCInstKind. Determines what kind of construct CS
 /// is.
 inline ARCInstKind GetCallSiteClass(const CallBase &CB) {
-  for (auto I = CB.arg_begin(), E = CB.arg_end(); I != E; ++I)
-    if (IsPotentialRetainableObjPtr(*I))
+  for (const Use &U : CB.args())
+    if (IsPotentialRetainableObjPtr(U))
       return CB.onlyReadsMemory() ? ARCInstKind::User : ARCInstKind::CallOrUser;
 
   return CB.onlyReadsMemory() ? ARCInstKind::None : ARCInstKind::Call;
@@ -240,9 +240,9 @@ class ARCMDKindCache {
 public:
   void init(Module *Mod) {
     M = Mod;
-    ImpreciseReleaseMDKind = NoneType::None;
-    CopyOnEscapeMDKind = NoneType::None;
-    NoObjCARCExceptionsMDKind = NoneType::None;
+    ImpreciseReleaseMDKind = llvm::None;
+    CopyOnEscapeMDKind = llvm::None;
+    NoObjCARCExceptionsMDKind = llvm::None;
   }
 
   unsigned get(ARCMDKindID ID) {

@@ -3,7 +3,6 @@ Test SBLaunchInfo
 """
 
 
-
 from lldbsuite.test.lldbtest import *
 
 
@@ -15,9 +14,8 @@ def lookup(info, key):
             return Value
     return ""
 
-class TestSBLaunchInfo(TestBase):
 
-    mydir = TestBase.compute_mydir(__file__)
+class TestSBLaunchInfo(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
     def test_environment_getset(self):

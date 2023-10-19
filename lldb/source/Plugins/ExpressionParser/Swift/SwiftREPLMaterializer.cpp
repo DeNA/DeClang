@@ -12,6 +12,7 @@
 
 #include "SwiftREPLMaterializer.h"
 #include "SwiftASTManipulator.h"
+#include "SwiftPersistentExpressionState.h"
 
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "lldb/Core/DumpDataExtractor.h"
@@ -155,14 +156,14 @@ public:
     ret->ValueUpdated();
 
     if (variable) {
-      const size_t pvar_byte_size = ret->GetByteSize().getValueOr(0);
+      const size_t pvar_byte_size = ret->GetByteSize().value_or(0);
       uint8_t *pvar_data = ret->GetValueBytes();
 
       Status read_error;
       // Handle resilient globals in fixed-size buffers.
       lldb::addr_t var_addr = variable->m_remote_addr;
-      if (auto *ast_ctx = llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
-              m_type.GetTypeSystem()))
+      if (auto ast_ctx = m_type.GetTypeSystem()
+                             .dyn_cast_or_null<SwiftASTContextForExpressions>())
         if (!ast_ctx->IsFixedSize(m_type))
           var_addr = FixupResilientGlobal(var_addr, m_type, execution_unit,
                                           process_sp, read_error);
@@ -186,7 +187,11 @@ public:
 
     if (m_swift_decl) {
       llvm::cast<SwiftPersistentExpressionState>(persistent_state)
-          ->RegisterSwiftPersistentDeclAlias(m_swift_decl, name);
+          ->RegisterSwiftPersistentDeclAlias(
+              {SwiftASTContext::GetSwiftASTContext(
+                   &m_swift_decl->getASTContext()),
+               m_swift_decl},
+              name.GetStringRef());
     }
 
     return;
@@ -207,8 +212,8 @@ public:
 
     for (const IRExecutionUnit::JittedGlobalVariable &variable :
          execution_unit->GetJittedGlobalVariables()) {
-      swift::Demangle::NodePointer node_pointer =
-          demangle_ctx.demangleSymbolAsNode(variable.m_name.GetStringRef());
+      auto *node_pointer = SwiftLanguageRuntime::DemangleSymbolAsNode(
+          variable.m_name.GetStringRef(), demangle_ctx);
 
       llvm::StringRef variable_name = GetNameOfDemangledVariable(node_pointer);
       if (variable_name == result_name) {
@@ -365,8 +370,8 @@ public:
       //     kind=Module, text="lldb_expr_0"
       //     kind=Identifier, text="a"
 
-      swift::Demangle::NodePointer node_pointer =
-          demangle_ctx.demangleSymbolAsNode(variable.m_name.GetStringRef());
+      auto *node_pointer = SwiftLanguageRuntime::DemangleSymbolAsNode(
+          variable.m_name.GetStringRef(), demangle_ctx);
 
       llvm::StringRef last_component = GetNameOfDemangledVariable(node_pointer);
 
@@ -409,7 +414,7 @@ public:
         // FIXME: This may not work if the value is not bitwise-takable.
         execution_unit->ReadMemory(
             m_persistent_variable_sp->GetValueBytes(), var_addr,
-            m_persistent_variable_sp->GetByteSize().getValueOr(0), read_error);
+            m_persistent_variable_sp->GetByteSize().value_or(0), read_error);
 
         if (!read_error.Success()) {
           err.SetErrorStringWithFormat(
@@ -455,8 +460,8 @@ public:
       if (!err.Success()) {
         dump_stream.Printf("  <could not be read>\n");
       } else {
-        DumpHexBytes(&dump_stream, data.GetBytes(),
-                               data.GetByteSize(), 16, load_addr);
+        DumpHexBytes(&dump_stream, data.GetBytes(), data.GetByteSize(), 16,
+                     load_addr);
 
         dump_stream.PutChar('\n');
       }
@@ -465,7 +470,7 @@ public:
     {
       dump_stream.Printf("Target:\n");
 
-      lldb::addr_t target_address;
+      lldb::addr_t target_address = LLDB_INVALID_ADDRESS;
 
       map.ReadPointerFromMemory(&target_address, load_addr, err);
 
@@ -482,8 +487,8 @@ public:
         if (!err.Success()) {
           dump_stream.Printf("  <could not be read>\n");
         } else {
-          DumpHexBytes(&dump_stream, data.GetBytes(),
-                                 data.GetByteSize(), 16, target_address);
+          DumpHexBytes(&dump_stream, data.GetBytes(), data.GetByteSize(), 16,
+                       target_address);
 
           dump_stream.PutChar('\n');
         }

@@ -19,6 +19,7 @@
 #include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Flags.h"
+#include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-private.h"
 
 namespace clang {
@@ -98,10 +99,8 @@ public:
   /// \{
   static void Initialize();
   static void Terminate();
-  llvm::StringRef GetPluginName() override {
-    return GetPluginNameStatic().GetStringRef();
-  }
-  static ConstString GetPluginNameStatic();
+  llvm::StringRef GetPluginName() override { return GetPluginNameStatic(); }
+  static llvm::StringRef GetPluginNameStatic() { return "swift"; }
   /// \}
 
   class LanguageFlags {
@@ -129,6 +128,8 @@ public:
   virtual CompilerType GetReferentType(lldb::opaque_compiler_type_t type) = 0;
   static CompilerType GetInstanceType(CompilerType ct);
   virtual CompilerType GetInstanceType(lldb::opaque_compiler_type_t type) = 0;
+  /// Return the static type if this is a DynamicSelf type else the input type.
+  virtual CompilerType GetStaticSelfType(lldb::opaque_compiler_type_t type) = 0;
   enum class TypeAllocationStrategy { eInline, ePointer, eDynamic, eUnknown };
   struct TupleElement {
     ConstString element_name;
@@ -141,6 +142,18 @@ public:
   virtual CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) = 0;
   virtual bool IsTupleType(lldb::opaque_compiler_type_t type) = 0;
+  enum class NonTriviallyManagedReferenceKind : uint8_t {
+    eWeak,
+    eUnowned,
+    eUnmanaged
+  };
+  virtual llvm::Optional<NonTriviallyManagedReferenceKind>
+  GetNonTriviallyManagedReferenceKind(lldb::opaque_compiler_type_t type) = 0;
+
+  /// Creates a GenericTypeParamType with the desired depth and index.
+  virtual CompilerType CreateGenericTypeParamType(unsigned int depth,
+                                                       unsigned int index) = 0;
+                                                       
   using TypeSystem::DumpTypeDescription;
   virtual void DumpTypeDescription(
       lldb::opaque_compiler_type_t type, bool print_help_if_available,
@@ -164,6 +177,12 @@ public:
   virtual std::string GetSwiftName(const clang::Decl *clang_decl,
                                    TypeSystemClang &clang_typesystem) = 0;
 
+  virtual CompilerType GetBuiltinRawPointerType() = 0;
+
+  /// Attempts to convert a Clang type into a Swift type.
+  /// For example, int is converted to Int32.
+  virtual CompilerType ConvertClangTypeToSwiftType(CompilerType clang_type) = 0;
+
   void DumpValue(lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx,
                  Stream *s, lldb::Format format, const DataExtractor &data,
                  lldb::offset_t data_offset, size_t data_byte_size,
@@ -182,12 +201,11 @@ public:
   ConstString DeclContextGetScopeQualifiedName(void *opaque_decl_ctx) override {
     return {};
   }
-  bool
-  DeclContextIsClassMethod(void *opaque_decl_ctx,
-                           lldb::LanguageType *language_ptr,
-                           bool *is_instance_method_ptr,
-                           ConstString *language_object_name_ptr) override {
+  bool DeclContextIsClassMethod(void *opaque_decl_ctx) override {
     return false;
+  }
+  lldb::LanguageType DeclContextGetLanguage(void *) override {
+    return lldb::eLanguageTypeSwift;
   }
   bool IsRuntimeGeneratedType(lldb::opaque_compiler_type_t type) override {
     return false;
@@ -201,6 +219,9 @@ public:
                            bool &is_complex) override;
   bool IsIntegerType(lldb::opaque_compiler_type_t type,
                      bool &is_signed) override;
+  bool IsBooleanType(lldb::opaque_compiler_type_t type) override {
+    return false;
+  }
   bool IsScopedEnumerationType(lldb::opaque_compiler_type_t type) override {
     return false;
   }
@@ -223,6 +244,10 @@ public:
   }
   bool IsBlockPointerType(lldb::opaque_compiler_type_t type,
                           CompilerType *function_pointer_type_ptr) override {
+    return false;
+  }
+  bool IsMemberFunctionPointerType(
+          lldb::opaque_compiler_type_t type) override {
     return false;
   }
   bool IsPolymorphicClass(lldb::opaque_compiler_type_t type) override {
@@ -311,4 +336,11 @@ protected:
 };
 
 } // namespace lldb_private
+
+namespace llvm {
+raw_ostream &
+operator<<(raw_ostream &os,
+           lldb_private::TypeSystemSwift::NonTriviallyManagedReferenceKind k);
+}
+
 #endif

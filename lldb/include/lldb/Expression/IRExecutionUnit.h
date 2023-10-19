@@ -354,10 +354,9 @@ private:
     AllocationRecord(uintptr_t host_address, uint32_t permissions,
                      lldb::SectionType sect_type, size_t size,
                      unsigned alignment, unsigned section_id, const char *name)
-        : m_name(), m_process_address(LLDB_INVALID_ADDRESS),
-          m_host_address(host_address), m_permissions(permissions),
-          m_sect_type(sect_type), m_size(size), m_alignment(alignment),
-          m_section_id(section_id) {
+        : m_process_address(LLDB_INVALID_ADDRESS), m_host_address(host_address),
+          m_permissions(permissions), m_sect_type(sect_type), m_size(size),
+          m_alignment(alignment), m_section_id(section_id) {
       if (name && name[0])
         m_name = name;
     }
@@ -392,6 +391,9 @@ private:
   std::vector<ConstString> m_failed_lookups;
 
   std::atomic<bool> m_did_jit;
+  // BEGIN SWIFT
+  std::atomic<bool> m_in_populate_symtab = false;
+  // END SWIFT
 
   lldb::addr_t m_function_load_addr;
   lldb::addr_t m_function_end_load_addr;

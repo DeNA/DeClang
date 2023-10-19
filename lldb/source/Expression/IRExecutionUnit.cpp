@@ -24,6 +24,7 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Expression/IRExecutionUnit.h"
+#include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/SymbolFile.h"
@@ -220,7 +221,9 @@ Status IRExecutionUnit::DisassembleFunction(Stream &stream,
                                       UINT32_MAX, false, false);
 
   InstructionList &instruction_list = disassembler_sp->GetInstructionList();
-  instruction_list.Dump(&stream, true, true, &exe_ctx);
+  instruction_list.Dump(&stream, true, true, /*show_control_flow_kind=*/true,
+                        &exe_ctx);
+
   return ret;
 }
 
@@ -328,27 +331,37 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
 
   class ObjectDumper : public llvm::ObjectCache {
   public:
+    ObjectDumper(FileSpec output_dir)  : m_out_dir(output_dir) {}
     void notifyObjectCompiled(const llvm::Module *module,
                               llvm::MemoryBufferRef object) override {
       int fd = 0;
       llvm::SmallVector<char, 256> result_path;
       std::string object_name_model =
           "jit-object-" + module->getModuleIdentifier() + "-%%%.o";
-      (void)llvm::sys::fs::createUniqueFile(object_name_model, fd, result_path);
-      llvm::raw_fd_ostream fds(fd, true);
-      fds.write(object.getBufferStart(), object.getBufferSize());
-    }
+      FileSpec model_spec 
+          = m_out_dir.CopyByAppendingPathComponent(object_name_model);
+      std::string model_path = model_spec.GetPath();
 
+      std::error_code result 
+        = llvm::sys::fs::createUniqueFile(model_path, fd, result_path);
+      if (!result) {
+          llvm::raw_fd_ostream fds(fd, true);
+          fds.write(object.getBufferStart(), object.getBufferSize());
+      }
+    }
     std::unique_ptr<llvm::MemoryBuffer>
-    getObject(const llvm::Module *module) override {
+    getObject(const llvm::Module *module) override  {
       // Return nothing - we're just abusing the object-cache mechanism to dump
       // objects.
       return nullptr;
-    }
+  }
+  private:
+    FileSpec m_out_dir;
   };
 
-  if (process_sp->GetTarget().GetEnableSaveObjects()) {
-    m_object_cache_up = std::make_unique<ObjectDumper>();
+  FileSpec save_objects_dir = process_sp->GetTarget().GetSaveJITObjectsDir();
+  if (save_objects_dir) {
+    m_object_cache_up = std::make_unique<ObjectDumper>(save_objects_dir);
     m_execution_engine_up->setObjectCache(m_object_cache_up.get());
   }
 
@@ -529,8 +542,6 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
 
   func_addr = m_function_load_addr;
   func_end = m_function_end_load_addr;
-
-  return;
 }
 
 IRExecutionUnit::MemoryManager::MemoryManager(IRExecutionUnit &parent)
@@ -828,17 +839,20 @@ IRExecutionUnit::FindInSymbols(const std::vector<ConstString> &names,
     }
 
     if (sc.target_sp) {
+      ModuleList images = sc.target_sp->GetImages();
+      // BEGIN SWIFT
+      if (m_in_populate_symtab)
+        if (lldb::ModuleSP module_sp = m_jit_module_wp.lock())
+        images.Remove(module_sp);
+      // END SWIFT
+
       SymbolContextList sc_list;
-      sc.target_sp->GetImages().FindFunctions(name, lldb::eFunctionNameTypeFull,
-                                              function_options, sc_list);
+      images.FindFunctions(name, lldb::eFunctionNameTypeFull, function_options,
+                           sc_list);
       if (auto load_addr = resolver.Resolve(sc_list))
         return *load_addr;
-    }
 
-    if (sc.target_sp) {
-      SymbolContextList sc_list;
-      sc.target_sp->GetImages().FindSymbolsWithNameAndType(
-          name, lldb::eSymbolTypeAny, sc_list);
+      images.FindSymbolsWithNameAndType(name, lldb::eSymbolTypeAny, sc_list);
       if (auto load_addr = resolver.Resolve(sc_list))
         return *load_addr;
     }
@@ -1183,6 +1197,9 @@ uint32_t IRExecutionUnit::GetAddressByteSize() const {
 
 void IRExecutionUnit::PopulateSymtab(lldb_private::ObjectFile *obj_file,
                                      lldb_private::Symtab &symtab) {
+  // BEGIN SWIFT
+  m_in_populate_symtab = true;
+  auto _ = llvm::make_scope_exit([this]() { m_in_populate_symtab = false; });
   if (m_execution_engine_up) {
     uint32_t symbol_id = 0;
     lldb_private::SectionList *section_list = obj_file->GetSectionList();
@@ -1259,8 +1276,8 @@ void IRExecutionUnit::PopulateSymtab(lldb_private::ObjectFile *obj_file,
         symtab.AddSymbol(symbol);
       }
     }
-    symtab.CalculateSymbolSizes();
   }
+  // END SWIFT
 }
 
 void IRExecutionUnit::PopulateSectionList(
@@ -1322,9 +1339,8 @@ lldb::ModuleSP IRExecutionUnit::CreateJITModule(const char *name) {
 
       jit_module_sp->SetTypeSystemMap(target->GetTypeSystemMap());
 
-      ConstString const_name(name);
       FileSpec jit_file;
-      jit_file.GetFilename() = const_name;
+      jit_file.SetFilename(name);
       jit_module_sp->SetFileSpecAndObjectName(jit_file, ConstString());
 
       target->GetImages().Append(jit_module_sp);

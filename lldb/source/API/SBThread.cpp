@@ -377,7 +377,6 @@ SBValue SBThread::GetStopErrorValue() {
 
 SBValue SBThread::GetStopReturnOrErrorValue(bool &is_swift_error_value) {
   LLDB_INSTRUMENT_VA(this, is_swift_error_value);
-
   ValueObjectSP return_valobj_sp;
   std::unique_lock<std::recursive_mutex> lock;
   ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
@@ -533,10 +532,10 @@ SBError SBThread::ResumeNewPlan(ExecutionContext &exe_ctx,
     return sb_error;
   }
 
-  // User level plans should be Master Plans so they can be interrupted, other
-  // plans executed, and then a "continue" will resume the plan.
+  // User level plans should be Controlling Plans so they can be interrupted,
+  // other plans executed, and then a "continue" will resume the plan.
   if (new_plan != nullptr) {
-    new_plan->SetIsMasterPlan(true);
+    new_plan->SetIsControllingPlan(true);
     new_plan->SetOkayToDiscard(false);
   }
 
@@ -817,7 +816,11 @@ SBError SBThread::StepOverUntil(lldb::SBFrame &sb_frame,
     }
 
     if (!frame_sp) {
-      frame_sp = thread->GetSelectedFrame();
+      // We don't want to run SelectMostRelevantFrame here, for instance if
+      // you called a sequence of StepOverUntil's you wouldn't want the
+      // frame changed out from under you because you stepped into a
+      // recognized frame.
+      frame_sp = thread->GetSelectedFrame(DoNoSelectMostRelevantFrame);
       if (!frame_sp)
         frame_sp = thread->GetStackFrameAtIndex(0);
     }
@@ -1161,7 +1164,8 @@ lldb::SBFrame SBThread::GetSelectedFrame() {
   if (exe_ctx.HasThreadScope()) {
     Process::StopLocker stop_locker;
     if (stop_locker.TryLock(&exe_ctx.GetProcessPtr()->GetRunLock())) {
-      frame_sp = exe_ctx.GetThreadPtr()->GetSelectedFrame();
+      frame_sp =
+          exe_ctx.GetThreadPtr()->GetSelectedFrame(SelectMostRelevantFrame);
       sb_frame.SetFrameSP(frame_sp);
     }
   }
@@ -1344,4 +1348,13 @@ lldb_private::Thread *SBThread::operator->() {
 
 lldb_private::Thread *SBThread::get() {
   return m_opaque_sp->GetThreadSP().get();
+}
+
+SBValue SBThread::GetSiginfo() {
+  LLDB_INSTRUMENT_VA(this);
+
+  ThreadSP thread_sp = m_opaque_sp->GetThreadSP();
+  if (!thread_sp)
+    return SBValue();
+  return thread_sp->GetSiginfoValue();
 }

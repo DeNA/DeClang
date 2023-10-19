@@ -40,6 +40,7 @@
 
 using namespace lldb;
 using namespace lldb_private;
+using namespace lldb_private::dwarf;
 
 DWARFASTParserSwift::DWARFASTParserSwift(
     TypeSystemSwiftTypeRef &swift_typesystem)
@@ -133,7 +134,7 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
     if (name.GetStringRef().equals("$swift.fixedbuffer")) {
       if (auto wrapped_type = get_type(die.GetFirstChild())) {
         // Create a unique pointer for the type + fixed buffer flag.
-        type_sp.reset(new Type(*wrapped_type));
+        type_sp = wrapped_type->GetSymbolFile()->CopyType(wrapped_type);
         type_sp->SetPayload(TypePayloadSwift(true));
         return type_sp;
       }
@@ -145,7 +146,7 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
           // For a typedef, store the once desugared type as the name.
           CompilerType type = desugared_type->GetForwardCompilerType();
           if (auto swift_ast_ctx =
-                  llvm::dyn_cast_or_null<TypeSystemSwift>(type.GetTypeSystem()))
+                  type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>())
             preferred_name =
                 swift_ast_ctx->GetMangledTypeName(type.GetOpaqueQualType());
         }
@@ -193,13 +194,13 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
   }
 
   if (compiler_type) {
-    type_sp = TypeSP(new Type(
-        die.GetID(), die.GetDWARF(),
+    type_sp = die.GetDWARF()->MakeType(
+        die.GetID(),
         preferred_name ? preferred_name : compiler_type.GetTypeName(),
         // We don't have an exe_scope here by design, so we need to
         // read the size from DWARF.
         dwarf_byte_size, nullptr, LLDB_INVALID_UID, Type::eEncodingIsUID, &decl,
-        compiler_type, Type::ResolveState::Full));
+        compiler_type, Type::ResolveState::Full);
   }
 
   // Cache this type.
@@ -209,6 +210,12 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
   die.GetDWARF()->GetDIEToType()[die.GetDIE()] = type_sp.get();
 
   return type_sp;
+}
+
+ConstString
+DWARFASTParserSwift::ConstructDemangledNameFromDWARF(const DWARFDIE &die) {
+  // FIXME: Implement me.
+  return {};
 }
 
 Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
@@ -225,7 +232,7 @@ Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
   int call_file = 0;
   int call_line = 0;
   int call_column = 0;
-  DWARFExpression frame_base;
+  DWARFExpressionList frame_base;
 
   if (die.Tag() != DW_TAG_subprogram)
     return NULL;
@@ -267,9 +274,11 @@ Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
           decl_column));
 
     const user_id_t func_user_id = die.GetID();
+    bool is_generic_trampoline = die.IsGenericTrampoline();
     func_sp.reset(new Function(&comp_unit, func_user_id, func_user_id,
-                               func_name, nullptr, func_range,
-                               can_throw)); // first address range
+                               func_name, nullptr,
+                               func_range, // first address range
+                               can_throw, is_generic_trampoline));
 
     if (func_sp.get() != NULL) {
       if (frame_base.IsValid())

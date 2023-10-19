@@ -23,7 +23,7 @@ CommandObjectRegexCommand::CommandObjectRegexCommand(
     bool is_removable)
     : CommandObjectRaw(interpreter, name, help, syntax),
       m_max_matches(max_matches), m_completion_type_mask(completion_type_mask),
-      m_entries(), m_is_removable(is_removable) {}
+      m_is_removable(is_removable) {}
 
 // Destructor
 CommandObjectRegexCommand::~CommandObjectRegexCommand() = default;
@@ -71,11 +71,11 @@ bool CommandObjectRegexCommand::DoExecute(llvm::StringRef command,
       // Interpret the new command and return this as the result!
       if (m_interpreter.GetExpandRegexAliases())
         result.GetOutputStream().Printf("%s\n", new_command->c_str());
-      // Pass in true for "no context switching".  The command that called us
-      // should have set up the context appropriately, we shouldn't have to
-      // redo that.
-      return m_interpreter.HandleCommand(new_command->c_str(),
-                                         eLazyBoolCalculate, result);
+      // We don't have to pass an override_context here, as the command that 
+      // called us should have set up the context appropriately.
+      bool force_repeat_command = true;
+      return m_interpreter.HandleCommand(new_command->c_str(), eLazyBoolNo,
+                                         result, force_repeat_command);
     }
   }
   result.SetStatus(eReturnStatusFailed);
@@ -105,7 +105,7 @@ bool CommandObjectRegexCommand::AddRegexCommand(llvm::StringRef re_cstr,
 
 void CommandObjectRegexCommand::HandleCompletion(CompletionRequest &request) {
   if (m_completion_type_mask) {
-    CommandCompletions::InvokeCommonCompletionCallbacks(
+    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
         GetCommandInterpreter(), m_completion_type_mask, request, nullptr);
   }
 }

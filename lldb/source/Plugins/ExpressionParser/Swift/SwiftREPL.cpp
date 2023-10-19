@@ -114,7 +114,7 @@ lldb::REPLSP SwiftREPL::CreateInstanceFromDebugger(Status &err,
 #else
   const char *repl_exe_name = "repl_swift.exe";
 #endif
-  repl_executable.GetFilename().SetCString(repl_exe_name);
+  repl_executable.SetFilename(repl_exe_name);
   std::string repl_exe_path(repl_executable.GetPath());
 
   if (!FileSystem::Instance().Exists(repl_executable)) {
@@ -282,8 +282,8 @@ void SwiftREPL::Initialize() {
   SwiftASTContext::Initialize();
   LanguageSet swift;
   swift.Insert(lldb::eLanguageTypeSwift);
-  PluginManager::RegisterPlugin(ConstString("swift"), "The Swift REPL",
-                                &CreateInstance, swift);
+  PluginManager::RegisterPlugin("swift", "The Swift REPL", &CreateInstance,
+                                swift);
 }
 
 void SwiftREPL::Terminate() {
@@ -565,7 +565,7 @@ void SwiftREPL::CompleteCode(const std::string &current_code,
 
     auto *swift_ts =
         llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
-            &*type_system_or_err);
+            type_system_or_err->get());
     auto *target_swift_ast =
         llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
             swift_ts->GetSwiftASTContext());

@@ -13,6 +13,8 @@
 #ifndef liblldb_SwiftExpressionParser_h_
 #define liblldb_SwiftExpressionParser_h_
 
+#include "SwiftASTManipulator.h"
+
 #include "Plugins/ExpressionParser/Clang/IRForTarget.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/Status.h"
@@ -28,7 +30,7 @@
 namespace lldb_private {
 
 class IRExecutionUnit;
-
+class SwiftLanguageRuntime;
 //----------------------------------------------------------------------
 /// @class SwiftExpressionParser SwiftExpressionParser.h
 /// "lldb/Expression/SwiftExpressionParser.h"
@@ -42,6 +44,12 @@ class IRExecutionUnit;
 //----------------------------------------------------------------------
 class SwiftExpressionParser : public ExpressionParser {
 public:
+  enum class ParseResult {
+    success,
+    retry_fresh_context, 
+    retry_no_bind_generic_params,
+    unrecoverable_error
+  };
   //------------------------------------------------------------------
   /// Constructor
   ///
@@ -55,14 +63,17 @@ public:
   /// @param[in] expr
   ///     The expression to be parsed.
   ///
+  /// @param[in] local_variables
+  ///     The local variables that are in scope.
+  ///
   /// @param[in] options
   ///     Additional options for the parser.
   //------------------------------------------------------------------
-  SwiftExpressionParser(ExecutionContextScope *exe_scope,
-                        SwiftASTContextForExpressions &swift_ast_ctx,
-                        Expression &expr,
-                        const EvaluateExpressionOptions &options);
-
+  SwiftExpressionParser(
+       ExecutionContextScope *exe_scope,
+       SwiftASTContextForExpressions &swift_ast_ctx, Expression &expr,
+       llvm::SmallVector<SwiftASTManipulator::VariableInfo> &&local_variables,
+       const EvaluateExpressionOptions &options);
   //------------------------------------------------------------------
   /// Attempts to find possible command line completions for the given
   /// expression.
@@ -83,8 +94,13 @@ public:
   ///     The number of errors encountered during parsing.  0 means
   ///     success.
   //------------------------------------------------------------------
-  unsigned Parse(DiagnosticManager &diagnostic_manager, uint32_t first_line = 0,
-                 uint32_t last_line = UINT32_MAX);
+  ParseResult Parse(DiagnosticManager &diagnostic_manager,
+                    uint32_t first_line = 0, uint32_t last_line = UINT32_MAX);
+
+  /// Returns true if the call to parse of this type is cacheable.
+  bool IsParseCacheable() const {
+    return m_is_cacheable;
+  }
 
   //------------------------------------------------------------------
   /// Ready an already-parsed expression for execution, possibly
@@ -133,19 +149,26 @@ public:
 
   bool RewriteExpression(DiagnosticManager &diagnostic_manager) override;
 
+  static CompilerType ResolveVariable(
+      lldb::VariableSP variable_sp, lldb::StackFrameSP &stack_frame_sp,
+      SwiftLanguageRuntime *runtime, lldb::DynamicValueType use_dynamic,
+      lldb::BindGenericTypes bind_generic_types);
+
+  static lldb::VariableSP FindSelfVariable(Block *block);
+
   //------------------------------------------------------------------
   /// Information about each variable provided to the expression, so
   /// that we can generate proper accesses in the SIL.
   //------------------------------------------------------------------
   struct SILVariableInfo {
     CompilerType type;
-    uint64_t offset;
-    bool needs_init;
+    uint64_t offset = 0;
+    bool needs_init = false;
+    bool is_unowned_self = false;
 
-    SILVariableInfo(CompilerType t, uint64_t o, bool ni)
-        : type(t), offset(o), needs_init(ni) {}
-
-    SILVariableInfo() : type(), offset(0), needs_init(false) {}
+    SILVariableInfo() = default;
+    SILVariableInfo(CompilerType t, uint64_t o, bool ni, bool s)
+      : type(t), offset(o), needs_init(ni), is_unowned_self(s) {}
   };
 
   //------------------------------------------------------------------
@@ -174,8 +197,15 @@ private:
   /// The stack frame to use (if possible) when determining dynamic
   /// types.
   lldb::StackFrameWP m_stack_frame_wp;
+
+  /// The variables in scope.
+  llvm::SmallVector<SwiftASTManipulator::VariableInfo> m_local_variables;
+
   /// If true, we are running in REPL mode
   EvaluateExpressionOptions m_options;
+
+  /// Indicates whether the call to Parse of this type is cacheable.
+  bool m_is_cacheable;
 };
 } // namespace lldb_private
 

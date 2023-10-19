@@ -22,7 +22,19 @@ if (HAS_WERROR_GLOBAL_CTORS)
 endif()
 
 if(LLVM_ENABLE_ZLIB)
-  set(imported_libs ZLIB::ZLIB)
+  list(APPEND imported_libs ZLIB::ZLIB)
+endif()
+
+if(LLVM_ENABLE_ZSTD)
+  if(TARGET zstd::libzstd_shared AND NOT LLVM_USE_STATIC_ZSTD)
+    set(zstd_target zstd::libzstd_shared)
+  else()
+    set(zstd_target zstd::libzstd_static)
+  endif()
+endif()
+
+if(LLVM_ENABLE_ZSTD)
+  list(APPEND imported_libs ${zstd_target})
 endif()
 
 if( MSVC OR MINGW )
@@ -45,7 +57,7 @@ elseif( CMAKE_HOST_UNIX )
     set(system_libs ${system_libs} ${Backtrace_LIBFILE})
   endif()
   if( LLVM_ENABLE_TERMINFO )
-    set(imported_libs ${imported_libs} "${TERMINFO_LIB}")
+    set(imported_libs ${imported_libs} Terminfo::terminfo)
   endif()
   if( LLVM_ENABLE_THREADS AND (HAVE_LIBATOMIC OR HAVE_CXX_LIBATOMICS64) )
     set(system_libs ${system_libs} atomic)
@@ -53,6 +65,9 @@ elseif( CMAKE_HOST_UNIX )
   set(system_libs ${system_libs} ${LLVM_PTHREAD_LIB})
   if( UNIX AND NOT (BEOS OR HAIKU) )
     set(system_libs ${system_libs} m)
+  endif()
+  if( UNIX AND ${CMAKE_SYSTEM_NAME} MATCHES "SunOS" )
+    set(system_libs ${system_libs} kstat)
   endif()
   if( FUCHSIA )
     set(system_libs ${system_libs} zircon)
@@ -66,7 +81,7 @@ endif( MSVC OR MINGW )
 # Delay load shell32.dll if possible to speed up process startup.
 set (delayload_flags)
 if (MSVC)
-  set (delayload_flags delayimp -delayload:shell32.dll -delayload:ole32.dll)
+  set (delayload_flags $<$<NOT:$<LINK_LANGUAGE:Swift>>:delayimp -delayload:shell32.dll -delayload:ole32.dll>)
 endif()
 
 # Link Z3 if the user wants to build it.
@@ -90,7 +105,7 @@ if(LLVM_INTEGRATED_CRT_ALLOC)
     add_definitions(-DENABLE_OVERRIDE -DENABLE_PRELOAD)
     set(ALLOCATOR_FILES "${LLVM_INTEGRATED_CRT_ALLOC}/rpmalloc/rpmalloc.c")
   elseif(LLVM_INTEGRATED_CRT_ALLOC MATCHES "snmalloc$")
-    set(ALLOCATOR_FILES "${LLVM_INTEGRATED_CRT_ALLOC}/src/override/malloc.cc" "${LLVM_INTEGRATED_CRT_ALLOC}/src/override/new.cc")
+    set(ALLOCATOR_FILES "${LLVM_INTEGRATED_CRT_ALLOC}/src/snmalloc/override/new.cc")
     set(system_libs ${system_libs} "mincore.lib" "-INCLUDE:malloc")
   elseif(LLVM_INTEGRATED_CRT_ALLOC MATCHES "mimalloc$")
     set(MIMALLOC_LIB "${LLVM_INTEGRATED_CRT_ALLOC}/out/msvc-x64/Release/mimalloc-static.lib")
@@ -104,6 +119,7 @@ endif()
 add_subdirectory(BLAKE3)
 
 add_llvm_component_library(LLVMSupport
+  AddressRanges.cpp
   AArch64TargetParser.cpp
   ABIBreak.cpp
   ARMTargetParser.cpp
@@ -117,6 +133,7 @@ add_llvm_component_library(LLVMSupport
   ARMWinEH.cpp
   Allocator.cpp
   AutoConvert.cpp
+  Base64.cpp
   BinaryStreamError.cpp
   BinaryStreamReader.cpp
   BinaryStreamRef.cpp
@@ -136,6 +153,9 @@ add_llvm_component_library(LLVMSupport
   ConvertUTF.cpp
   ConvertUTFWrapper.cpp
   CrashRecoveryContext.cpp
+  CSKYAttributes.cpp
+  CSKYAttributeParser.cpp
+  CSKYTargetParser.cpp
   DataExtractor.cpp
   Debug.cpp
   DebugCounter.cpp
@@ -152,6 +172,7 @@ add_llvm_component_library(LLVMSupport
   FileUtilities.cpp
   FileOutputBuffer.cpp
   FoldingSet.cpp
+  Format.cpp
   FormattedStream.cpp
   FormatVariadic.cpp
   GlobPattern.cpp
@@ -180,8 +201,11 @@ add_llvm_component_library(LLVMSupport
   NativeFormatting.cpp
   OptimizedStructLayout.cpp
   Optional.cpp
+  PGOOptions.cpp
   Parallel.cpp
   PluginLoader.cpp
+  PrefixMapper.cpp
+  PrefixMappingFileSystem.cpp
   PrettyStackTrace.cpp
   RandomNumberGenerator.cpp
   Regex.cpp
@@ -217,14 +241,22 @@ add_llvm_component_library(LLVMSupport
   TypeSize.cpp
   Unicode.cpp
   UnicodeCaseFold.cpp
+  UnicodeNameToCodepoint.cpp
+  UnicodeNameToCodepointGenerated.cpp
   VersionTuple.cpp
   VirtualFileSystem.cpp
+  VirtualOutputBackend.cpp
+  VirtualOutputBackends.cpp
+  VirtualOutputConfig.cpp
+  VirtualOutputError.cpp
+  VirtualOutputFile.cpp
   WithColor.cpp
   X86TargetParser.cpp
   YAMLParser.cpp
   YAMLTraits.cpp
   raw_os_ostream.cpp
   raw_ostream.cpp
+  raw_ostream_proxy.cpp
   regcomp.c
   regerror.c
   regexec.c
@@ -283,8 +315,24 @@ if(LLVM_ENABLE_ZLIB)
   set(llvm_system_libs ${llvm_system_libs} "${zlib_library}")
 endif()
 
+if(LLVM_ENABLE_ZSTD)
+  # CMAKE_BUILD_TYPE is only meaningful to single-configuration generators.
+  if(CMAKE_BUILD_TYPE)
+    string(TOUPPER ${CMAKE_BUILD_TYPE} build_type)
+    get_property(zstd_library TARGET ${zstd_target} PROPERTY LOCATION_${build_type})
+  endif()
+  if(NOT zstd_library)
+    get_property(zstd_library TARGET ${zstd_target} PROPERTY LOCATION)
+  endif()
+  get_library_name(${zstd_library} zstd_library)
+  set(llvm_system_libs ${llvm_system_libs} "${zstd_library}")
+endif()
+
 if(LLVM_ENABLE_TERMINFO)
-  get_library_name(${TERMINFO_LIB} terminfo_library)
+  if(NOT terminfo_library)
+    get_property(terminfo_library TARGET Terminfo::terminfo PROPERTY LOCATION)
+  endif()
+  get_library_name(${terminfo_library} terminfo_library)
   set(llvm_system_libs ${llvm_system_libs} "${terminfo_library}")
 endif()
 

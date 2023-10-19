@@ -18,14 +18,11 @@
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
-#include <algorithm>
-#include <cstdint>
 #include <memory>
 #include <utility>
 
 namespace llvm {
 
-struct AAMDNodes;
 class AssumptionCache;
 class BasicBlock;
 class DataLayout;
@@ -44,9 +41,7 @@ class Value;
 /// While it does retain some storage, that is used as an optimization and not
 /// to preserve information from query to query. However it does retain handles
 /// to various other analyses and must be recomputed when those analyses are.
-class BasicAAResult : public AAResultBase<BasicAAResult> {
-  friend AAResultBase<BasicAAResult>;
-
+class BasicAAResult : public AAResultBase {
   const DataLayout &DL;
   const Function &F;
   const TargetLibraryInfo &TLI;
@@ -58,7 +53,7 @@ public:
   BasicAAResult(const DataLayout &DL, const Function &F,
                 const TargetLibraryInfo &TLI, AssumptionCache &AC,
                 DominatorTree *DT = nullptr, PhiValues *PV = nullptr)
-      : AAResultBase(), DL(DL), F(F), TLI(TLI), AC(AC), DT(DT), PV(PV) {}
+      : DL(DL), F(F), TLI(TLI), AC(AC), DT(DT), PV(PV) {}
 
   BasicAAResult(const BasicAAResult &Arg)
       : AAResultBase(Arg), DL(Arg.DL), F(Arg.F), TLI(Arg.TLI), AC(Arg.AC),
@@ -88,7 +83,8 @@ public:
   ModRefInfo getArgModRefInfo(const CallBase *Call, unsigned ArgIdx);
 
   /// Returns the behavior when calling the given call site.
-  FunctionModRefBehavior getModRefBehavior(const CallBase *Call);
+  FunctionModRefBehavior getModRefBehavior(const CallBase *Call,
+                                           AAQueryInfo &AAQI);
 
   /// Returns the behavior when calling the given function. For use when the
   /// call site is not known.

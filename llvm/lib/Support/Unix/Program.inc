@@ -86,7 +86,7 @@ ErrorOr<std::string> sys::findProgramByName(StringRef Name,
       continue;
 
     // Check to see if this first directory contains the executable...
-    SmallString<512> FilePath(Path);
+    SmallString<128> FilePath(Path);
     sys::path::append(FilePath, Name);
     if (sys::fs::can_execute(FilePath.c_str()))
       return std::string(FilePath.str());  // Found the executable!

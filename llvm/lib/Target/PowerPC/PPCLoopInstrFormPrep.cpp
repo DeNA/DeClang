@@ -108,6 +108,7 @@
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/ScalarEvolutionExpander.h"
 #include <cassert>
+#include <cmath>
 #include <iterator>
 #include <utility>
 
@@ -115,17 +116,22 @@
 
 using namespace llvm;
 
-static cl::opt<unsigned> MaxVarsPrep("ppc-formprep-max-vars",
-                                 cl::Hidden, cl::init(24),
-  cl::desc("Potential common base number threshold per function for PPC loop "
-           "prep"));
+static cl::opt<unsigned>
+    MaxVarsPrep("ppc-formprep-max-vars", cl::Hidden, cl::init(24),
+                cl::desc("Potential common base number threshold per function "
+                         "for PPC loop prep"));
 
 static cl::opt<bool> PreferUpdateForm("ppc-formprep-prefer-update",
                                  cl::init(true), cl::Hidden,
   cl::desc("prefer update form when ds form is also a update form"));
 
+static cl::opt<bool> EnableUpdateFormForNonConstInc(
+    "ppc-formprep-update-nonconst-inc", cl::init(false), cl::Hidden,
+    cl::desc("prepare update form when the load/store increment is a loop "
+             "invariant non-const value."));
+
 static cl::opt<bool> EnableChainCommoning(
-    "ppc-formprep-chain-commoning", cl::init(true), cl::Hidden,
+    "ppc-formprep-chain-commoning", cl::init(false), cl::Hidden,
     cl::desc("Enable chain commoning in PPC loop prepare pass."));
 
 // Sum of following 3 per loop thresholds for all loops can not be larger
@@ -211,7 +217,7 @@ namespace {
   // load/store with update like ldu/stdu, or Prefetch intrinsic.
   // For DS form instructions, their displacements must be multiple of 4.
   // For DQ form instructions, their displacements must be multiple of 16.
-  enum InstrForm { UpdateForm = 1, DSForm = 4, DQForm = 16 };
+  enum PrepForm { UpdateForm = 1, DSForm = 4, DQForm = 16, ChainCommoning };
 
   class PPCLoopInstrFormPrep : public FunctionPass {
   public:
@@ -254,7 +260,7 @@ namespace {
     /// Check if required PHI node is already exist in Loop \p L.
     bool alreadyPrepared(Loop *L, Instruction *MemI,
                          const SCEV *BasePtrStartSCEV,
-                         const SCEV *BasePtrIncSCEV, InstrForm Form);
+                         const SCEV *BasePtrIncSCEV, PrepForm Form);
 
     /// Get the value which defines the increment SCEV \p BasePtrIncSCEV.
     Value *getNodeForInc(Loop *L, Instruction *MemI,
@@ -292,8 +298,7 @@ namespace {
 
     /// Prepare all candidates in \p Buckets for displacement form, now for
     /// ds/dq.
-    bool dispFormPrep(Loop *L, SmallVector<Bucket, 16> &Buckets,
-                      InstrForm Form);
+    bool dispFormPrep(Loop *L, SmallVector<Bucket, 16> &Buckets, PrepForm Form);
 
     /// Prepare for one chain \p BucketChain, find the best base element and
     /// update all other elements in \p BucketChain accordingly.
@@ -301,8 +306,7 @@ namespace {
     /// If success, best base element must be stored as the first element of
     /// \p BucketChain.
     /// Return false if no base element found, otherwise return true.
-    bool prepareBaseForDispFormChain(Bucket &BucketChain,
-                                     InstrForm Form);
+    bool prepareBaseForDispFormChain(Bucket &BucketChain, PrepForm Form);
 
     /// Prepare for one chain \p BucketChain, find the best base element and
     /// update all other elements in \p BucketChain accordingly.
@@ -315,12 +319,12 @@ namespace {
     /// preparation.
     bool rewriteLoadStores(Loop *L, Bucket &BucketChain,
                            SmallSet<BasicBlock *, 16> &BBChanged,
-                           InstrForm Form);
+                           PrepForm Form);
 
     /// Rewrite for the base load/store of a chain.
     std::pair<Instruction *, Instruction *>
     rewriteForBase(Loop *L, const SCEVAddRecExpr *BasePtrSCEV,
-                   Instruction *BaseMemI, bool CanPreInc, InstrForm Form,
+                   Instruction *BaseMemI, bool CanPreInc, PrepForm Form,
                    SCEVExpander &SCEVE, SmallPtrSet<Value *, 16> &DeletedPtrs);
 
     /// Rewrite for the other load/stores of a chain according to the new \p
@@ -409,9 +413,9 @@ bool PPCLoopInstrFormPrep::runOnFunction(Function &F) {
 
   bool MadeChange = false;
 
-  for (auto I = LI->begin(), IE = LI->end(); I != IE; ++I)
-    for (auto L = df_begin(*I), LE = df_end(*I); L != LE; ++L)
-      MadeChange |= runOnLoop(*L);
+  for (Loop *I : *LI)
+    for (Loop *L : depth_first(I))
+      MadeChange |= runOnLoop(L);
 
   return MadeChange;
 }
@@ -494,7 +498,7 @@ bool PPCLoopInstrFormPrep::prepareBasesForCommoningChains(Bucket &CBucket) {
   // All elements are increased by FirstOffset.
   // The number of chains should be sqrt(EleNum).
   if (!SawChainSeparater)
-    ChainNum = (unsigned)sqrt(EleNum);
+    ChainNum = (unsigned)sqrt((double)EleNum);
 
   CBucket.ChainSize = (unsigned)(EleNum / ChainNum);
 
@@ -553,8 +557,6 @@ bool PPCLoopInstrFormPrep::rewriteLoadStoresForCommoningChains(
   BasicBlock *Header = L->getHeader();
   BasicBlock *LoopPredecessor = L->getLoopPredecessor();
 
-  Type *I64Ty = Type::getInt64Ty(Header->getContext());
-
   SCEVExpander SCEVE(*SE, Header->getModule()->getDataLayout(),
                      "loopprepare-chaincommon");
 
@@ -567,15 +569,15 @@ bool PPCLoopInstrFormPrep::rewriteLoadStoresForCommoningChains(
     const SCEVAddRecExpr *BasePtrSCEV = cast<SCEVAddRecExpr>(BaseSCEV);
 
     // Make sure the base is able to expand.
-    if (!isSafeToExpand(BasePtrSCEV->getStart(), *SE))
+    if (!SCEVE.isSafeToExpand(BasePtrSCEV->getStart()))
       return MadeChange;
 
     assert(BasePtrSCEV->isAffine() &&
            "Invalid SCEV type for the base ptr for a candidate chain!\n");
 
-    std::pair<Instruction *, Instruction *> Base =
-        rewriteForBase(L, BasePtrSCEV, Bucket.Elements[BaseElemIdx].Instr,
-                       false /* CanPreInc */, UpdateForm, SCEVE, DeletedPtrs);
+    std::pair<Instruction *, Instruction *> Base = rewriteForBase(
+        L, BasePtrSCEV, Bucket.Elements[BaseElemIdx].Instr,
+        false /* CanPreInc */, ChainCommoning, SCEVE, DeletedPtrs);
 
     if (!Base.first || !Base.second)
       return MadeChange;
@@ -601,11 +603,11 @@ bool PPCLoopInstrFormPrep::rewriteLoadStoresForCommoningChains(
       // Make sure offset is able to expand. Only need to check one time as the
       // offsets are reused between different chains.
       if (!BaseElemIdx)
-        if (!isSafeToExpand(OffsetSCEV, *SE))
+        if (!SCEVE.isSafeToExpand(OffsetSCEV))
           return false;
 
       Value *OffsetValue = SCEVE.expandCodeFor(
-          OffsetSCEV, I64Ty, LoopPredecessor->getTerminator());
+          OffsetSCEV, OffsetSCEV->getType(), LoopPredecessor->getTerminator());
 
       Instruction *NewPtr = rewriteForBucketElement(Base, Bucket.Elements[Idx],
                                                     OffsetValue, DeletedPtrs);
@@ -646,7 +648,7 @@ bool PPCLoopInstrFormPrep::rewriteLoadStoresForCommoningChains(
 std::pair<Instruction *, Instruction *>
 PPCLoopInstrFormPrep::rewriteForBase(Loop *L, const SCEVAddRecExpr *BasePtrSCEV,
                                      Instruction *BaseMemI, bool CanPreInc,
-                                     InstrForm Form, SCEVExpander &SCEVE,
+                                     PrepForm Form, SCEVExpander &SCEVE,
                                      SmallPtrSet<Value *, 16> &DeletedPtrs) {
 
   LLVM_DEBUG(dbgs() << "PIP: Transforming: " << *BasePtrSCEV << "\n");
@@ -673,6 +675,13 @@ PPCLoopInstrFormPrep::rewriteForBase(Loop *L, const SCEVAddRecExpr *BasePtrSCEV,
   // No valid representation for the increment.
   if (!IncNode) {
     LLVM_DEBUG(dbgs() << "Loop Increasement can not be represented!\n");
+    return std::make_pair(nullptr, nullptr);
+  }
+
+  if (Form == UpdateForm && !IsConstantInc && !EnableUpdateFormForNonConstInc) {
+    LLVM_DEBUG(
+        dbgs()
+        << "Update form prepare for non-const increment is not enabled!\n");
     return std::make_pair(nullptr, nullptr);
   }
 
@@ -706,7 +715,7 @@ PPCLoopInstrFormPrep::rewriteForBase(Loop *L, const SCEVAddRecExpr *BasePtrSCEV,
 
   // Note that LoopPredecessor might occur in the predecessor list multiple
   // times, and we need to add it the right number of times.
-  for (auto PI : predecessors(Header)) {
+  for (auto *PI : predecessors(Header)) {
     if (PI != LoopPredecessor)
       continue;
 
@@ -721,7 +730,7 @@ PPCLoopInstrFormPrep::rewriteForBase(Loop *L, const SCEVAddRecExpr *BasePtrSCEV,
         I8Ty, NewPHI, IncNode, getInstrName(BaseMemI, GEPNodeIncNameSuffix),
         InsPoint);
     cast<GetElementPtrInst>(PtrInc)->setIsInBounds(IsPtrInBounds(BasePtr));
-    for (auto PI : predecessors(Header)) {
+    for (auto *PI : predecessors(Header)) {
       if (PI == LoopPredecessor)
         continue;
 
@@ -736,7 +745,7 @@ PPCLoopInstrFormPrep::rewriteForBase(Loop *L, const SCEVAddRecExpr *BasePtrSCEV,
   } else {
     // Note that LoopPredecessor might occur in the predecessor list multiple
     // times, and we need to make sure no more incoming value for them in PHI.
-    for (auto PI : predecessors(Header)) {
+    for (auto *PI : predecessors(Header)) {
       if (PI == LoopPredecessor)
         continue;
 
@@ -885,7 +894,7 @@ SmallVector<Bucket, 16> PPCLoopInstrFormPrep::collectCandidates(
 }
 
 bool PPCLoopInstrFormPrep::prepareBaseForDispFormChain(Bucket &BucketChain,
-                                                    InstrForm Form) {
+                                                       PrepForm Form) {
   // RemainderOffsetInfo details:
   // key:            value of (Offset urem DispConstraint). For DSForm, it can
   //                 be [0, 4).
@@ -1002,7 +1011,7 @@ bool PPCLoopInstrFormPrep::prepareBaseForUpdateFormChain(Bucket &BucketChain) {
 
 bool PPCLoopInstrFormPrep::rewriteLoadStores(
     Loop *L, Bucket &BucketChain, SmallSet<BasicBlock *, 16> &BBChanged,
-    InstrForm Form) {
+    PrepForm Form) {
   bool MadeChange = false;
 
   const SCEVAddRecExpr *BasePtrSCEV =
@@ -1010,14 +1019,13 @@ bool PPCLoopInstrFormPrep::rewriteLoadStores(
   if (!BasePtrSCEV->isAffine())
     return MadeChange;
 
-  if (!isSafeToExpand(BasePtrSCEV->getStart(), *SE))
-    return MadeChange;
-
-  SmallPtrSet<Value *, 16> DeletedPtrs;
-
   BasicBlock *Header = L->getHeader();
   SCEVExpander SCEVE(*SE, Header->getModule()->getDataLayout(),
                      "loopprepare-formrewrite");
+  if (!SCEVE.isSafeToExpand(BasePtrSCEV->getStart()))
+    return MadeChange;
+
+  SmallPtrSet<Value *, 16> DeletedPtrs;
 
   // For some DS form load/store instructions, it can also be an update form,
   // if the stride is constant and is a multipler of 4. Use update form if
@@ -1042,16 +1050,15 @@ bool PPCLoopInstrFormPrep::rewriteLoadStores(
   SmallPtrSet<Value *, 16> NewPtrs;
   NewPtrs.insert(Base.first);
 
-  for (auto I = std::next(BucketChain.Elements.begin()),
-       IE = BucketChain.Elements.end(); I != IE; ++I) {
-    Value *Ptr = getPointerOperandAndType(I->Instr);
+  for (const BucketElement &BE : llvm::drop_begin(BucketChain.Elements)) {
+    Value *Ptr = getPointerOperandAndType(BE.Instr);
     assert(Ptr && "No pointer operand");
     if (NewPtrs.count(Ptr))
       continue;
 
     Instruction *NewPtr = rewriteForBucketElement(
-        Base, *I,
-        I->Offset ? cast<SCEVConstant>(I->Offset)->getValue() : nullptr,
+        Base, BE,
+        BE.Offset ? cast<SCEVConstant>(BE.Offset)->getValue() : nullptr,
         DeletedPtrs);
     assert(NewPtr && "wrong rewrite!\n");
     NewPtrs.insert(NewPtr);
@@ -1099,8 +1106,9 @@ bool PPCLoopInstrFormPrep::updateFormPrep(Loop *L,
   return MadeChange;
 }
 
-bool PPCLoopInstrFormPrep::dispFormPrep(Loop *L, SmallVector<Bucket, 16> &Buckets,
-                                     InstrForm Form) {
+bool PPCLoopInstrFormPrep::dispFormPrep(Loop *L,
+                                        SmallVector<Bucket, 16> &Buckets,
+                                        PrepForm Form) {
   bool MadeChange = false;
 
   if (Buckets.empty())
@@ -1203,7 +1211,7 @@ Value *PPCLoopInstrFormPrep::getNodeForInc(Loop *L, Instruction *MemI,
 bool PPCLoopInstrFormPrep::alreadyPrepared(Loop *L, Instruction *MemI,
                                            const SCEV *BasePtrStartSCEV,
                                            const SCEV *BasePtrIncSCEV,
-                                           InstrForm Form) {
+                                           PrepForm Form) {
   BasicBlock *BB = MemI->getParent();
   if (!BB)
     return false;
@@ -1243,7 +1251,7 @@ bool PPCLoopInstrFormPrep::alreadyPrepared(Loop *L, Instruction *MemI,
         if (PHIBasePtrIncSCEV == BasePtrIncSCEV) {
           // The existing PHI (CurrentPHINode) has the same start and increment
           // as the PHI that we wanted to create.
-          if (Form == UpdateForm &&
+          if ((Form == UpdateForm || Form == ChainCommoning ) &&
               PHIBasePtrSCEV->getStart() == BasePtrStartSCEV) {
             ++PHINodeAlreadyExistsUpdate;
             return true;

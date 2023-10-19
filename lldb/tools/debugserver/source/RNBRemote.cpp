@@ -48,6 +48,7 @@
 #include <compression.h>
 
 #include <TargetConditionals.h>
+#include <algorithm>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -393,9 +394,12 @@ void RNBRemote::CreatePacketTable() {
                      "'G', 'p', and 'P') support having the thread ID appended "
                      "to the end of the command"));
   t.push_back(Packet(set_logging_mode, &RNBRemote::HandlePacket_QSetLogging,
-                     NULL, "QSetLogging:", "Check if register packets ('g', "
-                                           "'G', 'p', and 'P' support having "
-                                           "the thread ID prefix"));
+                     NULL, "QSetLogging:", "Turn on log channels in debugserver"));
+  t.push_back(Packet(set_ignored_exceptions, &RNBRemote::HandlePacket_QSetIgnoredExceptions,
+                     NULL, "QSetIgnoredExceptions:", "Set the exception types "
+                                           "debugserver won't wait for, allowing "
+                                           "them to be turned into the equivalent "
+                                           "BSD signals by the normal means."));
   t.push_back(Packet(
       set_max_packet_size, &RNBRemote::HandlePacket_QSetMaxPacketSize, NULL,
       "QSetMaxPacketSize:",
@@ -495,6 +499,10 @@ void RNBRemote::CreatePacketTable() {
       "Test the maximum speed at which packet can be sent/received."));
   t.push_back(Packet(query_transfer, &RNBRemote::HandlePacket_qXfer, NULL,
                      "qXfer:", "Support the qXfer packet."));
+  t.push_back(Packet(json_query_dyld_process_state,
+                     &RNBRemote::HandlePacket_jGetDyldProcessState, NULL,
+                     "jGetDyldProcessState",
+                     "Query the process state from dyld."));
 }
 
 void RNBRemote::FlushSTDIO() {
@@ -2209,6 +2217,37 @@ rnb_err_t set_logging(const char *p) {
   return rnb_success;
 }
 
+rnb_err_t RNBRemote::HandlePacket_QSetIgnoredExceptions(const char *p) {
+  // We can't set the ignored exceptions if we have a running process:
+  if (m_ctx.HasValidProcessID())
+    return SendPacket("E35");
+
+  p += sizeof("QSetIgnoredExceptions:") - 1;
+  bool success = true;
+  while(1) {
+    const char *bar  = strchr(p, '|');
+    if (bar == nullptr) {
+      success = m_ctx.AddIgnoredException(p);
+      break;
+    } else {
+      std::string exc_str(p, bar - p);
+      if (exc_str.empty()) {
+        success = false;
+        break;
+      }
+
+      success = m_ctx.AddIgnoredException(exc_str.c_str());
+      if (!success)
+        break;
+      p = bar + 1;
+    }
+  }
+  if (success)
+    return SendPacket("OK");
+  else
+    return SendPacket("E36");
+}
+
 rnb_err_t RNBRemote::HandlePacket_QThreadSuffixSupported(const char *p) {
   m_thread_suffix_supported = true;
   return SendPacket("OK");
@@ -3462,7 +3501,8 @@ rnb_err_t RNBRemote::HandlePacket_qSupported(const char *p) {
   uint32_t max_packet_size = 128 * 1024; // 128KBytes is a reasonable max packet
                                          // size--debugger can always use less
   char buf[256];
-  snprintf(buf, sizeof(buf), "qXfer:features:read+;PacketSize=%x;qEcho+",
+  snprintf(buf, sizeof(buf),
+           "qXfer:features:read+;PacketSize=%x;qEcho+;native-signals+",
            max_packet_size);
 
   bool enable_compression = false;
@@ -3751,17 +3791,6 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
     char err_str[1024] = {'\0'};
     std::string attach_name;
 
-    if (DNBDebugserverIsTranslated()) {
-      DNBLogError("debugserver is x86_64 binary running in translation, attach "
-                  "failed.");
-      std::string return_message = "E96;";
-      return_message +=
-          cstring_to_asciihex_string("debugserver is x86_64 binary running in "
-                                     "translation, attached failed.");
-      SendPacket(return_message);
-      return rnb_err;
-    }
-
     if (strstr(p, "vAttachWait;") == p) {
       p += strlen("vAttachWait;");
       if (!GetProcessNameFrom_vAttach(p, attach_name)) {
@@ -3800,8 +3829,8 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
              "'%s'",
              getpid(), attach_name.c_str());
       attach_pid = DNBProcessAttachByName(attach_name.c_str(), NULL,
-                                          Context().GetUnmaskSignals(), err_str,
-                                          sizeof(err_str));
+                                          Context().GetIgnoredExceptions(), 
+                                          err_str, sizeof(err_str));
 
     } else if (strstr(p, "vAttach;") == p) {
       p += strlen("vAttach;");
@@ -3815,10 +3844,22 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
         DNBLog("[LaunchAttach] START %d vAttach to pid %d", getpid(),
                pid_attaching_to);
         attach_pid = DNBProcessAttach(pid_attaching_to, &attach_timeout_abstime,
-                                      false, err_str, sizeof(err_str));
+                                      m_ctx.GetIgnoredExceptions(), 
+                                      err_str, sizeof(err_str));
       }
     } else {
       return HandlePacket_UNIMPLEMENTED(p);
+    }
+
+    if (attach_pid == INVALID_NUB_PROCESS_ARCH) {
+      DNBLogError("debugserver is x86_64 binary running in translation, attach "
+                  "failed.");
+      std::string return_message = "E96;";
+      return_message +=
+          cstring_to_asciihex_string("debugserver is x86_64 binary running in "
+                                     "translation, attach failed.");
+      SendPacket(return_message.c_str());
+      return rnb_err;
     }
 
     if (attach_pid != INVALID_NUB_PROCESS) {
@@ -4744,24 +4785,6 @@ static bool GetHostCPUType(uint32_t &cputype, uint32_t &cpusubtype,
   return g_host_cputype != 0;
 }
 
-static bool GetAddressingBits(uint32_t &addressing_bits) {
-  static uint32_t g_addressing_bits = 0;
-  static bool g_tried_addressing_bits_syscall = false;
-  if (g_tried_addressing_bits_syscall == false) {
-    size_t len = sizeof (uint32_t);
-    if (::sysctlbyname("machdep.virtual_address_size",
-          &g_addressing_bits, &len, NULL, 0) != 0) {
-      g_addressing_bits = 0;
-    }
-  }
-  g_tried_addressing_bits_syscall = true;
-  addressing_bits = g_addressing_bits;
-  if (addressing_bits > 0)
-    return true;
-  else
-    return false;
-}
-
 rnb_err_t RNBRemote::HandlePacket_qHostInfo(const char *p) {
   std::ostringstream strm;
 
@@ -4775,7 +4798,7 @@ rnb_err_t RNBRemote::HandlePacket_qHostInfo(const char *p) {
   }
 
   uint32_t addressing_bits = 0;
-  if (GetAddressingBits(addressing_bits)) {
+  if (DNBGetAddressingBits(addressing_bits)) {
     strm << "addressing_bits:" << std::dec << addressing_bits << ';';
   }
 
@@ -4920,7 +4943,6 @@ void GenerateTargetXMLRegister(std::ostringstream &s, const uint32_t reg_num,
   const char *gdb_type = default_gdb_type;
   const char *default_lldb_format = "hex";
   const char *lldb_format = default_lldb_format;
-  const char *lldb_set = NULL;
 
   switch (reg.nub_info.type) {
   case Uint:
@@ -4988,8 +5010,6 @@ void GenerateTargetXMLRegister(std::ostringstream &s, const uint32_t reg_num,
     lldb_format = "vector-uint128";
     break;
   };
-  if (reg_set_info && reg.nub_info.set < num_reg_sets)
-    lldb_set = reg_set_info[reg.nub_info.set].name;
 
   uint32_t indent = 2;
 
@@ -5238,6 +5258,22 @@ rnb_err_t RNBRemote::HandlePacket_qGDBServerVersion(const char *p) {
   strm << "version:" << DEBUGSERVER_VERSION_NUM << ";";
 
   return SendPacket(strm.str());
+}
+
+rnb_err_t RNBRemote::HandlePacket_jGetDyldProcessState(const char *p) {
+  const nub_process_t pid = m_ctx.ProcessID();
+  if (pid == INVALID_NUB_PROCESS)
+    return SendPacket("E87");
+
+  JSONGenerator::ObjectSP dyld_state_sp = DNBGetDyldProcessState(pid);
+  if (dyld_state_sp) {
+    std::ostringstream strm;
+    dyld_state_sp->DumpBinaryEscaped(strm);
+    dyld_state_sp->Clear();
+    if (strm.str().size() > 0)
+      return SendPacket(strm.str());
+  }
+  return SendPacket("E88");
 }
 
 // A helper function that retrieves a single integer value from
@@ -5822,21 +5858,17 @@ rnb_err_t RNBRemote::HandlePacket_jThreadExtendedInfo(const char *p) {
   return SendPacket("OK");
 }
 
-//  This packet may be called in one of three ways:
-//
-//  jGetLoadedDynamicLibrariesInfos:{"image_count":40,"image_list_address":4295244704}
-//      Look for an array of the old dyld_all_image_infos style of binary infos
-//      at the image_list_address.
-//      This an array of {void* load_addr, void* mod_date, void* pathname}
+//  This packet may be called in one of two ways:
 //
 //  jGetLoadedDynamicLibrariesInfos:{"fetch_all_solibs":true}
-//      Use the new style (macOS 10.12, tvOS 10, iOS 10, watchOS 3) dyld SPI to
-//      get a list of all the
-//      libraries loaded
+//      Use the new dyld SPI to get a list of all the libraries loaded.
+//      If "report_load_commands":false" is present, only the dyld SPI
+//      provided information (load address, filepath) is returned.
+//      lldb can ask for the mach-o header/load command details in a
+//      separate packet.
 //
 //  jGetLoadedDynamicLibrariesInfos:{"solib_addresses":[8382824135,3258302053,830202858503]}
-//      Use the new style (macOS 10.12, tvOS 10, iOS 10, watchOS 3) dyld SPI to
-//      get the information
+//      Use the dyld SPI and Mach-O parsing in memory to get the information
 //      about the libraries loaded at these addresses.
 //
 rnb_err_t
@@ -5859,24 +5891,17 @@ RNBRemote::HandlePacket_jGetLoadedDynamicLibrariesInfos(const char *p) {
 
     std::vector<uint64_t> macho_addresses;
     bool fetch_all_solibs = false;
+    bool report_load_commands = true;
+    get_boolean_value_for_key_name_from_json("report_load_commands", p,
+                                             report_load_commands);
+
     if (get_boolean_value_for_key_name_from_json("fetch_all_solibs", p,
                                                  fetch_all_solibs) &&
         fetch_all_solibs) {
-      json_sp = DNBGetAllLoadedLibrariesInfos(pid);
+      json_sp = DNBGetAllLoadedLibrariesInfos(pid, report_load_commands);
     } else if (get_array_of_ints_value_for_key_name_from_json(
                    "solib_addresses", p, macho_addresses)) {
       json_sp = DNBGetLibrariesInfoForAddresses(pid, macho_addresses);
-    } else {
-      nub_addr_t image_list_address =
-          get_integer_value_for_key_name_from_json("image_list_address", p);
-      nub_addr_t image_count =
-          get_integer_value_for_key_name_from_json("image_count", p);
-
-      if (image_list_address != INVALID_NUB_ADDRESS &&
-          image_count != INVALID_NUB_ADDRESS) {
-        json_sp = DNBGetLoadedDynamicLibrariesInfos(pid, image_list_address,
-                                                    image_count);
-      }
     }
 
     if (json_sp.get()) {
@@ -6242,12 +6267,12 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
 
         bool is_executable = true;
         uint32_t major_version, minor_version, patch_version;
-        auto *platform =
+        std::optional<std::string> platform =
             DNBGetDeploymentInfo(pid, is_executable, lc, load_command_addr,
                                  major_version, minor_version, patch_version);
         if (platform) {
           os_handled = true;
-          rep << "ostype:" << platform << ";";
+          rep << "ostype:" << *platform << ";";
           break;
         }
         load_command_addr = load_command_addr + lc.cmdsize;

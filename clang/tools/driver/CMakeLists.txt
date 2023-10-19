@@ -1,6 +1,7 @@
 set( LLVM_LINK_COMPONENTS
   ${LLVM_TARGETS_TO_BUILD}
   Analysis
+  CAS
   CodeGen
   Core
   IPO
@@ -11,13 +12,12 @@ set( LLVM_LINK_COMPONENTS
   MCParser
   ObjCARCOpts
   Option
+  RemoteCachingService
   ScalarOpts
   Support
   TransformUtils
   Vectorize
   )
-
-option(CLANG_PLUGIN_SUPPORT "Build clang with plugin support" ON)
 
 # Support plugins.
 if(CLANG_PLUGIN_SUPPORT)
@@ -26,20 +26,27 @@ endif()
 
 add_clang_tool(clang
   driver.cpp
+  CachedDiagnostics.cpp
+  CacheLauncherMode.cpp
   cc1_main.cpp
   cc1as_main.cpp
   cc1gen_reproducer_main.cpp
+  cc1depscanProtocol.cpp
+  cc1depscan_main.cpp
 
   DEPENDS
   intrinsics_gen
   ${support_plugins}
+  GENERATE_DRIVER
   )
 
 clang_target_link_libraries(clang
   PRIVATE
-  clangBasic
   clangAPINotes
+  clangBasic
+  clangCAS
   clangCodeGen
+  clangDependencyScanning
   clangDriver
   clangFrontend
   clangFrontendTool
@@ -63,9 +70,15 @@ if(NOT CLANG_LINKS_TO_CREATE)
   set(CLANG_LINKS_TO_CREATE clang++ clang-cl clang-cpp)
 endif()
 
-foreach(link ${CLANG_LINKS_TO_CREATE})
+if (CLANG_ENABLE_HLSL)
+  set(HLSL_LINK clang-dxc)
+endif()
+
+foreach(link ${CLANG_LINKS_TO_CREATE} ${HLSL_LINK})
   add_clang_symlink(${link} clang)
 endforeach()
+# Adding `clang-cache` tool as a symlink to clang.
+add_clang_symlink(clang-cache clang)
 
 # Configure plist creation for OS X.
 set (TOOL_INFO_PLIST "Info.plist" CACHE STRING "Plist name")
@@ -96,7 +109,7 @@ if(CLANG_ORDER_FILE AND
     (LLVM_LINKER_IS_LD64 OR LLVM_LINKER_IS_GOLD OR LLVM_LINKER_IS_LLD))
   include(LLVMCheckLinkerFlag)
 
-  if (LLVM_LINKER_IS_LD64)
+  if (LLVM_LINKER_IS_LD64 OR (LLVM_LINKER_IS_LLD AND APPLE))
     set(LINKER_ORDER_FILE_OPTION "-Wl,-order_file,${CLANG_ORDER_FILE}")
   elseif (LLVM_LINKER_IS_GOLD)
     set(LINKER_ORDER_FILE_OPTION "-Wl,--section-ordering-file,${CLANG_ORDER_FILE}")
@@ -124,13 +137,7 @@ endif()
 set(features_file_src "${CMAKE_CURRENT_SOURCE_DIR}/features.json")
 set(features_file_dest "${CMAKE_BINARY_DIR}/share/clang/features.json")
 
-add_custom_command(OUTPUT ${features_file_dest}
-                   COMMAND ${CMAKE_COMMAND} -E make_directory
-                     ${CMAKE_BINARY_DIR}/share/clang
-                   COMMAND ${CMAKE_COMMAND} -E copy
-                     ${features_file_src}
-                     ${features_file_dest}
-                   DEPENDS ${features_file_src})
+configure_file(${features_file_src} ${features_file_dest} @ONLY)
 
 add_custom_target(clang-features-file DEPENDS ${features_file_dest})
 add_dependencies(clang clang-features-file)

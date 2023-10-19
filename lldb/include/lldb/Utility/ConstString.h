@@ -12,7 +12,6 @@
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/FormatVariadic.h"
-#include "llvm/Support/YAMLTraits.h"
 
 #include <cstddef>
 
@@ -394,19 +393,7 @@ public:
   ///
   /// \return
   ///     The number of bytes that this object occupies in memory.
-  ///
-  /// \see ConstString::StaticMemorySize ()
   size_t MemorySize() const { return sizeof(ConstString); }
-
-  /// Get the size in bytes of the current global string pool.
-  ///
-  /// Reports the size in bytes of all shared C string values, containers and
-  /// any other values as a byte size for the entire string pool.
-  ///
-  /// \return
-  ///     The number of bytes that the global string pool occupies
-  ///     in memory.
-  static size_t StaticMemorySize();
 
   struct MemoryStats {
     size_t GetBytesTotal() const { return bytes_total; }
@@ -419,7 +406,7 @@ public:
   static MemoryStats GetMemoryStats();
 
 protected:
-  template <typename T> friend struct ::llvm::DenseMapInfo;
+  template <typename T, typename Enable> friend struct ::llvm::DenseMapInfo;
   /// Only used by DenseMapInfo.
   static ConstString FromStringPoolPointer(const char *ptr) {
     ConstString s;
@@ -462,20 +449,10 @@ template <> struct DenseMapInfo<lldb_private::ConstString> {
 };
 /// \}
 
-namespace yaml {
-template <> struct ScalarTraits<lldb_private::ConstString> {
-  static void output(const lldb_private::ConstString &, void *, raw_ostream &);
-  static StringRef input(StringRef, void *, lldb_private::ConstString &);
-  static QuotingType mustQuote(StringRef S) { return QuotingType::Double; }
-};
-} // namespace yaml
-
 inline raw_ostream &operator<<(raw_ostream &os, lldb_private::ConstString s) {
   os << s.GetStringRef();
   return os;
 }
 } // namespace llvm
-
-LLVM_YAML_IS_SEQUENCE_VECTOR(lldb_private::ConstString)
 
 #endif // LLDB_UTILITY_CONSTSTRING_H

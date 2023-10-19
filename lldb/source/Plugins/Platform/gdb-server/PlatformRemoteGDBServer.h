@@ -77,7 +77,7 @@ public:
 
   llvm::Optional<std::string> GetRemoteOSBuildString() override;
 
-  bool GetRemoteOSKernelDescription(std::string &s) override;
+  llvm::Optional<std::string> GetRemoteOSKernelDescription() override;
 
   // Remote Platform subclasses need to override this function
   ArchSpec GetRemoteSystemArchitecture() override;
@@ -154,7 +154,8 @@ public:
   GetPendingGdbServerList(std::vector<std::string> &connection_urls);
 
 protected:
-  process_gdb_remote::GDBRemoteCommunicationClient m_gdb_client;
+  std::unique_ptr<process_gdb_remote::GDBRemoteCommunicationClient>
+      m_gdb_client_up;
   std::string m_platform_description; // After we connect we can get a more
                                       // complete description of what we are
                                       // connected to

@@ -11,9 +11,6 @@ from lldbsuite.test import lldbutil
 
 
 class ProcessSaveCoreMinidumpTestCase(TestBase):
-
-    mydir = TestBase.compute_mydir(__file__)
-
     @skipUnlessArch("x86_64")
     @skipUnlessPlatform(["linux"])
     def test_save_linux_mini_dump(self):
@@ -21,11 +18,13 @@ class ProcessSaveCoreMinidumpTestCase(TestBase):
         self.build()
         exe = self.getBuildArtifact("a.out")
         core = self.getBuildArtifact("core.dmp")
+        core_sb = self.getBuildArtifact("core_sb.dmp")
         try:
             target = self.dbg.CreateTarget(exe)
             process = target.LaunchSimple(
-                None, None, self.get_process_working_directory())
-            self.assertEqual(process.GetState(), lldb.eStateStopped)
+                None, None, self.get_process_working_directory()
+            )
+            self.assertState(process.GetState(), lldb.eStateStopped)
 
             # get neccessary data for the verification phase
             process_info = process.GetProcessInfo()
@@ -41,8 +40,21 @@ class ProcessSaveCoreMinidumpTestCase(TestBase):
                 expected_threads.append(thread_id)
 
             # save core and, kill process and verify corefile existence
-            self.runCmd("process save-core --plugin-name=minidump --style=stack " + core)
+            self.runCmd(
+                "process save-core --plugin-name=minidump --style=stack " + core
+            )
             self.assertTrue(os.path.isfile(core))
+
+            # validate savinig via SBProcess
+            error = process.SaveCore(core_sb, "minidump", lldb.eSaveCoreStackOnly)
+            self.assertTrue(error.Success())
+            self.assertTrue(os.path.isfile(core_sb))
+
+            error = process.SaveCore(core_sb, "minidump", lldb.eSaveCoreFull)
+            self.assertTrue(error.Fail())
+            error = process.SaveCore(core_sb, "minidump", lldb.eSaveCoreDirtyOnly)
+            self.assertTrue(error.Fail())
+
             self.assertSuccess(process.Kill())
 
             # To verify, we'll launch with the mini dump
@@ -75,5 +87,7 @@ class ProcessSaveCoreMinidumpTestCase(TestBase):
         finally:
             # Clean up the mini dump file.
             self.assertTrue(self.dbg.DeleteTarget(target))
-            if (os.path.isfile(core)):
+            if os.path.isfile(core):
                 os.unlink(core)
+            if os.path.isfile(core_sb):
+                os.unlink(core_sb)

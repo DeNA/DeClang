@@ -139,7 +139,7 @@ getEqualLocalDeclContext(Sema &sema, DeclContext *foreign_ctxt) {
 
   // We currently only support building namespaces.
   if (foreign_ctxt->isNamespace()) {
-    NamedDecl *ns = llvm::dyn_cast<NamedDecl>(foreign_ctxt);
+    NamedDecl *ns = llvm::cast<NamedDecl>(foreign_ctxt);
     llvm::StringRef ns_name = ns->getName();
 
     auto lookup_result = emulateLookupInCtxt(sema, ns_name, *parent);
@@ -238,7 +238,8 @@ llvm::Optional<Decl *> CxxModuleHandler::tryInstantiateStdTemplate(Decl *d) {
         LLDB_LOG_ERROR(log, type.takeError(), "Couldn't import type: {0}");
         return llvm::None;
       }
-      imported_args.push_back(TemplateArgument(*type));
+      imported_args.push_back(
+          TemplateArgument(*type, /*isNullPtr*/ false, arg.getIsDefaulted()));
       break;
     }
     case TemplateArgument::Integral: {
@@ -249,8 +250,8 @@ llvm::Optional<Decl *> CxxModuleHandler::tryInstantiateStdTemplate(Decl *d) {
         LLDB_LOG_ERROR(log, type.takeError(), "Couldn't import type: {0}");
         return llvm::None;
       }
-      imported_args.push_back(
-          TemplateArgument(d->getASTContext(), integral, *type));
+      imported_args.push_back(TemplateArgument(d->getASTContext(), integral,
+                                               *type, arg.getIsDefaulted()));
       break;
     }
     default:

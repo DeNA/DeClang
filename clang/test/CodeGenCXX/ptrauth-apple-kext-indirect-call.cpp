@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple arm64-apple-ios -fptrauth-calls -fapple-kext -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -no-opaque-pointers -triple arm64-apple-ios -fptrauth-calls -fapple-kext -emit-llvm -o - %s | FileCheck %s
 
 // CHECK: @_ZTV5TemplIiE = internal unnamed_addr constant { [5 x i8*] } { [5 x i8*] [i8* null, i8* bitcast ({ i8*, i8* }* @_ZTI5TemplIiE to i8*), i8* bitcast ({ i8*, i32, i64, i64 }* @_ZN5TemplIiE1fEv.ptrauth to i8*), i8* bitcast ({ i8*, i32, i64, i64 }* @_ZN5TemplIiE1gEv.ptrauth to i8*), i8* null] }
 
@@ -38,5 +38,5 @@ void f(SubTempl<int>* t) {
 }
 
 // CHECK: getelementptr inbounds (void (%struct.Templ*)*, void (%struct.Templ*)** bitcast ({ [5 x i8*] }* @_ZTV5TemplIiE to void (%struct.Templ*)**), i64 2)
-// CHECK: define internal void @_ZN5TemplIiE1fEv(%struct.Templ* nonnull align {{[0-9]+}} dereferenceable(8) %this)
-// CHECK: define internal void @_ZN5TemplIiE1gEv(%struct.Templ* nonnull align {{[0-9]+}} dereferenceable(8) %this)
+// CHECK: define internal void @_ZN5TemplIiE1fEv(%struct.Templ* noundef nonnull align {{[0-9]+}} dereferenceable(8) %this)
+// CHECK: define internal void @_ZN5TemplIiE1gEv(%struct.Templ* noundef nonnull align {{[0-9]+}} dereferenceable(8) %this)

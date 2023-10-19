@@ -25,7 +25,7 @@ namespace lldb_private {
 
 class StructuredDataImpl {
 public:
-  StructuredDataImpl() : m_plugin_wp(), m_data_sp() {}
+  StructuredDataImpl() = default;
 
   StructuredDataImpl(const StructuredDataImpl &rhs) = default;
 
@@ -80,7 +80,7 @@ public:
         error.SetErrorString("No data to describe.");
         return error;
       }
-      m_data_sp->Dump(stream, true);
+      m_data_sp->GetDescription(stream);
       return error;
     }
     // Get the data's description.
@@ -153,6 +153,17 @@ public:
       return (::snprintf(s, 1, "%s", result.data()));
     }
     return (::snprintf(dst, dst_len, "%s", result.data()));
+  }
+
+  void *GetGenericValue() const {
+    if (!m_data_sp)
+      return nullptr;
+
+    StructuredData::Generic *generic_data = m_data_sp->GetAsGeneric();
+    if (!generic_data)
+      return nullptr;
+
+    return generic_data->GetValue();
   }
 
   StructuredData::ObjectSP GetObjectSP() const { return m_data_sp; }

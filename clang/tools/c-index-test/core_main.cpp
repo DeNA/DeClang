@@ -18,6 +18,7 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/FrontendAction.h"
+#include "clang/Frontend/Utils.h"
 #include "clang/Index/IndexDataConsumer.h"
 #include "clang/Index/IndexDataStoreSymbolUtils.h"
 #include "clang/Index/IndexRecordReader.h"
@@ -27,6 +28,7 @@
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Serialization/ASTReader.h"
 #include "llvm/ADT/FunctionExtras.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -122,6 +124,21 @@ FilePathAndRange("filepath",
 static cl::opt<std::string>
     ModuleName("module-name", cl::desc("name of the module, of which we are "
                                        "getting file and module dependencies"));
+
+static cl::opt<std::string>
+    OutputDir("output-dir", cl::desc("directory for module output files "
+                                     "(defaults 'module-outputs')"));
+static cl::opt<bool>
+    SerializeDiags("serialize-diagnostics",
+                   cl::desc("module builds should serialize diagnostics"));
+static cl::opt<bool>
+    DependencyFile("dependency-file",
+                   cl::desc("module builds should write dependency files"));
+static cl::list<std::string> DependencyTargets(
+    "dependency-target",
+    cl::desc("module builds should use the given dependency target(s)"));
+static llvm::cl::opt<std::string>
+    CASPath("cas-path", llvm::cl::desc("Path for on-disk CAS/cache."));
 }
 } // anonymous namespace
 
@@ -269,7 +286,10 @@ static bool printSourceSymbols(const char *Executable,
   ArgsWithProgName.append(Args.begin(), Args.end());
   IntrusiveRefCntPtr<DiagnosticsEngine>
     Diags(CompilerInstance::createDiagnostics(new DiagnosticOptions));
-  auto CInvok = createInvocationFromCommandLine(ArgsWithProgName, Diags);
+  CreateInvocationOptions CIOpts;
+  CIOpts.Diags = Diags;
+  CIOpts.ProbePrecompiled = true; // FIXME: historical default. Needed?
+  auto CInvok = createInvocation(ArgsWithProgName, std::move(CIOpts));
   if (!CInvok)
     return true;
 
@@ -464,7 +484,7 @@ static int printStoreFileRecord(StringRef storePath, StringRef filePath,
     return 1;
   }
 
-  if (!lineStart.hasValue())
+  if (!lineStart)
     return printStoreRecord(store, recName, filePath, OS);
 
   indexstore::IndexRecordReader Reader(store, recName, error);
@@ -657,148 +677,191 @@ static void printSymbolNameAndUSR(const clang::Module *Mod, raw_ostream &OS) {
   generateFullUSRForModule(Mod, OS);
 }
 
-static int scanDeps(ArrayRef<const char *> Args, std::string WorkingDirectory) {
+static int scanDeps(ArrayRef<const char *> Args, std::string WorkingDirectory,
+                    bool SerializeDiags, bool DependencyFile,
+                    ArrayRef<std::string> DepTargets, std::string OutputPath,
+                    Optional<std::string> CASPath,
+                    Optional<std::string> ModuleName = std::nullopt) {
+  CXDependencyScannerServiceOptions Opts =
+      clang_experimental_DependencyScannerServiceOptions_create();
+  auto CleanupOpts = llvm::make_scope_exit([&] {
+    clang_experimental_DependencyScannerServiceOptions_dispose(Opts);
+  });
+  clang_experimental_DependencyScannerServiceOptions_setDependencyMode(
+      Opts, CXDependencyMode_Full);
+
+  CXString Error;
+  if (CASPath) {
+    CXCASOptions CASOpts = clang_experimental_cas_Options_create();
+    auto CleanupCASOpts = llvm::make_scope_exit(
+        [&] { clang_experimental_cas_Options_dispose(CASOpts); });
+    clang_experimental_cas_Options_setOnDiskPath(CASOpts, CASPath->c_str());
+    CXCASDatabases DBs =
+        clang_experimental_cas_Databases_create(CASOpts, &Error);
+    auto CleanupCaches = llvm::make_scope_exit(
+        [&] { clang_experimental_cas_Databases_dispose(DBs); });
+    if (!DBs) {
+      llvm::errs() << "error: failed to create cache instances\n";
+      llvm::errs() << clang_getCString(Error) << "\n";
+      clang_disposeString(Error);
+      return 1;
+    }
+    clang_experimental_DependencyScannerServiceOptions_setCASDatabases(Opts,
+                                                                       DBs);
+  }
+
   CXDependencyScannerService Service =
-      clang_experimental_DependencyScannerService_create_v0(
-          CXDependencyMode_Full);
+      clang_experimental_DependencyScannerService_create_v1(Opts);
   CXDependencyScannerWorker Worker =
       clang_experimental_DependencyScannerWorker_create_v0(Service);
-  CXString Error;
+  auto DisposeWorkerAndService = llvm::make_scope_exit([&]() {
+    clang_experimental_DependencyScannerWorker_dispose_v0(Worker);
+    clang_experimental_DependencyScannerService_dispose_v0(Service);
+  });
 
-  auto Callback = [&](CXModuleDependencySet *MDS) {
-    llvm::outs() << "modules:\n";
-    for (const auto &M : llvm::makeArrayRef(MDS->Modules, MDS->Count)) {
-      llvm::outs() << "  module:\n"
-                   << "    name: " << clang_getCString(M.Name) << "\n"
-                   << "    context-hash: " << clang_getCString(M.ContextHash)
-                   << "\n"
-                   << "    module-map-path: "
-                   << clang_getCString(M.ModuleMapPath) << "\n"
-                   << "    module-deps:\n";
-      for (const auto &ModuleName :
-           llvm::makeArrayRef(M.ModuleDeps->Strings, M.ModuleDeps->Count))
-        llvm::outs() << "      " << clang_getCString(ModuleName) << "\n";
-      llvm::outs() << "    file-deps:\n";
-      for (const auto &FileName :
-           llvm::makeArrayRef(M.FileDeps->Strings, M.FileDeps->Count))
-        llvm::outs() << "      " << clang_getCString(FileName) << "\n";
-      llvm::outs() << "    build-args:";
-      for (const auto &Arg : llvm::makeArrayRef(M.BuildArguments->Strings,
-                                                M.BuildArguments->Count))
-        llvm::outs() << " " << clang_getCString(Arg);
-      llvm::outs() << "\n";
+  auto LookupOutput = [&](const char *ModuleName, const char *ContextHash,
+                          CXOutputKind Kind, char *Output, size_t MaxLen) {
+    std::string Out = OutputPath + "/" + ModuleName + "_" + ContextHash;
+    switch (Kind) {
+    case CXOutputKind_ModuleFile:
+      Out += ".pcm";
+      break;
+    case CXOutputKind_Dependencies:
+      if (!DependencyFile)
+        return (size_t)0;
+      Out += ".d";
+      break;
+    case CXOutputKind_DependenciesTarget:
+      if (DepTargets.empty())
+        return (size_t)0;
+      Out = join(DepTargets, StringRef("\0", 1));
+      break;
+    case CXOutputKind_SerializedDiagnostics:
+      if (!SerializeDiags)
+        return (size_t)0;
+      Out += ".diag";
+      break;
     }
-    clang_experimental_ModuleDependencySet_dispose(MDS);
+    if (0 < Out.size() && Out.size() <= MaxLen)
+      memcpy(Output, Out.data(), Out.size());
+    return Out.size();
   };
 
-  auto CB =
-      functionObjectToCCallbackRef<void(CXModuleDependencySet *)>(Callback);
+  auto LookupOutputCB = functionObjectToCCallbackRef<size_t(
+      const char *ModuleName, const char *ContextHash, CXOutputKind Kind,
+      char *Output, size_t MaxLen)>(LookupOutput);
 
-  CXFileDependencies *Result =
-      clang_experimental_DependencyScannerWorker_getFileDependencies_v1(
-          Worker, Args.size(), Args.data(), WorkingDirectory.c_str(),
-          CB.Callback, CB.Context, &Error);
-  if (!Result) {
-    llvm::errs() << "error: failed to get dependencies\n";
-    llvm::errs() << clang_getCString(Error) << "\n";
-    clang_disposeString(Error);
-    return 1;
-  }
-  llvm::outs() << "dependencies:\n";
-  llvm::outs() << "  context-hash: " << clang_getCString(Result->ContextHash)
-               << "\n"
-               << "  module-deps:\n";
-  for (const auto &ModuleName : llvm::makeArrayRef(Result->ModuleDeps->Strings,
-                                                   Result->ModuleDeps->Count))
-    llvm::outs() << "    " << clang_getCString(ModuleName) << "\n";
-  llvm::outs() << "  file-deps:\n";
-  for (const auto &FileName :
-       llvm::makeArrayRef(Result->FileDeps->Strings, Result->FileDeps->Count))
-    llvm::outs() << "    " << clang_getCString(FileName) << "\n";
-  llvm::outs() << "  additional-build-args:";
-  for (const auto &Arg :
-       llvm::makeArrayRef(Result->AdditionalArguments->Strings,
-                          Result->AdditionalArguments->Count))
-    llvm::outs() << " " << clang_getCString(Arg);
-  llvm::outs() << "\n";
-
-  clang_experimental_FileDependencies_dispose(Result);
-  clang_experimental_DependencyScannerWorker_dispose_v0(Worker);
-  clang_experimental_DependencyScannerService_dispose_v0(Service);
-  return 0;
-}
-
-static int scanDepsByModuleName(ArrayRef<const char *> Args,
-                                std::string WorkingDirectory,
-                                std::string ModuleName) {
-  CXDependencyScannerService Service =
-      clang_experimental_DependencyScannerService_create_v0(
-          CXDependencyMode_Full);
-  CXDependencyScannerWorker Worker =
-      clang_experimental_DependencyScannerWorker_create_v0(Service);
-  CXString Error;
-
-  auto Callback = [&](CXModuleDependencySet *MDS) {
-    llvm::outs() << "modules:\n";
-    for (const auto &M : llvm::makeArrayRef(MDS->Modules, MDS->Count)) {
-      llvm::outs() << "  module:\n"
-                   << "    name: " << clang_getCString(M.Name) << "\n"
-                   << "    context-hash: " << clang_getCString(M.ContextHash)
-                   << "\n"
-                   << "    module-map-path: "
-                   << clang_getCString(M.ModuleMapPath) << "\n"
-                   << "    module-deps:\n";
-      for (const auto &ModuleName :
-           llvm::makeArrayRef(M.ModuleDeps->Strings, M.ModuleDeps->Count))
-        llvm::outs() << "      " << clang_getCString(ModuleName) << "\n";
-      llvm::outs() << "    file-deps:\n";
-      for (const auto &FileName :
-           llvm::makeArrayRef(M.FileDeps->Strings, M.FileDeps->Count))
-        llvm::outs() << "      " << clang_getCString(FileName) << "\n";
-      llvm::outs() << "    build-args:";
-      for (const auto &Arg : llvm::makeArrayRef(M.BuildArguments->Strings,
-                                                M.BuildArguments->Count))
-        llvm::outs() << " " << clang_getCString(Arg);
-      llvm::outs() << "\n";
-    }
-    clang_experimental_ModuleDependencySet_dispose(MDS);
+  unsigned CommandIndex = 0;
+  auto HandleCommand = [&](const char *ContextHash, CXCStringArray ModuleDeps,
+                           CXCStringArray FileDeps, CXCStringArray Args,
+                           const char *CacheKey) {
+    llvm::outs() << "  command " << CommandIndex++ << ":\n";
+    llvm::outs() << "    context-hash: " << ContextHash << "\n";
+    if (CacheKey)
+      llvm::outs() << "    cache-key: " << CacheKey << "\n";
+    llvm::outs() << "    module-deps:\n";
+    for (const auto &ModuleName :
+         llvm::makeArrayRef(ModuleDeps.Strings, ModuleDeps.Count))
+      llvm::outs() << "      " << ModuleName << "\n";
+    llvm::outs() << "    file-deps:\n";
+    for (const auto &FileName : ArrayRef(FileDeps.Strings, FileDeps.Count))
+      llvm::outs() << "      " << FileName << "\n";
+    llvm::outs() << "    build-args:";
+    for (const auto &Arg : ArrayRef(Args.Strings, Args.Count))
+      llvm::outs() << " " << Arg;
+    llvm::outs() << "\n";
   };
 
-  auto CB =
-      functionObjectToCCallbackRef<void(CXModuleDependencySet *)>(Callback);
+  CXDependencyScannerWorkerScanSettings ScanSettings =
+      clang_experimental_DependencyScannerWorkerScanSettings_create(
+          Args.size(), Args.data(), ModuleName ? ModuleName->c_str() : nullptr,
+          WorkingDirectory.c_str(), LookupOutputCB.Context,
+          LookupOutputCB.Callback);
+  auto DisposeScanSettings = llvm::make_scope_exit([&]() {
+    clang_experimental_DependencyScannerWorkerScanSettings_dispose(
+        ScanSettings);
+  });
+  CXDepGraph Graph = nullptr;
+  auto DisposeDepGraph = llvm::make_scope_exit(
+      [&]() { clang_experimental_DepGraph_dispose(Graph); });
+  CXErrorCode Err = clang_experimental_DependencyScannerWorker_getDepGraph(
+      Worker, ScanSettings, &Graph);
 
-  CXFileDependencies *Result =
-      clang_experimental_DependencyScannerWorker_getDependenciesByModuleName_v0(
-          Worker, Args.size(), Args.data(), ModuleName.c_str(),
-          WorkingDirectory.c_str(), CB.Callback, CB.Context, &Error);
-  if (!Result) {
-    llvm::errs() << "error: failed to get dependencies\n";
-    llvm::errs() << clang_getCString(Error) << "\n";
-    clang_disposeString(Error);
-    return 1;
+  if (Err == CXError_Success) {
+    llvm::outs() << "modules:\n";
+    for (size_t I = 0, E = clang_experimental_DepGraph_getNumModules(Graph);
+         I < E; ++I) {
+      CXDepGraphModule Mod = clang_experimental_DepGraph_getModule(Graph, I);
+      const char *Name = clang_experimental_DepGraphModule_getName(Mod);
+      const char *ContextHash =
+          clang_experimental_DepGraphModule_getContextHash(Mod);
+      const char *ModuleMapPath =
+          clang_experimental_DepGraphModule_getModuleMapPath(Mod);
+      const char *ModuleCacheKey =
+          clang_experimental_DepGraphModule_getCacheKey(Mod);
+      CXCStringArray ModuleDeps =
+          clang_experimental_DepGraphModule_getModuleDeps(Mod);
+      CXCStringArray FileDeps =
+          clang_experimental_DepGraphModule_getFileDeps(Mod);
+      CXCStringArray BuildArguments =
+          clang_experimental_DepGraphModule_getBuildArguments(Mod);
+      auto Dispose = llvm::make_scope_exit(
+          [&]() { clang_experimental_DepGraphModule_dispose(Mod); });
+      llvm::outs() << "  module:\n"
+                   << "    name: " << Name << "\n"
+                   << "    context-hash: " << ContextHash << "\n"
+                   << "    module-map-path: "
+                   << (ModuleMapPath ? ModuleMapPath : "<none>") << "\n";
+      if (ModuleCacheKey)
+        llvm::outs() << "    cache-key: " << ModuleCacheKey << "\n";
+      llvm::outs() << "    module-deps:\n";
+      for (const auto &ModuleName :
+           ArrayRef(ModuleDeps.Strings, ModuleDeps.Count))
+        llvm::outs() << "      " << ModuleName << "\n";
+      llvm::outs() << "    file-deps:\n";
+      for (const auto &FileName : ArrayRef(FileDeps.Strings, FileDeps.Count))
+        llvm::outs() << "      " << FileName << "\n";
+      llvm::outs() << "    build-args:";
+      for (const auto &Arg :
+           ArrayRef(BuildArguments.Strings, BuildArguments.Count))
+        llvm::outs() << " " << Arg;
+      llvm::outs() << "\n";
+    }
+
+    llvm::outs() << "dependencies:\n";
+    const char *TUContextHash =
+        clang_experimental_DepGraph_getTUContextHash(Graph);
+    CXCStringArray TUModuleDeps =
+        clang_experimental_DepGraph_getTUModuleDeps(Graph);
+    CXCStringArray TUFileDeps =
+        clang_experimental_DepGraph_getTUFileDeps(Graph);
+    for (size_t I = 0, E = clang_experimental_DepGraph_getNumTUCommands(Graph);
+         I < E; ++I) {
+      CXDepGraphTUCommand Cmd =
+          clang_experimental_DepGraph_getTUCommand(Graph, I);
+      CXCStringArray Args =
+          clang_experimental_DepGraphTUCommand_getBuildArguments(Cmd);
+      const char *CacheKey =
+          clang_experimental_DepGraphTUCommand_getCacheKey(Cmd);
+      auto Dispose = llvm::make_scope_exit(
+          [&]() { clang_experimental_DepGraphTUCommand_dispose(Cmd); });
+      HandleCommand(TUContextHash, TUModuleDeps, TUFileDeps, Args, CacheKey);
+    }
+    return 0;
   }
-  llvm::outs() << "dependencies:\n";
-  llvm::outs() << "  context-hash: " << clang_getCString(Result->ContextHash)
-               << "\n"
-               << "  module-deps:\n";
-  for (const auto &ModuleName : llvm::makeArrayRef(Result->ModuleDeps->Strings,
-                                                   Result->ModuleDeps->Count))
-    llvm::outs() << "    " << clang_getCString(ModuleName) << "\n";
-  llvm::outs() << "  file-deps:\n";
-  for (const auto &FileName :
-       llvm::makeArrayRef(Result->FileDeps->Strings, Result->FileDeps->Count))
-    llvm::outs() << "    " << clang_getCString(FileName) << "\n";
-  llvm::outs() << "  additional-build-args:";
-  for (const auto &Arg :
-       llvm::makeArrayRef(Result->AdditionalArguments->Strings,
-                          Result->AdditionalArguments->Count))
-    llvm::outs() << " " << clang_getCString(Arg);
-  llvm::outs() << "\n";
-
-  clang_experimental_FileDependencies_dispose(Result);
-  clang_experimental_DependencyScannerWorker_dispose_v0(Worker);
-  clang_experimental_DependencyScannerService_dispose_v0(Service);
-  return 0;
+  llvm::errs() << "error: failed to get dependencies\n";
+  CXDiagnosticSet Diags = clang_experimental_DepGraph_getDiagnostics(Graph);
+  auto DisposeDiagnosticSet =
+      llvm::make_scope_exit([&]() { clang_disposeDiagnosticSet(Diags); });
+  for (unsigned I = 0, N = clang_getNumDiagnosticsInSet(Diags); I < N; ++I) {
+    CXDiagnostic Diag = clang_getDiagnosticInSet(Diags, I);
+    CXString Spelling =
+        clang_formatDiagnostic(Diag, clang_defaultDiagnosticDisplayOptions());
+    llvm::errs() << clang_getCString(Spelling) << "\n";
+    clang_disposeString(Spelling);
+    clang_disposeDiagnostic(Diag);
+  }
+  return 1;
 }
 
 static void printSymbol(const IndexRecordDecl &Rec, raw_ostream &OS) {
@@ -986,7 +1049,7 @@ bool deconstructPathAndRange(StringRef input,
     errs() << "couldn't convert to integer: " << end << '\n';
     return true;
   }
-  lineCount = num-lineStart.getValue();
+  lineCount = num - *lineStart;
   return false;
 }
 
@@ -1101,13 +1164,19 @@ int indextest_core_main(int argc, const char **argv) {
     }
     return aggregateDataAsJSON(storePath, PathRemapper, OS);
   }
-  
+
+  Optional<std::string> CASPath = options::CASPath.empty()
+                                      ? std::nullopt
+                                      : Optional<std::string>(options::CASPath);
+
   if (options::Action == ActionType::ScanDeps) {
     if (options::InputFiles.empty()) {
       errs() << "error: missing working directory\n";
       return 1;
     }
-    return scanDeps(CompArgs, options::InputFiles[0]);
+    return scanDeps(CompArgs, options::InputFiles[0], options::SerializeDiags,
+                    options::DependencyFile, options::DependencyTargets,
+                    options::OutputDir, CASPath);
   }
 
   if (options::Action == ActionType::ScanDepsByModuleName) {
@@ -1120,8 +1189,9 @@ int indextest_core_main(int argc, const char **argv) {
       errs() << "error: missing module name\n";
       return 1;
     }
-    return scanDepsByModuleName(CompArgs, options::InputFiles[0],
-                                options::ModuleName);
+    return scanDeps(CompArgs, options::InputFiles[0], options::SerializeDiags,
+                    options::DependencyFile, options::DependencyTargets,
+                    options::OutputDir, CASPath, options::ModuleName);
   }
 
   if (options::Action == ActionType::WatchDir) {

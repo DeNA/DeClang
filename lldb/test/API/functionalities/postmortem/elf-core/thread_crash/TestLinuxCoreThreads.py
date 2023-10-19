@@ -3,7 +3,6 @@ Test signal reporting when debugging with linux core files.
 """
 
 
-
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
@@ -13,8 +12,6 @@ from lldbsuite.test import lldbutil
 class LinuxCoreThreadsTestCase(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
-    mydir = TestBase.compute_mydir(__file__)
-
     _i386_pid = 5193
     _x86_64_pid = 5222
 
@@ -22,14 +19,14 @@ class LinuxCoreThreadsTestCase(TestBase):
     _i386_tid = 5195
     _x86_64_tid = 5250
 
-    @skipIf(oslist=['windows'])
-    @skipIf(triple='^mips')
+    @skipIf(oslist=["windows"])
+    @skipIf(triple="^mips")
     def test_i386(self):
         """Test that lldb can read the process information from an i386 linux core file."""
         self.do_test("linux-i386", self._i386_pid, self._i386_tid)
 
-    @skipIf(oslist=['windows'])
-    @skipIf(triple='^mips')
+    @skipIf(oslist=["windows"])
+    @skipIf(triple="^mips")
     def test_x86_64(self):
         """Test that lldb can read the process information from an x86_64 linux core file."""
         self.do_test("linux-x86_64", self._x86_64_pid, self._x86_64_tid)
@@ -54,8 +51,8 @@ class LinuxCoreThreadsTestCase(TestBase):
                 bytes_read = process.ReadMemory(0x400000, 4, mem_err)
             self.assertEqual(bytes_read, None)
             reason = thread.GetStopReason()
-            if( thread.GetThreadID() == tid ):
-                self.assertEqual(reason, lldb.eStopReasonSignal)
+            if thread.GetThreadID() == tid:
+                self.assertStopReason(reason, lldb.eStopReasonSignal)
                 signal = thread.GetStopReasonDataAtIndex(1)
                 # Check we got signal 4 (SIGILL)
                 self.assertEqual(signal, 4)

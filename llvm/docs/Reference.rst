@@ -33,15 +33,18 @@ LLVM and API reference documentation.
    MarkedUpDisassembly
    MIRLangRef
    OptBisect
+   PCSectionsMetadata
    PDB/index
    PointerAuth
    ScudoHardenedAllocator
    MemTagSanitizer
    Security
+   SecurityTransparencyReports
    SegmentedStacks
    StackMaps
    SpeculativeLoadHardening
    Statepoints
+   SymbolizerMarkupFormat
    SystemLibrary
    TestingGuide
    TransformMetadata
@@ -60,8 +63,6 @@ API Reference
 :doc:`HowToUseAttributes`
   Answers some questions about the new Attributes infrastructure.
 
-`Documentation for Go bindings <http://godoc.org/llvm.org/llvm/bindings/go/llvm>`_
-
 LLVM Reference
 --------------
 
@@ -79,6 +80,9 @@ Command Line Utilities
 
 :doc:`OptBisect`
   A command line option for debugging optimization-induced failures.
+
+:doc:`SymbolizerMarkupFormat`
+  A reference for the log symbolizer markup accepted by ``llvm-symbolizer``.
 
 :doc:`The Microsoft PDB File Format <PDB/index>`
   A detailed description of the Microsoft PDB (Program Database) file format.

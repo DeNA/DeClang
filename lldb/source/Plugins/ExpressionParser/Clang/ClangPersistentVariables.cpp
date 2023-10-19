@@ -21,6 +21,7 @@
 #include "clang/AST/Decl.h"
 
 #include "llvm/ADT/StringMap.h"
+#include <memory>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -98,9 +99,9 @@ ClangPersistentVariables::GetCompilerTypeFromPersistentDecl(
   return llvm::None;
 }
 
-void ClangPersistentVariables::RegisterPersistentDecl(ConstString name,
-                                                      clang::NamedDecl *decl,
-                                                      TypeSystemClang *ctx) {
+void ClangPersistentVariables::RegisterPersistentDecl(
+    ConstString name, clang::NamedDecl *decl,
+    std::shared_ptr<TypeSystemClang> ctx) {
   PersistentDecl p = {decl, ctx};
   m_persistent_decls.insert(std::make_pair(name.GetCString(), p));
 

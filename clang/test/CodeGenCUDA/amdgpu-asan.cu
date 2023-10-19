@@ -9,12 +9,12 @@
 // RUN: %clang_cc1 %s -emit-llvm -o - -triple=amdgcn-amd-amdhsa \
 // RUN:   -fcuda-is-device -target-cpu gfx906 -fsanitize=address \
 // RUN:   -mlink-bitcode-file %t.asanrtl.bc -x hip \
-// RUN:   | FileCheck -check-prefix=ASAN %s
+// RUN:   | FileCheck -check-prefixes=ASAN %s
 
 // RUN: %clang_cc1 %s -emit-llvm -o - -triple=amdgcn-amd-amdhsa \
 // RUN:   -fcuda-is-device -target-cpu gfx906 -fsanitize=address \
 // RUN:   -O3 -mlink-bitcode-file %t.asanrtl.bc -x hip \
-// RUN:   | FileCheck -check-prefix=ASAN %s
+// RUN:   | FileCheck -check-prefixes=ASAN %s
 
 // RUN: %clang_cc1 %s -emit-llvm -o - -triple=amdgcn-amd-amdhsa \
 // RUN:   -fcuda-is-device -target-cpu gfx906 -x hip \
@@ -23,7 +23,7 @@
 // REQUIRES: amdgpu-registered-target
 
 // ASAN-DAG: define weak void @__amdgpu_device_library_preserve_asan_functions()
-// ASAN-DAG: @__amdgpu_device_library_preserve_asan_functions_ptr = weak addrspace(1) constant void ()* @__amdgpu_device_library_preserve_asan_functions
+// ASAN-DAG: @__amdgpu_device_library_preserve_asan_functions_ptr = weak addrspace(1) constant ptr @__amdgpu_device_library_preserve_asan_functions
 // ASAN-DAG: @llvm.compiler.used = {{.*}}@__amdgpu_device_library_preserve_asan_functions_ptr
 // ASAN-DAG: define weak void @__asan_report_load1(i64 %{{.*}})
 

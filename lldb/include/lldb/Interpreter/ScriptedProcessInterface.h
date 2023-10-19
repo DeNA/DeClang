@@ -10,7 +10,6 @@
 #define LLDB_INTERPRETER_SCRIPTEDPROCESSINTERFACE_H
 
 #include "lldb/Core/StructuredDataImpl.h"
-#include "lldb/Interpreter/ScriptInterpreter.h"
 #include "lldb/Interpreter/ScriptedInterface.h"
 #include "lldb/Target/MemoryRegionInfo.h"
 
@@ -25,16 +24,18 @@ public:
   CreatePluginObject(llvm::StringRef class_name, ExecutionContext &exe_ctx,
                      StructuredData::DictionarySP args_sp,
                      StructuredData::Generic *script_obj = nullptr) override {
-    return nullptr;
+    return {};
+  }
+
+  virtual StructuredData::DictionarySP GetCapabilities() { return {}; }
+
+  virtual Status Attach(const ProcessAttachInfo &attach_info) {
+    return Status("ScriptedProcess did not attach");
   }
 
   virtual Status Launch() { return Status("ScriptedProcess did not launch"); }
 
   virtual Status Resume() { return Status("ScriptedProcess did not resume"); }
-
-  virtual bool ShouldStop() { return true; }
-
-  virtual Status Stop() { return Status("ScriptedProcess did not stop"); }
 
   virtual llvm::Optional<MemoryRegionInfo>
   GetMemoryRegionContainingAddress(lldb::addr_t address, Status &error) {
@@ -42,22 +43,25 @@ public:
     return {};
   }
 
-  virtual StructuredData::DictionarySP GetThreadsInfo() { return nullptr; }
+  virtual StructuredData::DictionarySP GetThreadsInfo() { return {}; }
 
-  virtual StructuredData::DictionarySP GetThreadWithID(lldb::tid_t tid) {
-    return nullptr;
-  }
-
-  virtual StructuredData::DictionarySP GetRegistersForThread(lldb::tid_t tid) {
-    return nullptr;
+  virtual bool CreateBreakpoint(lldb::addr_t addr, Status &error) {
+    error.SetErrorString("ScriptedProcess don't support creating breakpoints.");
+    return {};
   }
 
   virtual lldb::DataExtractorSP
   ReadMemoryAtAddress(lldb::addr_t address, size_t size, Status &error) {
-    return nullptr;
+    return {};
   }
 
-  virtual StructuredData::ArraySP GetLoadedImages() { return nullptr; }
+  virtual size_t WriteMemoryAtAddress(lldb::addr_t addr,
+                                      lldb::DataExtractorSP data_sp,
+                                      Status &error) {
+    return LLDB_INVALID_OFFSET;
+  };
+
+  virtual StructuredData::ArraySP GetLoadedImages() { return {}; }
 
   virtual lldb::pid_t GetProcessID() { return LLDB_INVALID_PROCESS_ID; }
 
@@ -67,10 +71,12 @@ public:
     return llvm::None;
   }
 
+  virtual StructuredData::DictionarySP GetMetadata() { return {}; }
+
 protected:
   friend class ScriptedThread;
   virtual lldb::ScriptedThreadInterfaceSP CreateScriptedThreadInterface() {
-    return nullptr;
+    return {};
   }
 };
 
@@ -80,7 +86,7 @@ public:
   CreatePluginObject(llvm::StringRef class_name, ExecutionContext &exe_ctx,
                      StructuredData::DictionarySP args_sp,
                      StructuredData::Generic *script_obj = nullptr) override {
-    return nullptr;
+    return {};
   }
 
   virtual lldb::tid_t GetThreadID() { return LLDB_INVALID_THREAD_ID; }
@@ -91,15 +97,17 @@ public:
 
   virtual llvm::Optional<std::string> GetQueue() { return llvm::None; }
 
-  virtual StructuredData::DictionarySP GetStopReason() { return nullptr; }
+  virtual StructuredData::DictionarySP GetStopReason() { return {}; }
 
-  virtual StructuredData::ArraySP GetStackFrames() { return nullptr; }
+  virtual StructuredData::ArraySP GetStackFrames() { return {}; }
 
-  virtual StructuredData::DictionarySP GetRegisterInfo() { return nullptr; }
+  virtual StructuredData::DictionarySP GetRegisterInfo() { return {}; }
 
   virtual llvm::Optional<std::string> GetRegisterContext() {
     return llvm::None;
   }
+
+  virtual StructuredData::ArraySP GetExtendedInfo() { return {}; }
 };
 } // namespace lldb_private
 

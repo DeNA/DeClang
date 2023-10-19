@@ -135,15 +135,15 @@ public:
 
   void SetError(llvm::Error error);
 
-  lldb::ReturnStatus GetStatus();
+  lldb::ReturnStatus GetStatus() const;
 
   void SetStatus(lldb::ReturnStatus status);
 
-  bool Succeeded();
+  bool Succeeded() const;
 
-  bool HasResult();
+  bool HasResult() const;
 
-  bool GetDidChangeProcessState();
+  bool GetDidChangeProcessState() const;
 
   void SetDidChangeProcessState(bool b);
 

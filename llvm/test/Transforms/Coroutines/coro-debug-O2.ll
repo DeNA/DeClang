@@ -1,16 +1,16 @@
-; RUN: opt < %s -passes='function(coro-early),cgscc(coro-split,coro-split),function(sroa)' --reuse-storage-in-coroutine-frame -S | FileCheck %s
+; RUN: opt < %s -passes='module(coro-early),cgscc(coro-split<reuse-storage>),function(sroa)' -S | FileCheck %s
 
 ; Checks whether the dbg.declare for `__promise` remains valid under O2.
 
 ; CHECK-LABEL: define internal fastcc void @f.resume({{.*}})
 ; CHECK:       entry.resume:
-; CHECK:        call void @llvm.dbg.declare(
 ; CHECK:        call void @llvm.dbg.declare(metadata %f.Frame* %FramePtr, metadata ![[PROMISEVAR_RESUME:[0-9]+]], metadata !DIExpression(
+; CHECK:        call void @llvm.dbg.declare(
 ;
 ; CHECK: ![[PROMISEVAR_RESUME]] = !DILocalVariable(name: "__promise"
 %promise_type = type { i32, i32, double }
 
-define void @f() !dbg !8 {
+define void @f() presplitcoroutine !dbg !8  {
 entry:
     %__promise = alloca %promise_type, align 8
     %0 = bitcast %promise_type* %__promise to i8*

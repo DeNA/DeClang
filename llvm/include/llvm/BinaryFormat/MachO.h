@@ -1,4 +1,4 @@
-//===-- llvm/BinaryFormat/MachO.h - The MachO file format -------*- C++/-*-===//
+//===-- llvm/BinaryFormat/MachO.h - The MachO file format -------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -50,7 +50,8 @@ enum HeaderFileType {
   MH_BUNDLE = 0x8u,
   MH_DYLIB_STUB = 0x9u,
   MH_DSYM = 0xAu,
-  MH_KEXT_BUNDLE = 0xBu
+  MH_KEXT_BUNDLE = 0xBu,
+  MH_FILESET = 0xCu,
 };
 
 enum {
@@ -106,6 +107,7 @@ enum : uint32_t {
   SG_FVMLIB = 0x2u,
   SG_NORELOC = 0x4u,
   SG_PROTECTED_VERSION_1 = 0x8u,
+  SG_READ_ONLY = 0x10u,
 
   // Constant masks for the "flags" field in llvm::MachO::section and
   // llvm::MachO::section_64
@@ -174,8 +176,11 @@ enum SectionType : uint32_t {
   /// S_THREAD_LOCAL_INIT_FUNCTION_POINTERS - Section with thread local
   /// variable initialization pointers to functions.
   S_THREAD_LOCAL_INIT_FUNCTION_POINTERS = 0x15u,
+  /// S_INIT_FUNC_OFFSETS - Section with 32-bit offsets to initializer
+  /// functions.
+  S_INIT_FUNC_OFFSETS = 0x16u,
 
-  LAST_KNOWN_SECTION_TYPE = S_THREAD_LOCAL_INIT_FUNCTION_POINTERS
+  LAST_KNOWN_SECTION_TYPE = S_INIT_FUNC_OFFSETS
 };
 
 enum : uint32_t {
@@ -255,7 +260,8 @@ enum BindType {
 enum BindSpecialDylib {
   BIND_SPECIAL_DYLIB_SELF = 0,
   BIND_SPECIAL_DYLIB_MAIN_EXECUTABLE = -1,
-  BIND_SPECIAL_DYLIB_FLAT_LOOKUP = -2
+  BIND_SPECIAL_DYLIB_FLAT_LOOKUP = -2,
+  BIND_SPECIAL_DYLIB_WEAK_LOOKUP = -3
 };
 
 enum {
@@ -491,6 +497,7 @@ enum { VM_PROT_READ = 0x1, VM_PROT_WRITE = 0x2, VM_PROT_EXECUTE = 0x4 };
 
 // Values for platform field in build_version_command.
 enum PlatformType {
+  PLATFORM_UNKNOWN = 0,
   PLATFORM_MACOS = 1,
   PLATFORM_IOS = 2,
   PLATFORM_TVOS = 3,
@@ -864,6 +871,12 @@ struct build_version_command {
   uint32_t ntools;   // number of tool entries following this
 };
 
+struct dyld_env_command {
+  uint32_t cmd;
+  uint32_t cmdsize;
+  uint32_t name;
+};
+
 struct dyld_info_command {
   uint32_t cmd;
   uint32_t cmdsize;
@@ -883,6 +896,14 @@ struct linker_option_command {
   uint32_t cmd;
   uint32_t cmdsize;
   uint32_t count;
+};
+
+struct fileset_entry_command {
+  uint32_t cmd;
+  uint32_t cmdsize;
+  uint64_t vmaddr;
+  uint64_t fileoff;
+  uint32_t entry_id;
 };
 
 // The symseg_command is obsolete and no longer supported.
@@ -1000,6 +1021,119 @@ struct nlist_64 {
   uint8_t n_sect;
   uint16_t n_desc;
   uint64_t n_value;
+};
+
+// Values for dyld_chained_fixups_header::imports_format.
+enum ChainedImportFormat {
+  DYLD_CHAINED_IMPORT = 1,
+  DYLD_CHAINED_IMPORT_ADDEND = 2,
+  DYLD_CHAINED_IMPORT_ADDEND64 = 3,
+};
+
+// Values for dyld_chained_fixups_header::symbols_format.
+enum {
+  DYLD_CHAINED_SYMBOL_UNCOMPRESSED = 0,
+  DYLD_CHAINED_SYMBOL_ZLIB = 1,
+};
+
+// Values for dyld_chained_starts_in_segment::page_start.
+enum {
+  DYLD_CHAINED_PTR_START_NONE = 0xFFFF,
+  DYLD_CHAINED_PTR_START_MULTI = 0x8000,
+  DYLD_CHAINED_PTR_START_LAST = 0x8000,
+};
+
+// Values for dyld_chained_starts_in_segment::pointer_format.
+enum {
+  DYLD_CHAINED_PTR_ARM64E = 1,
+  DYLD_CHAINED_PTR_64 = 2,
+  DYLD_CHAINED_PTR_32 = 3,
+  DYLD_CHAINED_PTR_32_CACHE = 4,
+  DYLD_CHAINED_PTR_32_FIRMWARE = 5,
+  DYLD_CHAINED_PTR_64_OFFSET = 6,
+  DYLD_CHAINED_PTR_ARM64E_KERNEL = 7,
+  DYLD_CHAINED_PTR_64_KERNEL_CACHE = 8,
+  DYLD_CHAINED_PTR_ARM64E_USERLAND = 9,
+  DYLD_CHAINED_PTR_ARM64E_FIRMWARE = 10,
+  DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE = 11,
+  DYLD_CHAINED_PTR_ARM64E_USERLAND24 = 12,
+};
+
+/// Structs for dyld chained fixups.
+/// dyld_chained_fixups_header is the data pointed to by LC_DYLD_CHAINED_FIXUPS
+/// load command.
+struct dyld_chained_fixups_header {
+  uint32_t fixups_version; ///< 0
+  uint32_t starts_offset;  ///< Offset of dyld_chained_starts_in_image.
+  uint32_t imports_offset; ///< Offset of imports table in chain_data.
+  uint32_t symbols_offset; ///< Offset of symbol strings in chain_data.
+  uint32_t imports_count;  ///< Number of imported symbol names.
+  uint32_t imports_format; ///< DYLD_CHAINED_IMPORT*
+  uint32_t symbols_format; ///< 0 => uncompressed, 1 => zlib compressed
+};
+
+/// dyld_chained_starts_in_image is embedded in LC_DYLD_CHAINED_FIXUPS payload.
+/// Each each seg_info_offset entry is the offset into this struct for that
+/// segment followed by pool of dyld_chain_starts_in_segment data.
+struct dyld_chained_starts_in_image {
+  uint32_t seg_count;
+  uint32_t seg_info_offset[1];
+};
+
+struct dyld_chained_starts_in_segment {
+  uint32_t size;              ///< Size of this, including chain_starts entries
+  uint16_t page_size;         ///< Page size in bytes (0x1000 or 0x4000)
+  uint16_t pointer_format;    ///< DYLD_CHAINED_PTR*
+  uint64_t segment_offset;    ///< VM offset from the __TEXT segment
+  uint32_t max_valid_pointer; ///< Values beyond this are not pointers on 32-bit
+  uint16_t page_count;        ///< Length of the page_start array
+  uint16_t page_start[1];     ///< Page offset of first fixup on each page, or
+                              ///< DYLD_CHAINED_PTR_START_NONE if no fixups
+};
+
+// DYLD_CHAINED_IMPORT
+struct dyld_chained_import {
+  uint32_t lib_ordinal : 8;
+  uint32_t weak_import : 1;
+  uint32_t name_offset : 23;
+};
+
+// DYLD_CHAINED_IMPORT_ADDEND
+struct dyld_chained_import_addend {
+  uint32_t lib_ordinal : 8;
+  uint32_t weak_import : 1;
+  uint32_t name_offset : 23;
+  int32_t addend;
+};
+
+// DYLD_CHAINED_IMPORT_ADDEND64
+struct dyld_chained_import_addend64 {
+  uint64_t lib_ordinal : 16;
+  uint64_t weak_import : 1;
+  uint64_t reserved : 15;
+  uint64_t name_offset : 32;
+  uint64_t addend;
+};
+
+// The `bind` field (most significant bit) of the encoded fixup determines
+// whether it is dyld_chained_ptr_64_bind or dyld_chained_ptr_64_rebase.
+
+// DYLD_CHAINED_PTR_64/DYLD_CHAINED_PTR_64_OFFSET
+struct dyld_chained_ptr_64_bind {
+  uint64_t ordinal : 24;
+  uint64_t addend : 8;
+  uint64_t reserved : 19;
+  uint64_t next : 12;
+  uint64_t bind : 1; // set to 1
+};
+
+// DYLD_CHAINED_PTR_64/DYLD_CHAINED_PTR_64_OFFSET
+struct dyld_chained_ptr_64_rebase {
+  uint64_t target : 36;
+  uint64_t high8 : 8;
+  uint64_t reserved : 7;
+  uint64_t next : 12;
+  uint64_t bind : 1; // set to 0
 };
 
 // Byte order swapping functions for MachO structs
@@ -1295,6 +1429,14 @@ inline void swapStruct(linker_option_command &C) {
   sys::swapByteOrder(C.count);
 }
 
+inline void swapStruct(fileset_entry_command &C) {
+  sys::swapByteOrder(C.cmd);
+  sys::swapByteOrder(C.cmdsize);
+  sys::swapByteOrder(C.vmaddr);
+  sys::swapByteOrder(C.fileoff);
+  sys::swapByteOrder(C.entry_id);
+}
+
 inline void swapStruct(version_min_command &C) {
   sys::swapByteOrder(C.cmd);
   sys::swapByteOrder(C.cmdsize);
@@ -1499,7 +1641,38 @@ enum CPUSubTypeARM64 {
   CPU_SUBTYPE_ARM64_ALL = 0,
   CPU_SUBTYPE_ARM64_V8 = 1,
   CPU_SUBTYPE_ARM64E = 2,
+
+  // arm64 reserves bits in the high byte for subtype-specific flags.
+  // On arm64e, the 6 low bits represent the ptrauth ABI version.
+  CPU_SUBTYPE_ARM64E_PTRAUTH_MASK = 0x3f000000,
+  // On arm64e, the top bit tells whether the Mach-O is versioned.
+  CPU_SUBTYPE_ARM64E_VERSIONED_PTRAUTH_ABI_MASK = 0x80000000,
+  // On arm64e, the 2nd high bit tells whether the Mach-O is using kernel ABI.
+  CPU_SUBTYPE_ARM64E_KERNEL_PTRAUTH_ABI_MASK = 0x40000000
 };
+
+inline int CPU_SUBTYPE_ARM64E_PTRAUTH_VERSION(unsigned ST) {
+  return (ST & CPU_SUBTYPE_ARM64E_PTRAUTH_MASK) >> 24;
+}
+
+inline unsigned
+CPU_SUBTYPE_ARM64E_WITH_PTRAUTH_VERSION(unsigned PtrAuthABIVersion,
+                                        bool PtrAuthKernelABIVersion) {
+  assert((PtrAuthABIVersion <= 0x3F) &&
+         "ptrauth abi version must fit in 6 bits");
+  return CPU_SUBTYPE_ARM64E | CPU_SUBTYPE_ARM64E_VERSIONED_PTRAUTH_ABI_MASK |
+         (PtrAuthKernelABIVersion ? CPU_SUBTYPE_ARM64E_KERNEL_PTRAUTH_ABI_MASK
+                                  : 0) |
+         (PtrAuthABIVersion << 24);
+}
+
+inline unsigned CPU_SUBTYPE_ARM64E_IS_VERSIONED_PTRAUTH_ABI(unsigned ST) {
+  return ST & CPU_SUBTYPE_ARM64E_VERSIONED_PTRAUTH_ABI_MASK;
+}
+
+inline unsigned CPU_SUBTYPE_ARM64E_IS_KERNEL_PTRAUTH_ABI(unsigned ST) {
+  return ST & CPU_SUBTYPE_ARM64E_KERNEL_PTRAUTH_ABI_MASK;
+}
 
 enum CPUSubTypeARM64_32 { CPU_SUBTYPE_ARM64_32_V8 = 1 };
 
@@ -1526,6 +1699,8 @@ enum CPUSubTypePowerPC {
 
 Expected<uint32_t> getCPUType(const Triple &T);
 Expected<uint32_t> getCPUSubType(const Triple &T);
+Expected<uint32_t> getCPUSubType(const Triple &T, unsigned PtrAuthABIVersion,
+                                 bool PtrAuthKernelABIVersion);
 
 struct x86_thread_state32_t {
   uint32_t eax;
@@ -2009,6 +2184,32 @@ union alignas(4) macho_load_command {
 };
 LLVM_PACKED_END
 
+inline void swapStruct(dyld_chained_fixups_header &C) {
+  sys::swapByteOrder(C.fixups_version);
+  sys::swapByteOrder(C.starts_offset);
+  sys::swapByteOrder(C.imports_offset);
+  sys::swapByteOrder(C.symbols_offset);
+  sys::swapByteOrder(C.imports_count);
+  sys::swapByteOrder(C.imports_format);
+  sys::swapByteOrder(C.symbols_format);
+}
+
+inline void swapStruct(dyld_chained_starts_in_image &C) {
+  sys::swapByteOrder(C.seg_count);
+  // getStructOrErr() cannot copy the variable-length seg_info_offset array.
+  // Its elements must be byte swapped manually.
+}
+
+inline void swapStruct(dyld_chained_starts_in_segment &C) {
+  sys::swapByteOrder(C.size);
+  sys::swapByteOrder(C.page_size);
+  sys::swapByteOrder(C.pointer_format);
+  sys::swapByteOrder(C.segment_offset);
+  sys::swapByteOrder(C.max_valid_pointer);
+  sys::swapByteOrder(C.page_count);
+  // seg_info_offset entries must be byte swapped manually.
+}
+
 /* code signing attributes of a process */
 
 enum CodeSignAttrs {
@@ -2182,7 +2383,7 @@ struct CS_CodeDirectory {
   uint64_t execSegFlags; /* executable segment flags */
 };
 
-static_assert(sizeof(CS_CodeDirectory) == 88, "");
+static_assert(sizeof(CS_CodeDirectory) == 88);
 
 struct CS_BlobIndex {
   uint32_t type;   /* type of entry */
@@ -2204,6 +2405,17 @@ enum SecCSDigestAlgorithm {
       3,                           /* SHA-256 truncated to first 20 bytes */
   kSecCodeSignatureHashSHA384 = 4, /* SHA-384 */
   kSecCodeSignatureHashSHA512 = 5, /* SHA-512 */
+};
+
+enum LinkerOptimizationHintKind {
+  LOH_ARM64_ADRP_ADRP = 1,
+  LOH_ARM64_ADRP_LDR = 2,
+  LOH_ARM64_ADRP_ADD_LDR = 3,
+  LOH_ARM64_ADRP_LDR_GOT_LDR = 4,
+  LOH_ARM64_ADRP_ADD_STR = 5,
+  LOH_ARM64_ADRP_LDR_GOT_STR = 6,
+  LOH_ARM64_ADRP_ADD = 7,
+  LOH_ARM64_ADRP_LDR_GOT = 8,
 };
 
 } // end namespace MachO

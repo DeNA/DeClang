@@ -19,6 +19,7 @@
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCFragment.h"
 #include "llvm/MC/MCMachObjectWriter.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCSection.h"
 #include "llvm/MC/MCSectionMachO.h"
@@ -29,6 +30,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/LEB128.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -133,7 +135,9 @@ uint64_t MachObjectWriter::getPaddingSize(const MCSection *Sec,
 void MachObjectWriter::writeHeader(MachO::HeaderFileType Type,
                                    unsigned NumLoadCommands,
                                    unsigned LoadCommandsSize,
-                                   bool SubsectionsViaSymbols) {
+                                   bool SubsectionsViaSymbols,
+                                   std::optional<unsigned> PtrAuthABIVersion,
+                                   bool PtrAuthKernelABIVersion) {
   uint32_t Flags = 0;
 
   if (SubsectionsViaSymbols)
@@ -148,7 +152,22 @@ void MachObjectWriter::writeHeader(MachO::HeaderFileType Type,
   W.write<uint32_t>(is64Bit() ? MachO::MH_MAGIC_64 : MachO::MH_MAGIC);
 
   W.write<uint32_t>(TargetObjectWriter->getCPUType());
-  W.write<uint32_t>(TargetObjectWriter->getCPUSubtype());
+
+  uint32_t Cpusubtype = TargetObjectWriter->getCPUSubtype();
+  if (PtrAuthABIVersion) {
+    assert(TargetObjectWriter->getCPUType() == MachO::CPU_TYPE_ARM64 &&
+           Cpusubtype == MachO::CPU_SUBTYPE_ARM64E &&
+           "ptrauth ABI version is only supported on arm64e");
+    // Changes to this format should be reflected in MachO::getCPUSubType to
+    // support LTO.
+    // FIXME: Use MachO::getCPUSubType here. We can't use it for now because at
+    // the time we create TargetObjectWriter, we don't know if the assembler
+    // encountered any directives that affect the result.
+    Cpusubtype = MachO::CPU_SUBTYPE_ARM64E_WITH_PTRAUTH_VERSION(
+        *PtrAuthABIVersion, PtrAuthKernelABIVersion);
+  }
+
+  W.write<uint32_t>(Cpusubtype);
 
   W.write<uint32_t>(Type);
   W.write<uint32_t>(NumLoadCommands);
@@ -484,15 +503,15 @@ void MachObjectWriter::bindIndirectSymbols(MCAssembler &Asm) {
 
   // Report errors for use of .indirect_symbol not in a symbol pointer section
   // or stub section.
-  for (MCAssembler::indirect_symbol_iterator it = Asm.indirect_symbol_begin(),
-         ie = Asm.indirect_symbol_end(); it != ie; ++it) {
-    const MCSectionMachO &Section = cast<MCSectionMachO>(*it->Section);
+  for (IndirectSymbolData &ISD : llvm::make_range(Asm.indirect_symbol_begin(),
+                                                  Asm.indirect_symbol_end())) {
+    const MCSectionMachO &Section = cast<MCSectionMachO>(*ISD.Section);
 
     if (Section.getType() != MachO::S_NON_LAZY_SYMBOL_POINTERS &&
         Section.getType() != MachO::S_LAZY_SYMBOL_POINTERS &&
         Section.getType() != MachO::S_THREAD_LOCAL_VARIABLE_POINTERS &&
         Section.getType() != MachO::S_SYMBOL_STUBS) {
-      MCSymbol &Symbol = *it->Symbol;
+      MCSymbol &Symbol = *ISD.Symbol;
       report_fatal_error("indirect symbol '" + Symbol.getName() +
                          "' not in a symbol pointer or stub section");
     }
@@ -751,13 +770,46 @@ static MachO::LoadCommandType getLCFromMCVM(MCVersionMinType Type) {
   llvm_unreachable("Invalid mc version min type");
 }
 
+void MachObjectWriter::populateAddrSigSection(MCAssembler &Asm) {
+  MCSection *AddrSigSection =
+      Asm.getContext().getObjectFileInfo()->getAddrSigSection();
+  unsigned Log2Size = is64Bit() ? 3 : 2;
+  for (const MCSymbol *S : getAddrsigSyms()) {
+    if (!S->isRegistered())
+      continue;
+    MachO::any_relocation_info MRE;
+    MRE.r_word0 = 0;
+    MRE.r_word1 = (Log2Size << 25) | (MachO::GENERIC_RELOC_VANILLA << 28);
+    addRelocation(S, AddrSigSection, MRE);
+  }
+}
+
 uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
                                        const MCAsmLayout &Layout) {
   uint64_t StartOffset = W.OS.tell();
 
+  populateAddrSigSection(Asm);
+
   // Compute symbol table information and bind symbol indices.
   computeSymbolTable(Asm, LocalSymbolData, ExternalSymbolData,
                      UndefinedSymbolData);
+
+  if (!Asm.CGProfile.empty()) {
+    MCSection *CGProfileSection = Asm.getContext().getMachOSection(
+        "__LLVM", "__cg_profile", 0, SectionKind::getMetadata());
+    MCDataFragment *Frag = dyn_cast_or_null<MCDataFragment>(
+        &*CGProfileSection->getFragmentList().begin());
+    assert(Frag && "call graph profile section not reserved");
+    Frag->getContents().clear();
+    raw_svector_ostream OS(Frag->getContents());
+    for (const MCAssembler::CGProfileEntry &CGPE : Asm.CGProfile) {
+      uint32_t FromIndex = CGPE.From->getSymbol().getIndex();
+      uint32_t ToIndex = CGPE.To->getSymbol().getIndex();
+      support::endian::write(OS, FromIndex, W.Endian);
+      support::endian::write(OS, ToIndex, W.Endian);
+      support::endian::write(OS, CGPE.Count, W.Endian);
+    }
+  }
 
   unsigned NumSections = Asm.size();
   const MCAssembler::VersionInfoType &VersionInfo =
@@ -777,6 +829,17 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
       LoadCommandsSize += sizeof(MachO::build_version_command);
     else
       LoadCommandsSize += sizeof(MachO::version_min_command);
+  }
+
+  const MCAssembler::VersionInfoType &TargetVariantVersionInfo =
+      Layout.getAssembler().getDarwinTargetVariantVersionInfo();
+
+  // Add the target variant version info load command size, if used.
+  if (TargetVariantVersionInfo.Major != 0) {
+    ++NumLoadCommands;
+    assert(TargetVariantVersionInfo.EmitBuildVersion &&
+           "target variant should use build version");
+    LoadCommandsSize += sizeof(MachO::build_version_command);
   }
 
   // Add the data-in-code load command size, if used.
@@ -838,9 +901,19 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
       offsetToAlignment(SectionDataFileSize, is64Bit() ? Align(8) : Align(4));
   SectionDataFileSize += SectionDataPadding;
 
+  // The ptrauth ABI version is limited to 4 bits.
+  std::optional<unsigned> PtrAuthABIVersion = Asm.getPtrAuthABIVersion();
+  if (PtrAuthABIVersion && *PtrAuthABIVersion > 63) {
+    Asm.getContext().reportError(SMLoc(), "invalid ptrauth ABI version: " +
+                                              utostr(*PtrAuthABIVersion));
+    PtrAuthABIVersion = 63;
+  }
+  bool PtrAuthKernelABIVersion = Asm.getPtrAuthKernelABIVersion();
+
   // Write the prolog, starting with the header and load command...
   writeHeader(MachO::MH_OBJECT, NumLoadCommands, LoadCommandsSize,
-              Asm.getSubsectionsViaSymbols());
+              Asm.getSubsectionsViaSymbols(), PtrAuthABIVersion,
+              PtrAuthKernelABIVersion);
   uint32_t Prot =
       MachO::VM_PROT_READ | MachO::VM_PROT_WRITE | MachO::VM_PROT_EXECUTE;
   writeSegmentLoadCommand("", NumSections, 0, VMSize, SectionDataStart,
@@ -862,38 +935,43 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
   }
 
   // Write out the deployment target information, if it's available.
-  if (VersionInfo.Major != 0) {
-    auto EncodeVersion = [](VersionTuple V) -> uint32_t {
-      assert(!V.empty() && "empty version");
-      unsigned Update = V.getSubminor() ? *V.getSubminor() : 0;
-      unsigned Minor = V.getMinor() ? *V.getMinor() : 0;
-      assert(Update < 256 && "unencodable update target version");
-      assert(Minor < 256 && "unencodable minor target version");
-      assert(V.getMajor() < 65536 && "unencodable major target version");
-      return Update | (Minor << 8) | (V.getMajor() << 16);
-    };
-    uint32_t EncodedVersion = EncodeVersion(
-        VersionTuple(VersionInfo.Major, VersionInfo.Minor, VersionInfo.Update));
-    uint32_t SDKVersion = !VersionInfo.SDKVersion.empty()
-                              ? EncodeVersion(VersionInfo.SDKVersion)
-                              : 0;
-    if (VersionInfo.EmitBuildVersion) {
-      // FIXME: Currently empty tools. Add clang version in the future.
-      W.write<uint32_t>(MachO::LC_BUILD_VERSION);
-      W.write<uint32_t>(sizeof(MachO::build_version_command));
-      W.write<uint32_t>(VersionInfo.TypeOrPlatform.Platform);
-      W.write<uint32_t>(EncodedVersion);
-      W.write<uint32_t>(SDKVersion);
-      W.write<uint32_t>(0);         // Empty tools list.
-    } else {
-      MachO::LoadCommandType LCType
-        = getLCFromMCVM(VersionInfo.TypeOrPlatform.Type);
-      W.write<uint32_t>(LCType);
-      W.write<uint32_t>(sizeof(MachO::version_min_command));
-      W.write<uint32_t>(EncodedVersion);
-      W.write<uint32_t>(SDKVersion);
-    }
-  }
+  auto EmitDeploymentTargetVersion =
+      [&](const MCAssembler::VersionInfoType &VersionInfo) {
+        auto EncodeVersion = [](VersionTuple V) -> uint32_t {
+          assert(!V.empty() && "empty version");
+          unsigned Update = V.getSubminor().value_or(0);
+          unsigned Minor = V.getMinor().value_or(0);
+          assert(Update < 256 && "unencodable update target version");
+          assert(Minor < 256 && "unencodable minor target version");
+          assert(V.getMajor() < 65536 && "unencodable major target version");
+          return Update | (Minor << 8) | (V.getMajor() << 16);
+        };
+        uint32_t EncodedVersion = EncodeVersion(VersionTuple(
+            VersionInfo.Major, VersionInfo.Minor, VersionInfo.Update));
+        uint32_t SDKVersion = !VersionInfo.SDKVersion.empty()
+                                  ? EncodeVersion(VersionInfo.SDKVersion)
+                                  : 0;
+        if (VersionInfo.EmitBuildVersion) {
+          // FIXME: Currently empty tools. Add clang version in the future.
+          W.write<uint32_t>(MachO::LC_BUILD_VERSION);
+          W.write<uint32_t>(sizeof(MachO::build_version_command));
+          W.write<uint32_t>(VersionInfo.TypeOrPlatform.Platform);
+          W.write<uint32_t>(EncodedVersion);
+          W.write<uint32_t>(SDKVersion);
+          W.write<uint32_t>(0); // Empty tools list.
+        } else {
+          MachO::LoadCommandType LCType =
+              getLCFromMCVM(VersionInfo.TypeOrPlatform.Type);
+          W.write<uint32_t>(LCType);
+          W.write<uint32_t>(sizeof(MachO::version_min_command));
+          W.write<uint32_t>(EncodedVersion);
+          W.write<uint32_t>(SDKVersion);
+        }
+      };
+  if (VersionInfo.Major != 0)
+    EmitDeploymentTargetVersion(VersionInfo);
+  if (TargetVariantVersionInfo.Major != 0)
+    EmitDeploymentTargetVersion(TargetVariantVersionInfo);
 
   // Write the data-in-code load command, if used.
   uint64_t DataInCodeTableEnd = RelocTableEnd + NumDataRegions * 8;
@@ -965,7 +1043,7 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
     // Write the section relocation entries, in reverse order to match 'as'
     // (approximately, the exact algorithm is more complicated than this).
     std::vector<RelAndSymbol> &Relocs = Relocations[&Sec];
-    for (const RelAndSymbol &Rel : make_range(Relocs.rbegin(), Relocs.rend())) {
+    for (const RelAndSymbol &Rel : llvm::reverse(Relocs)) {
       W.write<uint32_t>(Rel.MRE.r_word0);
       W.write<uint32_t>(Rel.MRE.r_word1);
     }

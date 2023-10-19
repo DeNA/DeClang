@@ -79,8 +79,7 @@ lldb::addr_t SwiftUnsafeType::GetAddress(llvm::StringRef child_name) {
     return false;
   }
 
-  auto *type_system =
-      llvm::dyn_cast_or_null<TypeSystemSwift>(type.GetTypeSystem());
+  auto type_system = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
   if (!type_system) {
     LLDB_LOG(GetLog(LLDBLog::DataFormatters),
              "{0}: Couldn't get {1} type system.", __FUNCTION__,
@@ -249,8 +248,7 @@ bool SwiftUnsafeRawBufferPointer::Update() {
       return false;
     }
 
-    auto *type_system =
-        llvm::dyn_cast_or_null<TypeSystemSwift>(type.GetTypeSystem());
+    auto type_system = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
     if (!type_system) {
       LLDB_LOG(GetLog(LLDBLog::DataFormatters),
                "{0}: Couldn't get {1} type system.", __FUNCTION__,
@@ -312,8 +310,7 @@ bool SwiftUnsafePointer::Update() {
     return false;
   }
 
-  auto *type_system =
-      llvm::dyn_cast_or_null<TypeSystemSwift>(type.GetTypeSystem());
+  auto type_system = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
   if (!type_system) {
     LLDB_LOG(GetLog(LLDBLog::DataFormatters),
              "{0}: Couldn't get {1} type system.", __FUNCTION__,
@@ -365,8 +362,7 @@ std::unique_ptr<SwiftUnsafeType> SwiftUnsafeType::Create(ValueObject &valobj) {
       return nullptr;
     }
 
-    auto *type_system =
-        llvm::dyn_cast_or_null<TypeSystemSwift>(type.GetTypeSystem());
+    auto type_system = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
     if (!type_system) {
       LLDB_LOG(GetLog(LLDBLog::DataFormatters),
                "{0}: Couldn't get {1} type system.", __FUNCTION__,
@@ -501,6 +497,8 @@ bool lldb_private::formatters::swift::UnsafeTypeSyntheticFrontEnd::Update() {
   lldb::ProcessSP process_sp(valobj_sp->GetProcessSP());
   if (!process_sp)
     return false;
+  if (!m_unsafe_ptr)
+    return false;
   if (!m_unsafe_ptr->Update())
     return false;
 
@@ -513,9 +511,14 @@ bool lldb_private::formatters::swift::UnsafeTypeSyntheticFrontEnd::Update() {
     return false;
 
   m_element_stride = *stride;
-
   if (m_children.empty()) {
     size_t buffer_size = num_children * m_element_stride;
+    if (buffer_size > 512*1024*1024) {
+      LLDB_LOG(GetLog(LLDBLog::DataFormatters),
+               "Suspiciously large object: num_children={0}, stride={1}",
+               num_children, m_element_stride);
+      return false;
+    }
     m_buffer_sp.reset(new DataBufferHeap(buffer_size, 0));
 
     Status error;
@@ -550,12 +553,12 @@ bool lldb_private::formatters::swift::UnsafeTypeSyntheticFrontEnd::Update() {
 
 bool lldb_private::formatters::swift::UnsafeTypeSyntheticFrontEnd::
     MightHaveChildren() {
-  return m_unsafe_ptr->GetCount();
+  return m_unsafe_ptr && m_unsafe_ptr->GetCount();
 }
 
 size_t lldb_private::formatters::swift::UnsafeTypeSyntheticFrontEnd::
     GetIndexOfChildWithName(ConstString name) {
-  if (m_unsafe_ptr->HasPointee() && name == "pointee")
+  if (m_unsafe_ptr && m_unsafe_ptr->HasPointee() && name == "pointee")
     return 0;
   return UINT32_MAX;
 }

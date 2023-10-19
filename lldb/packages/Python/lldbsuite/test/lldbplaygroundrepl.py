@@ -77,9 +77,13 @@ class PlaygroundREPLTest(TestBase):
 
         with open(inputFile, 'r') as contents_file:
             contents = contents_file.read()
-
         result = self.frame.EvaluateExpression(contents, self.options)
         output = self.frame.EvaluateExpression("get_output()")
+        with recording(self, self.TraceOn()) as sbuf:
+            print("playground result: ", file=sbuf)
+            print(str(result), file=sbuf)
+            print("playground output:", file=sbuf)
+            print(str(output), file=sbuf)
         self.assertSuccess(output.GetError())
 
         return result, output

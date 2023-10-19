@@ -50,27 +50,6 @@ void FileSystem::Initialize() {
   InstanceImpl().emplace();
 }
 
-void FileSystem::Initialize(std::shared_ptr<FileCollectorBase> collector) {
-  lldbassert(!InstanceImpl() && "Already initialized.");
-  InstanceImpl().emplace(collector);
-}
-
-llvm::Error FileSystem::Initialize(const FileSpec &mapping) {
-  lldbassert(!InstanceImpl() && "Already initialized.");
-
-  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer =
-      llvm::vfs::getRealFileSystem()->getBufferForFile(mapping.GetPath());
-
-  if (!buffer)
-    return llvm::errorCodeToError(buffer.getError());
-
-  InstanceImpl().emplace(llvm::vfs::getVFSFromYAML(std::move(buffer.get()),
-                                                   nullptr, mapping.GetPath()),
-                         true);
-
-  return llvm::Error::success();
-}
-
 void FileSystem::Initialize(IntrusiveRefCntPtr<vfs::FileSystem> fs) {
   lldbassert(!InstanceImpl() && "Already initialized.");
   InstanceImpl().emplace(fs);
@@ -212,7 +191,7 @@ void FileSystem::EnumerateDirectory(Twine path, bool find_directories,
     const auto &Item = *Iter;
     ErrorOr<vfs::Status> Status = m_fs->status(Item.path());
     if (!Status)
-      break;
+      continue;
     if (!find_files && Status->isRegularFile())
       continue;
     if (!find_directories && Status->isDirectory())
@@ -288,7 +267,7 @@ void FileSystem::Resolve(FileSpec &file_spec) {
 
   // Update the FileSpec with the resolved path.
   if (file_spec.GetFilename().IsEmpty())
-    file_spec.GetDirectory().SetString(path);
+    file_spec.SetDirectory(path);
   else
     file_spec.SetPath(path);
   file_spec.SetIsResolved(true);
@@ -471,18 +450,14 @@ static mode_t GetOpenMode(uint32_t permissions) {
 Expected<FileUP> FileSystem::Open(const FileSpec &file_spec,
                                   File::OpenOptions options,
                                   uint32_t permissions, bool should_close_fd) {
-  Collect(file_spec.GetPath());
-
   const int open_flags = GetOpenFlags(options);
   const mode_t open_mode =
       (open_flags & O_CREAT) ? GetOpenMode(permissions) : 0;
 
-  auto path = GetExternalPath(file_spec);
-  if (!path)
-    return errorCodeToError(path.getError());
+  auto path = file_spec.GetPath();
 
   int descriptor = llvm::sys::RetryAfterSignal(
-      -1, OpenWithFS, *this, path->c_str(), open_flags, open_mode);
+      -1, OpenWithFS, *this, path.c_str(), open_flags, open_mode);
 
   if (!File::DescriptorIsValid(descriptor))
     return llvm::errorCodeToError(
@@ -494,43 +469,14 @@ Expected<FileUP> FileSystem::Open(const FileSpec &file_spec,
   return std::move(file);
 }
 
-ErrorOr<std::string> FileSystem::GetExternalPath(const llvm::Twine &path) {
-  if (!m_mapped)
-    return path.str();
-
-  // If VFS mapped we know the underlying FS is a RedirectingFileSystem.
-  ErrorOr<vfs::RedirectingFileSystem::LookupResult> Result =
-      static_cast<vfs::RedirectingFileSystem &>(*m_fs).lookupPath(path.str());
-  if (!Result) {
-    if (Result.getError() == llvm::errc::no_such_file_or_directory) {
-      return path.str();
-    }
-    return Result.getError();
-  }
-
-  if (Optional<StringRef> ExtRedirect = Result->getExternalRedirect())
-    return std::string(*ExtRedirect);
-  return make_error_code(llvm::errc::not_supported);
-}
-
-ErrorOr<std::string> FileSystem::GetExternalPath(const FileSpec &file_spec) {
-  return GetExternalPath(file_spec.GetPath());
-}
-
-void FileSystem::Collect(const FileSpec &file_spec) {
-  Collect(file_spec.GetPath());
-}
-
-void FileSystem::Collect(const llvm::Twine &file) {
-  if (!m_collector)
-    return;
-
-  if (llvm::sys::fs::is_directory(file))
-    m_collector->addDirectory(file);
-  else
-    m_collector->addFile(file);
-}
-
 void FileSystem::SetHomeDirectory(std::string home_directory) {
   m_home_directory = std::move(home_directory);
+}
+
+Status FileSystem::RemoveFile(const FileSpec &file_spec) {
+  return RemoveFile(file_spec.GetPath());
+}
+
+Status FileSystem::RemoveFile(const llvm::Twine &path) {
+  return Status(llvm::sys::fs::remove(path));
 }

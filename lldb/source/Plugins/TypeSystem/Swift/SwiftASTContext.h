@@ -13,16 +13,24 @@
 #ifndef liblldb_SwiftASTContext_h_
 #define liblldb_SwiftASTContext_h_
 
-#include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
-#include "swift/SymbolGraphGen/SymbolGraphOptions.h"
+
 #include "lldb/Core/SwiftForward.h"
 #include "lldb/Core/ThreadSafeDenseSet.h"
+#include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Utility/Either.h"
+
+#include "swift/AST/Import.h"
+#include "swift/AST/Module.h"
+#include "swift/Parse/ParseVersion.h"
+#include "swift/SymbolGraphGen/SymbolGraphOptions.h"
+
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Target/TargetOptions.h"
+
+#include <memory>
 
 namespace swift {
 enum class IRGenDebugInfoLevel : unsigned;
@@ -140,17 +148,17 @@ private:
       auto r2_as1 = r2.GetAs<CompilerType>();
       auto r2_as2 = r2.GetAs<swift::Decl *>();
 
-      if (r1_as1.hasValue() && r2_as1.hasValue())
-        return r1_as1.getValue() < r2_as1.getValue();
+      if (r1_as1.has_value() && r2_as1.has_value())
+        return r1_as1.value() < r2_as1.value();
 
-      if (r1_as2.hasValue() && r2_as2.hasValue())
-        return r1_as2.getValue() < r2_as2.getValue();
+      if (r1_as2.has_value() && r2_as2.has_value())
+        return r1_as2.value() < r2_as2.value();
 
-      if (r1_as1.hasValue() && r2_as2.hasValue())
-        return (void *)r1_as1->GetOpaqueQualType() < (void *)r2_as2.getValue();
+      if (r1_as1.has_value() && r2_as2.has_value())
+        return (void *)r1_as1->GetOpaqueQualType() < (void *)r2_as2.value();
 
-      if (r1_as2.hasValue() && r2_as1.hasValue())
-        return (void *)r1_as2.getValue() < (void *)r2_as1->GetOpaqueQualType();
+      if (r1_as2.has_value() && r2_as1.has_value())
+        return (void *)r1_as2.value() < (void *)r2_as1->GetOpaqueQualType();
 
       return false;
     }
@@ -254,6 +262,10 @@ public:
   void AddExtraClangArgs(const std::vector<std::string> &ExtraArgs);
   static void AddExtraClangArgs(const std::vector<std::string>& source,
                                 std::vector<std::string>& dest);
+  static std::string GetPluginServer(llvm::StringRef plugin_library_path);
+  /// Removes nonexisting VFS overlay options.
+  static void FilterClangImporterOptions(std::vector<std::string> &extra_args,
+                                         SwiftASTContext *ctx = nullptr);
 
   /// Add the target's swift-extra-clang-flags to the ClangImporter options.
   void AddUserClangArgs(TargetProperties &props);
@@ -359,6 +371,16 @@ public:
   /// clang_decl.
   std::string GetSwiftName(const clang::Decl *clang_decl,
                            TypeSystemClang &clang_typesystem) override;
+
+  CompilerType GetBuiltinRawPointerType() override;
+  CompilerType GetBuiltinIntType();
+
+  /// Attempts to convert a Clang type into a Swift type.
+  /// For example, int is converted to Int32.
+  CompilerType ConvertClangTypeToSwiftType(CompilerType clang_type) override;
+
+  bool TypeHasArchetype(CompilerType type);
+
   /// Use \p ClangImporter to swiftify the decl's name.
   std::string ImportName(const clang::NamedDecl *clang_decl);
 
@@ -389,11 +411,11 @@ public:
   swift::CanType
   GetCanonicalSwiftType(lldb::opaque_compiler_type_t opaque_type);
 
-  // Imports the type from the passed in type into this SwiftASTContext. The
-  // type must be a Swift type. If the type can be imported, returns the
-  // CompilerType for the imported type.
-  // If it cannot be, returns an invalid CompilerType, and sets the error to
-  // indicate what went wrong.
+  /// Imports the type from the passed in type into this SwiftASTContext. The
+  /// type must be a Swift type. If the type can be imported, returns the
+  /// CompilerType for the imported type.
+  /// If it cannot be, returns an invalid CompilerType, and sets the error to
+  /// indicate what went wrong.
   CompilerType ImportType(CompilerType &type, Status &error);
 
   swift::ClangImporter *GetClangImporter();
@@ -401,22 +423,78 @@ public:
   CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) override;
   bool IsTupleType(lldb::opaque_compiler_type_t type) override;
+  llvm::Optional<NonTriviallyManagedReferenceKind>
+  GetNonTriviallyManagedReferenceKind(
+      lldb::opaque_compiler_type_t type) override;
+
+  /// Creates a GenericTypeParamType with the desired depth and index.
+  CompilerType CreateGenericTypeParamType(unsigned int depth,
+                                               unsigned int index) override;
 
   CompilerType GetErrorType() override;
 
-  bool HasErrors();
+  /// Error handling
+  /// \{
+  bool HasDiagnostics() const;
+  bool HasClangImporterErrors() const;
 
-  // NEVER call this without checking HasFatalErrors() first.
-  // This clears the fatal-error state which is terrible.
-  // We will assert if you clear an actual fatal error.
-  void ClearDiagnostics();
+  void AddDiagnostic(DiagnosticSeverity severity, llvm::StringRef message);
+  void RaiseFatalError(std::string msg) const {
+    m_fatal_errors.SetErrorString(msg);
+  }
+  static bool HasFatalErrors(swift::ASTContext *ast_context);
+  bool HasFatalErrors() const {
+    return m_fatal_errors.Fail() || HasFatalErrors(m_ast_context_ap.get());
+  }
 
+  /// Return only fatal errors.
+  Status GetFatalErrors() const;
+  /// Notify the Process about any Swift or ClangImporter errors.
+  void DiagnoseWarnings(Process &process, Module &module) const override;
+  
   bool SetColorizeDiagnostics(bool b);
-  void AddErrorStatusAsGenericDiagnostic(Status error);
 
   void PrintDiagnostics(DiagnosticManager &diagnostic_manager,
                         uint32_t bufferID = UINT32_MAX, uint32_t first_line = 0,
                         uint32_t last_line = UINT32_MAX) const;
+
+  /// A set of indices into the diagnostic vectors to mark the start
+  /// of a transaction.
+  struct DiagnosticCursor {
+    size_t swift = 0;
+    size_t clang = 0;
+    size_t lldb = 0;
+    size_t m_num_swift_errors = 0;
+  };
+
+  /// A lightweight RAII abstraction that sits on top of a diagnostic
+  /// consumer that can be used capture diagnostics for one
+  /// transaction and restore (most of) the state of the consumer
+  /// after its destruction.  Clang errors and LLDB errors are
+  /// persistent and intentionally not reset by this.
+  class ScopedDiagnostics {
+    swift::DiagnosticConsumer &m_consumer;
+    const DiagnosticCursor m_cursor;
+
+  public:
+    enum class ErrorKind { swift, clang };
+    ScopedDiagnostics(swift::DiagnosticConsumer &consumer);
+    ~ScopedDiagnostics();
+    /// Print all diagnostics that happened during the lifetime of
+    /// this object to diagnostic_manager. If none is found, print the
+    /// persistent diagnostics form the parent consumer.
+    void PrintDiagnostics(DiagnosticManager &diagnostic_manager,
+                          uint32_t bufferID = UINT32_MAX,
+                          uint32_t first_line = 0,
+                          uint32_t last_line = UINT32_MAX) const;
+    std::optional<ErrorKind> GetOptionalErrorKind() const;
+    bool HasErrors() const;
+    /// Return all errors and warnings that happened during the lifetime of this
+    /// object.
+    llvm::Error GetAllErrors() const;
+  };
+  std::unique_ptr<ScopedDiagnostics> getScopedDiagnosticConsumer();
+  /// \}
 
   ConstString GetMangledTypeName(swift::TypeBase *);
 
@@ -435,21 +513,6 @@ public:
   typedef llvm::StringMap<swift::ModuleDecl *> SwiftModuleMap;
 
   const SwiftModuleMap &GetModuleCache() { return m_swift_module_cache; }
-
-  static bool HasFatalErrors(swift::ASTContext *ast_context);
-
-  bool HasFatalErrors() const {
-    return m_fatal_errors.Fail() || HasFatalErrors(m_ast_context_ap.get());
-  }
-
-  Status GetFatalErrors() const;
-  void DiagnoseWarnings(Process &process, Module &module) const override;
-  void LogFatalErrors() const;
-
-  /// Return a list of warnings collected from ClangImporter.
-  const std::vector<std::string> &GetModuleImportWarnings() const {
-    return m_module_import_warnings;
-  }
 
   const swift::irgen::TypeInfo *
   GetSwiftTypeInfo(lldb::opaque_compiler_type_t type);
@@ -519,8 +582,6 @@ public:
   /// Whether this is the Swift error type.
   bool IsErrorType(lldb::opaque_compiler_type_t type);
 
-  static bool IsFullyRealized(const CompilerType &compiler_type);
-
   struct ProtocolInfo {
     uint32_t m_num_protocols;
     uint32_t m_num_payload_words;
@@ -544,16 +605,6 @@ public:
 
   static bool GetProtocolTypeInfo(const CompilerType &type,
                                   ProtocolInfo &protocol_info);
-
-  enum class NonTriviallyManagedReferenceStrategy {
-    eWeak,
-    eUnowned,
-    eUnmanaged
-  };
-
-  static bool IsNonTriviallyManagedReferenceType(
-      const CompilerType &type, NonTriviallyManagedReferenceStrategy &strategy,
-      CompilerType *underlying_type = nullptr);
 
   static void ApplyWorkingDir(llvm::SmallVectorImpl<char> &clang_argument,
                               llvm::StringRef cur_working_dir);
@@ -654,7 +705,8 @@ public:
                                 bool omit_empty_base_classes,
                                 std::vector<uint32_t> &child_indexes) override;
 
-  size_t GetNumTemplateArguments(lldb::opaque_compiler_type_t type) override;
+  size_t GetNumTemplateArguments(lldb::opaque_compiler_type_t type,
+                                 bool expand_pack) override;
 
   lldb::GenericKind GetGenericArgumentKind(lldb::opaque_compiler_type_t type,
                                            size_t idx);
@@ -752,30 +804,7 @@ public:
                       CompilerType *original_type) override;
 
   CompilerType GetReferentType(lldb::opaque_compiler_type_t type) override;
-
-  /// Retrieves the modules that need to be implicitly imported in a given
-  /// execution scope. This includes the modules imported by both the compile
-  /// unit as well as any imports from previous expression evaluations.
-  static bool GetImplicitImports(
-      SwiftASTContext &swift_ast_context, SymbolContext &sc,
-      ExecutionContextScope &exe_scope, lldb::ProcessSP process_sp,
-      llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
-          &modules,
-      Status &error);
-
-  // FIXME: the correct thing to do would be to get the modules by calling
-  // CompilerInstance::getImplicitImportInfo, instead of loading these
-  // modules manually. However, we currently don't have  access to a
-  // CompilerInstance, which is why this function is needed.
-  void LoadImplicitModules(lldb::TargetSP target, lldb::ProcessSP process,
-                           ExecutionContextScope &exe_scope);
-  /// Cache the user's imports from a SourceFile in a given execution scope such
-  /// that they are carried over into future expression evaluations.
-  static bool CacheUserImports(SwiftASTContext &swift_ast_context,
-                               SymbolContext &sc,
-                               ExecutionContextScope &exe_scope,
-                               lldb::ProcessSP process_sp,
-                               swift::SourceFile &source_file, Status &error);
+  CompilerType GetStaticSelfType(lldb::opaque_compiler_type_t type) override;
 
   /// Retrieve/import the modules imported by the compilation
   /// unit. Early-exists with false if there was an import failure.
@@ -805,6 +834,12 @@ protected:
   /// Similar logic applies to this "reverse" map
   typedef llvm::DenseMap<swift::TypeBase *, const char *>
       SwiftMangledNameFromTypeMap;
+
+  /// Called by the VALID_OR_RETURN macro to log all errors.
+  void LogFatalErrors() const;
+  Status GetAllDiagnostics() const;
+  /// Stream all diagnostics to the Debugger and clear them.
+  void StreamAllDiagnostics(llvm::Optional<lldb::user_id_t> debugger_id) const;
 
   llvm::TargetOptions *getTargetOptions();
 
@@ -849,18 +884,20 @@ protected:
   std::unique_ptr<swift::irgen::IRGenerator> m_ir_generator_ap;
   std::unique_ptr<swift::irgen::IRGenModule> m_ir_gen_module_ap;
   llvm::once_flag m_ir_gen_module_once;
+  mutable std::once_flag m_swift_import_warning;
+  mutable std::once_flag m_swift_diags_streamed;
+  mutable std::once_flag m_swift_warning_streamed;
   std::unique_ptr<swift::DiagnosticConsumer> m_diagnostic_consumer_ap;
   std::unique_ptr<swift::DependencyTracker> m_dependency_tracker;
-  /// A collection of (not necessarily fatal) error messages that
-  /// should be printed by Process::PrintWarningCantLoadSwift().
-  std::vector<std::string> m_module_import_warnings;
   swift::ModuleDecl *m_scratch_module = nullptr;
   std::unique_ptr<swift::Lowering::TypeConverter> m_sil_types_ap;
   std::unique_ptr<swift::SILModule> m_sil_module_ap;
   /// Owned by the AST.
   swift::MemoryBufferSerializedModuleLoader *m_memory_buffer_module_loader =
       nullptr;
-  swift::ClangImporter *m_clang_importer = nullptr;
+  swift::ClangImporter *m_clangimporter = nullptr;
+  /// Wraps the clang::ASTContext owned by ClangImporter.
+  std::shared_ptr<TypeSystemClang> m_clangimporter_typesystem;
   SwiftModuleMap m_swift_module_cache;
   SwiftTypeFromMangledNameMap m_mangled_name_to_type_map;
   SwiftMangledNameFromTypeMap m_type_to_mangled_name_map;
@@ -925,22 +962,6 @@ protected:
   /// Apply a PathMappingList dictionary on all search paths in the
   /// ClangImporterOptions.
   void RemapClangImporterOptions(const PathMappingList &path_map);
-
-  /// Infer the appropriate Swift resource directory for a target triple.
-  std::string GetResourceDir(const llvm::Triple &target);
-
-  /// Implementation of \c GetResourceDir.
-  static std::string GetResourceDir(llvm::StringRef platform_sdk_path,
-                                    llvm::StringRef swift_stdlib_os_dir,
-                                    std::string swift_dir,
-                                    std::string xcode_contents_path,
-                                    std::string toolchain_path,
-                                    std::string cl_tools_path);
-
-  /// Return the name of the OS-specific subdirectory containing the
-  /// Swift stdlib needed for \p target.
-  static std::string GetSwiftStdlibOSDir(const llvm::Triple &target,
-                                         const llvm::Triple &host);
 };
 
 /// Deprecated.
@@ -991,6 +1012,42 @@ public:
   PersistentExpressionState *GetPersistentExpressionState() override;
 
   void ModulesDidLoad(ModuleList &module_list);
+
+  typedef llvm::StringMap<swift::AttributedImport<swift::ImportedModule>>
+      HandLoadedModuleSet;
+
+  // Insert to the list of hand-loaded modules, (no actual loading occurs).
+  void AddHandLoadedModule(
+      ConstString module_name,
+      swift::AttributedImport<swift::ImportedModule> attributed_import) {
+    m_hand_loaded_modules.insert_or_assign(module_name.GetStringRef(),
+                                           attributed_import);
+  }
+
+  /// Retrieves the modules that need to be implicitly imported in a given
+  /// execution scope. This includes the modules imported by both the compile
+  /// unit as well as any imports from previous expression evaluations.
+  bool GetImplicitImports(
+      SymbolContext &sc, lldb::ProcessSP process_sp,
+      llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
+          &modules,
+      Status &error);
+
+  // FIXME: the correct thing to do would be to get the modules by calling
+  // CompilerInstance::getImplicitImportInfo, instead of loading these
+  // modules manually. However, we currently don't have  access to a
+  // CompilerInstance, which is why this function is needed.
+  void LoadImplicitModules(lldb::TargetSP target, lldb::ProcessSP process,
+                           ExecutionContextScope &exe_scope);
+  /// Cache the user's imports from a SourceFile in a given execution scope such
+  /// that they are carried over into future expression evaluations.
+  bool CacheUserImports(lldb::ProcessSP process_sp,
+                        swift::SourceFile &source_file, Status &error);
+
+protected:
+  /// These are the names of modules that we have loaded by hand into
+  /// the Contexts we make for parsing.
+  HandLoadedModuleSet m_hand_loaded_modules;
 
 private:
   std::unique_ptr<SwiftPersistentExpressionState> m_persistent_state_up;

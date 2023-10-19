@@ -13,7 +13,7 @@
 #include "lldb/Target/Language.h"
 #include "lldb/Utility/Status.h"
 
-#include <set>
+#include "llvm/ADT/DenseSet.h"
 
 using namespace lldb_private;
 using namespace lldb;
@@ -38,20 +38,19 @@ bool LanguageSet::operator[](unsigned i) const { return bitvector[i]; }
 
 TypeSystem::~TypeSystem() = default;
 
-static lldb::TypeSystemSP CreateInstanceHelper(lldb::LanguageType language,
-                                               Module *module, Target *target,
-                                               const char *compiler_options) {
+static TypeSystemSP CreateInstanceHelper(lldb::LanguageType language,
+                                         Module *module, Target *target,
+                                         const char *compiler_options) {
   uint32_t i = 0;
   TypeSystemCreateInstance create_callback;
   while ((create_callback = PluginManager::GetTypeSystemCreateCallbackAtIndex(
               i++)) != nullptr) {
-    lldb::TypeSystemSP type_system_sp =
-        create_callback(language, module, target, compiler_options);
-    if (type_system_sp)
+    if (auto type_system_sp =
+        create_callback(language, module, target, compiler_options))
       return type_system_sp;
   }
 
-  return lldb::TypeSystemSP();
+  return {};
 }
 
 lldb::TypeSystemSP TypeSystem::CreateInstance(lldb::LanguageType language,
@@ -123,26 +122,28 @@ CompilerType TypeSystem::GetBuiltinTypeByName(ConstString name) {
 }
 
 CompilerType TypeSystem::GetTypeForFormatters(void *type) {
-  return CompilerType(this, type);
+  return CompilerType(weak_from_this(), type);
 }
 
-size_t TypeSystem::GetNumTemplateArguments(lldb::opaque_compiler_type_t type) {
+size_t TypeSystem::GetNumTemplateArguments(lldb::opaque_compiler_type_t type,
+                                           bool expand_pack) {
   return 0;
 }
 
 TemplateArgumentKind
-TypeSystem::GetTemplateArgumentKind(opaque_compiler_type_t type, size_t idx) {
+TypeSystem::GetTemplateArgumentKind(opaque_compiler_type_t type, size_t idx,
+                                    bool expand_pack) {
   return eTemplateArgumentKindNull;
 }
 
 CompilerType TypeSystem::GetTypeTemplateArgument(opaque_compiler_type_t type,
-                                                 size_t idx) {
+                                                 size_t idx, bool expand_pack) {
   return CompilerType();
 }
 
 llvm::Optional<CompilerType::IntegralTemplateArgument>
-TypeSystem::GetIntegralTemplateArgument(opaque_compiler_type_t type,
-                                        size_t idx) {
+TypeSystem::GetIntegralTemplateArgument(opaque_compiler_type_t type, size_t idx,
+                                        bool expand_pack) {
   return llvm::None;
 }
 
@@ -211,13 +212,13 @@ void TypeSystemMap::Clear() {
     map = m_map;
     m_clear_in_progress = true;
   }
-  std::set<TypeSystem *> visited;
-  for (auto pair : map) {
-    TypeSystem *type_system = pair.second.get();
-    if (type_system && !visited.count(type_system)) {
-      visited.insert(type_system);
+  llvm::DenseSet<TypeSystem *> visited;
+  for (auto &pair : map) {
+    if (visited.count(pair.second.get()))
+      continue;
+    visited.insert(pair.second.get());
+    if (lldb::TypeSystemSP type_system = pair.second)
       type_system->Finalize();
-    }
   }
   map.clear();
   {
@@ -227,22 +228,34 @@ void TypeSystemMap::Clear() {
   }
 }
 
-void TypeSystemMap::ForEach(std::function<bool(TypeSystem *)> const &callback) {
-  std::lock_guard<std::mutex> guard(m_mutex);
+void TypeSystemMap::ForEach(
+    std::function<bool(lldb::TypeSystemSP)> const &callback) {
+
+  // The callback may call into this function again causing
+  // us to lock m_mutex twice if we held it across the callback.
+  // Since we just care about guarding access to 'm_map', make
+  // a local copy and iterate over that instead.
+  collection map_snapshot;
+  {
+      std::lock_guard<std::mutex> guard(m_mutex);
+      map_snapshot = m_map;
+  }
+
   // Use a std::set so we only call the callback once for each unique
-  // TypeSystem instance
-  std::set<TypeSystem *> visited;
-  for (auto pair : m_map) {
+  // TypeSystem instance.
+  llvm::DenseSet<TypeSystem *> visited;
+  for (auto &pair : map_snapshot) {
     TypeSystem *type_system = pair.second.get();
-    if (type_system && !visited.count(type_system)) {
-      visited.insert(type_system);
-      if (!callback(type_system))
-        break;
-    }
+    if (!type_system || visited.count(type_system))
+      continue;
+    visited.insert(type_system);
+    assert(type_system);
+    if (!callback(pair.second))
+      break;
   }
 }
 
-llvm::Expected<TypeSystem &> TypeSystemMap::GetTypeSystemForLanguage(
+llvm::Expected<lldb::TypeSystemSP> TypeSystemMap::GetTypeSystemForLanguage(
     lldb::LanguageType language,
     llvm::Optional<CreateCallback> create_callback) {
   std::lock_guard<std::mutex> guard(m_mutex);
@@ -253,9 +266,10 @@ llvm::Expected<TypeSystem &> TypeSystemMap::GetTypeSystemForLanguage(
 
   collection::iterator pos = m_map.find(language);
   if (pos != m_map.end()) {
-    auto *type_system = pos->second.get();
-    if (type_system)
-      return *type_system;
+    if (pos->second) {
+      assert(!pos->second->weak_from_this().expired());
+      return pos->second;
+    }
     return llvm::make_error<llvm::StringError>(
         "TypeSystem for language " +
             llvm::StringRef(Language::GetNameForLanguageType(language)) +
@@ -268,8 +282,8 @@ llvm::Expected<TypeSystem &> TypeSystemMap::GetTypeSystemForLanguage(
       // Add a new mapping for "language" to point to an already existing
       // TypeSystem that supports this language
       m_map[language] = pair.second;
-      if (pair.second.get())
-        return *pair.second.get();
+      if (pair.second)
+        return pair.second;
       return llvm::make_error<llvm::StringError>(
           "TypeSystem for language " +
               llvm::StringRef(Language::GetNameForLanguageType(language)) +
@@ -285,11 +299,11 @@ llvm::Expected<TypeSystem &> TypeSystemMap::GetTypeSystemForLanguage(
         llvm::inconvertibleErrorCode());
 
   // Cache even if we get a shared pointer that contains a null type system
-  // back
+  // back.
   TypeSystemSP type_system_sp = (*create_callback)();
   m_map[language] = type_system_sp;
-  if (type_system_sp.get())
-    return *type_system_sp.get();
+  if (type_system_sp)
+    return type_system_sp;
   return llvm::make_error<llvm::StringError>(
       "TypeSystem for language " +
           llvm::StringRef(Language::GetNameForLanguageType(language)) +
@@ -297,7 +311,7 @@ llvm::Expected<TypeSystem &> TypeSystemMap::GetTypeSystemForLanguage(
       llvm::inconvertibleErrorCode());
 }
 
-llvm::Expected<TypeSystem &>
+llvm::Expected<lldb::TypeSystemSP>
 TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
                                         Module *module, bool can_create) {
   if (can_create) {
@@ -309,7 +323,7 @@ TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
   return GetTypeSystemForLanguage(language);
 }
 
-llvm::Expected<TypeSystem &>
+llvm::Expected<lldb::TypeSystemSP>
 TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
                                         Target *target, bool can_create) {
   if (can_create) {
@@ -322,7 +336,7 @@ TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
 }
 
 // BEGIN SWIFT
-llvm::Expected<TypeSystem &>
+llvm::Expected<TypeSystemSP>
 TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
                                         Target *target, bool can_create,
                                         const char *compiler_options) {
@@ -339,7 +353,7 @@ TypeSystemMap::GetTypeSystemForLanguage(lldb::LanguageType language,
 void TypeSystemMap::RemoveTypeSystemsForLanguage(lldb::LanguageType language) {
   std::lock_guard<std::mutex> guard(m_mutex);
   collection::iterator pos = m_map.find(language);
-  // If we are clearning the map, we don't need to remove this individual item.
+  // If we are clearing the map, we don't need to remove this individual item.
   // It will go away soon enough.
   if (!m_clear_in_progress) {
     if (pos != m_map.end())

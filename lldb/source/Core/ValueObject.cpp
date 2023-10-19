@@ -52,6 +52,7 @@
 #include "lldb/lldb-private-types.h"
 
 #ifdef LLDB_ENABLE_SWIFT
+#include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #endif //LLDB_ENABLE_SWIFT
 
@@ -291,7 +292,7 @@ CompilerType ValueObject::MaybeCalculateCompleteType() {
           process_sp->GetLanguageRuntime(GetObjectRuntimeLanguage())) {
     if (llvm::Optional<CompilerType> complete_type =
             runtime->GetRuntimeType(compiler_type)) {
-      m_override_type = complete_type.getValue();
+      m_override_type = *complete_type;
       if (m_override_type.IsValid())
         return m_override_type;
     }
@@ -878,7 +879,7 @@ bool ValueObject::SetData(DataExtractor &data, Status &error) {
   uint64_t count = 0;
   const Encoding encoding = GetCompilerType().GetEncoding(count);
 
-  const size_t byte_size = GetByteSize().getValueOr(0);
+  const size_t byte_size = GetByteSize().value_or(0);
 
   Value::ValueType value_type = m_value.GetValueType();
 
@@ -936,7 +937,7 @@ bool ValueObject::SetData(DataExtractor &data, Status &error) {
 static bool CopyStringDataToBufferSP(const StreamString &source,
                                      lldb::WritableDataBufferSP &destination) {
   llvm::StringRef src = source.GetString();
-  src.consume_back(llvm::StringRef("\0", 1));
+  src = src.rtrim('\0');
   destination = std::make_shared<DataBufferHeap>(src.size(), 0);
   memcpy(destination->GetBytes(), src.data(), src.size());
   return true;
@@ -1250,6 +1251,15 @@ bool ValueObject::DumpPrintableRepresentation(
     Stream &s, ValueObjectRepresentationStyle val_obj_display,
     Format custom_format, PrintableRepresentationSpecialCases special,
     bool do_dump_error) {
+    
+  // If the ValueObject has an error, we might end up dumping the type, which
+  // is useful, but if we don't even have a type, then don't examine the object
+  // further as that's not meaningful, only the error is.
+  if (m_error.Fail() && !GetCompilerType().IsValid()) {
+    if (do_dump_error)
+      s.Printf("<%s>", m_error.AsCString());
+    return false;
+  }
 
   Flags flags(GetTypeInfo());
 
@@ -1451,6 +1461,8 @@ bool ValueObject::DumpPrintableRepresentation(
     if (!str.empty())
       s << str;
     else {
+      // We checked for errors at the start, but do it again here in case
+      // realizing the value for dumping produced an error.
       if (m_error.Fail()) {
         if (do_dump_error)
           s.Printf("<%s>", m_error.AsCString());
@@ -1560,7 +1572,7 @@ bool ValueObject::SetValueFromCString(const char *value_str, Status &error) {
   uint64_t count = 0;
   const Encoding encoding = GetCompilerType().GetEncoding(count);
 
-  const size_t byte_size = GetByteSize().getValueOr(0);
+  const size_t byte_size = GetByteSize().value_or(0);
 
   Value::ValueType value_type = m_value.GetValueType();
 
@@ -1637,6 +1649,7 @@ bool ValueObject::GetDeclaration(Declaration &decl) {
   decl.Clear();
   return false;
 }
+
 
 #ifdef LLDB_ENABLE_SWIFT
 llvm::Optional<SwiftScratchContextReader> ValueObject::GetSwiftScratchContext() {
@@ -1754,13 +1767,13 @@ ValueObjectSP ValueObject::GetSyntheticBitFieldChild(uint32_t from, uint32_t to,
       uint32_t bit_field_offset = from;
       if (GetDataExtractor().GetByteOrder() == eByteOrderBig)
         bit_field_offset =
-            GetByteSize().getValueOr(0) * 8 - bit_field_size - bit_field_offset;
+            GetByteSize().value_or(0) * 8 - bit_field_size - bit_field_offset;
       // We haven't made a synthetic array member for INDEX yet, so lets make
       // one and cache it for any future reference.
       ValueObjectChild *synthetic_child = new ValueObjectChild(
-          *this, GetCompilerType(), index_const_str,
-          GetByteSize().getValueOr(0), 0, bit_field_size, bit_field_offset,
-          false, false, eAddressTypeInvalid, 0);
+          *this, GetCompilerType(), index_const_str, GetByteSize().value_or(0),
+          0, bit_field_size, bit_field_offset, false, false,
+          eAddressTypeInvalid, 0);
 
       // Cache the value if we got one back...
       if (synthetic_child) {
@@ -1937,7 +1950,7 @@ ValueObjectSP ValueObject::GetDynamicValue(DynamicValueType use_dynamic) {
   if (!IsDynamic() && m_dynamic_value == nullptr) {
     CalculateDynamicValue(use_dynamic);
   }
-  if (m_dynamic_value)
+  if (m_dynamic_value && m_dynamic_value->GetError().Success())
     return m_dynamic_value->GetSP();
   else
     return ValueObjectSP();
@@ -2211,7 +2224,7 @@ ValueObjectSP ValueObject::GetValueForExpressionPath_Impl(
         return ValueObjectSP();
       }
     }
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     case '.': // or fallthrough from ->
     {
       if (options.m_check_dot_vs_arrow_syntax &&
@@ -2904,7 +2917,7 @@ ValueObject::EvaluationPoint::EvaluationPoint() : m_mod_id(), m_exe_ctx_ref() {}
 
 ValueObject::EvaluationPoint::EvaluationPoint(ExecutionContextScope *exe_scope,
                                               bool use_selected)
-    : m_mod_id(), m_exe_ctx_ref(), m_needs_update(true) {
+    : m_mod_id(), m_exe_ctx_ref() {
   ExecutionContext exe_ctx(exe_scope);
   TargetSP target_sp(exe_ctx.GetTargetSP());
   if (target_sp) {
@@ -2930,7 +2943,7 @@ ValueObject::EvaluationPoint::EvaluationPoint(ExecutionContextScope *exe_scope,
         StackFrameSP frame_sp(exe_ctx.GetFrameSP());
         if (!frame_sp) {
           if (use_selected)
-            frame_sp = thread_sp->GetSelectedFrame();
+            frame_sp = thread_sp->GetSelectedFrame(DoNoSelectMostRelevantFrame);
         }
         if (frame_sp)
           m_exe_ctx_ref.SetFrameSP(frame_sp);
@@ -2941,7 +2954,7 @@ ValueObject::EvaluationPoint::EvaluationPoint(ExecutionContextScope *exe_scope,
 
 ValueObject::EvaluationPoint::EvaluationPoint(
     const ValueObject::EvaluationPoint &rhs)
-    : m_mod_id(), m_exe_ctx_ref(rhs.m_exe_ctx_ref), m_needs_update(true) {}
+    : m_mod_id(), m_exe_ctx_ref(rhs.m_exe_ctx_ref) {}
 
 ValueObject::EvaluationPoint::~EvaluationPoint() = default;
 

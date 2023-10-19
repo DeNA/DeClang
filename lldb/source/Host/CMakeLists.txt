@@ -24,7 +24,7 @@ add_host_subdirectory(common
   common/HostThread.cpp
   common/LockFileBase.cpp
   common/LZMA.cpp
-  common/MainLoop.cpp
+  common/MainLoopBase.cpp
   common/MonitoringProcessLauncher.cpp
   common/NativeProcessProtocol.cpp
   common/NativeRegisterContext.cpp
@@ -43,6 +43,12 @@ add_host_subdirectory(common
   common/UDPSocket.cpp
   common/XML.cpp
   )
+
+  if(LLDB_ENABLE_SWIFT_SUPPORT)
+    add_host_subdirectory(posix
+      common/HostInfoSwift.cpp
+      )
+  endif()
 
 if (LLDB_ENABLE_LIBEDIT)
   add_host_subdirectory(common
@@ -63,11 +69,17 @@ if (CMAKE_SYSTEM_NAME MATCHES "Windows")
     windows/HostProcessWindows.cpp
     windows/HostThreadWindows.cpp
     windows/LockFileWindows.cpp
+    windows/MainLoopWindows.cpp
     windows/PipeWindows.cpp
     windows/ProcessLauncherWindows.cpp
     windows/ProcessRunLock.cpp
-    windows/Windows.cpp
     )
+    if(LLDB_ENABLE_SWIFT_SUPPORT)
+    add_host_subdirectory(posix
+      windows/HostInfoWindowsSwift.cpp
+      )
+    endif()
+
 else()
   add_host_subdirectory(posix
     posix/DomainSocket.cpp
@@ -76,10 +88,17 @@ else()
     posix/HostProcessPosix.cpp
     posix/HostThreadPosix.cpp
     posix/LockFilePosix.cpp
+    posix/MainLoopPosix.cpp
     posix/PipePosix.cpp
     posix/ProcessLauncherPosixFork.cpp
     )
 
+  if(LLDB_ENABLE_SWIFT_SUPPORT)
+    add_host_subdirectory(posix
+      posix/HostInfoPosixSwift.cpp
+      )
+  endif()
+  
   if (CMAKE_SYSTEM_NAME MATCHES "Darwin")
     add_subdirectory(macosx/objcxx)
     set(LLDBObjCLibs lldbHostMacOSXObjCXX)
@@ -142,7 +161,7 @@ if (HAVE_LIBDL)
   list(APPEND EXTRA_LIBS ${CMAKE_DL_LIBS})
 endif()
 if (LLDB_ENABLE_LIBEDIT)
-  list(APPEND EXTRA_LIBS ${LibEdit_LIBRARIES})
+  list(APPEND EXTRA_LIBS LibEdit::LibEdit)
 endif()
 if (LLDB_ENABLE_LZMA)
   list(APPEND EXTRA_LIBS ${LIBLZMA_LIBRARIES})
@@ -152,7 +171,7 @@ if (WIN32)
 endif()
 
 if (LLDB_ENABLE_LIBEDIT)
-  list(APPEND LLDB_LIBEDIT_LIBS ${LibEdit_LIBRARIES})
+  list(APPEND LLDB_LIBEDIT_LIBS LibEdit::LibEdit)
   if (LLVM_BUILD_STATIC)
     list(APPEND LLDB_SYSTEM_LIBS gpm)
   endif()
@@ -172,6 +191,3 @@ add_lldb_library(lldbHost
     Support
   )
 
-if (LLDB_ENABLE_LIBEDIT)
-  target_include_directories(lldbHost PUBLIC ${LibEdit_INCLUDE_DIRS})
-endif()

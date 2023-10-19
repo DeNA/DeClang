@@ -25,7 +25,7 @@
  * INDEXSTORE_VERSION_MAJOR is intended for "major" source/ABI breaking changes.
  */
 #define INDEXSTORE_VERSION_MAJOR 0
-#define INDEXSTORE_VERSION_MINOR 13
+#define INDEXSTORE_VERSION_MINOR 15 /* added Swift init accessor sub-symbol */
 
 #define INDEXSTORE_VERSION_ENCODE(major, minor) ( \
       ((major) * 10000)                           \
@@ -127,6 +127,8 @@ typedef struct {
 
 INDEXSTORE_PUBLIC unsigned
 indexstore_format_version(void);
+
+INDEXSTORE_PUBLIC unsigned indexstore_version(void);
 
 typedef void *indexstore_t;
 typedef void *indexstore_creation_options_t;
@@ -280,6 +282,7 @@ typedef enum {
   INDEXSTORE_SYMBOL_KIND_CONVERSIONFUNCTION = 24,
   INDEXSTORE_SYMBOL_KIND_PARAMETER = 25,
   INDEXSTORE_SYMBOL_KIND_USING = 26,
+  INDEXSTORE_SYMBOL_KIND_CONCEPT = 27,
 
   INDEXSTORE_SYMBOL_KIND_COMMENTTAG = 1000,
 } indexstore_symbol_kind_t;
@@ -310,6 +313,7 @@ typedef enum {
   INDEXSTORE_SYMBOL_SUBKIND_SWIFTGENERICTYPEPARAM = 1013,
   INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORREAD = 1014,
   INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORMODIFY = 1015,
+  INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORINIT = 1016,
 } indexstore_symbol_subkind_t;
 
 INDEXSTORE_OPTIONS(uint64_t, indexstore_symbol_property_t) {

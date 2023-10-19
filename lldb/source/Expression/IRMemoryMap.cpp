@@ -143,7 +143,7 @@ lldb::addr_t IRMemoryMap::FindSpace(size_t size) {
     if (address_byte_size != UINT32_MAX) {
       switch (address_byte_size) {
       case 8:
-        ret = 0xffffffff00000000ull;
+        ret = 0xdead0fff00000000ull;
         break;
       case 4:
         ret = 0xee000000ull;
@@ -607,7 +607,6 @@ void IRMemoryMap::WriteScalarToMemory(lldb::addr_t process_address,
     error.SetErrorToGenericError();
     error.SetErrorString("Couldn't write scalar: its size was zero");
   }
-  return;
 }
 
 void IRMemoryMap::WritePointerToMemory(lldb::addr_t process_address,
@@ -754,7 +753,6 @@ void IRMemoryMap::ReadScalarFromMemory(Scalar &scalar,
     error.SetErrorToGenericError();
     error.SetErrorString("Couldn't read scalar: its size was zero");
   }
-  return;
 }
 
 void IRMemoryMap::ReadPointerFromMemory(lldb::addr_t *address,
@@ -770,8 +768,6 @@ void IRMemoryMap::ReadPointerFromMemory(lldb::addr_t *address,
     return;
 
   *address = pointer_scalar.ULongLong();
-
-  return;
 }
 
 void IRMemoryMap::GetMemoryData(DataExtractor &extractor,

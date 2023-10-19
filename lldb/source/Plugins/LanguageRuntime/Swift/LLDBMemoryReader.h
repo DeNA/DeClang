@@ -2,8 +2,14 @@
 #ifndef liblldb_LLDBMemoryReader_h_
 #define liblldb_LLDBMemoryReader_h_
 
+
 #include "SwiftLanguageRuntime.h"
-#include "swift/Reflection/TypeLowering.h"
+
+// We need to include ReflectionContext.h before TypeLowering.h to avoid
+// conflicts between mach/machine.h and llvm/BinaryFormat/MachO.h.
+#include "swift/RemoteInspection/ReflectionContext.h"
+#include "swift/RemoteInspection/TypeLowering.h"
+
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/Support/Memory.h"
 
@@ -11,8 +17,12 @@
 namespace lldb_private {
 class LLDBMemoryReader : public swift::remote::MemoryReader {
 public:
-  LLDBMemoryReader(Process &p, size_t max_read_amount = INT32_MAX)
-      : m_process(p), m_range_module_map() {
+  LLDBMemoryReader(Process &p,
+                   std::function<swift::remote::RemoteAbsolutePointer(
+                       swift::remote::RemoteAbsolutePointer)>
+                       stripper,
+                   size_t max_read_amount = INT32_MAX)
+      : m_process(p), signedPointerStripper(stripper), m_range_module_map() {
     m_max_read_amount = max_read_amount;
   }
 
@@ -77,6 +87,10 @@ private:
 
   llvm::Optional<uint64_t> m_local_buffer;
   uint64_t m_local_buffer_size = 0;
+
+  std::function<swift::remote::RemoteAbsolutePointer(
+      swift::remote::RemoteAbsolutePointer)>
+      signedPointerStripper;
 
   /// LLDBMemoryReader prefers to read reflection metadata from the
   /// binary on disk, which is faster than reading it out of process

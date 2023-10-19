@@ -3,10 +3,8 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test import lldbutil
 
+
 class TestCase(TestBase):
-
-    mydir = TestBase.compute_mydir(__file__)
-
     @skipUnlessDarwin
     # LLDB ends up calling the user-defined function (but at least doesn't
     # crash).
@@ -18,7 +16,9 @@ class TestCase(TestBase):
         """
 
         self.build()
-        lldbutil.run_to_source_breakpoint(self, "// break here", lldb.SBFileSpec("main.m"))
+        lldbutil.run_to_source_breakpoint(
+            self, "// break here", lldb.SBFileSpec("main.m")
+        )
 
         # Get the (dynamic) type of our 'id' variable so that our Objective-C
         # runtime information is updated.

@@ -7,8 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/DebugInfo.h"
-#include "llvm/IR/DIBuilder.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/AsmParser/Parser.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -244,6 +245,62 @@ TEST(DIBuilder, CreateSetType) {
 
   DIDerivedType *SetType = DIB.createSetType(Scope, "set1", F, 1, 64, 64, Type);
   EXPECT_TRUE(isa_and_nonnull<DIDerivedType>(SetType));
+}
+
+TEST(DIBuilder, CreateStringType) {
+  LLVMContext Ctx;
+  std::unique_ptr<Module> M(new Module("MyModule", Ctx));
+  DIBuilder DIB(*M);
+  DIScope *Scope = DISubprogram::getDistinct(
+      Ctx, nullptr, "", "", nullptr, 0, nullptr, 0, nullptr, 0, 0,
+      DINode::FlagZero, DISubprogram::SPFlagZero, nullptr);
+  DIFile *F = DIB.createFile("main.c", "/");
+  StringRef StrName = "string";
+  DIVariable *StringLen = DIB.createAutoVariable(Scope, StrName, F, 0, nullptr,
+                                                 false, DINode::FlagZero, 0);
+  auto getDIExpression = [&DIB](int offset) {
+    SmallVector<uint64_t, 4> ops;
+    ops.push_back(llvm::dwarf::DW_OP_push_object_address);
+    DIExpression::appendOffset(ops, offset);
+    ops.push_back(llvm::dwarf::DW_OP_deref);
+
+    return DIB.createExpression(ops);
+  };
+  DIExpression *StringLocationExp = getDIExpression(1);
+  DIStringType *StringType =
+      DIB.createStringType(StrName, StringLen, StringLocationExp);
+
+  EXPECT_TRUE(isa_and_nonnull<DIStringType>(StringType));
+  EXPECT_EQ(StringType->getName(), StrName);
+  EXPECT_EQ(StringType->getStringLength(), StringLen);
+  EXPECT_EQ(StringType->getStringLocationExp(), StringLocationExp);
+
+  StringRef StrNameExp = "stringexp";
+  DIExpression *StringLengthExp = getDIExpression(2);
+  DIStringType *StringTypeExp =
+      DIB.createStringType(StrNameExp, StringLengthExp, StringLocationExp);
+
+  EXPECT_TRUE(isa_and_nonnull<DIStringType>(StringTypeExp));
+  EXPECT_EQ(StringTypeExp->getName(), StrNameExp);
+  EXPECT_EQ(StringTypeExp->getStringLocationExp(), StringLocationExp);
+  EXPECT_EQ(StringTypeExp->getStringLengthExp(), StringLengthExp);
+}
+
+TEST(DIBuilder, DIEnumerator) {
+  LLVMContext Ctx;
+  std::unique_ptr<Module> M(new Module("MyModule", Ctx));
+  DIBuilder DIB(*M);
+  APSInt I1(APInt(32, 1));
+  APSInt I2(APInt(33, 1));
+
+  auto *E = DIEnumerator::get(Ctx, I1, I1.isSigned(), "name");
+  EXPECT_TRUE(E);
+
+  auto *E1 = DIEnumerator::getIfExists(Ctx, I1, I1.isSigned(), "name");
+  EXPECT_TRUE(E1);
+
+  auto *E2 = DIEnumerator::getIfExists(Ctx, I2, I1.isSigned(), "name");
+  EXPECT_FALSE(E2);
 }
 
 TEST(DIBuilder, createDbgAddr) {

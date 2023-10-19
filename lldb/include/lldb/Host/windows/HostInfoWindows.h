@@ -28,12 +28,22 @@ public:
 
   static llvm::VersionTuple GetOSVersion();
   static llvm::Optional<std::string> GetOSBuildString();
-  static bool GetOSKernelDescription(std::string &s);
+  static llvm::Optional<std::string> GetOSKernelDescription();
   static bool GetHostname(std::string &s);
   static FileSpec GetProgramFileSpec();
   static FileSpec GetDefaultShell();
 
   static bool GetEnvironmentVar(const std::string &var_name, std::string &var);
+
+#ifdef LLDB_ENABLE_SWIFT
+  static FileSpec GetSwiftResourceDir();
+  static std::string GetSwiftResourceDir(llvm::Triple triple,
+                                         llvm::StringRef platform_sdk_path);
+  static bool ComputeSwiftResourceDirectory(FileSpec &lldb_shlib_spec,
+                                            FileSpec &file_spec, bool verify);
+  static llvm::Expected<llvm::StringRef> GetSDKRoot(SDKOptions options);
+  static std::vector<std::string> GetSwiftLibrarySearchPaths();
+#endif
 
 private:
   static FileSpec m_program_filespec;

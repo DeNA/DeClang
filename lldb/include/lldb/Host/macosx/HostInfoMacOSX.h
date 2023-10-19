@@ -12,6 +12,7 @@
 #include "lldb/Host/posix/HostInfoPosix.h"
 #include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/XcodeSDK.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/VersionTuple.h"
 
 namespace lldb_private {
@@ -25,13 +26,35 @@ public:
   static llvm::VersionTuple GetOSVersion();
   static llvm::VersionTuple GetMacCatalystVersion();
   static llvm::Optional<std::string> GetOSBuildString();
-  static bool GetOSKernelDescription(std::string &s);
   static FileSpec GetProgramFileSpec();
   static FileSpec GetXcodeContentsDirectory();
   static FileSpec GetXcodeDeveloperDirectory();
 
-  /// Query xcrun to find an Xcode SDK directory.
-  static llvm::StringRef GetXcodeSDKPath(XcodeSDK sdk);
+#ifdef LLDB_ENABLE_SWIFT
+  static FileSpec GetSwiftResourceDir();
+  static std::string GetSwiftResourceDir(llvm::Triple triple,
+                                         llvm::StringRef platform_sdk_path);
+
+  /// Return the name of the OS-specific subdirectory containing the
+  /// Swift stdlib needed for \p target. Only exposed for unit tests.
+  static std::string GetSwiftStdlibOSDir(llvm::Triple target,
+                                         llvm::Triple host);
+
+  /// Private implementation detail of GetSwiftResourceDir, exposed for unit
+  /// tests.
+  static std::string DetectSwiftResourceDir(llvm::StringRef platform_sdk_path,
+                                            llvm::StringRef swift_stdlib_os_dir,
+                                            std::string swift_dir,
+                                            std::string xcode_contents_path,
+                                            std::string toolchain_path,
+                                            std::string cl_tools_path);
+  static bool ComputeSwiftResourceDirectory(FileSpec &lldb_shlib_spec,
+                                            FileSpec &file_spec, bool verify);
+#endif
+
+  static llvm::Expected<llvm::StringRef> GetSDKRoot(SDKOptions options);
+  static llvm::Expected<llvm::StringRef> FindSDKTool(XcodeSDK sdk,
+                                                     llvm::StringRef tool);
 
   /// Shared cache utilities
   static SharedCacheImageInfo

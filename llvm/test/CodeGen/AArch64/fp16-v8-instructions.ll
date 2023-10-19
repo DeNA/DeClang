@@ -661,13 +661,12 @@ define void @test_insert_at_zero(half %a, <8 x half>* %b) #0 {
 define <8 x i8> @fptosi_i8(<8 x half> %a) #0 {
 ; CHECK-CVT-LABEL: fptosi_i8:
 ; CHECK-CVT:       // %bb.0:
-; CHECK-CVT-NEXT:    fcvtl v1.4s, v0.4h
-; CHECK-CVT-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl2 v1.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl v0.4s, v0.4h
 ; CHECK-CVT-NEXT:    fcvtzs v1.4s, v1.4s
 ; CHECK-CVT-NEXT:    fcvtzs v0.4s, v0.4s
-; CHECK-CVT-NEXT:    xtn v1.4h, v1.4s
-; CHECK-CVT-NEXT:    xtn2 v1.8h, v0.4s
-; CHECK-CVT-NEXT:    xtn v0.8b, v1.8h
+; CHECK-CVT-NEXT:    uzp1 v0.8h, v0.8h, v1.8h
+; CHECK-CVT-NEXT:    xtn v0.8b, v0.8h
 ; CHECK-CVT-NEXT:    ret
 ;
 ; CHECK-FP16-LABEL: fptosi_i8:
@@ -680,21 +679,13 @@ define <8 x i8> @fptosi_i8(<8 x half> %a) #0 {
 }
 
 define <8 x i16> @fptosi_i16(<8 x half> %a) #0 {
-; CHECK-CVT_DAG:   fcvtl   [[LO:v[0-9]+\.4s]], v0.4h
-; CHECK-CVT_DAG:   fcvtl2  [[HI:v[0-9]+\.4s]], v0.8h
-; CHECK-CVT_DAG:   fcvtzs  [[LOF32:v[0-9]+\.4s]], [[LO]]
-; CHECK-CVT_DAG:   xtn     [[I16:v[0-9]+]].4h, [[LOF32]]
-; CHECK-CVT_DAG:   fcvtzs  [[HIF32:v[0-9]+\.4s]], [[HI]]
-; CHECK-CVT_DAG:   xtn2    [[I16]].8h, [[HIF32]]
-; CHECK-COMMON_NEXT:      ret
 ; CHECK-CVT-LABEL: fptosi_i16:
 ; CHECK-CVT:       // %bb.0:
-; CHECK-CVT-NEXT:    fcvtl v1.4s, v0.4h
-; CHECK-CVT-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl2 v1.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl v0.4s, v0.4h
 ; CHECK-CVT-NEXT:    fcvtzs v1.4s, v1.4s
-; CHECK-CVT-NEXT:    fcvtzs v2.4s, v0.4s
-; CHECK-CVT-NEXT:    xtn v0.4h, v1.4s
-; CHECK-CVT-NEXT:    xtn2 v0.8h, v2.4s
+; CHECK-CVT-NEXT:    fcvtzs v0.4s, v0.4s
+; CHECK-CVT-NEXT:    uzp1 v0.8h, v0.8h, v1.8h
 ; CHECK-CVT-NEXT:    ret
 ;
 ; CHECK-FP16-LABEL: fptosi_i16:
@@ -708,13 +699,12 @@ define <8 x i16> @fptosi_i16(<8 x half> %a) #0 {
 define <8 x i8> @fptoui_i8(<8 x half> %a) #0 {
 ; CHECK-CVT-LABEL: fptoui_i8:
 ; CHECK-CVT:       // %bb.0:
-; CHECK-CVT-NEXT:    fcvtl v1.4s, v0.4h
-; CHECK-CVT-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl2 v1.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl v0.4s, v0.4h
 ; CHECK-CVT-NEXT:    fcvtzu v1.4s, v1.4s
 ; CHECK-CVT-NEXT:    fcvtzu v0.4s, v0.4s
-; CHECK-CVT-NEXT:    xtn v1.4h, v1.4s
-; CHECK-CVT-NEXT:    xtn2 v1.8h, v0.4s
-; CHECK-CVT-NEXT:    xtn v0.8b, v1.8h
+; CHECK-CVT-NEXT:    uzp1 v0.8h, v0.8h, v1.8h
+; CHECK-CVT-NEXT:    xtn v0.8b, v0.8h
 ; CHECK-CVT-NEXT:    ret
 ;
 ; CHECK-FP16-LABEL: fptoui_i8:
@@ -729,12 +719,11 @@ define <8 x i8> @fptoui_i8(<8 x half> %a) #0 {
 define <8 x i16> @fptoui_i16(<8 x half> %a) #0 {
 ; CHECK-CVT-LABEL: fptoui_i16:
 ; CHECK-CVT:       // %bb.0:
-; CHECK-CVT-NEXT:    fcvtl v1.4s, v0.4h
-; CHECK-CVT-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl2 v1.4s, v0.8h
+; CHECK-CVT-NEXT:    fcvtl v0.4s, v0.4h
 ; CHECK-CVT-NEXT:    fcvtzu v1.4s, v1.4s
-; CHECK-CVT-NEXT:    fcvtzu v2.4s, v0.4s
-; CHECK-CVT-NEXT:    xtn v0.4h, v1.4s
-; CHECK-CVT-NEXT:    xtn2 v0.8h, v2.4s
+; CHECK-CVT-NEXT:    fcvtzu v0.4s, v0.4s
+; CHECK-CVT-NEXT:    uzp1 v0.8h, v0.8h, v1.8h
 ; CHECK-CVT-NEXT:    ret
 ;
 ; CHECK-FP16-LABEL: fptoui_i16:

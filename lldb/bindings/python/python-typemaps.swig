@@ -18,7 +18,7 @@
       if (!py_str.IsAllocated()) {
         PyErr_SetString(PyExc_TypeError, "list must contain strings");
         free($1);
-        return nullptr;
+        SWIG_fail;
       }
 
       $1[i] = const_cast<char *>(py_str.GetString().data());
@@ -28,7 +28,7 @@
     $1 = NULL;
   } else {
     PyErr_SetString(PyExc_TypeError, "not a list");
-    return NULL;
+    SWIG_fail;
   }
 }
 
@@ -54,6 +54,87 @@
   free((char *) $1);
 }
 
+%typecheck(SWIG_TYPECHECK_POINTER) lldb::ScriptObjectPtr {
+  PythonObject obj(PyRefType::Borrowed, $input);
+  if (!obj.IsValid()) {
+    PyErr_Clear();
+    $1 = 0;
+  } else {
+    $1 = 1;
+  }
+}
+
+%typemap(in) lldb::ScriptObjectPtr {
+  if ($input == Py_None) {
+    $1 = nullptr;
+  } else {
+    PythonObject obj(PyRefType::Borrowed, $input);
+    if (!obj.IsValid()) {
+      PyErr_SetString(PyExc_TypeError, "Script object is not valid");
+      SWIG_fail;
+    }
+
+    auto lldb_module = PythonModule::Import("lldb");
+    if (!lldb_module) {
+      std::string err_msg = llvm::toString(lldb_module.takeError());
+      PyErr_SetString(PyExc_TypeError, err_msg.c_str());
+      SWIG_fail;
+    }
+
+    auto sb_structured_data_class = lldb_module.get().Get("SBStructuredData");
+    if (!sb_structured_data_class) {
+      std::string err_msg = llvm::toString(sb_structured_data_class.takeError());
+      PyErr_SetString(PyExc_TypeError, err_msg.c_str());
+      SWIG_fail;
+    }
+
+    if (obj.IsInstance(sb_structured_data_class.get())) {
+      $1 = obj.get();
+    } else {
+      auto type = obj.GetType();
+      if (!type) {
+        std::string err_msg = llvm::toString(type.takeError());
+        PyErr_SetString(PyExc_TypeError, err_msg.c_str());
+        SWIG_fail;
+      }
+
+      auto type_name = As<std::string>(type.get().GetAttribute("__name__"));
+      if (!type_name) {
+        std::string err_msg = llvm::toString(type_name.takeError());
+        PyErr_SetString(PyExc_TypeError, err_msg.c_str());
+        SWIG_fail;
+      }
+
+      if (llvm::StringRef(type_name.get()).startswith("SB")) {
+        std::string error_msg = "Input type is invalid: " + type_name.get();
+        PyErr_SetString(PyExc_TypeError, error_msg.c_str());
+        SWIG_fail;
+      } else {
+        $1 = obj.get();
+      }
+    }
+  }
+}
+
+%typemap(out) lldb::ScriptObjectPtr {
+  $result = (PyObject*) $1;
+  if (!$result)
+    $result = Py_None;
+  Py_INCREF($result);
+}
+
+%typemap(out) lldb::SBScriptObject {
+  $result = nullptr;
+  if (const void* impl = $1.GetPointer())
+    $result = (PyObject*) impl;
+  if (!$result) {
+    $result = Py_None;
+    Py_INCREF(Py_None);
+  } else {
+    Py_INCREF($result);
+  }
+}
+
 %typemap(out) char** {
   int len;
   int i;
@@ -70,7 +151,7 @@
   PythonObject obj = Retain<PythonObject>($input);
   lldb::tid_t value = unwrapOrSetPythonException(As<unsigned long long>(obj));
   if (PyErr_Occurred())
-    return nullptr;
+    SWIG_fail;
   $1 = value;
 }
 
@@ -79,10 +160,10 @@
   unsigned long long state_type_value =
       unwrapOrSetPythonException(As<unsigned long long>(obj));
   if (PyErr_Occurred())
-    return nullptr;
+    SWIG_fail;
   if (state_type_value > lldb::StateType::kLastStateType) {
     PyErr_SetString(PyExc_ValueError, "Not a valid StateType value");
-    return nullptr;
+    SWIG_fail;
   }
   $1 = static_cast<lldb::StateType>(state_type_value);
 }
@@ -93,12 +174,12 @@
 %typemap(in) (char *dst, size_t dst_len) {
   if (!PyInt_Check($input)) {
     PyErr_SetString(PyExc_ValueError, "Expecting an integer");
-    return NULL;
+    SWIG_fail;
   }
   $2 = PyInt_AsLong($input);
   if ($2 <= 0) {
     PyErr_SetString(PyExc_ValueError, "Positive integer expected");
-    return NULL;
+    SWIG_fail;
   }
   $1 = (char *)malloc($2);
 }
@@ -129,12 +210,12 @@
 %typemap(in) (char *dst_or_null, size_t dst_len) {
   if (!PyInt_Check($input)) {
     PyErr_SetString(PyExc_ValueError, "Expecting an integer");
-    return NULL;
+    SWIG_fail;
   }
   $2 = PyInt_AsLong($input);
   if ($2 <= 0) {
     PyErr_SetString(PyExc_ValueError, "Positive integer expected");
-    return NULL;
+    SWIG_fail;
   }
   $1 = (char *)malloc($2);
 }
@@ -166,7 +247,7 @@
     $2 = bytes.GetSize();
   } else {
     PyErr_SetString(PyExc_ValueError, "Expecting a string");
-    return NULL;
+    SWIG_fail;
   }
 }
 // For SBProcess::WriteMemory, SBTarget::GetInstructions and SBDebugger::DispatchInput.
@@ -186,7 +267,7 @@
     $2 = bytes.GetSize();
   } else {
     PyErr_SetString(PyExc_ValueError, "Expecting a buffer");
-    return NULL;
+    SWIG_fail;
   }
 }
 
@@ -199,11 +280,11 @@
     $2 = PyLong_AsLong($input);
   } else {
     PyErr_SetString(PyExc_ValueError, "Expecting an integer or long object");
-    return NULL;
+    SWIG_fail;
   }
   if ($2 <= 0) {
     PyErr_SetString(PyExc_ValueError, "Positive integer expected");
-    return NULL;
+    SWIG_fail;
   }
   $1 = (void *)malloc($2);
 }
@@ -287,12 +368,12 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
       if (!SetNumberFromPyObject($1[i], o)) {
         PyErr_SetString(PyExc_TypeError, "list must contain numbers");
         free($1);
-        return NULL;
+        SWIG_fail;
       }
 
       if (PyErr_Occurred()) {
         free($1);
-        return NULL;
+        SWIG_fail;
       }
     }
   } else if ($input == Py_None) {
@@ -300,7 +381,7 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
     $2 = 0;
   } else {
     PyErr_SetString(PyExc_TypeError, "not a list");
-    return NULL;
+    SWIG_fail;
   }
 }
 
@@ -353,7 +434,7 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
   if (!($input == Py_None ||
         PyCallable_Check(reinterpret_cast<PyObject *>($input)))) {
     PyErr_SetString(PyExc_TypeError, "Need a callable object or None!");
-    return NULL;
+    SWIG_fail;
   }
 
   // FIXME (filcab): We can't currently check if our callback is already
@@ -377,11 +458,11 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
   PythonFile py_file(PyRefType::Borrowed, $input);
   if (!py_file) {
     PyErr_SetString(PyExc_TypeError, "not a file");
-    return nullptr;
+    SWIG_fail;
   }
   auto sp = unwrapOrSetPythonException(py_file.ConvertToFile());
   if (!sp)
-    return nullptr;
+    SWIG_fail;
   $1 = sp;
 }
 
@@ -389,12 +470,12 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
   PythonFile py_file(PyRefType::Borrowed, $input);
   if (!py_file) {
     PyErr_SetString(PyExc_TypeError, "not a file");
-    return nullptr;
+    SWIG_fail;
   }
   auto sp = unwrapOrSetPythonException(
       py_file.ConvertToFileForcingUseOfScriptingIOMethods());
   if (!sp)
-    return nullptr;
+    SWIG_fail;
   $1 = sp;
 }
 
@@ -402,12 +483,12 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
   PythonFile py_file(PyRefType::Borrowed, $input);
   if (!py_file) {
     PyErr_SetString(PyExc_TypeError, "not a file");
-    return nullptr;
+    SWIG_fail;
   }
   auto sp =
       unwrapOrSetPythonException(py_file.ConvertToFile(/*borrowed=*/true));
   if (!sp)
-    return nullptr;
+    SWIG_fail;
   $1 = sp;
 }
 
@@ -415,12 +496,12 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
   PythonFile py_file(PyRefType::Borrowed, $input);
   if (!py_file) {
     PyErr_SetString(PyExc_TypeError, "not a file");
-    return nullptr;
+    SWIG_fail;
   }
   auto sp = unwrapOrSetPythonException(
       py_file.ConvertToFileForcingUseOfScriptingIOMethods(/*borrowed=*/true));
   if (!sp)
-    return nullptr;
+    SWIG_fail;
   $1 = sp;
 }
 
@@ -435,11 +516,11 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
 
 %typemap(out) lldb::FileSP {
   $result = nullptr;
-  lldb::FileSP &sp = $1;
+  const lldb::FileSP &sp = $1;
   if (sp) {
     PythonFile pyfile = unwrapOrSetPythonException(PythonFile::FromFile(*sp));
     if (!pyfile.IsValid())
-      return nullptr;
+      SWIG_fail;
     $result = pyfile.release();
   }
   if (!$result) {
@@ -468,7 +549,7 @@ template <> bool SetNumberFromPyObject<double>(double &number, PyObject *obj) {
     py_str.release();
   } else {
     PyErr_SetString(PyExc_TypeError, "not a string-like object");
-    return NULL;
+    SWIG_fail;
   }
 }
 

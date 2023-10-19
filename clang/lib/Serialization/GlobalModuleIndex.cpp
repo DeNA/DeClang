@@ -277,7 +277,7 @@ GlobalModuleIndex::readIndex(StringRef Path) {
       return std::make_pair(nullptr, Res.takeError());
   }
 
-  return std::make_pair(new GlobalModuleIndex(std::move(Buffer), Cursor),
+  return std::make_pair(new GlobalModuleIndex(std::move(Buffer), std::move(Cursor)),
                         llvm::Error::success());
 }
 
@@ -657,6 +657,9 @@ llvm::Error GlobalModuleIndexBuilder::loadModuleFile(const FileEntry *File) {
         SmallString<128> ImportedFile(Record.begin() + Idx,
                                       Record.begin() + Idx + Length);
         Idx += Length;
+
+        // Skip the module cache key.
+        Idx += Record[Idx] + 1;
 
         // Find the imported module file.
         auto DependsOnFile

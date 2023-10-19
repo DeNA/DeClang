@@ -23,6 +23,7 @@
 #include "lldb/Symbol/Type.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-private.h"
 
 class CommandObjectObjC_ClassTable_Dump;
@@ -82,6 +83,11 @@ public:
                                strcmp(class_name, "NSCFType") == 0);
       }
       return (m_is_cf == eLazyBoolYes);
+    }
+
+    /// Determine whether this class is implemented in Swift.
+    virtual lldb::LanguageType GetImplementationLanguage() const {
+      return lldb::eLanguageTypeObjC;
     }
 
     virtual bool IsValid() = 0;
@@ -158,7 +164,7 @@ public:
     virtual CompilerType RealizeType(const char *name, bool for_expression);
 
   protected:
-    std::unique_ptr<TypeSystemClang> m_scratch_ast_ctx_up;
+    std::shared_ptr<TypeSystemClang> m_scratch_ast_ctx_sp;
   };
 
   class ObjCExceptionPrecondition : public BreakpointPrecondition {

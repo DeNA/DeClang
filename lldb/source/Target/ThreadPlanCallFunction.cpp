@@ -29,6 +29,7 @@
 
 #ifdef LLDB_ENABLE_SWIFT
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
+#include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #endif //LLDB_ENABLE_SWIFT
 
 using namespace lldb;
@@ -38,7 +39,7 @@ using namespace lldb_private;
 bool ThreadPlanCallFunction::ConstructorSetup(
     Thread &thread, ABI *&abi, lldb::addr_t &start_load_addr,
     lldb::addr_t &function_load_addr) {
-  SetIsMasterPlan(true);
+  SetIsControllingPlan(true);
   SetOkayToDiscard(false);
   SetPrivate(true);
 
@@ -108,7 +109,10 @@ ThreadPlanCallFunction::ThreadPlanCallFunction(
       m_ignore_breakpoints(options.DoesIgnoreBreakpoints()),
       m_debug_execution(options.GetDebug()),
       m_trap_exceptions(options.GetTrapExceptions()), m_function_addr(function),
-      m_function_sp(0), m_takedown_done(false),
+      m_start_addr(), m_function_sp(0), m_subplan_sp(),
+      m_cxx_language_runtime(nullptr), m_objc_language_runtime(nullptr),
+      m_stored_thread_state(), m_real_stop_info_sp(), m_constructor_errors(),
+      m_return_valobj_sp(), m_takedown_done(false),
       m_should_clear_objc_exception_bp(false),
       m_should_clear_cxx_exception_bp(false),
       m_stop_address(LLDB_INVALID_ADDRESS),
@@ -140,7 +144,10 @@ ThreadPlanCallFunction::ThreadPlanCallFunction(
       m_ignore_breakpoints(options.DoesIgnoreBreakpoints()),
       m_debug_execution(options.GetDebug()),
       m_trap_exceptions(options.GetTrapExceptions()), m_function_addr(function),
-      m_function_sp(0), m_takedown_done(false),
+      m_start_addr(), m_function_sp(0), m_subplan_sp(),
+      m_cxx_language_runtime(nullptr), m_objc_language_runtime(nullptr),
+      m_stored_thread_state(), m_real_stop_info_sp(), m_constructor_errors(),
+      m_return_valobj_sp(), m_takedown_done(false),
       m_should_clear_objc_exception_bp(false),
       m_should_clear_cxx_exception_bp(false),
       m_stop_address(LLDB_INVALID_ADDRESS), m_return_type(CompilerType()) {}

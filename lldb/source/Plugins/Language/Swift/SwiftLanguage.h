@@ -18,6 +18,7 @@
 // Other libraries and framework includes
 // Project includes
 #include "lldb/Target/Language.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-private.h"
 
 namespace lldb_private {
@@ -84,16 +85,16 @@ public:
 
   static lldb_private::Language *CreateInstance(lldb::LanguageType language);
 
-  static lldb_private::ConstString GetPluginNameStatic();
+  static llvm::StringRef GetPluginNameStatic() { return "swift"; }
 
   bool SymbolNameFitsToLanguage(Mangled mangled) const override;
+
+  ConstString GetInstanceVariableName() override { return ConstString("self"); }
 
   //------------------------------------------------------------------
   // PluginInterface protocol
   //------------------------------------------------------------------
-  llvm::StringRef GetPluginName() override {
-    return GetPluginNameStatic().GetStringRef();
-  }
+  llvm::StringRef GetPluginName() override { return GetPluginNameStatic(); }
 };
 
 } // namespace lldb_private

@@ -43,6 +43,12 @@ parsing options from the command line.  ``LIT_OPTS`` is primarily useful for
 supplementing or overriding the command-line options supplied to :program:`lit`
 by ``check`` targets defined by a project's build system.
 
+:program:`lit` can also read options from response files which are specified as
+inputs using the ``@path/to/file.rsp`` syntax. Arguments read from a file must
+be one per line and are treated as if they were in the same place as the
+original file referencing argument on the command line. A response file can
+reference other response files.
+
 Users interested in the :program:`lit` architecture or designing a
 :program:`lit` testing implementation should see :ref:`lit-infrastructure`.
 
@@ -523,6 +529,9 @@ TestRunner.py:
  %S                      source dir (directory of the file currently being run)
  %p                      same as %S
  %{pathsep}              path separator
+ %{fs-src-root}          root component of file system paths pointing to the LLVM checkout
+ %{fs-tmp-root}          root component of file system paths pointing to the test's temporary directory
+ %{fs-sep}               file system path separator
  %t                      temporary file name unique to the test
  %basename_t             The last path component of %t but without the ``.tmp`` extension
  %T                      parent directory of %t (not unique, deprecated, do not use)
@@ -532,6 +541,16 @@ TestRunner.py:
  %/p                     %p but ``\`` is replaced by ``/``
  %/t                     %t but ``\`` is replaced by ``/``
  %/T                     %T but ``\`` is replaced by ``/``
+ %{s:real}               %s after expanding all symbolic links and substitute drives
+ %{S:real}               %S after expanding all symbolic links and substitute drives
+ %{p:real}               %p after expanding all symbolic links and substitute drives
+ %{t:real}               %t after expanding all symbolic links and substitute drives
+ %{T:real}               %T after expanding all symbolic links and substitute drives
+ %{/s:real}              %/s after expanding all symbolic links and substitute drives
+ %{/S:real}              %/S after expanding all symbolic links and substitute drives
+ %{/p:real}              %/p after expanding all symbolic links and substitute drives
+ %{/t:real}              %/t after expanding all symbolic links and substitute drives
+ %{/T:real}              %/T after expanding all symbolic links and substitute drives
  %{/s:regex_replacement} %/s but escaped for use in the replacement of a ``s@@@`` command in sed
  %{/S:regex_replacement} %/S but escaped for use in the replacement of a ``s@@@`` command in sed
  %{/p:regex_replacement} %/p but escaped for use in the replacement of a ``s@@@`` command in sed
@@ -552,14 +571,6 @@ TestRunner.py:
 Other substitutions are provided that are variations on this base set and
 further substitution patterns can be defined by each test module. See the
 modules :ref:`local-configuration-files`.
-
-By default, substitutions are expanded exactly once, so that if e.g. a
-substitution ``%build`` is defined in top of another substitution ``%cxx``,
-``%build`` will expand to ``%cxx`` textually, not to what ``%cxx`` expands to.
-However, if the ``recursiveExpansionLimit`` property of the ``TestingConfig``
-is set to a non-negative integer, substitutions will be expanded recursively
-until that limit is reached. It is an error if the limit is reached and
-expanding substitutions again would yield a different result.
 
 More detailed information on substitutions can be found in the
 :doc:`../TestingGuide`.

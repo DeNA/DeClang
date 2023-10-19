@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_Clang_H
-#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_Clang_H
+#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_CLANG_H
+#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_CLANG_H
 
 #include "MSVC.h"
 #include "clang/Basic/DebugInfoOptions.h"
@@ -26,6 +26,10 @@ namespace tools {
 
 /// Clang compiler tool.
 class LLVM_LIBRARY_VISIBILITY Clang : public Tool {
+  // Indicates whether this instance has integrated backend using
+  // internal LLVM infrastructure.
+  bool HasBackend;
+
 public:
   static const char *getBaseInputName(const llvm::opt::ArgList &Args,
                                       const InputInfo &Input);
@@ -39,7 +43,8 @@ private:
                                const Driver &D, const llvm::opt::ArgList &Args,
                                llvm::opt::ArgStringList &CmdArgs,
                                const InputInfo &Output,
-                               const InputInfoList &Inputs) const;
+                               const InputInfoList &Inputs,
+                               std::optional<StringRef> &Sysroot) const;
 
   void RenderTargetOptions(const llvm::Triple &EffectiveTriple,
                            const llvm::opt::ArgList &Args, bool KernelOrKext,
@@ -53,6 +58,8 @@ private:
                         bool KernelOrKext) const;
   void AddARM64TargetArgs(const llvm::opt::ArgList &Args,
                           llvm::opt::ArgStringList &CmdArgs) const;
+  void AddLoongArchTargetArgs(const llvm::opt::ArgList &Args,
+                              llvm::opt::ArgStringList &CmdArgs) const;
   void AddMIPSTargetArgs(const llvm::opt::ArgList &Args,
                          llvm::opt::ArgStringList &CmdArgs) const;
   void AddPPCTargetArgs(const llvm::opt::ArgList &Args,
@@ -98,12 +105,18 @@ private:
       StringRef Dir, Compilation &C, StringRef Target, const InputInfo &Output,
       const InputInfo &Input, const llvm::opt::ArgList &Args) const;
 
+  void AddPrefixMappingOptions(const llvm::opt::ArgList &Args,
+                               llvm::opt::ArgStringList &CmdArgs,
+                               const Driver &D,
+                               std::optional<StringRef> Sysroot) const;
+
 public:
-  Clang(const ToolChain &TC);
+  Clang(const ToolChain &TC, bool HasIntegratedBackend = true);
   ~Clang() override;
 
   bool hasGoodDiagnostics() const override { return true; }
   bool hasIntegratedAssembler() const override { return true; }
+  bool hasIntegratedBackend() const override { return HasBackend; }
   bool hasIntegratedCPP() const override { return true; }
   bool canEmitIR() const override { return true; }
 
@@ -124,6 +137,8 @@ public:
                         llvm::opt::ArgStringList &CmdArgs) const;
   void AddRISCVTargetArgs(const llvm::opt::ArgList &Args,
                           llvm::opt::ArgStringList &CmdArgs) const;
+  void AddAArch64TargetArgs(const llvm::opt::ArgList &Args,
+                            llvm::opt::ArgStringList &CmdArgs) const;
   bool hasGoodDiagnostics() const override { return true; }
   bool hasIntegratedAssembler() const override { return false; }
   bool hasIntegratedCPP() const override { return false; }
@@ -164,6 +179,40 @@ public:
                     const llvm::opt::ArgList &TCArgs,
                     const char *LinkingOutput) const override;
 };
+
+/// Offload binary tool.
+class LLVM_LIBRARY_VISIBILITY OffloadPackager final : public Tool {
+public:
+  OffloadPackager(const ToolChain &TC)
+      : Tool("Offload::Packager", "clang-offload-packager", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+};
+
+/// Linker wrapper tool.
+class LLVM_LIBRARY_VISIBILITY LinkerWrapper final : public Tool {
+  const Tool *Linker;
+
+public:
+  LinkerWrapper(const ToolChain &TC, const Tool *Linker)
+      : Tool("Offload::Linker", "linker", TC), Linker(Linker) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+};
+
+enum class DwarfFissionKind { None, Split, Single };
+
+DwarfFissionKind getDebugFissionKind(const Driver &D,
+                                     const llvm::opt::ArgList &Args,
+                                     llvm::opt::Arg *&Arg);
 
 } // end namespace tools
 

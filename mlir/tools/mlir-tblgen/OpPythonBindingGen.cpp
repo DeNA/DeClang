@@ -50,6 +50,10 @@ class _Dialect(_ods_ir.Dialect):
 
 )Py";
 
+constexpr const char *dialectExtensionTemplate = R"Py(
+from ._{0}_ops_gen import _Dialect
+)Py";
+
 /// Template for operation class:
 ///   {0} is the Python class name;
 ///   {1} is the operation name.
@@ -67,6 +71,7 @@ class {0}(_ods_ir.OpView):
 /// Each segment spec is either None (default) or an array of integers
 /// where:
 ///   1 = single element (expect non sequence operand/result)
+///   0 = optional element (expect a value or None)
 ///   -1 = operand/result is a sequence corresponding to a variadic
 constexpr const char *opClassSizedSegmentsTemplate = R"Py(
   _ODS_{0}_SEGMENTS = {1}
@@ -108,10 +113,13 @@ constexpr const char *opSingleAfterVariableTemplate = R"Py(
 ///   {1} is either 'operand' or 'result';
 ///   {2} is the total number of element groups;
 ///   {3} is the position of the current group in the group list.
+/// This works if we have only one variable-length group (and it's the optional
+/// operand/result): we can deduce it's absent if the `len(operation.{1}s)` is
+/// smaller than the total number of groups.
 constexpr const char *opOneOptionalTemplate = R"Py(
   @builtins.property
   def {0}(self):
-    return self.operation.{1}s[{3}] if len(self.operation.{1}s) > {2} else None
+    return None if len(self.operation.{1}s) < {2} else self.operation.{1}s[{3}]
 )Py";
 
 /// Template for the variadic group accessor in the single variadic group case:
@@ -266,6 +274,10 @@ static llvm::cl::opt<std::string>
                   llvm::cl::desc("The dialect to run the generator for"),
                   llvm::cl::init(""), llvm::cl::cat(clOpPythonBindingCat));
 
+static llvm::cl::opt<std::string> clDialectExtensionName(
+    "dialect-extension", llvm::cl::desc("The prefix of the dialect extension"),
+    llvm::cl::init(""), llvm::cl::cat(clOpPythonBindingCat));
+
 using AttributeClasses = DenseMap<StringRef, StringRef>;
 
 /// Checks whether `str` is a Python keyword.
@@ -310,7 +322,7 @@ static std::string attrSizedTraitForKind(const char *kind) {
 /// `operand` or `result` and is used verbatim in the emitted code.
 static void emitElementAccessors(
     const Operator &op, raw_ostream &os, const char *kind,
-    llvm::function_ref<unsigned(const Operator &)> getNumVariadic,
+    llvm::function_ref<unsigned(const Operator &)> getNumVariableLength,
     llvm::function_ref<int(const Operator &)> getNumElements,
     llvm::function_ref<const NamedTypeConstraint &(const Operator &, int)>
         getElement) {
@@ -325,12 +337,12 @@ static void emitElementAccessors(
                     llvm::StringRef(kind).drop_front());
   std::string attrSizedTrait = attrSizedTraitForKind(kind);
 
-  unsigned numVariadic = getNumVariadic(op);
+  unsigned numVariableLength = getNumVariableLength(op);
 
-  // If there is only one variadic element group, its size can be inferred from
-  // the total number of elements. If there are none, the generation is
-  // straightforward.
-  if (numVariadic <= 1) {
+  // If there is only one variable-length element group, its size can be
+  // inferred from the total number of elements. If there are none, the
+  // generation is straightforward.
+  if (numVariableLength <= 1) {
     bool seenVariableLength = false;
     for (int i = 0, e = getNumElements(op); i < e; ++i) {
       const NamedTypeConstraint &element = getElement(op, i);
@@ -363,7 +375,7 @@ static void emitElementAccessors(
       const NamedTypeConstraint &element = getElement(op, i);
       if (!element.name.empty()) {
         os << llvm::formatv(opVariadicEqualPrefixTemplate,
-                            sanitizeName(element.name), kind, numVariadic,
+                            sanitizeName(element.name), kind, numVariableLength,
                             numPrecedingSimple, numPrecedingVariadic);
         os << llvm::formatv(element.isVariableLength()
                                 ? opVariadicEqualVariadicTemplate
@@ -413,20 +425,20 @@ static const NamedTypeConstraint &getResult(const Operator &op, int i) {
 
 /// Emits accessors to Op operands.
 static void emitOperandAccessors(const Operator &op, raw_ostream &os) {
-  auto getNumVariadic = [](const Operator &oper) {
+  auto getNumVariableLengthOperands = [](const Operator &oper) {
     return oper.getNumVariableLengthOperands();
   };
-  emitElementAccessors(op, os, "operand", getNumVariadic, getNumOperands,
-                       getOperand);
+  emitElementAccessors(op, os, "operand", getNumVariableLengthOperands,
+                       getNumOperands, getOperand);
 }
 
 /// Emits accessors Op results.
 static void emitResultAccessors(const Operator &op, raw_ostream &os) {
-  auto getNumVariadic = [](const Operator &oper) {
+  auto getNumVariableLengthResults = [](const Operator &oper) {
     return oper.getNumVariableLengthResults();
   };
-  emitElementAccessors(op, os, "result", getNumVariadic, getNumResults,
-                       getResult);
+  emitElementAccessors(op, os, "result", getNumVariableLengthResults,
+                       getNumResults, getResult);
 }
 
 /// Emits accessors to Op attributes.
@@ -505,6 +517,9 @@ constexpr const char *singleResultAppendTemplate = "results.append({0})";
 ///   {0} is the field name.
 constexpr const char *optionalAppendOperandTemplate =
     "if {0} is not None: operands.append(_get_op_result_or_value({0}))";
+constexpr const char *optionalAppendAttrSizedOperandsTemplate =
+    "operands.append(_get_op_result_or_value({0}) if {0} is not None else "
+    "None)";
 constexpr const char *optionalAppendResultTemplate =
     "if {0} is not None: results.append({0})";
 
@@ -613,6 +628,13 @@ populateBuilderArgs(const Operator &op,
     if (!op.getArg(i).is<NamedAttribute *>())
       operandNames.push_back(name);
   }
+}
+
+/// Populates `builderArgs` with the Python-compatible names of builder function
+/// successor arguments. Additionally, `successorArgNames` is also populated.
+static void populateBuilderArgsSuccessors(
+    const Operator &op, llvm::SmallVectorImpl<std::string> &builderArgs,
+    llvm::SmallVectorImpl<std::string> &successorArgNames) {
 
   for (int i = 0, e = op.getNumSuccessors(); i < e; ++i) {
     NamedSuccessor successor = op.getSuccessor(i);
@@ -647,10 +669,11 @@ populateBuilderLinesAttr(const Operator &op,
       continue;
     }
 
-    builderLines.push_back(llvm::formatv(attribute->attr.isOptional()
-                                             ? initOptionalAttributeTemplate
-                                             : initAttributeTemplate,
-                                         attribute->name, argNames[i]));
+    builderLines.push_back(llvm::formatv(
+        (attribute->attr.isOptional() || attribute->attr.hasDefaultValue())
+            ? initOptionalAttributeTemplate
+            : initAttributeTemplate,
+        attribute->name, argNames[i]));
   }
 }
 
@@ -693,7 +716,11 @@ populateBuilderLinesOperand(const Operator &op,
     if (!element.isVariableLength()) {
       formatString = singleOperandAppendTemplate;
     } else if (element.isOptional()) {
-      formatString = optionalAppendOperandTemplate;
+      if (sizedSegments) {
+        formatString = optionalAppendAttrSizedOperandsTemplate;
+      } else {
+        formatString = optionalAppendOperandTemplate;
+      }
     } else {
       assert(element.isVariadic() && "unhandled element group type");
       // If emitting with sizedSegments, then we add the actual list-typed
@@ -846,6 +873,8 @@ static void emitDefaultOpBuilder(const Operator &op, raw_ostream &os) {
   populateBuilderArgsResults(op, builderArgs);
   size_t numResultArgs = builderArgs.size();
   populateBuilderArgs(op, builderArgs, operandArgNames, successorArgNames);
+  size_t numOperandAttrArgs = builderArgs.size() - numResultArgs;
+  populateBuilderArgsSuccessors(op, builderArgs, successorArgNames);
 
   populateBuilderLinesOperand(op, operandArgNames, builderLines);
   populateBuilderLinesAttr(
@@ -857,10 +886,52 @@ static void emitDefaultOpBuilder(const Operator &op, raw_ostream &os) {
   populateBuilderLinesSuccessors(op, successorArgNames, builderLines);
   populateBuilderRegions(op, builderArgs, builderLines);
 
-  builderArgs.push_back("*");
-  builderArgs.push_back("loc=None");
-  builderArgs.push_back("ip=None");
-  os << llvm::formatv(initTemplate, llvm::join(builderArgs, ", "),
+  // Layout of builderArgs vector elements:
+  // [ result_args  operand_attr_args successor_args regions ]
+
+  // Determine whether the argument corresponding to a given index into the
+  // builderArgs vector is a python keyword argument or not.
+  auto isKeywordArgFn = [&](size_t builderArgIndex) -> bool {
+    // All result, successor, and region arguments are positional arguments.
+    if ((builderArgIndex < numResultArgs) ||
+        (builderArgIndex >= (numResultArgs + numOperandAttrArgs)))
+      return false;
+    // Keyword arguments:
+    // - optional named attributes (including unit attributes)
+    // - default-valued named attributes
+    // - optional operands
+    Argument a = op.getArg(builderArgIndex - numResultArgs);
+    if (auto *nattr = a.dyn_cast<NamedAttribute *>())
+      return (nattr->attr.isOptional() || nattr->attr.hasDefaultValue());
+    if (auto *ntype = a.dyn_cast<NamedTypeConstraint *>())
+      return ntype->isOptional();
+    return false;
+  };
+
+  // StringRefs in functionArgs refer to strings allocated by builderArgs.
+  llvm::SmallVector<llvm::StringRef> functionArgs;
+
+  // Add positional arguments.
+  for (size_t i = 0, cnt = builderArgs.size(); i < cnt; ++i) {
+    if (!isKeywordArgFn(i))
+      functionArgs.push_back(builderArgs[i]);
+  }
+
+  // Add a bare '*' to indicate that all following arguments must be keyword
+  // arguments.
+  functionArgs.push_back("*");
+
+  // Add a default 'None' value to each keyword arg string, and then add to the
+  // function args list.
+  for (size_t i = 0, cnt = builderArgs.size(); i < cnt; ++i) {
+    if (isKeywordArgFn(i)) {
+      builderArgs[i].append("=None");
+      functionArgs.push_back(builderArgs[i]);
+    }
+  }
+  functionArgs.push_back("loc=None");
+  functionArgs.push_back("ip=None");
+  os << llvm::formatv(initTemplate, llvm::join(functionArgs, ", "),
                       llvm::join(builderLines, "\n    "));
 }
 
@@ -882,10 +953,10 @@ static void emitSegmentSpec(
   std::string segmentSpec("[");
   for (int i = 0, e = getNumElements(op); i < e; ++i) {
     const NamedTypeConstraint &element = getElement(op, i);
-    if (element.isVariableLength()) {
-      segmentSpec.append("-1,");
-    } else if (element.isOptional()) {
+    if (element.isOptional()) {
       segmentSpec.append("0,");
+    } else if (element.isVariadic()) {
+      segmentSpec.append("-1,");
     } else {
       segmentSpec.append("1,");
     }
@@ -905,7 +976,7 @@ static void emitRegionAttributes(const Operator &op, raw_ostream &os) {
 
 /// Emits named accessors to regions.
 static void emitRegionAccessors(const Operator &op, raw_ostream &os) {
-  for (auto en : llvm::enumerate(op.getRegions())) {
+  for (const auto &en : llvm::enumerate(op.getRegions())) {
     const NamedRegion &region = en.value();
     if (region.name.empty())
       continue;
@@ -951,8 +1022,14 @@ static bool emitAllOps(const llvm::RecordKeeper &records, raw_ostream &os) {
   AttributeClasses attributeClasses;
   constructAttributeMapping(records, attributeClasses);
 
-  os << llvm::formatv(fileHeader, clDialectName.getValue());
-  os << llvm::formatv(dialectClassTemplate, clDialectName.getValue());
+  bool isExtension = !clDialectExtensionName.empty();
+  os << llvm::formatv(fileHeader, isExtension
+                                      ? clDialectExtensionName.getValue()
+                                      : clDialectName.getValue());
+  if (isExtension)
+    os << llvm::formatv(dialectExtensionTemplate, clDialectName.getValue());
+  else
+    os << llvm::formatv(dialectClassTemplate, clDialectName.getValue());
 
   for (const llvm::Record *rec : records.getAllDerivedDefinitions("Op")) {
     Operator op(rec);

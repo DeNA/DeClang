@@ -21,6 +21,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/State.h"
 #include "lldb/Utility/Stream.h"
 
 using namespace lldb_private;
@@ -62,6 +63,15 @@ FunctionCaller *UtilityFunction::MakeFunctionCaller(
   ProcessSP process_sp = m_jit_process_wp.lock();
   if (!process_sp) {
     error.SetErrorString("Can't make a function caller without a process.");
+    return nullptr;
+  }
+  // Since we might need to allocate memory and maybe call code to make
+  // the caller, we need to be stopped.
+  if (process_sp->GetState() != lldb::eStateStopped) {
+    error.SetErrorStringWithFormatv(
+        "Can't make a function caller while the process is {0}: the process "
+        "must be stopped to allocate memory.",
+        StateAsCString(process_sp->GetState()));
     return nullptr;
   }
 

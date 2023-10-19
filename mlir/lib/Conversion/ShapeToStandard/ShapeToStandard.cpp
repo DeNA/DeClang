@@ -8,16 +8,21 @@
 
 #include "mlir/Conversion/ShapeToStandard/ShapeToStandard.h"
 
-#include "../PassDetail.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
-#include "mlir/Dialect/SCF/SCF.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Shape/IR/Shape.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/STLExtras.h"
+
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTSHAPETOSTANDARD
+#include "mlir/Conversion/Passes.h.inc"
+} // namespace mlir
 
 using namespace mlir;
 using namespace mlir::shape;
@@ -107,8 +112,8 @@ Value getBroadcastedDim(ImplicitLocOpBuilder lb, ValueRange extentTensors,
                 Value dimIsOne =
                     b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
                                             lesserRankOperandExtent, one);
-                Value dim = b.create<SelectOp>(loc, dimIsOne, broadcastedDim,
-                                               lesserRankOperandExtent);
+                Value dim = b.create<arith::SelectOp>(
+                    loc, dimIsOne, broadcastedDim, lesserRankOperandExtent);
                 b.create<scf::YieldOp>(loc, dim);
               })
             .getResult(0);
@@ -144,7 +149,7 @@ LogicalResult BroadcastOpConverter::matchAndRewrite(
   for (Value v : llvm::drop_begin(ranks, 1)) {
     Value rankIsGreater =
         lb.create<arith::CmpIOp>(arith::CmpIPredicate::ugt, v, maxRank);
-    maxRank = lb.create<SelectOp>(rankIsGreater, v, maxRank);
+    maxRank = lb.create<arith::SelectOp>(rankIsGreater, v, maxRank);
   }
 
   // Calculate the difference of ranks and the maximum rank for later offsets.
@@ -193,10 +198,10 @@ LogicalResult ConstShapeOpConverter::matchAndRewrite(
     extentOperands.push_back(
         rewriter.create<arith::ConstantIndexOp>(loc, extent.getLimitedValue()));
   }
-  Type indexTy = rewriter.getIndexType();
+  Type resultTy =
+      RankedTensorType::get({op.getShape().size()}, rewriter.getIndexType());
   Value tensor =
-      rewriter.create<tensor::FromElementsOp>(loc, indexTy, extentOperands);
-  Type resultTy = RankedTensorType::get({op.getShape().size()}, indexTy);
+      rewriter.create<tensor::FromElementsOp>(loc, resultTy, extentOperands);
   rewriter.replaceOpWithNewOp<tensor::CastOp>(op, resultTy, tensor);
   return success();
 }
@@ -259,7 +264,7 @@ LogicalResult IsBroadcastableOpConverter::matchAndRewrite(
   for (Value v : llvm::drop_begin(ranks, 1)) {
     Value rankIsGreater =
         lb.create<arith::CmpIOp>(arith::CmpIPredicate::ugt, v, maxRank);
-    maxRank = lb.create<SelectOp>(rankIsGreater, v, maxRank);
+    maxRank = lb.create<arith::SelectOp>(rankIsGreater, v, maxRank);
   }
 
   // Calculate the difference of ranks and the maximum rank for later offsets.
@@ -318,7 +323,29 @@ LogicalResult IsBroadcastableOpConverter::matchAndRewrite(
         b.create<scf::YieldOp>(loc, broadcastable);
       });
 
-  rewriter.replaceOp(op, reduceResult.results().front());
+  rewriter.replaceOp(op, reduceResult.getResults().front());
+  return success();
+}
+
+namespace {
+class DimOpConverter : public OpConversionPattern<DimOp> {
+  using OpConversionPattern<DimOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(DimOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+} // namespace
+
+LogicalResult
+DimOpConverter::matchAndRewrite(DimOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const {
+  // Lower to dim(X, i) to get_extent(shape_of(X), i) and rely on further
+  // lowerings. This can be further optimized if needed to avoid intermediate
+  // steps.
+  auto shapeOf = rewriter.create<shape::ShapeOfOp>(op.getLoc(), op.getValue());
+  rewriter.replaceOpWithNewOp<shape::GetExtentOp>(op, op.getType(), shapeOf,
+                                                  op.getIndex());
   return success();
 }
 
@@ -569,7 +596,8 @@ LogicalResult ShapeOfOpConversion::matchAndRewrite(
 
     // Materialize extent tensor.
     Value staticExtentTensor = rewriter.create<tensor::FromElementsOp>(
-        loc, rewriter.getIndexType(), extentValues);
+        loc, RankedTensorType::get({rank}, rewriter.getIndexType()),
+        extentValues);
     rewriter.replaceOpWithNewOp<tensor::CastOp>(op, op.getType(),
                                                 staticExtentTensor);
     return success();
@@ -577,7 +605,7 @@ LogicalResult ShapeOfOpConversion::matchAndRewrite(
 
   // Lower to `tensor.generate` otherwise.
   auto *ctx = rewriter.getContext();
-  Value rank = rewriter.create<mlir::RankOp>(loc, tensor);
+  Value rank = rewriter.create<tensor::RankOp>(loc, tensor);
   rewriter.replaceOpWithNewOp<tensor::GenerateOp>(
       op, getExtentTensorType(ctx), ValueRange{rank},
       [&](OpBuilder &b, Location loc, ValueRange args) {
@@ -618,7 +646,7 @@ LogicalResult SplitAtOpConversion::matchAndRewrite(
   Value add = b.create<arith::AddIOp>(originalIndex, rank);
   Value indexIsNegative =
       b.create<arith::CmpIOp>(arith::CmpIPredicate::slt, originalIndex, zero);
-  Value index = b.create<SelectOp>(indexIsNegative, add, originalIndex);
+  Value index = b.create<arith::SelectOp>(indexIsNegative, add, originalIndex);
 
   Value one = b.create<arith::ConstantIndexOp>(1);
   Value head =
@@ -657,7 +685,7 @@ namespace {
 namespace {
 /// Conversion pass.
 class ConvertShapeToStandardPass
-    : public ConvertShapeToStandardBase<ConvertShapeToStandardPass> {
+    : public impl::ConvertShapeToStandardBase<ConvertShapeToStandardPass> {
 
   void runOnOperation() override;
 };
@@ -667,9 +695,9 @@ void ConvertShapeToStandardPass::runOnOperation() {
   // Setup target legality.
   MLIRContext &ctx = getContext();
   ConversionTarget target(ctx);
-  target.addLegalDialect<arith::ArithmeticDialect, StandardOpsDialect,
-                         SCFDialect, tensor::TensorDialect>();
-  target.addLegalOp<CstrRequireOp, FuncOp, ModuleOp>();
+  target.addLegalDialect<arith::ArithDialect, SCFDialect,
+                         tensor::TensorDialect>();
+  target.addLegalOp<CstrRequireOp, func::FuncOp, ModuleOp>();
 
   // Setup conversion patterns.
   RewritePatternSet patterns(&ctx);
@@ -692,6 +720,7 @@ void mlir::populateShapeToStandardConversionPatterns(
       BroadcastOpConverter,
       ConstShapeOpConverter,
       ConstSizeOpConversion,
+      DimOpConverter,
       IsBroadcastableOpConverter,
       GetExtentOpConverter,
       RankOpConverter,

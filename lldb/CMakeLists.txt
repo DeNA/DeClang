@@ -11,9 +11,20 @@ set(CMAKE_MODULE_PATH
 # using LLVM as an external library.
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(lldb)
+  set(LLDB_BUILT_STANDALONE TRUE)
+endif()
+
+# Must go below project(..)
+include(GNUInstallDirs)
+
+# BEGIN SWIFT MOD
+option(LLDB_ENABLE_SWIFT_SUPPORT "Enable swift support" ON)
+# END SWIFT MOD
+
+if(LLDB_BUILT_STANDALONE)
   include(LLDBStandalone)
 
-  set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to conform to")
+  set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
   set(CMAKE_CXX_STANDARD_REQUIRED YES)
   set(CMAKE_CXX_EXTENSIONS NO)
 else()
@@ -26,14 +37,30 @@ include(LLDBConfig)
 include(AddLLDB)
 
 # BEGIN - Swift Mods
-if(EXISTS "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}")
-   list(APPEND CMAKE_MODULE_PATH
-        "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}/cmake"
-        "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}/cmake/modules")
-elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../swift)
-   list(APPEND CMAKE_MODULE_PATH
-        "${CMAKE_CURRENT_SOURCE_DIR}/../swift/cmake"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../swift/cmake/modules")
+if (LLDB_ENABLE_SWIFT_SUPPORT)
+  if(EXISTS "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}")
+     list(APPEND CMAKE_MODULE_PATH
+          "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}/cmake"
+          "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}/cmake/modules")
+  elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../swift)
+     list(APPEND CMAKE_MODULE_PATH
+          "${CMAKE_CURRENT_SOURCE_DIR}/../swift/cmake"
+          "${CMAKE_CURRENT_SOURCE_DIR}/../swift/cmake/modules")
+  endif()
+endif()
+
+# When we have the early SwiftSyntax build, we can include its parser.
+if (LLDB_ENABLE_SWIFT_SUPPORT)
+  if(SWIFT_PATH_TO_EARLYSWIFTSYNTAX_BUILD_DIR)
+    set(SWIFT_PATH_TO_EARLYSWIFTSYNTAX_TARGETS
+      ${SWIFT_PATH_TO_EARLYSWIFTSYNTAX_BUILD_DIR}/cmake/SwiftSyntaxTargets.cmake)
+    if(NOT EXISTS "${SWIFT_PATH_TO_EARLYSWIFTSYNTAX_TARGETS}")
+      message(STATUS "Skipping Swift Swift parser integration due to missing early SwiftSyntax")
+    else()
+      set(SWIFT_SWIFT_PARSER TRUE)
+      include(${SWIFT_PATH_TO_EARLYSWIFTSYNTAX_TARGETS})
+    endif()
+  endif()
 endif()
 # END - Swift Mods
 
@@ -47,24 +74,30 @@ if (WIN32)
 endif()
 
 if (LLDB_ENABLE_PYTHON)
-  if (NOT CMAKE_CROSSCOMPILING)
-    execute_process(
-      COMMAND ${Python3_EXECUTABLE}
-          -c "import distutils.sysconfig; print(distutils.sysconfig.get_python_lib(True, False, ''))"
-      OUTPUT_VARIABLE LLDB_PYTHON_DEFAULT_RELATIVE_PATH
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set(cachestring_LLDB_PYTHON_RELATIVE_PATH
+    "Path where Python modules are installed, relative to LLDB's install prefix")
+  set(cachestring_LLDB_PYTHON_EXE_RELATIVE_PATH
+    "Path to python interpreter exectuable, relative to python's install prefix")
+  set(cachestring_LLDB_PYTHON_EXT_SUFFIX
+    "Filename extension for native code python modules")
 
-    file(TO_CMAKE_PATH ${LLDB_PYTHON_DEFAULT_RELATIVE_PATH} LLDB_PYTHON_DEFAULT_RELATIVE_PATH)
-  else ()
-    if ("${LLDB_PYTHON_RELATIVE_PATH}" STREQUAL "")
-      message(FATAL_ERROR
-        "Crosscompiling LLDB with Python requires manually setting
-        LLDB_PYTHON_RELATIVE_PATH.")
-    endif ()
-  endif ()
-
-  set(LLDB_PYTHON_RELATIVE_PATH ${LLDB_PYTHON_DEFAULT_RELATIVE_PATH}
-    CACHE STRING "Path where Python modules are installed, relative to install prefix")
+  foreach(var LLDB_PYTHON_RELATIVE_PATH LLDB_PYTHON_EXE_RELATIVE_PATH LLDB_PYTHON_EXT_SUFFIX)
+    if(NOT DEFINED ${var} AND NOT CMAKE_CROSSCOMPILING)
+      execute_process(
+        COMMAND ${Python3_EXECUTABLE}
+          ${CMAKE_CURRENT_SOURCE_DIR}/bindings/python/get-python-config.py
+          ${var}
+        OUTPUT_VARIABLE value
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      file(TO_CMAKE_PATH "${value}" value)
+      set(${var} ${value} CACHE STRING ${cachestring_${var}})
+    else()
+      if ("${${var}}" STREQUAL "")
+        message(FATAL_ERROR
+          "Crosscompiling LLDB with Python requires manually setting ${var}.")
+      endif()
+    endif()
+  endforeach()
 endif ()
 
 if (LLDB_ENABLE_LUA)
@@ -130,10 +163,17 @@ if (LLDB_ENABLE_LUA)
   finish_swig_lua("lldb-lua" "${lldb_lua_bindings_dir}" "${lldb_lua_target_dir}")
 endif()
 
+set(LLDB_INCLUDE_UNITTESTS ON)
+if (NOT TARGET llvm_gtest)
+  set(LLDB_INCLUDE_UNITTESTS OFF)
+endif()
+
 option(LLDB_INCLUDE_TESTS "Generate build targets for the LLDB unit tests." ${LLVM_INCLUDE_TESTS})
 if(LLDB_INCLUDE_TESTS)
   add_subdirectory(test)
-  add_subdirectory(unittests)
+  if (LLDB_INCLUDE_UNITTESTS)
+    add_subdirectory(unittests)
+  endif()
   add_subdirectory(utils)
 endif()
 

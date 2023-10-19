@@ -26,16 +26,18 @@
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFVerifier.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/FileCollector.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ThreadPool.h"
@@ -110,7 +112,7 @@ struct DsymutilOptions {
   std::vector<std::string> InputFiles;
   unsigned NumThreads;
   DWARFVerify Verify = DWARFVerify::None;
-  ReproducerMode ReproMode = ReproducerMode::Off;
+  ReproducerMode ReproMode = ReproducerMode::GenerateOnCrash;
   dsymutil::LinkOptions LinkOpts;
 };
 
@@ -205,23 +207,48 @@ static Error verifyOptions(const DsymutilOptions &Options) {
   return Error::success();
 }
 
-static Expected<AccelTableKind> getAccelTableKind(opt::InputArgList &Args) {
+static Expected<DwarfLinkerAccelTableKind>
+getAccelTableKind(opt::InputArgList &Args) {
   if (opt::Arg *Accelerator = Args.getLastArg(OPT_accelerator)) {
     StringRef S = Accelerator->getValue();
     if (S == "Apple")
-      return AccelTableKind::Apple;
+      return DwarfLinkerAccelTableKind::Apple;
     if (S == "Dwarf")
-      return AccelTableKind::Dwarf;
+      return DwarfLinkerAccelTableKind::Dwarf;
     if (S == "Pub")
-      return AccelTableKind::Pub;
+      return DwarfLinkerAccelTableKind::Pub;
     if (S == "Default")
-      return AccelTableKind::Default;
+      return DwarfLinkerAccelTableKind::Default;
+    if (S == "None")
+      return DwarfLinkerAccelTableKind::None;
+    return make_error<StringError>("invalid accelerator type specified: '" + S +
+                                       "'. Supported values are 'Apple', "
+                                       "'Dwarf', 'Pub', 'Default' and 'None'.",
+                                   inconvertibleErrorCode());
+  }
+  return DwarfLinkerAccelTableKind::Default;
+}
+
+static Expected<ReproducerMode> getReproducerMode(opt::InputArgList &Args) {
+  if (Args.hasArg(OPT_gen_reproducer))
+    return ReproducerMode::GenerateOnExit;
+  if (opt::Arg *Reproducer = Args.getLastArg(OPT_reproducer)) {
+    StringRef S = Reproducer->getValue();
+    if (S == "GenerateOnExit")
+      return ReproducerMode::GenerateOnExit;
+    if (S == "GenerateOnCrash")
+      return ReproducerMode::GenerateOnCrash;
+    if (S == "Use")
+      return ReproducerMode::Use;
+    if (S == "Off")
+      return ReproducerMode::Off;
     return make_error<StringError>(
-        "invalid accelerator type specified: '" + S +
-            "'. Support values are 'Apple', 'Dwarf', 'Pub' and 'Default'.",
+        "invalid reproducer mode: '" + S +
+            "'. Supported values are 'GenerateOnExit', 'GenerateOnCrash', "
+            "'Use', 'Off'.",
         inconvertibleErrorCode());
   }
-  return AccelTableKind::Default;
+  return ReproducerMode::GenerateOnCrash;
 }
 
 static Expected<DWARFVerify> getVerifyKind(opt::InputArgList &Args) {
@@ -239,7 +266,7 @@ static Expected<DWARFVerify> getVerifyKind(opt::InputArgList &Args) {
       return DWARFVerify::None;
     return make_error<StringError>(
         "invalid verify type specified: '" + S +
-            "'. Support values are 'input', 'output', 'all' and 'none'.",
+            "'. Supported values are 'input', 'output', 'all' and 'none'.",
         inconvertibleErrorCode());
   }
   return DWARFVerify::None;
@@ -270,18 +297,22 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
   Options.LinkOpts.Update = Args.hasArg(OPT_update);
   Options.LinkOpts.Verbose = Args.hasArg(OPT_verbose);
   Options.LinkOpts.Statistics = Args.hasArg(OPT_statistics);
+  Options.LinkOpts.Fat64 = Args.hasArg(OPT_fat64);
   Options.LinkOpts.KeepFunctionForStatic =
       Args.hasArg(OPT_keep_func_for_static);
 
   if (opt::Arg *ReproducerPath = Args.getLastArg(OPT_use_reproducer)) {
     Options.ReproMode = ReproducerMode::Use;
     Options.ReproducerPath = ReproducerPath->getValue();
+  } else {
+    if (Expected<ReproducerMode> ReproMode = getReproducerMode(Args)) {
+      Options.ReproMode = *ReproMode;
+    } else {
+      return ReproMode.takeError();
+    }
   }
 
-  if (Args.hasArg(OPT_gen_reproducer))
-    Options.ReproMode = ReproducerMode::Generate;
-
-  if (Expected<AccelTableKind> AccelKind = getAccelTableKind(Args)) {
+  if (Expected<DwarfLinkerAccelTableKind> AccelKind = getAccelTableKind(Args)) {
     Options.LinkOpts.TheAccelTableKind = *AccelKind;
   } else {
     return AccelKind.takeError();
@@ -517,7 +548,7 @@ getOutputFileName(StringRef InputFile, const DsymutilOptions &Options) {
   return OutputLocation(std::string(Path.str()), ResourceDir);
 }
 
-int main(int argc, char **argv) {
+int dsymutil_main(int argc, char **argv) {
   InitLLVM X(argc, argv);
 
   // Parse arguments.
@@ -565,8 +596,8 @@ int main(int argc, char **argv) {
   InitializeAllTargets();
   InitializeAllAsmPrinters();
 
-  auto Repro =
-      Reproducer::createReproducer(Options.ReproMode, Options.ReproducerPath);
+  auto Repro = Reproducer::createReproducer(Options.ReproMode,
+                                            Options.ReproducerPath, argc, argv);
   if (!Repro) {
     WithColor::error() << toString(Repro.takeError());
     return EXIT_FAILURE;
@@ -658,109 +689,134 @@ int main(int argc, char **argv) {
       VerifyOutput = false;
     }
 
-    SmallVector<MachOUtils::ArchAndFile, 4> TempFiles;
+    // Set up a crash recovery context.
+    CrashRecoveryContext::Enable();
+    CrashRecoveryContext CRC;
+    CRC.DumpStackAndCleanupOnFailure = true;
+
     std::atomic_char AllOK(1);
-    for (auto &Map : *DebugMapPtrsOrErr) {
-      if (Options.LinkOpts.Verbose || Options.DumpDebugMap)
-        Map->print(outs());
+    SmallVector<MachOUtils::ArchAndFile, 4> TempFiles;
 
-      if (Options.DumpDebugMap)
-        continue;
+    const bool Crashed = !CRC.RunSafely([&]() {
+      for (auto &Map : *DebugMapPtrsOrErr) {
+        if (Options.LinkOpts.Verbose || Options.DumpDebugMap)
+          Map->print(outs());
 
-      if (!Options.SymbolMap.empty())
-        Options.LinkOpts.Translator = SymMapLoader.Load(InputFile, *Map);
+        if (Options.DumpDebugMap)
+          continue;
 
-      if (Map->begin() == Map->end())
-        WithColor::warning()
-            << "no debug symbols in executable (-arch "
-            << MachOUtils::getArchName(Map->getTriple().getArchName()) << ")\n";
+        if (!Options.SymbolMap.empty())
+          Options.LinkOpts.Translator = SymMapLoader.Load(InputFile, *Map);
 
-      // Using a std::shared_ptr rather than std::unique_ptr because move-only
-      // types don't work with std::bind in the ThreadPool implementation.
-      std::shared_ptr<raw_fd_ostream> OS;
+        if (Map->begin() == Map->end())
+          WithColor::warning()
+              << "no debug symbols in executable (-arch "
+              << MachOUtils::getArchName(Map->getTriple().getArchName())
+              << ")\n";
 
-      std::string OutputFile = OutputLocationOrErr->DWARFFile;
-      if (NeedsTempFiles) {
-        TempFiles.emplace_back(Map->getTriple().getArchName().str());
+        // Using a std::shared_ptr rather than std::unique_ptr because move-only
+        // types don't work with std::bind in the ThreadPool implementation.
+        std::shared_ptr<raw_fd_ostream> OS;
 
-        auto E = TempFiles.back().createTempFile();
-        if (E) {
-          WithColor::error() << toString(std::move(E));
-          return EXIT_FAILURE;
+        std::string OutputFile = OutputLocationOrErr->DWARFFile;
+        if (NeedsTempFiles) {
+          TempFiles.emplace_back(Map->getTriple().getArchName().str());
+
+          auto E = TempFiles.back().createTempFile();
+          if (E) {
+            WithColor::error() << toString(std::move(E));
+            AllOK.fetch_and(false);
+            return;
+          }
+
+          auto &TempFile = *(TempFiles.back().File);
+          OS = std::make_shared<raw_fd_ostream>(TempFile.FD,
+                                                /*shouldClose*/ false);
+          OutputFile = TempFile.TmpName;
+        } else {
+          std::error_code EC;
+          OS = std::make_shared<raw_fd_ostream>(
+              Options.LinkOpts.NoOutput ? "-" : OutputFile, EC,
+              sys::fs::OF_None);
+          if (EC) {
+            WithColor::error() << OutputFile << ": " << EC.message();
+            AllOK.fetch_and(false);
+            return;
+          }
         }
 
-        auto &TempFile = *(TempFiles.back().File);
-        OS = std::make_shared<raw_fd_ostream>(TempFile.FD,
-                                              /*shouldClose*/ false);
-        OutputFile = TempFile.TmpName;
-      } else {
-        std::error_code EC;
-        OS = std::make_shared<raw_fd_ostream>(
-            Options.LinkOpts.NoOutput ? "-" : OutputFile, EC, sys::fs::OF_None);
-        if (EC) {
-          WithColor::error() << OutputFile << ": " << EC.message();
-          return EXIT_FAILURE;
-        }
+        auto LinkLambda = [&,
+                           OutputFile](std::shared_ptr<raw_fd_ostream> Stream,
+                                       LinkOptions Options) {
+          AllOK.fetch_and(
+              linkDwarf(*Stream, BinHolder, *Map, std::move(Options)));
+          Stream->flush();
+          if (VerifyOutput) {
+            AllOK.fetch_and(verifyOutput(
+                OutputFile, Map->getTriple().getArchName(), Options.Verbose));
+          }
+        };
+
+        // FIXME: The DwarfLinker can have some very deep recursion that can max
+        // out the (significantly smaller) stack when using threads. We don't
+        // want this limitation when we only have a single thread.
+        if (S.ThreadsRequested == 1)
+          LinkLambda(OS, Options.LinkOpts);
+        else
+          Threads.async(LinkLambda, OS, Options.LinkOpts);
       }
 
-      auto LinkLambda = [&, OutputFile](std::shared_ptr<raw_fd_ostream> Stream,
-                                        LinkOptions Options) {
-        AllOK.fetch_and(
-            linkDwarf(*Stream, BinHolder, *Map, std::move(Options)));
-        Stream->flush();
-        if (VerifyOutput) {
-          AllOK.fetch_and(verifyOutput(
-              OutputFile, Map->getTriple().getArchName(), Options.Verbose));
-        }
-      };
+      Threads.wait();
+    });
 
-      // FIXME: The DwarfLinker can have some very deep recursion that can max
-      // out the (significantly smaller) stack when using threads. We don't
-      // want this limitation when we only have a single thread.
-      if (S.ThreadsRequested == 1)
-        LinkLambda(OS, Options.LinkOpts);
-      else
-        Threads.async(LinkLambda, OS, Options.LinkOpts);
-    }
-
-    Threads.wait();
+    if (Crashed)
+      (*Repro)->generate();
 
     if (!AllOK)
       return EXIT_FAILURE;
 
     if (NeedsTempFiles) {
-      // Universal Mach-O files can't have an archicture slice that starts
-      // beyond the 4GB boundary. "lipo" can creeate a 64 bit universal header,
-      // but not all tools can parse these files so we want to return an error
-      // if the file can't be encoded as a file with a 32 bit universal header.
-      // To detect this, we check the size of each architecture's skinny Mach-O
-      // file and add up the offsets. If they exceed 4GB, then we return an
-      // error.
+      const bool Fat64 = Options.LinkOpts.Fat64;
+      if (!Fat64) {
+        // Universal Mach-O files can't have an archicture slice that starts
+        // beyond the 4GB boundary. "lipo" can create a 64 bit universal
+        // header, but not all tools can parse these files so we want to return
+        // an error if the file can't be encoded as a file with a 32 bit
+        // universal header. To detect this, we check the size of each
+        // architecture's skinny Mach-O file and add up the offsets. If they
+        // exceed 4GB, then we return an error.
 
-      // First we compute the right offset where the first architecture will fit
-      // followin the 32 bit universal header. The 32 bit universal header
-      // starts with a uint32_t magic and a uint32_t number of architecture
-      // infos. Then it is followed by 5 uint32_t values for each architecture.
-      // So we set the start offset to the right value so we can calculate the
-      // exact offset that the first architecture slice can start at.
-      constexpr uint64_t MagicAndCountSize = 2 * 4;
-      constexpr uint64_t UniversalArchInfoSize = 5 * 4;
-      uint64_t FileOffset = MagicAndCountSize +
-          UniversalArchInfoSize * TempFiles.size();
-      for (const auto &File: TempFiles) {
-        ErrorOr<vfs::Status> stat = Options.LinkOpts.VFS->status(File.path());
-        if (!stat)
-          break;
-        FileOffset += stat->getSize();
-        if (FileOffset > UINT32_MAX) {
-          WithColor::error() << "the univesral binary has a slice with an "
-              "offset exceeds 4GB and will produce an invalid Mach-O file.";
-          return EXIT_FAILURE;
+        // First we compute the right offset where the first architecture will
+        // fit followin the 32 bit universal header. The 32 bit universal header
+        // starts with a uint32_t magic and a uint32_t number of architecture
+        // infos. Then it is followed by 5 uint32_t values for each
+        // architecture. So we set the start offset to the right value so we can
+        // calculate the exact offset that the first architecture slice can
+        // start at.
+        constexpr uint64_t MagicAndCountSize = 2 * 4;
+        constexpr uint64_t UniversalArchInfoSize = 5 * 4;
+        uint64_t FileOffset =
+            MagicAndCountSize + UniversalArchInfoSize * TempFiles.size();
+        for (const auto &File : TempFiles) {
+          ErrorOr<vfs::Status> stat = Options.LinkOpts.VFS->status(File.path());
+          if (!stat)
+            break;
+          if (FileOffset > UINT32_MAX) {
+            WithColor::error()
+                << formatv("the universal binary has a slice with a starting "
+                           "offset ({0:x}) that exceeds 4GB and will produce "
+                           "an invalid Mach-O file. Use the -fat64 flag to "
+                           "generate a universal binary with a 64-bit header "
+                           "but note that not all tools support this format.",
+                           FileOffset);
+            return EXIT_FAILURE;
+          }
+          FileOffset += stat->getSize();
         }
       }
-      if (!MachOUtils::generateUniversalBinary(TempFiles,
-                                               OutputLocationOrErr->DWARFFile,
-                                               Options.LinkOpts, SDKPath))
+      if (!MachOUtils::generateUniversalBinary(
+              TempFiles, OutputLocationOrErr->DWARFFile, Options.LinkOpts,
+              SDKPath, Fat64))
         return EXIT_FAILURE;
     }
   }

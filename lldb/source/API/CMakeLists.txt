@@ -8,10 +8,6 @@ if (LLDB_ENABLE_SWIFT_SUPPORT)
 endif()
 ## END SWIFT
 
-if ( CMAKE_SYSTEM_NAME MATCHES "Windows" )
-  add_definitions( -DEXPORT_LIBLLDB )
-endif()
-
 get_property(LLDB_ALL_PLUGINS GLOBAL PROPERTY LLDB_PLUGINS)
 
 if(LLDB_BUILD_FRAMEWORK)
@@ -73,6 +69,7 @@ add_lldb_library(liblldb SHARED ${option_framework}
   SBQueue.cpp
   SBQueueItem.cpp
   SBReproducer.cpp
+  SBScriptObject.cpp
   SBSection.cpp
   SBSourceManager.cpp
   SBStream.cpp
@@ -86,6 +83,7 @@ add_lldb_library(liblldb SHARED ${option_framework}
   SBThreadCollection.cpp
   SBThreadPlan.cpp
   SBTrace.cpp
+  SBTraceCursor.cpp
   SBType.cpp
   SBTypeCategory.cpp
   SBTypeEnumMember.cpp
@@ -125,10 +123,6 @@ add_lldb_library(liblldb SHARED ${option_framework}
   ${option_install_prefix}
 )
 
-# BEGIN Swift Mods
-add_properties_for_swift_modules(liblldb)
-# END Swift Mods
-
 # lib/pythonX.Y/dist-packages/lldb/_lldb.so is a symlink to lib/liblldb.so,
 # which depends on lib/libLLVM*.so (BUILD_SHARED_LIBS) or lib/libLLVM-10git.so
 # (LLVM_LINK_LLVM_DYLIB). Add an additional rpath $ORIGIN/../../../../lib so
@@ -151,6 +145,16 @@ if(Python3_RPATH)
       "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/"
     )
 endif()
+
+# BEGIN Swift Mods
+# Note that add_properties_for_swift_modules appends RPATHs so it's critical
+# that this is called after lldb_setup_rpaths.
+if(LLDB_BUILD_FRAMEWORK)
+  add_properties_for_swift_modules(liblldb "../../../../../../usr/" "../../../../")
+else()
+  add_properties_for_swift_modules(liblldb "../")
+endif()
+# END Swift Mods
 
 if(LLDB_ENABLE_PYTHON)
   add_dependencies(liblldb swig_wrapper_python)
@@ -191,6 +195,7 @@ set_target_properties(liblldb
   VERSION ${LLDB_VERSION}
 )
 
+target_compile_definitions(liblldb PRIVATE LLDB_IN_LIBLLDB)
 if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
   if (NOT LLDB_EXPORT_ALL_SYMBOLS)
     # If we're not exporting all symbols, we'll want to explicitly set
@@ -238,6 +243,16 @@ endif()
 
 if(LLDB_BUILD_FRAMEWORK)
   include(LLDBFramework)
+
+  if (TARGET install-liblldb)
+    add_dependencies(install-liblldb
+      lldb-framework-cleanup)
+  endif()
+
+  if (TARGET install-liblldb-stripped)
+    add_dependencies(install-liblldb-stripped
+      lldb-framework-cleanup)
+  endif()
 endif()
 
 ## BEGIN SWIFT

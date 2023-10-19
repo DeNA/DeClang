@@ -82,6 +82,7 @@
 #include "../cfcpp/CFCString.h"
 
 #include <objc/objc-auto.h>
+#include <os/log.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <Foundation/Foundation.h>
@@ -97,6 +98,20 @@ int __pthread_fchdir(int fildes);
 
 using namespace lldb;
 using namespace lldb_private;
+
+static os_log_t g_os_log;
+static std::once_flag g_os_log_once;
+
+void Host::SystemLog(llvm::StringRef message) {
+  if (__builtin_available(macos 10.12, iOS 10, tvOS 10, watchOS 3, *)) {
+    std::call_once(g_os_log_once, []() {
+      g_os_log = os_log_create("com.apple.dt.lldb", "lldb");
+    });
+    os_log(g_os_log, "%{public}s", message.str().c_str());
+  } else {
+    llvm::errs() << message;
+  }
+}
 
 bool Host::GetBundleDirectory(const FileSpec &file,
                               FileSpec &bundle_directory) {
@@ -138,8 +153,7 @@ bool Host::ResolveExecutableInBundle(FileSpec &file) {
 
 #if TARGET_OS_OSX
 
-static void *AcceptPIDFromInferior(void *arg) {
-  const char *connect_url = (const char *)arg;
+static void *AcceptPIDFromInferior(const char *connect_url) {
   ConnectionFileDescriptor file_conn;
   Status error;
   if (file_conn.Connect(connect_url, &error) == eConnectionStatusSuccess) {
@@ -197,7 +211,7 @@ LaunchInNewTerminalWithAppleScript(const char *exe_path,
     return error;
   }
 
-  darwin_debug_file_spec.GetFilename().SetCString("darwin-debug");
+  darwin_debug_file_spec.SetFilename("darwin-debug");
 
   if (!FileSystem::Instance().Exists(darwin_debug_file_spec)) {
     error.SetErrorStringWithFormat(
@@ -222,7 +236,7 @@ LaunchInNewTerminalWithAppleScript(const char *exe_path,
 
   FileSpec working_dir{launch_info.GetWorkingDirectory()};
   if (working_dir)
-    command.Printf(R"( --working-dir \"%s\")", working_dir.GetCString());
+    command.Printf(R"( --working-dir \"%s\")", working_dir.GetPath().c_str());
   else {
     char cwd[PATH_MAX];
     if (getcwd(cwd, PATH_MAX))
@@ -289,7 +303,7 @@ LaunchInNewTerminalWithAppleScript(const char *exe_path,
   // to the process that we wanted to launch. So when our process actually
   // gets launched, we will handshake with it and get the process ID for it.
   llvm::Expected<HostThread> accept_thread = ThreadLauncher::LaunchThread(
-      unix_socket_name, AcceptPIDFromInferior, connect_url);
+      unix_socket_name, [&] { return AcceptPIDFromInferior(connect_url); });
 
   if (!accept_thread)
     return Status(accept_thread.takeError());
@@ -1186,13 +1200,14 @@ static Status LaunchProcessPosixSpawn(const char *exe_path,
   FileSpec working_dir{launch_info.GetWorkingDirectory()};
   if (working_dir) {
     // Set the working directory on this thread only
-    if (__pthread_chdir(working_dir.GetCString()) < 0) {
+    std::string working_dir_path = working_dir.GetPath();
+    if (__pthread_chdir(working_dir_path.c_str()) < 0) {
       if (errno == ENOENT) {
         error.SetErrorStringWithFormat("No such file or directory: %s",
-                                       working_dir.GetCString());
+                                       working_dir_path.c_str());
       } else if (errno == ENOTDIR) {
         error.SetErrorStringWithFormat("Path doesn't name a directory: %s",
-                                       working_dir.GetCString());
+                                       working_dir_path.c_str());
       } else {
         error.SetErrorStringWithFormat("An unknown error occurred when "
                                        "changing directory for process "
@@ -1319,15 +1334,12 @@ Status Host::LaunchProcess(ProcessLaunchInfo &launch_info) {
 
   lldb::pid_t pid = LLDB_INVALID_PROCESS_ID;
 
-  // From now on we'll deal with the external (devirtualized) path.
-  auto exe_path = fs.GetExternalPath(exe_spec);
-  if (!exe_path)
-    return Status(exe_path.getError());
+  auto exe_path = exe_spec.GetPath();
 
   if (ShouldLaunchUsingXPC(launch_info))
-    error = LaunchProcessXPC(exe_path->c_str(), launch_info, pid);
+    error = LaunchProcessXPC(exe_path.c_str(), launch_info, pid);
   else
-    error = LaunchProcessPosixSpawn(exe_path->c_str(), launch_info, pid);
+    error = LaunchProcessPosixSpawn(exe_path.c_str(), launch_info, pid);
 
   if (pid != LLDB_INVALID_PROCESS_ID) {
     // If all went well, then set the process ID into the launch info
@@ -1441,11 +1453,8 @@ Status Host::ShellExpandArguments(ProcessLaunchInfo &launch_info) {
 }
 
 llvm::Expected<HostThread> Host::StartMonitoringChildProcess(
-    const Host::MonitorChildProcessCallback &callback, lldb::pid_t pid,
-    bool monitor_signals) {
+    const Host::MonitorChildProcessCallback &callback, lldb::pid_t pid) {
   unsigned long mask = DISPATCH_PROC_EXIT;
-  if (monitor_signals)
-    mask |= DISPATCH_PROC_SIGNAL;
 
   Log *log(GetLog(LLDBLog::Host | LLDBLog::Process));
 
@@ -1454,11 +1463,8 @@ llvm::Expected<HostThread> Host::StartMonitoringChildProcess(
       ::dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
 
   LLDB_LOGF(log,
-            "Host::StartMonitoringChildProcess "
-            "(callback, pid=%i, monitor_signals=%i) "
-            "source = %p\n",
-            static_cast<int>(pid), monitor_signals,
-            static_cast<void *>(source));
+            "Host::StartMonitoringChildProcess(callback, pid=%i) source = %p\n",
+            static_cast<int>(pid), static_cast<void *>(source));
 
   if (source) {
     Host::MonitorChildProcessCallback callback_copy = callback;
@@ -1469,27 +1475,20 @@ llvm::Expected<HostThread> Host::StartMonitoringChildProcess(
 
       int status = 0;
       int wait_pid = 0;
-      bool cancel = false;
-      bool exited = false;
       wait_pid = llvm::sys::RetryAfterSignal(-1, ::waitpid, pid, &status, 0);
       if (wait_pid >= 0) {
         int signal = 0;
         int exit_status = 0;
         const char *status_cstr = NULL;
-        if (WIFSTOPPED(status)) {
-          signal = WSTOPSIG(status);
-          status_cstr = "STOPPED";
-        } else if (WIFEXITED(status)) {
+        if (WIFEXITED(status)) {
           exit_status = WEXITSTATUS(status);
           status_cstr = "EXITED";
-          exited = true;
         } else if (WIFSIGNALED(status)) {
           signal = WTERMSIG(status);
           status_cstr = "SIGNALED";
-          exited = true;
           exit_status = -1;
         } else {
-          status_cstr = "???";
+          llvm_unreachable("Unknown status");
         }
 
         LLDB_LOGF(log,
@@ -1498,52 +1497,13 @@ llvm::Expected<HostThread> Host::StartMonitoringChildProcess(
                   pid, wait_pid, status, status_cstr, signal, exit_status);
 
         if (callback_copy)
-          cancel = callback_copy(pid, exited, signal, exit_status);
+          callback_copy(pid, signal, exit_status);
 
-        if (exited || cancel) {
-          ::dispatch_source_cancel(source);
-        }
+        ::dispatch_source_cancel(source);
       }
     });
 
     ::dispatch_resume(source);
   }
   return HostThread();
-}
-
-//----------------------------------------------------------------------
-// Log to both stderr and to ASL Logging when running on MacOSX.
-//----------------------------------------------------------------------
-void Host::SystemLog(SystemLogType type, const char *format, va_list args) {
-  if (format && format[0]) {
-    static aslmsg g_aslmsg = NULL;
-    if (g_aslmsg == NULL) {
-      g_aslmsg = ::asl_new(ASL_TYPE_MSG);
-      char asl_key_sender[PATH_MAX];
-      snprintf(asl_key_sender, sizeof(asl_key_sender),
-               "com.apple.LLDB.framework");
-      ::asl_set(g_aslmsg, ASL_KEY_SENDER, asl_key_sender);
-    }
-
-    // Copy the va_list so we can log this message twice
-    va_list copy_args;
-    va_copy(copy_args, args);
-    // Log to stderr
-    ::vfprintf(stderr, format, copy_args);
-    va_end(copy_args);
-
-    int asl_level;
-    switch (type) {
-    case eSystemLogError:
-      asl_level = ASL_LEVEL_ERR;
-      break;
-
-    case eSystemLogWarning:
-      asl_level = ASL_LEVEL_WARNING;
-      break;
-    }
-
-    // Log to ASL
-    ::asl_vlog(NULL, g_aslmsg, asl_level, format, args);
-  }
 }

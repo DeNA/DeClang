@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
+#include "SwiftExpressionParser.h"
 #include "lldb/Expression/LLVMUserExpression.h"
 #include "lldb/Expression/Materializer.h"
 
@@ -26,7 +28,7 @@
 // Project includes
 
 namespace lldb_private {
-class SwiftExpressionParser;
+class SwiftExpressionSourceCode;
   
 //----------------------------------------------------------------------
 /// @class SwiftUserExpression SwiftUserExpression.h
@@ -137,6 +139,10 @@ public:
   void WillStartExecuting() override;
   void DidFinishExecuting() override;
 
+  bool IsParseCacheable() override {
+    return m_parser->IsParseCacheable();
+  }
+
 private:
   //------------------------------------------------------------------
   /// Populate m_in_cplusplus_method and m_in_objectivec_method based on the
@@ -149,6 +155,11 @@ private:
   bool AddArguments(ExecutionContext &exe_ctx, std::vector<lldb::addr_t> &args,
                     lldb::addr_t struct_address,
                     DiagnosticManager &diagnostic_manager) override;
+
+  SwiftExpressionParser::ParseResult
+  GetTextAndSetExpressionParser(DiagnosticManager &diagnostic_manager,
+                  std::unique_ptr<SwiftExpressionSourceCode> &source_code,
+                  ExecutionContext &exe_ctx, ExecutionContextScope *exe_scope);
 
   SwiftUserExpressionHelper m_type_system_helper;
 
@@ -179,11 +190,12 @@ private:
     void DidDematerialize(lldb::ExpressionVariableSP &variable) override;
   };
 
+  llvm::Optional<SwiftScratchContextReader> m_swift_scratch_ctx;
   SwiftASTContextForExpressions *m_swift_ast_ctx;
   PersistentVariableDelegate m_persistent_variable_delegate;
   std::unique_ptr<SwiftExpressionParser> m_parser;
+  llvm::Optional<SwiftLanguageRuntime::GenericSignature> m_generic_signature;
   Status m_err;
-  llvm::Optional<SwiftScratchContextReader> m_swift_scratch_ctx;
   bool m_runs_in_playground_or_repl;
   bool m_needs_object_ptr = false;
   bool m_in_static_method = false;

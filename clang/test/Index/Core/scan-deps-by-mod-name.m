@@ -1,10 +1,12 @@
 // Use driver arguments.
 // RUN: rm -rf %t.mcp
 // RUN: echo %S > %t.result
-// RUN: c-index-test core --scan-deps-by-mod-name -module-name=ModA %S -- %clang -c -I %S/Inputs/module \
+// RUN: echo %S > %t_v2.result
+//
+// RUN: c-index-test core --scan-deps-by-mod-name -output-dir %t -module-name=ModA %S -- %clang -c -I %S/Inputs/module \
 // RUN:     -fmodules -fmodules-cache-path=%t.mcp \
 // RUN:     -o FoE.o -x objective-c >> %t.result
-// RUN: cat %t.result | sed 's/\\/\//g' | FileCheck %s
+// RUN: cat %t.result | sed 's/\\/\//g' | FileCheck %s -DOUTPUTS=%/t
 
 // CHECK: [[PREFIX:.*]]
 // CHECK-NEXT: modules:
@@ -20,8 +22,9 @@
 // CHECK-NEXT:       [[PREFIX]]/Inputs/module/module.modulemap
 // CHECK-NEXT:     build-args: {{.*}} -emit-module {{.*}} -fmodule-name=ModA {{.*}} -fno-implicit-modules {{.*}}
 // CHECK-NEXT: dependencies:
-// CHECK-NEXT:   context-hash:
-// CHECK-NEXT:   module-deps:
-// CHECK-NEXT:     ModA:[[HASH_MOD_A]]
-// CHECK-NEXT:   file-deps:
-// CHECK-NEXT:   additional-build-args: -fno-implicit-modules -fno-implicit-module-maps
+// CHECK-NEXT:   command 0:
+// CHECK-NEXT:     context-hash:
+// CHECK-NEXT:     module-deps:
+// CHECK-NEXT:       ModA:[[HASH_MOD_A]]
+// CHECK-NEXT:     file-deps:
+// CHECK-NEXT:     build-args: -cc1 {{.*}} -fmodule-file={{(ModA=)?}}{{.*}}ModA_{{.*}}.pcm

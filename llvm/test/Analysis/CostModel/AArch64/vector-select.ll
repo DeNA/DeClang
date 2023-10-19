@@ -1,6 +1,8 @@
-; RUN: opt < %s -mtriple=aarch64--linux-gnu -cost-model -analyze | FileCheck %s --check-prefixes=COST,COST-NOFP16
-; RUN: opt < %s -mtriple=aarch64--linux-gnu -cost-model -analyze -mattr=+fullfp16 | FileCheck %s --check-prefixes=COST,COST-FULLFP16
+; RUN: opt < %s -mtriple=aarch64--linux-gnu -passes="print<cost-model>" 2>&1 -disable-output | FileCheck %s --check-prefixes=COST,COST-NOFP16
+; RUN: opt < %s -mtriple=aarch64--linux-gnu -passes="print<cost-model>" 2>&1 -disable-output -mattr=+fullfp16 | FileCheck %s --check-prefixes=COST,COST-FULLFP16
 ; RUN: llc < %s -mtriple=aarch64--linux-gnu -mattr=+fullfp16 | FileCheck %s --check-prefix=CODE
+
+target datalayout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
 
 ; COST-LABEL: v8i8_select_eq
 ; COST-NEXT:  Cost Model: Found an estimated cost of 1 for instruction:   %cmp.1 = icmp eq <8 x i8> %a, %b
@@ -121,11 +123,11 @@ define <2 x i64> @v2i64_select_sle(<2 x i64> %a, <2 x i64> %b, <2 x i64> %c) {
 ; CODE-LABEL: v3i64_select_sle
 ; CODE:       bb.0
 ; CODE:    mov
+; CODE:    mov
+; CODE:    mov
+; CODE:    cmge
+; CODE:    cmge
 ; CODE:    ldr
-; CODE:    mov
-; CODE:    mov
-; CODE:    cmge
-; CODE:    cmge
 ; CODE:    bif
 ; CODE:    bif
 ; CODE:    ext
@@ -144,7 +146,7 @@ define <3 x i64> @v3i64_select_sle(<3 x i64> %a, <3 x i64> %b, <3 x i64> %c) {
 ; CODE:       bb.0
 ; CODE-NEXT:    ushll   v{{.+}}.2d, v{{.+}}.2s, #0
 ; CODE-NEXT:    shl v{{.+}}.2d, v{{.+}}.2d, #63
-; CODE-NEXT:    sshr    v{{.+}}.2d, v{{.+}}.2d, #63
+; CODE-NEXT:    cmlt    v{{.+}}.2d, v{{.+}}.2d, #0
 ; CODE-NEXT:    bif v{{.+}}.16b, v{{.+}}.16b, v{{.+}}.16b
 ; CODE-NEXT:    ret
 

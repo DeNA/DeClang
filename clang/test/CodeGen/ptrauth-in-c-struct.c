@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple arm64-apple-ios -fblocks -fptrauth-calls -fptrauth-returns -fptrauth-intrinsics -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -no-opaque-pointers -triple arm64-apple-ios -fblocks -fptrauth-calls -fptrauth-returns -fptrauth-intrinsics -emit-llvm -o - %s | FileCheck %s
 
 #define AQ1_50 __ptrauth(1,1,50)
 #define AQ2_30 __ptrauth(2,1,30)
@@ -27,12 +27,10 @@ typedef struct {
 SA getSA(void);
 void calleeSA(SA);
 
-int g0;
-
-// CHECK: define void @test_copy_constructor_SA(%[[STRUCT_SA]]* %{{.*}})
+// CHECK: define void @test_copy_constructor_SA(%[[STRUCT_SA]]* noundef %{{.*}})
 // CHECK: call void @__copy_constructor_8_8_t0w4_pa1_50_8(
 
-// CHECK: define linkonce_odr hidden void @__copy_constructor_8_8_t0w4_pa1_50_8(i8** %[[DST:.*]], i8** %[[SRC:.*]])
+// CHECK: define linkonce_odr hidden void @__copy_constructor_8_8_t0w4_pa1_50_8(i8** noundef %[[DST:.*]], i8** noundef %[[SRC:.*]])
 // CHECK: %[[DST_ADDR:.*]] = alloca i8**, align 8
 // CHECK: %[[SRC_ADDR:.*]] = alloca i8**, align 8
 // CHECK: store i8** %[[DST]], i8*** %[[DST_ADDR]], align 8
@@ -47,20 +45,20 @@ int g0;
 // CHECK: %[[V10:.*]] = bitcast i8* %[[V9]] to i8**
 // CHECK: %[[V11:.*]] = load i8*, i8** %[[V10]], align 8
 // CHECK: %[[V12:.*]] = ptrtoint i8** %[[V10]] to i64
-// CHECK: %[[V13:.*]] = call i64 @llvm.ptrauth.blend.i64(i64 %[[V12]], i64 50)
+// CHECK: %[[V13:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V12]], i64 50)
 // CHECK: %[[V14:.*]] = ptrtoint i8** %[[V7]] to i64
-// CHECK: %[[V15:.*]] = call i64 @llvm.ptrauth.blend.i64(i64 %[[V14]], i64 50)
+// CHECK: %[[V15:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V14]], i64 50)
 // CHECK: %[[V17:.*]] = ptrtoint i8* %[[V11]] to i64
-// CHECK: %[[V18:.*]] = call i64 @llvm.ptrauth.resign.i64(i64 %[[V17]], i32 1, i64 %[[V13]], i32 1, i64 %[[V15]])
+// CHECK: %[[V18:.*]] = call i64 @llvm.ptrauth.resign(i64 %[[V17]], i32 1, i64 %[[V13]], i32 1, i64 %[[V15]])
 
 void test_copy_constructor_SA(SA *s) {
   SA t = *s;
 }
 
-// CHECK: define void @test_copy_constructor_SA2(%[[STRUCT_SA2]]* %{{.*}})
+// CHECK: define void @test_copy_constructor_SA2(%[[STRUCT_SA2]]* noundef %{{.*}})
 // CHECK: call void @__copy_constructor_8_8_t0w4_pa2_30_8(
 
-// CHECK: define linkonce_odr hidden void @__copy_constructor_8_8_t0w4_pa2_30_8(i8** %[[DST:.*]], i8** %[[SRC:.*]])
+// CHECK: define linkonce_odr hidden void @__copy_constructor_8_8_t0w4_pa2_30_8(i8** noundef %[[DST:.*]], i8** noundef %[[SRC:.*]])
 // CHECK: %[[DST_ADDR:.*]] = alloca i8**, align 8
 // CHECK: %[[SRC_ADDR:.*]] = alloca i8**, align 8
 // CHECK: store i8** %[[DST]], i8*** %[[DST_ADDR]], align 8
@@ -75,11 +73,11 @@ void test_copy_constructor_SA(SA *s) {
 // CHECK: %[[V10:.*]] = bitcast i8* %[[V9]] to i8**
 // CHECK: %[[V11:.*]] = load i8*, i8** %[[V10]], align 8
 // CHECK: %[[V12:.*]] = ptrtoint i8** %[[V10]] to i64
-// CHECK: %[[V13:.*]] = call i64 @llvm.ptrauth.blend.i64(i64 %[[V12]], i64 30)
+// CHECK: %[[V13:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V12]], i64 30)
 // CHECK: %[[V14:.*]] = ptrtoint i8** %[[V7]] to i64
-// CHECK: %[[V15:.*]] = call i64 @llvm.ptrauth.blend.i64(i64 %[[V14]], i64 30)
+// CHECK: %[[V15:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V14]], i64 30)
 // CHECK: %[[V17:.*]] = ptrtoint i8* %[[V11]] to i64
-// CHECK: %[[V18:.*]] = call i64 @llvm.ptrauth.resign.i64(i64 %[[V17]], i32 2, i64 %[[V13]], i32 2, i64 %[[V15]])
+// CHECK: %[[V18:.*]] = call i64 @llvm.ptrauth.resign(i64 %[[V17]], i32 2, i64 %[[V13]], i32 2, i64 %[[V15]])
 
 void test_copy_constructor_SA2(SA2 *s) {
   SA2 t = *s;
@@ -111,14 +109,14 @@ void test_move_assignment_SA(SA *p) {
   *p = getSA();
 }
 
-// CHECK: define void @test_parameter_SA(%[[STRUCT_SA]]* %{{.*}})
+// CHECK: define void @test_parameter_SA(%[[STRUCT_SA]]* noundef %{{.*}})
 // CHECK-NOT: call
 // CHECK: ret void
 
 void test_parameter_SA(SA a) {
 }
 
-// CHECK: define void @test_argument_SA(%[[STRUCT_SA]]* %[[A:.*]])
+// CHECK: define void @test_argument_SA(%[[STRUCT_SA]]* noundef %[[A:.*]])
 // CHECK: %[[A_ADDR:.*]] = alloca %[[STRUCT_SA]]*, align 8
 // CHECK: %[[AGG_TMP:.*]] = alloca %[[STRUCT_SA]], align 8
 // CHECK: store %[[STRUCT_SA]]* %[[A]], %[[STRUCT_SA]]** %[[A_ADDR]], align 8
@@ -126,7 +124,7 @@ void test_parameter_SA(SA a) {
 // CHECK: %[[V1:.*]] = bitcast %[[STRUCT_SA]]* %[[AGG_TMP]] to i8**
 // CHECK: %[[V2:.*]] = bitcast %[[STRUCT_SA]]* %[[V0]] to i8**
 // CHECK: call void @__copy_constructor_8_8_t0w4_pa1_50_8(i8** %[[V1]], i8** %[[V2]]) #5
-// CHECK: call void @calleeSA(%[[STRUCT_SA]]* %[[AGG_TMP]])
+// CHECK: call void @calleeSA(%[[STRUCT_SA]]* noundef %[[AGG_TMP]])
 // CHECK-NOT: call
 // CHECK: ret void
 
@@ -134,7 +132,7 @@ void test_argument_SA(SA *a) {
   calleeSA(*a);
 }
 
-// CHECK: define void @test_return_SA(%[[STRUCT_SA]]* noalias sret(%struct.SA) align 8 %[[AGG_RESULT:.*]], %[[STRUCT_SA]]* %[[A:.*]])
+// CHECK: define void @test_return_SA(%[[STRUCT_SA]]* noalias sret(%struct.SA) align 8 %[[AGG_RESULT:.*]], %[[STRUCT_SA]]* noundef %[[A:.*]])
 // CHECK: %[[A_ADDR:.*]] = alloca %[[STRUCT_SA]]*, align 8
 // CHECK: store %[[STRUCT_SA]]* %[[A]], %[[STRUCT_SA]]** %[[A_ADDR]], align 8
 // CHECK: %[[V0:.*]] = load %[[STRUCT_SA]]*, %[[STRUCT_SA]]** %[[A_ADDR]], align 8
@@ -163,22 +161,4 @@ void test_copy_constructor_SI(SI *s) {
 // CHECK: ret void
 
 void test_parameter_SI(SI a) {
-}
-
-// CHECK-LABEL: define void @test_array(
-// CHECK: %[[F1:.*]] = getelementptr inbounds %[[STRUCT_SA]], %[[STRUCT_SA]]* %{{.*}}, i32 0, i32 1
-// CHECK: %[[V0:.*]] = ptrtoint i32** %[[F1]] to i64
-// CHECK: %[[V1:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V0]], i64 50)
-// CHECK: %[[V2:.*]] = call i64 @llvm.ptrauth.sign(i64 ptrtoint (i32* @g0 to i64), i32 1, i64 %[[V1]])
-// CHECK: %[[V3:.*]] = inttoptr i64 %[[V2]] to i32*
-// CHECK: store i32* %[[V3]], i32** %[[F1]], align 8
-// CHECK: %[[F12:.*]] = getelementptr inbounds %[[STRUCT_SA]], %[[STRUCT_SA]]* %{{.*}}, i32 0, i32 1
-// CHECK: %[[V4:.*]] = ptrtoint i32** %[[F12]] to i64
-// CHECK: %[[V5:.*]] = call i64 @llvm.ptrauth.blend(i64 %[[V4]], i64 50)
-// CHECK: %[[V6:.*]] = call i64 @llvm.ptrauth.sign(i64 ptrtoint (i32* @g0 to i64), i32 1, i64 %[[V5]])
-// CHECK: %[[V7:.*]] = inttoptr i64 %[[V6]] to i32*
-// CHECK: store i32* %[[V7]], i32** %[[F12]], align 8
-
-void test_array(void) {
-  const SA a[] = {{0, &g0}, {1, &g0}};
 }

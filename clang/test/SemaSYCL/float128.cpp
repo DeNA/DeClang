@@ -22,6 +22,8 @@ void host_ok(void) {
   C.field1 = A;
 }
 
+long double ld_func(long double arg);
+
 void usage() {
   // expected-note@+1 3{{'A' defined here}}
   __float128 A;
@@ -30,8 +32,8 @@ void usage() {
   // expected-error@+2 {{'A' requires 128 bit size '__float128' type support, but target 'spir64' does not support it}}
   // expected-error@+1 {{'field1' requires 128 bit size '__float128' type support, but target 'spir64' does not support it}}
   C.field1 = A;
-  // expected-error@+2 {{expression requires 128 bit size 'Z::BIGTYPE' (aka '__float128') type support, but target 'spir64' does not support it}}
-  // expected-error@+1 {{'bigfield' requires 128 bit size 'Z::BIGTYPE' (aka '__float128') type support, but target 'spir64' does not support it}}
+  // expected-error@+2 {{expression requires 128 bit size 'BIGTYPE' (aka '__float128') type support, but target 'spir64' does not support it}}
+  // expected-error@+1 {{'bigfield' requires 128 bit size 'BIGTYPE' (aka '__float128') type support, but target 'spir64' does not support it}}
   C.bigfield += 1.0;
 
   // expected-error@+1 {{'A' requires 128 bit size '__float128' type support, but target 'spir64' does not support it}}
@@ -48,6 +50,9 @@ void usage() {
     float F2 = 0.1f;
     // expected-error@+1 3{{expression requires 128 bit size '__float128' type support, but target 'spir64' does not support it}}
     float F3 = ((__float128)F1 * (__float128)F2) / 2.0f;
+
+    // assume that long double is supported
+    float F4 = ld_func(F3);
   };
 
   // expected-note@+1 {{called by 'usage'}}

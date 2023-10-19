@@ -3,11 +3,12 @@ add_lldb_library(lldbPluginSwiftLanguageRuntime PLUGIN
   SwiftLanguageRuntime.cpp
   SwiftLanguageRuntimeDynamicTypeResolution.cpp
   SwiftLanguageRuntimeNames.cpp
+  SwiftMetadataCache.cpp
 
   LINK_LIBS
     swiftAST
     swiftBasic
-    swiftReflection
+    swiftRemoteInspection
     swiftRemoteAST
     lldbCore
     lldbExpression

@@ -9,19 +9,17 @@ from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.lldbpexpect import PExpectTest
 
+
 class IOHandlerCompletionTest(PExpectTest):
-
-    mydir = TestBase.compute_mydir(__file__)
-
     # PExpect uses many timeouts internally and doesn't play well
     # under ASAN on a loaded machine..
     @skipIfAsan
     @skipIfEditlineSupportMissing
-    @expectedFailureAll(oslist=['freebsd'], bugnumber='llvm.org/pr49408')
+    @expectedFailureAll(oslist=["freebsd"], bugnumber="llvm.org/pr49408")
     @skipIf(oslist=["linux"], archs=["arm", "aarch64"])
     def test_completion(self):
         self.build()
-        self.launch(dimensions=(100,500), executable=self.getBuildArtifact("a.out"))
+        self.launch(dimensions=(100, 500), executable=self.getBuildArtifact("a.out"))
 
         # Start tab completion, go to the next page and then display all with 'a'.
         self.child.send("\t\ta")
@@ -31,7 +29,13 @@ class IOHandlerCompletionTest(PExpectTest):
         self.child.send("regi\t")
         # editline might move the cursor back to the start of the line and
         # then back to its original position.
-        self.child.expect(re.compile(b"regi(\r" + self.cursor_forward_escape_seq(len(self.PROMPT + "regi")) + b")?ster"))
+        self.child.expect(
+            re.compile(
+                b"regi(\r"
+                + self.cursor_forward_escape_seq(len(self.PROMPT + "regi"))
+                + b")?ster"
+            )
+        )
         self.child.send("\n")
         self.expect_prompt()
 
@@ -48,7 +52,13 @@ class IOHandlerCompletionTest(PExpectTest):
         # then back to its original position. We only care about the fact
         # that this is completing a partial completion, so skip the exact cursor
         # position calculation.
-        self.child.expect(re.compile(b"TestIOHandler(\r" + self.cursor_forward_escape_seq("\d+") + b")?Completion.py"))
+        self.child.expect(
+            re.compile(
+                b"TestIOHandler(\r"
+                + self.cursor_forward_escape_seq("\d+")
+                + b")?Completion.py"
+            )
+        )
         self.child.send("\n")
         self.expect_prompt()
 

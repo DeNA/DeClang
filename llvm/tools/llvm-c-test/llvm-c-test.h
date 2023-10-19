@@ -15,6 +15,7 @@
 
 #include <stdbool.h>
 #include "llvm-c/Core.h"
+#include "llvm-c/ErrorHandling.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,7 +51,7 @@ int llvm_object_list_symbols(void);
 int llvm_targets_list(void);
 
 // echo.c
-int llvm_echo(void);
+int llvm_echo(bool OpaquePointers);
 
 // diagnostic.c
 int llvm_test_diagnostic_handler(void);

@@ -28,6 +28,7 @@ add_llvm_component_library(LLVMCore
   Globals.cpp
   IRBuilder.cpp
   IRPrintingPasses.cpp
+  SSAContext.cpp
   InlineAsm.cpp
   Instruction.cpp
   Instructions.cpp
@@ -49,6 +50,7 @@ add_llvm_component_library(LLVMCore
   PassRegistry.cpp
   PassTimingInfo.cpp
   PrintPasses.cpp
+  ProfDataUtils.cpp
   SafepointIRVerifier.cpp
   ProfileSummary.cpp
   PseudoProbe.cpp
@@ -56,11 +58,13 @@ add_llvm_component_library(LLVMCore
   Statepoint.cpp
   StructuralHash.cpp
   Type.cpp
+  TypedPointerType.cpp
   TypeFinder.cpp
   Use.cpp
   User.cpp
   Value.cpp
   ValueSymbolTable.cpp
+  VectorBuilder.cpp
   Verifier.cpp
 
   ADDITIONAL_HEADER_DIRS

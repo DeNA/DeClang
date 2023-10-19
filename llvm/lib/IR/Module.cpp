@@ -13,7 +13,6 @@
 #include "llvm/IR/Module.h"
 #include "SymbolTableListTraitsImpl.h"
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
@@ -39,7 +38,6 @@
 #include "llvm/IR/TypeFinder.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueSymbolTable.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Error.h"
@@ -73,8 +71,7 @@ template class llvm::SymbolTableListTraits<GlobalIFunc>;
 
 Module::Module(StringRef MID, LLVMContext &C)
     : Context(C), ValSymTab(std::make_unique<ValueSymbolTable>(-1)),
-      Materializer(), ModuleID(std::string(MID)),
-      SourceFileName(std::string(MID)), DL("") {
+      ModuleID(std::string(MID)), SourceFileName(std::string(MID)), DL("") {
   Context.addModule(this);
 }
 
@@ -599,7 +596,9 @@ PICLevel::Level Module::getPICLevel() const {
 }
 
 void Module::setPICLevel(PICLevel::Level PL) {
-  addModuleFlag(ModFlagBehavior::Max, "PIC Level", PL);
+  // The merge result of a non-PIC object and a PIC object can only be reliably
+  // used as a non-PIC object, so use the Min merge behavior.
+  addModuleFlag(ModFlagBehavior::Min, "PIC Level", PL);
 }
 
 PIELevel::Level Module::getPIELevel() const {
@@ -673,12 +672,15 @@ void Module::setRtLibUseGOT() {
   addModuleFlag(ModFlagBehavior::Max, "RtLibUseGOT", 1);
 }
 
-bool Module::getUwtable() const {
-  auto *Val = cast_or_null<ConstantAsMetadata>(getModuleFlag("uwtable"));
-  return Val && (cast<ConstantInt>(Val->getValue())->getZExtValue() > 0);
+UWTableKind Module::getUwtable() const {
+  if (auto *Val = cast_or_null<ConstantAsMetadata>(getModuleFlag("uwtable")))
+    return UWTableKind(cast<ConstantInt>(Val->getValue())->getZExtValue());
+  return UWTableKind::None;
 }
 
-void Module::setUwtable() { addModuleFlag(ModFlagBehavior::Max, "uwtable", 1); }
+void Module::setUwtable(UWTableKind Kind) {
+  addModuleFlag(ModFlagBehavior::Max, "uwtable", uint32_t(Kind));
+}
 
 FramePointerKind Module::getFramePointer() const {
   auto *Val = cast_or_null<ConstantAsMetadata>(getModuleFlag("frame-pointer"));
@@ -714,6 +716,18 @@ void Module::setStackProtectorGuardReg(StringRef Reg) {
   addModuleFlag(ModFlagBehavior::Error, "stack-protector-guard-reg", ID);
 }
 
+StringRef Module::getStackProtectorGuardSymbol() const {
+  Metadata *MD = getModuleFlag("stack-protector-guard-symbol");
+  if (auto *MDS = dyn_cast_or_null<MDString>(MD))
+    return MDS->getString();
+  return {};
+}
+
+void Module::setStackProtectorGuardSymbol(StringRef Symbol) {
+  MDString *ID = MDString::get(getContext(), Symbol);
+  addModuleFlag(ModFlagBehavior::Error, "stack-protector-guard-symbol", ID);
+}
+
 int Module::getStackProtectorGuardOffset() const {
   Metadata *MD = getModuleFlag("stack-protector-guard-offset");
   if (auto *CI = mdconst::dyn_extract_or_null<ConstantInt>(MD))
@@ -736,7 +750,7 @@ void Module::setOverrideStackAlignment(unsigned Align) {
   addModuleFlag(ModFlagBehavior::Error, "override-stack-alignment", Align);
 }
 
-void Module::setSDKVersion(const VersionTuple &V) {
+static void addSDKVersionMD(const VersionTuple &V, Module &M, StringRef Name) {
   SmallVector<unsigned, 3> Entries;
   Entries.push_back(V.getMajor());
   if (auto Minor = V.getMinor()) {
@@ -746,12 +760,16 @@ void Module::setSDKVersion(const VersionTuple &V) {
     // Ignore the 'build' component as it can't be represented in the object
     // file.
   }
-  addModuleFlag(ModFlagBehavior::Warning, "SDK Version",
-                ConstantDataArray::get(Context, Entries));
+  M.addModuleFlag(Module::ModFlagBehavior::Warning, Name,
+                  ConstantDataArray::get(M.getContext(), Entries));
 }
 
-VersionTuple Module::getSDKVersion() const {
-  auto *CM = dyn_cast_or_null<ConstantAsMetadata>(getModuleFlag("SDK Version"));
+void Module::setSDKVersion(const VersionTuple &V) {
+  addSDKVersionMD(V, *this, "SDK Version");
+}
+
+static VersionTuple getSDKVersionMD(Metadata *MD) {
+  auto *CM = dyn_cast_or_null<ConstantAsMetadata>(MD);
   if (!CM)
     return {};
   auto *Arr = dyn_cast_or_null<ConstantDataArray>(CM->getValue());
@@ -773,6 +791,90 @@ VersionTuple Module::getSDKVersion() const {
     }
   }
   return Result;
+}
+
+VersionTuple Module::getSDKVersion() const {
+  return getSDKVersionMD(getModuleFlag("SDK Version"));
+}
+
+SmallVector<Module::PtrAuthABIVersion, 2>
+Module::getPtrAuthABIVersions() const {
+  // Look for the ptrauth abi version in the module flags.
+  SmallVector<Module::PtrAuthABIVersion, 2> Result;
+  const Metadata *Meta = getModuleFlag("ptrauth.abi-version");
+  if (!Meta)
+    return Result;
+  const MDNode *MD = cast<MDNode>(Meta);
+
+  auto extractVersionFromOperand = [](const Metadata *Meta) {
+    const auto *CV = cast<ConstantAsMetadata>(Meta)->getValue();
+    return cast<ConstantInt>(CV)->getSExtValue();
+  };
+
+  // If there are multiple versions, there's a mismatch.  In that case, fall
+  // back to version "64".
+  if (MD->getNumOperands() == 1) {
+    int V = extractVersionFromOperand(
+        cast<MDNode>(MD->getOperand(0))->getOperand(0));
+    // The version -1 has special meaning: we're treating old bitcode files with
+    // no ptrauth abi version. In that case, we want to fall back to the old
+    // behavior where the flags are 0.
+    if (V == -1)
+      return Result;
+    bool K = extractVersionFromOperand(
+        cast<MDNode>(MD->getOperand(0))->getOperand(1));
+    Result.push_back({V, K});
+    return Result;
+  } else if (MD->getNumOperands() >= 2) {
+    // If we do have multiple versions, print them in a warning.
+    int LV = extractVersionFromOperand(
+        cast<MDNode>(MD->getOperand(0))->getOperand(0));
+    bool LK = extractVersionFromOperand(
+        cast<MDNode>(MD->getOperand(0))->getOperand(1));
+    Result.push_back({LV, LK});
+    int RV = extractVersionFromOperand(
+        cast<MDNode>(MD->getOperand(1))->getOperand(0));
+    bool RK = extractVersionFromOperand(
+        cast<MDNode>(MD->getOperand(1))->getOperand(1));
+    Result.push_back({RV, RK});
+    return Result;
+  } else {
+    llvm_unreachable(
+        "Malformed ptrauth.abi-version metadata with no operands.");
+    return {};
+  }
+}
+
+std::optional<Module::PtrAuthABIVersion> Module::getPtrAuthABIVersion() const {
+  SmallVector<Module::PtrAuthABIVersion, 2> Versions = getPtrAuthABIVersions();
+  if (Versions.size() == 0)
+    return std::nullopt;
+  if (Versions.size() == 1) {
+    int V = Versions[0].Version;
+    if (V == -1)
+      return std::nullopt;
+    if (V > 64)
+      V = 64;
+    bool K = Versions[0].Kernel;
+    return PtrAuthABIVersion{V, K};
+  }
+  // If there are multiple versions, there's a mismatch.  In that case, fall
+  // back to version "64".
+  if (Versions.size() == 2)
+    return PtrAuthABIVersion{64, false};
+  llvm_unreachable("Mismatch between more than two ptrauth abi versions.");
+}
+
+void Module::setPtrAuthABIVersion(Module::PtrAuthABIVersion ABIVersion) {
+  // Add a module flag containing a tuple of i32s representing the version.
+  llvm::LLVMContext &Ctx = getContext();
+  auto *ABIVer = llvm::ConstantAsMetadata::get(
+      llvm::ConstantInt::get(Type::getInt32Ty(Ctx), ABIVersion.Version));
+  auto *KernelABI = llvm::ConstantAsMetadata::get(
+      llvm::ConstantInt::get(Type::getInt1Ty(Ctx), ABIVersion.Kernel));
+  auto *ABIVerNode = llvm::MDNode::get(Ctx, {ABIVer, KernelABI});
+  auto *ABIVerNodes = llvm::MDNode::get(Ctx, ABIVerNode);
+  addModuleFlag(llvm::Module::AppendUnique, "ptrauth.abi-version", ABIVerNodes);
 }
 
 GlobalVariable *llvm::collectUsedGlobalVariables(
@@ -808,4 +910,23 @@ void Module::setPartialSampleProfileRatio(const ModuleSummaryIndex &Index) {
                         ProfileSummary::PSK_Sample);
     }
   }
+}
+
+StringRef Module::getDarwinTargetVariantTriple() const {
+  if (const auto *MD = getModuleFlag("darwin.target_variant.triple"))
+    return cast<MDString>(MD)->getString();
+  return "";
+}
+
+void Module::setDarwinTargetVariantTriple(StringRef T) {
+  addModuleFlag(ModFlagBehavior::Override, "darwin.target_variant.triple",
+                MDString::get(getContext(), T));
+}
+
+VersionTuple Module::getDarwinTargetVariantSDKVersion() const {
+  return getSDKVersionMD(getModuleFlag("darwin.target_variant.SDK Version"));
+}
+
+void Module::setDarwinTargetVariantSDKVersion(VersionTuple Version) {
+  addSDKVersionMD(Version, *this, "darwin.target_variant.SDK Version");
 }

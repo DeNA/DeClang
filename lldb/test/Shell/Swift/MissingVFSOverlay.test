@@ -12,10 +12,8 @@
 b main
 run
 # Create a SwiftASTContext, to induce error output.
-p 1
+expression 1
 
 # The {{ }} avoids accidentally matching the input script!
-# CHECK: a.out:{{ }}
-# CHECK-SAME: error:
-# CHECK-SAME: overlay.yaml
-# CHECK-SAME: not found
+# CHECK: warning:{{ }}{{.*}}Swift{{.*}}a.out
+# CHECK: warning:{{ }}{{.*}}Ignoring missing VFS{{.*}}overlay.yaml

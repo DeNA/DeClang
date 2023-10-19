@@ -48,7 +48,7 @@ llvm::Optional<Token> findQualToken(const VarDecl *Decl, Qualifier Qual,
       Result.Context->getLangOpts());
 
   if (FileRange.isInvalid())
-    return llvm::None;
+    return std::nullopt;
 
   tok::TokenKind Tok =
       Qual == Qualifier::Const
@@ -70,7 +70,7 @@ getTypeSpecifierLocation(const VarDecl *Var,
 
   if (TypeSpecifier.getBegin().isMacroID() ||
       TypeSpecifier.getEnd().isMacroID())
-    return llvm::None;
+    return std::nullopt;
   return TypeSpecifier;
 }
 
@@ -78,11 +78,11 @@ llvm::Optional<SourceRange> mergeReplacementRange(SourceRange &TypeSpecifier,
                                                   const Token &ConstToken) {
   if (TypeSpecifier.getBegin().getLocWithOffset(-1) == ConstToken.getEndLoc()) {
     TypeSpecifier.setBegin(ConstToken.getLocation());
-    return llvm::None;
+    return std::nullopt;
   }
   if (TypeSpecifier.getEnd().getLocWithOffset(1) == ConstToken.getLocation()) {
     TypeSpecifier.setEnd(ConstToken.getEndLoc());
-    return llvm::None;
+    return std::nullopt;
   }
   return SourceRange(ConstToken.getLocation(), ConstToken.getEndLoc());
 }
@@ -125,18 +125,22 @@ void QualifiedAutoCheck::registerMatchers(MatchFinder *Finder) {
       };
 
   auto IsBoundToType = refersToType(equalsBoundNode("type"));
+  auto UnlessFunctionType = unless(hasUnqualifiedDesugaredType(functionType()));
+  auto IsAutoDeducedToPointer = [](const auto &...InnerMatchers) {
+    return autoType(hasDeducedType(
+        hasUnqualifiedDesugaredType(pointerType(pointee(InnerMatchers...)))));
+  };
 
   Finder->addMatcher(
-      ExplicitSingleVarDecl(hasType(autoType(hasDeducedType(
-                                pointerType(pointee(unless(functionType())))))),
+      ExplicitSingleVarDecl(hasType(IsAutoDeducedToPointer(UnlessFunctionType)),
                             "auto"),
       this);
 
   Finder->addMatcher(
       ExplicitSingleVarDeclInTemplate(
-          allOf(hasType(autoType(hasDeducedType(pointerType(
-                    pointee(hasUnqualifiedType(qualType().bind("type")),
-                            unless(functionType())))))),
+          allOf(hasType(IsAutoDeducedToPointer(
+                    hasUnqualifiedType(qualType().bind("type")),
+                    UnlessFunctionType)),
                 anyOf(hasAncestor(
                           functionDecl(hasAnyTemplateArgument(IsBoundToType))),
                       hasAncestor(classTemplateSpecializationDecl(
@@ -226,7 +230,7 @@ void QualifiedAutoCheck::check(const MatchFinder::MatchResult &Result) {
     if (!isPointerConst(Var->getType()))
       return; // Pointer isn't const, no need to add const qualifier.
     if (!isAutoPointerConst(Var->getType()))
-      return; // Const isnt wrapped in the auto type, so must be declared
+      return; // Const isn't wrapped in the auto type, so must be declared
               // explicitly.
 
     if (Var->getType().isLocalConstQualified()) {
@@ -267,7 +271,7 @@ void QualifiedAutoCheck::check(const MatchFinder::MatchResult &Result) {
     if (!isPointerConst(Var->getType()))
       return; // Pointer isn't const, no need to add const qualifier.
     if (!isAutoPointerConst(Var->getType()))
-      // Const isnt wrapped in the auto type, so must be declared explicitly.
+      // Const isn't wrapped in the auto type, so must be declared explicitly.
       return;
 
     if (llvm::Optional<SourceRange> TypeSpec =

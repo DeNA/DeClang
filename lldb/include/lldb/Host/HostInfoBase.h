@@ -16,6 +16,7 @@
 #include "lldb/Utility/XcodeSDK.h"
 #include "lldb/lldb-enumerations.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Errc.h"
 
 #include <cstdint>
 
@@ -29,6 +30,23 @@ struct SharedCacheImageInfo {
   UUID uuid;
   lldb::DataBufferSP data_sp;
 };
+
+namespace {
+struct HostInfoError : public llvm::ErrorInfo<HostInfoError> {
+  static char ID;
+  const std::string message_;
+
+  HostInfoError(const std::string message) : message_(std::move(message)) {}
+
+  void log(llvm::raw_ostream &OS) const override { OS << "HostInfoError"; }
+
+  std::error_code convertToErrorCode() const override {
+    return llvm::inconvertibleErrorCode();
+  }
+};
+
+char HostInfoError::ID = 0;
+} // namespace
 
 class HostInfoBase {
 private:
@@ -106,9 +124,21 @@ public:
 
   static FileSpec GetXcodeContentsDirectory() { return {}; }
   static FileSpec GetXcodeDeveloperDirectory() { return {}; }
-  
-  /// Return the directory containing a specific Xcode SDK.
-  static llvm::StringRef GetXcodeSDKPath(XcodeSDK sdk) { return {}; }
+
+  struct SDKOptions {
+    std::optional<XcodeSDK> XcodeSDK;
+  };
+
+  /// Return the directory containing something like a SDK (reused for Swift).
+  static llvm::Expected<llvm::StringRef> GetSDKRoot(SDKOptions options) {
+    return llvm::make_error<HostInfoError>("cannot determine SDK root");
+  }
+
+  /// Return the path to a specific tool in the specified Xcode SDK.
+  static llvm::Expected<llvm::StringRef> FindSDKTool(XcodeSDK sdk,
+                                                     llvm::StringRef tool) {
+    return llvm::errorCodeToError(llvm::errc::no_such_file_or_directory);
+  }
 
   /// Return information about module \p image_name if it is loaded in
   /// the current process's address space.
@@ -116,6 +146,20 @@ public:
   GetSharedCacheImageInfo(llvm::StringRef image_name) {
     return {};
   }
+
+#ifdef LLDB_ENABLE_SWIFT
+  static FileSpec GetSwiftResourceDir() { return {}; }
+  static FileSpec GetSwiftResourceDir(llvm::Triple triple) { return {}; }
+  static bool ComputeSwiftResourceDirectory(
+      FileSpec &lldb_shlib_spec, FileSpec &file_spec, bool verify) {
+    return false;
+  }
+
+  /// Return the default set of library paths to search in.  This allows a
+  /// platform specific extension for system libraries that may need to be
+  /// resolved (e.g. `/usr/lib` on Unicies and `Path` on Windows).
+  static std::vector<std::string> GetSwiftLibrarySearchPaths() { return {}; }
+#endif
 
 protected:
   static bool ComputeSharedLibraryDirectory(FileSpec &file_spec);

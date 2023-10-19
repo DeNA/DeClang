@@ -208,7 +208,11 @@ void Broadcaster::BroadcasterImpl::PrivateBroadcastEvent(EventSP &event_sp,
       hijacking_listener_sp.reset();
   }
 
-  if (Log *log = GetLog(LLDBLog::Events)) {
+  Log *log = GetLog(LLDBLog::Events);
+  if (!log && event_sp->GetData())
+    log = event_sp->GetData()->GetLogChannel();
+
+  if (log) {
     StreamString event_description;
     event_sp->Dump(&event_description);
     LLDB_LOGF(log,
@@ -224,6 +228,8 @@ void Broadcaster::BroadcasterImpl::PrivateBroadcastEvent(EventSP &event_sp,
                       &m_broadcaster, event_type))
       return;
     hijacking_listener_sp->AddEvent(event_sp);
+    if (m_shadow_listener)
+      m_shadow_listener->AddEvent(event_sp);
   } else {
     for (auto &pair : GetListeners()) {
       if (!(pair.second & event_type))
@@ -233,6 +239,8 @@ void Broadcaster::BroadcasterImpl::PrivateBroadcastEvent(EventSP &event_sp,
         continue;
 
       pair.first->AddEvent(event_sp);
+      if (m_shadow_listener)
+        m_shadow_listener->AddEvent(event_sp);
     }
   }
 }

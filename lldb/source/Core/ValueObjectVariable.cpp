@@ -13,7 +13,7 @@
 #include "lldb/Core/Declaration.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Value.h"
-#include "lldb/Expression/DWARFExpression.h"
+#include "lldb/Expression/DWARFExpressionList.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -148,12 +148,12 @@ bool ValueObjectVariable::UpdateValue() {
     }
   }
 
-  DWARFExpression &expr = variable->LocationExpression();
+  DWARFExpressionList &expr_list = variable->LocationExpressionList();
 
   if (variable->GetLocationIsConstantValueData()) {
     // expr doesn't contain DWARF bytes, it contains the constant variable
     // value bytes themselves...
-    if (expr.GetExpressionData(m_data)) {
+    if (expr_list.GetExpressionData(m_data)) {
       if (m_data.GetDataStart() && m_data.GetByteSize())
         m_value.SetBytes(m_data.GetDataStart(), m_data.GetByteSize());
       m_value.SetContext(Value::ContextType::Variable, variable);
@@ -172,7 +172,7 @@ bool ValueObjectVariable::UpdateValue() {
       m_data.SetAddressByteSize(target->GetArchitecture().GetAddressByteSize());
     }
 
-    if (expr.IsLocationList()) {
+    if (!expr_list.IsAlwaysValidSingleExpr()) {
       SymbolContext sc;
       variable->CalculateSymbolContext(&sc);
       if (sc.function)
@@ -181,8 +181,8 @@ bool ValueObjectVariable::UpdateValue() {
                 target);
     }
     Value old_value(m_value);
-    if (expr.Evaluate(&exe_ctx, nullptr, loclist_base_load_addr, nullptr,
-                      nullptr, m_value, &m_error)) {
+    if (expr_list.Evaluate(&exe_ctx, nullptr, loclist_base_load_addr, nullptr,
+                           nullptr, m_value, &m_error)) {
       m_resolved_value = m_value;
       m_value.SetContext(Value::ContextType::Variable, variable);
 
@@ -218,8 +218,9 @@ bool ValueObjectVariable::UpdateValue() {
 
 #ifdef LLDB_ENABLE_SWIFT
       if (auto type = variable->GetType())
-        if (llvm::dyn_cast_or_null<TypeSystemSwift>(
-                type->GetForwardCompilerType().GetTypeSystem()) &&
+        if (type->GetForwardCompilerType()
+                .GetTypeSystem()
+                .dyn_cast_or_null<TypeSystemSwift>() &&
             TypePayloadSwift(type->GetPayload()).IsFixedValueBuffer())
           if (auto process_sp = GetProcessSP())
             if (auto runtime = process_sp->GetLanguageRuntime(
@@ -235,7 +236,7 @@ bool ValueObjectVariable::UpdateValue() {
                   m_value.GetScalar() = deref_addr;
                 }
               }
-            }
+          }
 #endif // LLDB_ENABLE_SWIFT
 
       switch (value_type) {
@@ -289,7 +290,7 @@ bool ValueObjectVariable::UpdateValue() {
       m_resolved_value.SetContext(Value::ContextType::Invalid, nullptr);
     }
   }
-  
+
   return m_error.Success();
 }
 
@@ -442,7 +443,7 @@ bool ValueObjectVariable::SetData(DataExtractor &data, Status &error) {
       error.SetErrorString("unable to retrieve register info");
       return false;
     }
-    error = reg_value.SetValueFromData(reg_info, data, 0, true);
+    error = reg_value.SetValueFromData(*reg_info, data, 0, true);
     if (error.Fail())
       return false;
     if (reg_ctx->WriteRegister(reg_info, reg_value)) {

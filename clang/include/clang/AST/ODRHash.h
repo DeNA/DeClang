@@ -55,6 +55,10 @@ public:
   // more information than the AddDecl class.
   void AddCXXRecordDecl(const CXXRecordDecl *Record);
 
+  // Use this for ODR checking records in C/Objective-C between modules. This
+  // method compares more information than the AddDecl class.
+  void AddRecordDecl(const RecordDecl *Record);
+
   // Use this for ODR checking functions between modules.  This method compares
   // more information than the AddDecl class.  SkipBody will process the
   // hash as if the function has no body.
@@ -89,7 +93,7 @@ public:
   // Save booleans until the end to lower the size of data to process.
   void AddBoolean(bool value);
 
-  static bool isDeclToBeProcessed(const Decl* D, const DeclContext *Parent);
+  static bool isSubDeclToBeProcessed(const Decl *D, const DeclContext *Parent);
 
 private:
   void AddDeclarationNameImpl(DeclarationName Name);

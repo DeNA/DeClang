@@ -42,8 +42,10 @@ public:
   StructuredData::DictionarySP GetRegisterInfo() override;
 
   llvm::Optional<std::string> GetRegisterContext() override;
+
+  StructuredData::ArraySP GetExtendedInfo() override;
 };
 } // namespace lldb_private
 
 #endif // LLDB_ENABLE_PYTHON
-#endif // LLDB_PLUGINS_SCRIPTINTERPRETER_PYTHON_SCRIPTEDPROCESSTHREADINTERFACE_H
+#endif // LLDB_PLUGINS_SCRIPTINTERPRETER_PYTHON_SCRIPTEDTHREADPYTHONINTERFACE_H

@@ -2,7 +2,7 @@
 ; RUN: opt -passes="function(loop(indvars,loop-idiom,loop-deletion),simplifycfg)" -S < %s | FileCheck %s
 ; Compile command:
 ; $ clang -m32 -fno-discard-value-names -O0 -S -emit-llvm -Xclang -disable-O0-optnone Code.c
-; $ bin/opt -S -basic-aa -mem2reg -loop-simplify -lcssa -loop-rotate \
+; $ bin/opt -S -mem2reg -loop-simplify -lcssa -loop-rotate \
 ;   -licm -simple-loop-unswitch -enable-nontrivial-unswitch -loop-simplify \
 ;   -loop-deletion -simplifycfg -indvars Code.ll > CodeOpt.ll
 target datalayout = "e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-f64:32:64-f80:32-n8:16:32-S128"
@@ -239,7 +239,7 @@ define dso_local void @NegativeFor64(i32* %ar, i64 %n, i64 %m) #0 {
 ; CHECK-NEXT:    [[MUL3:%.*]] = mul nsw i64 [[M:%.*]], 4
 ; CHECK-NEXT:    [[CONV4:%.*]] = trunc i64 [[MUL3]] to i32
 ; CHECK-NEXT:    [[TMP0:%.*]] = trunc i64 [[M]] to i32
-; CHECK-NEXT:    [[TMP1:%.*]] = sub i32 [[CONV]], -1
+; CHECK-NEXT:    [[TMP1:%.*]] = trunc i64 [[N]] to i32
 ; CHECK-NEXT:    [[TMP2:%.*]] = mul i32 [[TMP0]], [[TMP1]]
 ; CHECK-NEXT:    [[TMP3:%.*]] = shl i32 [[TMP2]], 2
 ; CHECK-NEXT:    call void @llvm.memset.p0i8.i32(i8* align 4 [[AR1]], i8 0, i32 [[TMP3]], i1 false)
@@ -366,6 +366,54 @@ for.end17.loopexit:                               ; preds = %for.cond2.for.end_c
   br label %for.end17
 
 for.end17:                                        ; preds = %for.end17.loopexit, %for.body.lr.ph, %entry
+  ret void
+}
+
+; void NegStart(int n, int m, int *ar) {
+;   for (int i = -100; i < n; i++) {
+;     int *arr = ar + (i + 100) * m;
+;     memset(arr, 0, m * sizeof(int));
+;   }
+; }
+define void @NegStart(i32 %n, i32 %m, i32* %ar) {
+; CHECK-LABEL: @NegStart(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[AR1:%.*]] = bitcast i32* [[AR:%.*]] to i8*
+; CHECK-NEXT:    [[CMP1:%.*]] = icmp slt i32 -100, [[N:%.*]]
+; CHECK-NEXT:    br i1 [[CMP1]], label [[FOR_BODY_LR_PH:%.*]], label [[FOR_END:%.*]]
+; CHECK:       for.body.lr.ph:
+; CHECK-NEXT:    [[MUL1:%.*]] = mul i32 [[M:%.*]], 4
+; CHECK-NEXT:    [[TMP0:%.*]] = add i32 [[N]], 100
+; CHECK-NEXT:    [[TMP1:%.*]] = mul i32 [[M]], [[TMP0]]
+; CHECK-NEXT:    [[TMP2:%.*]] = shl i32 [[TMP1]], 2
+; CHECK-NEXT:    call void @llvm.memset.p0i8.i32(i8* align 4 [[AR1]], i8 0, i32 [[TMP2]], i1 false)
+; CHECK-NEXT:    br label [[FOR_END]]
+; CHECK:       for.end:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %cmp1 = icmp slt i32 -100, %n
+  br i1 %cmp1, label %for.body.lr.ph, label %for.end
+
+for.body.lr.ph:                                   ; preds = %entry
+  %mul1 = mul i32 %m, 4
+  br label %for.body
+
+for.body:                                         ; preds = %for.body.lr.ph, %for.body
+  %i.02 = phi i32 [ -100, %for.body.lr.ph ], [ %inc, %for.body ]
+  %add = add nsw i32 %i.02, 100
+  %mul = mul nsw i32 %add, %m
+  %add.ptr = getelementptr inbounds i32, i32* %ar, i32 %mul
+  %0 = bitcast i32* %add.ptr to i8*
+  call void @llvm.memset.p0i8.i32(i8* align 4 %0, i8 0, i32 %mul1, i1 false)
+  %inc = add nsw i32 %i.02, 1
+  %exitcond = icmp ne i32 %inc, %n
+  br i1 %exitcond, label %for.body, label %for.end.loopexit
+
+for.end.loopexit:                                 ; preds = %for.body
+  br label %for.end
+
+for.end:                                          ; preds = %for.end.loopexit, %entry
   ret void
 }
 

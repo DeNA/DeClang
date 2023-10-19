@@ -10,16 +10,20 @@
 
 #include "CommandObjectExpression.h"
 #include "lldb/Core/Debugger.h"
+#include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Expression/REPL.h"
 #include "lldb/Expression/UserExpression.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
+#include "lldb/Interpreter/CommandOptionArgumentTable.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionArgParser.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
+#include "lldb/lldb-enumerations.h"
+#include "lldb/lldb-private-enumerations.h"
 
 // BEGIN SWIFT
 #include "lldb/Symbol/CompileUnit.h"
@@ -28,26 +32,9 @@
 using namespace lldb;
 using namespace lldb_private;
 
-CommandObjectExpression::CommandOptions::CommandOptions() : OptionGroup() {}
+CommandObjectExpression::CommandOptions::CommandOptions() = default;
 
 CommandObjectExpression::CommandOptions::~CommandOptions() = default;
-
-static constexpr OptionEnumValueElement g_description_verbosity_type[] = {
-    {
-        eLanguageRuntimeDescriptionDisplayVerbosityCompact,
-        "compact",
-        "Only show the description string",
-    },
-    {
-        eLanguageRuntimeDescriptionDisplayVerbosityFull,
-        "full",
-        "Show the full output, including persistent variable's name and type",
-    },
-};
-
-static constexpr OptionEnumValues DescriptionVerbosityTypes() {
-  return OptionEnumValues(g_description_verbosity_type);
-}
 
 #define LLDB_OPTIONS_expression
 #include "CommandOptions.inc"
@@ -62,10 +49,15 @@ Status CommandObjectExpression::CommandOptions::SetOptionValue(
   switch (short_option) {
   case 'l':
     language = Language::GetLanguageTypeFromString(option_arg);
-    if (language == eLanguageTypeUnknown)
-      error.SetErrorStringWithFormat(
-          "unknown language type: '%s' for expression",
-          option_arg.str().c_str());
+    if (language == eLanguageTypeUnknown) {
+      StreamString sstr;
+      sstr.Printf("unknown language type: '%s' for expression. "
+                  "List of supported languages:\n",
+                  option_arg.str().c_str());
+
+      Language::PrintSupportedLanguagesForExpressions(sstr, "  ", "\n");
+      error.SetErrorString(sstr.GetString());
+    }
     break;
 
   case 'a': {
@@ -160,6 +152,30 @@ Status CommandObjectExpression::CommandOptions::SetOptionValue(
     break;
   }
 
+  case '\x01': {
+    bool success;
+    bool persist_result =
+        OptionArgParser::ToBoolean(option_arg, true, &success);
+    if (success)
+      suppress_persistent_result = !persist_result ? eLazyBoolYes : eLazyBoolNo;
+    else
+      error.SetErrorStringWithFormat(
+          "could not convert \"%s\" to a boolean value.",
+          option_arg.str().c_str());
+    break;
+  }
+
+  // BEGIN SWIFT
+  case '\x31': {
+    int32_t result;
+    result = OptionArgParser::ToOptionEnum(option_arg, BindGenTypeParamValue(),
+                                           0, error);
+    if (error.Success())
+      bind_generic_types = (BindGenericTypes)result;
+    break;
+  }
+  // END SWIFT
+
   default:
     llvm_unreachable("Unimplemented option");
   }
@@ -188,11 +204,78 @@ void CommandObjectExpression::CommandOptions::OptionParsingStarting(
   auto_apply_fixits = eLazyBoolCalculate;
   top_level = false;
   allow_jit = true;
+  suppress_persistent_result = eLazyBoolCalculate;
+  // BEGIN SWIFT
+  bind_generic_types = eBindAuto;
+  // END SWIFT
 }
 
 llvm::ArrayRef<OptionDefinition>
 CommandObjectExpression::CommandOptions::GetDefinitions() {
   return llvm::makeArrayRef(g_expression_options);
+}
+
+EvaluateExpressionOptions
+CommandObjectExpression::CommandOptions::GetEvaluateExpressionOptions(
+    const Target &target, const OptionGroupValueObjectDisplay &display_opts) {
+  EvaluateExpressionOptions options;
+  options.SetCoerceToId(display_opts.use_objc);
+  options.SetUnwindOnError(unwind_on_error);
+  options.SetIgnoreBreakpoints(ignore_breakpoints);
+  options.SetKeepInMemory(true);
+  options.SetUseDynamic(display_opts.use_dynamic);
+  options.SetTryAllThreads(try_all_threads);
+  options.SetDebug(debug);
+
+  // BEGIN SWIFT
+  options.SetBindGenericTypes(bind_generic_types);
+  // If the language was not specified in the expression command,
+  // set it to the language in the target's properties if
+  // specified, else default to the language for the frame.
+  if (language != eLanguageTypeUnknown) {
+  // END SWIFT
+  options.SetLanguage(language);
+  // BEGIN SWIFT
+  }
+  // END SWIFT
+
+  options.SetExecutionPolicy(
+      allow_jit ? EvaluateExpressionOptions::default_execution_policy
+                : lldb_private::eExecutionPolicyNever);
+
+  bool auto_apply_fixits;
+  if (this->auto_apply_fixits == eLazyBoolCalculate)
+    auto_apply_fixits = target.GetEnableAutoApplyFixIts();
+  else
+    auto_apply_fixits = this->auto_apply_fixits == eLazyBoolYes;
+
+  options.SetAutoApplyFixIts(auto_apply_fixits);
+  options.SetRetriesWithFixIts(target.GetNumberOfRetriesWithFixits());
+
+  if (top_level)
+    options.SetExecutionPolicy(eExecutionPolicyTopLevel);
+
+  // If there is any chance we are going to stop and want to see what went
+  // wrong with our expression, we should generate debug info
+  if (!ignore_breakpoints || !unwind_on_error)
+    options.SetGenerateDebugInfo(true);
+
+  if (timeout > 0)
+    options.SetTimeout(std::chrono::microseconds(timeout));
+  else
+    options.SetTimeout(std::nullopt);
+  return options;
+}
+
+bool CommandObjectExpression::CommandOptions::ShouldSuppressResult(
+    const OptionGroupValueObjectDisplay &display_opts) const {
+  // Explicitly disabling persistent results takes precedence over the
+  // m_verbosity/use_objc logic.
+  if (suppress_persistent_result != eLazyBoolCalculate)
+    return suppress_persistent_result == eLazyBoolYes;
+
+  return display_opts.use_objc &&
+         m_verbosity == eLanguageRuntimeDescriptionDisplayVerbosityCompact;
 }
 
 CommandObjectExpression::CommandObjectExpression(
@@ -204,12 +287,12 @@ CommandObjectExpression::CommandObjectExpression(
                        "",
                        eCommandProcessMustBePaused | eCommandTryTargetAPILock),
       IOHandlerDelegate(IOHandlerDelegate::Completion::Expression),
-      m_option_group(), m_format_options(eFormatDefault),
+      m_format_options(eFormatDefault),
       // BEGIN SWIFT
       m_repl_option(LLDB_OPT_SET_1, false, "repl", 'r', "Drop into Swift REPL",
                     false, true),
       // END SWIFT
-      m_command_options(), m_expr_line_count(0), m_expr_lines() {
+      m_command_options(), m_expr_line_count(0) {
   SetHelpLong(
       R"(
 Single and multi-line expressions:
@@ -359,58 +442,6 @@ CanBeUsedForElementCountPrinting(ValueObject &valobj) {
   return Status();
 }
 
-EvaluateExpressionOptions
-CommandObjectExpression::GetEvalOptions(const Target &target) {
-  EvaluateExpressionOptions options;
-  options.SetCoerceToId(m_varobj_options.use_objc);
-  options.SetUnwindOnError(m_command_options.unwind_on_error);
-  options.SetIgnoreBreakpoints(m_command_options.ignore_breakpoints);
-  options.SetKeepInMemory(true);
-  options.SetUseDynamic(m_varobj_options.use_dynamic);
-  options.SetTryAllThreads(m_command_options.try_all_threads);
-  options.SetDebug(m_command_options.debug);
-
-  // BEGIN SWIFT
-  // If the language was not specified in the expression command,
-  // set it to the language in the target's properties if
-  // specified, else default to the language for the frame.
-  if (m_command_options.language != eLanguageTypeUnknown) {
-  // END SWIFT   
-  options.SetLanguage(m_command_options.language);
-  // BEGIN SWIFT
-  }
-  // END SWIFT
-
-  options.SetExecutionPolicy(
-      m_command_options.allow_jit
-          ? EvaluateExpressionOptions::default_execution_policy
-          : lldb_private::eExecutionPolicyNever);
-
-  bool auto_apply_fixits;
-  if (m_command_options.auto_apply_fixits == eLazyBoolCalculate)
-    auto_apply_fixits = target.GetEnableAutoApplyFixIts();
-  else
-    auto_apply_fixits = m_command_options.auto_apply_fixits == eLazyBoolYes;
-
-  options.SetAutoApplyFixIts(auto_apply_fixits);
-  options.SetRetriesWithFixIts(target.GetNumberOfRetriesWithFixits());
-
-  if (m_command_options.top_level)
-    options.SetExecutionPolicy(eExecutionPolicyTopLevel);
-
-  // If there is any chance we are going to stop and want to see what went
-  // wrong with our expression, we should generate debug info
-  if (!m_command_options.ignore_breakpoints ||
-      !m_command_options.unwind_on_error)
-    options.SetGenerateDebugInfo(true);
-
-  if (m_command_options.timeout > 0)
-    options.SetTimeout(std::chrono::microseconds(m_command_options.timeout));
-  else
-    options.SetTimeout(llvm::None);
-  return options;
-}
-
 bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
                                                  Stream &output_stream,
                                                  Stream &error_stream,
@@ -431,9 +462,14 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
     return false;
   }
 
-  const EvaluateExpressionOptions options = GetEvalOptions(target);
+  EvaluateExpressionOptions eval_options =
+      m_command_options.GetEvaluateExpressionOptions(target, m_varobj_options);
+  // This command manually removes the result variable, make sure expression
+  // evaluation doesn't do it first.
+  eval_options.SetSuppressPersistentResult(false);
+
   ExpressionResults success = target.EvaluateExpression(
-      expr, frame, result_valobj_sp, options, &m_fixed_expression);
+      expr, frame, result_valobj_sp, eval_options, &m_fixed_expression);
 
   // We only tell you about the FixIt if we applied it.  The compiler errors
   // will suggest the FixIt if it parsed.
@@ -460,13 +496,25 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
           }
         }
 
+        bool suppress_result =
+            m_command_options.ShouldSuppressResult(m_varobj_options);
+
         DumpValueObjectOptions options(m_varobj_options.GetAsDumpOptions(
             m_command_options.m_verbosity, format));
+        options.SetHideRootName(suppress_result);
         options.SetVariableFormatDisplayLanguage(
             result_valobj_sp->GetPreferredDisplayLanguage());
 
         result_valobj_sp->Dump(output_stream, options);
 
+        if (suppress_result)
+          if (auto result_var_sp =
+                  target.GetPersistentVariable(result_valobj_sp->GetName())) {
+            auto language = result_valobj_sp->GetPreferredDisplayLanguage();
+            if (auto *persistent_state =
+                    target.GetPersistentExpressionStateForLanguage(language))
+              persistent_state->RemovePersistentVariable(result_var_sp);
+          }
         result.SetStatus(eReturnStatusSuccessFinishResult);
       }
     } else {
@@ -494,6 +542,8 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
         result.SetStatus(eReturnStatusFailed);
       }
     }
+  } else {
+    error_stream.Printf("error: unknown error\n");
   }
 
   return (success != eExpressionSetupError &&
@@ -503,9 +553,6 @@ bool CommandObjectExpression::EvaluateExpression(llvm::StringRef expr,
 void CommandObjectExpression::IOHandlerInputComplete(IOHandler &io_handler,
                                                      std::string &line) {
   io_handler.SetIsDone(true);
-  //    StreamSP output_stream =
-  //    io_handler.GetDebugger().GetAsyncOutputStream();
-  //    StreamSP error_stream = io_handler.GetDebugger().GetAsyncErrorStream();
   StreamFileSP output_sp = io_handler.GetOutputStreamFileSP();
   StreamFileSP error_sp = io_handler.GetErrorStreamFileSP();
 
@@ -571,7 +618,7 @@ void CommandObjectExpression::GetMultilineExpression() {
                             llvm::StringRef(), // Continuation prompt
                             multiple_lines, color_prompt,
                             1, // Show line numbers starting at 1
-                            *this, nullptr));
+                            *this));
 
   StreamFileSP output_sp = io_handler_sp->GetOutputStreamFileSP();
   if (output_sp) {

@@ -468,7 +468,7 @@ public:
     return true;
   }
 
-  bool VisitUnresolvedLookupExpr(UnresolvedLookupExpr *E) {
+  bool VisitOverloadExpr(OverloadExpr *E) {
     SmallVector<SymbolRelation, 4> Relations;
     SymbolRoleSet Roles = getRolesForRef(E, Relations);
     for (auto *D : E->decls())
@@ -483,13 +483,10 @@ public:
     return true;
   }
 
-  bool VisitTemplateTypeParmDecl(TemplateTypeParmDecl *D) {
-    // This handles references in return type requirements of RequiresExpr.
-    // E.g. `requires (T x) { {*x} -> ConceptRef }`
-    if (auto *C = D->getTypeConstraint())
-      IndexCtx.handleReference(C->getNamedConcept(), C->getConceptNameLoc(),
-                               Parent, ParentDC);
-    return true;
+  bool TraverseTypeConstraint(const TypeConstraint *C) {
+    IndexCtx.handleReference(C->getNamedConcept(), C->getConceptNameLoc(),
+                             Parent, ParentDC);
+    return RecursiveASTVisitor::TraverseTypeConstraint(C);
   }
 };
 

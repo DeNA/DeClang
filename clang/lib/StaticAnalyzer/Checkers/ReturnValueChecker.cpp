@@ -59,7 +59,7 @@ private:
 } // namespace
 
 static std::string getName(const CallEvent &Call) {
-  std::string Name = "";
+  std::string Name;
   if (const auto *MD = dyn_cast<CXXMethodDecl>(Call.getDecl()))
     if (const CXXRecordDecl *RD = MD->getParent())
       Name += RD->getNameAsString() + "::";
@@ -74,7 +74,7 @@ static Optional<bool> isInvariantBreak(bool ExpectedValue, SVal ReturnV,
                                        CheckerContext &C) {
   auto ReturnDV = ReturnV.getAs<DefinedOrUnknownSVal>();
   if (!ReturnDV)
-    return None;
+    return std::nullopt;
 
   if (ExpectedValue)
     return C.getState()->isNull(*ReturnDV).isConstrainedTrue();

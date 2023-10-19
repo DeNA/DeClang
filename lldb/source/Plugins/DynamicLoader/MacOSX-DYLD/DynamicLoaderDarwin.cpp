@@ -276,7 +276,7 @@ bool DynamicLoaderDarwin::UpdateImageLoadAddress(Module *module,
 
               changed = m_process->GetTarget().SetSectionLoadAddress(
                   section_sp, new_section_load_addr, warn_multiple);
-            } 
+            }
           }
         }
 
@@ -337,11 +337,11 @@ bool DynamicLoaderDarwin::UnloadModuleSections(Module *module,
                     section_sp, old_section_load_addr))
               changed = true;
           } else {
-            Host::SystemLog(Host::eSystemLogWarning,
-                            "warning: unable to find and unload segment named "
-                            "'%s' in '%s' in macosx dynamic loader plug-in.\n",
-                            info.segments[i].name.AsCString("<invalid>"),
-                            image_object_file->GetFileSpec().GetPath().c_str());
+            Debugger::ReportWarning(
+                llvm::formatv("unable to find and unload segment named "
+                              "'{0}' in '{1}' in macosx dynamic loader plug-in",
+                              info.segments[i].name.AsCString("<invalid>"),
+                              image_object_file->GetFileSpec().GetPath()));
           }
         }
       }
@@ -372,7 +372,6 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
     // clang-format off
     if (!image->HasKey("load_address") ||
         !image->HasKey("pathname") ||
-        !image->HasKey("mod_date") ||
         !image->HasKey("mach_header") ||
         image->GetValueForKey("mach_header")->GetAsDictionary() == nullptr ||
         !image->HasKey("segments") ||
@@ -383,8 +382,6 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
     // clang-format on
     image_infos[i].address =
         image->GetValueForKey("load_address")->GetAsInteger()->GetValue();
-    image_infos[i].mod_date =
-        image->GetValueForKey("mod_date")->GetAsInteger()->GetValue();
     image_infos[i].file_spec.SetFile(
         image->GetValueForKey("pathname")->GetAsString()->GetValue(),
         FileSpec::Style::native);
@@ -501,7 +498,7 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
       image_infos[i].segments.push_back(segment);
     }
 
-    image_infos[i].uuid.SetFromOptionalStringRef(
+    image_infos[i].uuid.SetFromStringRef(
         image->GetValueForKey("uuid")->GetAsString()->GetValue());
 
     // All sections listed in the dyld image info structure will all either be
@@ -541,8 +538,8 @@ void DynamicLoaderDarwin::UpdateSpecialBinariesFromNewImageInfos(
   const size_t image_infos_size = image_infos.size();
   for (size_t i = 0; i < image_infos_size; i++) {
     if (image_infos[i].header.filetype == llvm::MachO::MH_DYLINKER) {
-      // In a "simulator" process we will have two dyld modules -- 
-      // a "dyld" that we want to keep track of, and a "dyld_sim" which 
+      // In a "simulator" process we will have two dyld modules --
+      // a "dyld" that we want to keep track of, and a "dyld_sim" which
       // we don't need to keep track of here.  dyld_sim will have a non-macosx
       // OS.
       if (target_arch.GetTriple().getEnvironment() == llvm::Triple::Simulator &&
@@ -551,7 +548,7 @@ void DynamicLoaderDarwin::UpdateSpecialBinariesFromNewImageInfos(
       }
 
       dyld_idx = i;
-    } 
+    }
     if (image_infos[i].header.filetype == llvm::MachO::MH_EXECUTE) {
       exe_idx = i;
     }
@@ -567,8 +564,27 @@ void DynamicLoaderDarwin::UpdateSpecialBinariesFromNewImageInfos(
                 exe_module_sp->GetFileSpec().GetPath().c_str());
       target.GetImages().AppendIfNeeded(exe_module_sp);
       UpdateImageLoadAddress(exe_module_sp.get(), image_infos[exe_idx]);
-      if (exe_module_sp.get() != target.GetExecutableModulePointer()) {
+      if (exe_module_sp.get() != target.GetExecutableModulePointer())
         target.SetExecutableModule(exe_module_sp, eLoadDependentsNo);
+
+      // Update the target executable's arch if necessary.
+      auto exe_triple = exe_module_sp->GetArchitecture().GetTriple();
+      if (target_arch.GetTriple().isArm64e() &&
+          exe_triple.getArch() == llvm::Triple::aarch64 &&
+          !exe_triple.isArm64e()) {
+        // On arm64e-capable Apple platforms, the system libraries are
+        // always arm64e, but applications often are arm64. When a
+        // target is created from a file, LLDB recognizes it as an
+        // arm64 target, but debugserver will still (technically
+        // correct) report the process as being arm64e. For
+        // consistency, set the target to arm64 here, so attaching to
+        // a live process behaves the same as creating a process from
+        // file.
+        auto triple = target_arch.GetTriple();
+        triple.setArchName(exe_triple.getArchName());
+        target_arch.SetTriple(triple);
+        target.SetArchitecture(target_arch, /*set_platform=*/false,
+                               /*merge=*/false);
       }
     }
   }
@@ -652,7 +668,7 @@ bool DynamicLoaderDarwin::AddModulesUsingImageInfos(
               module_spec.SetObjectOffset(objfile->GetFileOffset() +
                                           commpage_section->GetFileOffset());
               module_spec.SetObjectSize(objfile->GetByteSize());
-              commpage_image_module_sp = target.GetOrCreateModule(module_spec, 
+              commpage_image_module_sp = target.GetOrCreateModule(module_spec,
                                                                true /* notify */);
               if (!commpage_image_module_sp ||
                   commpage_image_module_sp->GetObjectFile() == nullptr) {
@@ -792,11 +808,11 @@ void DynamicLoaderDarwin::ImageInfo::PutToLog(Log *log) const {
   if (!log)
     return;
   if (address == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "modtime={0:x+8} uuid={1} path='{2}' (UNLOADED)", mod_date,
-             uuid.GetAsString(), file_spec.GetPath());
+    LLDB_LOG(log, "uuid={1} path='{2}' (UNLOADED)", uuid.GetAsString(),
+             file_spec.GetPath());
   } else {
-    LLDB_LOG(log, "address={0:x+16} modtime={1:x+8} uuid={2} path='{3}'",
-             address, mod_date, uuid.GetAsString(), file_spec.GetPath());
+    LLDB_LOG(log, "address={0:x+16} uuid={1} path='{2}'", address,
+             uuid.GetAsString(), file_spec.GetPath());
     for (uint32_t i = 0; i < segments.size(); ++i)
       segments[i].PutToLog(log, slide);
   }
@@ -1023,8 +1039,7 @@ lldb::ModuleSP DynamicLoaderDarwin::GetPThreadLibraryModule() {
   if (!module_sp) {
     SymbolContextList sc_list;
     ModuleSpec module_spec;
-    module_spec.GetFileSpec().GetFilename().SetCString(
-        "libsystem_pthread.dylib");
+    module_spec.GetFileSpec().SetFilename("libsystem_pthread.dylib");
     ModuleList module_list;
     m_process->GetTarget().GetImages().FindModules(module_spec, module_list);
     if (!module_list.IsEmpty()) {
@@ -1094,14 +1109,14 @@ DynamicLoaderDarwin::GetThreadLocalData(const lldb::ModuleSP module_sp,
         }
         StackFrameSP frame_sp = thread_sp->GetStackFrameAtIndex(0);
         if (frame_sp) {
-          TypeSystemClang *clang_ast_context =
+          TypeSystemClangSP scratch_ts_sp =
               ScratchTypeSystemClang::GetForTarget(target);
 
-          if (!clang_ast_context)
+          if (!scratch_ts_sp)
             return LLDB_INVALID_ADDRESS;
 
           CompilerType clang_void_ptr_type =
-              clang_ast_context->GetBasicType(eBasicTypeVoid).GetPointerType();
+              scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
           Address pthread_getspecific_addr = GetPthreadSetSpecificAddress();
           if (pthread_getspecific_addr.IsValid()) {
             EvaluateExpressionOptions options;

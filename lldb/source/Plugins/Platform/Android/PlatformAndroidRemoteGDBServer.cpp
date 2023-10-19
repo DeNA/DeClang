@@ -81,9 +81,11 @@ PlatformAndroidRemoteGDBServer::~PlatformAndroidRemoteGDBServer() {
 
 bool PlatformAndroidRemoteGDBServer::LaunchGDBServer(lldb::pid_t &pid,
                                                      std::string &connect_url) {
+  assert(IsConnected());
   uint16_t remote_port = 0;
   std::string socket_name;
-  if (!m_gdb_client.LaunchGDBServer("127.0.0.1", pid, remote_port, socket_name))
+  if (!m_gdb_client_up->LaunchGDBServer("127.0.0.1", pid, remote_port,
+                                        socket_name))
     return false;
 
   Log *log = GetLog(LLDBLog::Platform);
@@ -97,8 +99,9 @@ bool PlatformAndroidRemoteGDBServer::LaunchGDBServer(lldb::pid_t &pid,
 }
 
 bool PlatformAndroidRemoteGDBServer::KillSpawnedProcess(lldb::pid_t pid) {
+  assert(IsConnected());
   DeleteForwardPort(pid);
-  return m_gdb_client.KillSpawnedProcess(pid);
+  return m_gdb_client_up->KillSpawnedProcess(pid);
 }
 
 Status PlatformAndroidRemoteGDBServer::ConnectRemote(Args &args) {
@@ -125,7 +128,7 @@ Status PlatformAndroidRemoteGDBServer::ConnectRemote(Args &args) {
 
   std::string connect_url;
   auto error =
-      MakeConnectURL(g_remote_platform_pid, parsed_url->port.getValueOr(0),
+      MakeConnectURL(g_remote_platform_pid, parsed_url->port.value_or(0),
                      parsed_url->path, connect_url);
 
   if (error.Fail())
@@ -214,7 +217,7 @@ lldb::ProcessSP PlatformAndroidRemoteGDBServer::ConnectProcess(
 
   std::string new_connect_url;
   error = MakeConnectURL(s_remote_gdbserver_fake_pid--,
-                         parsed_url->port.getValueOr(0), parsed_url->path,
+                         parsed_url->port.value_or(0), parsed_url->path,
                          new_connect_url);
   if (error.Fail())
     return nullptr;

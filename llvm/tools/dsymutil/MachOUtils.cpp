@@ -12,10 +12,12 @@
 #include "LinkUtils.h"
 #include "llvm/CodeGen/NonRelocatableStringpool.h"
 #include "llvm/MC/MCAsmLayout.h"
+#include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCMachObjectWriter.h"
 #include "llvm/MC/MCObjectStreamer.h"
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/Program.h"
@@ -75,7 +77,8 @@ static bool runLipo(StringRef SDKPath, SmallVectorImpl<StringRef> &Args) {
 
 bool generateUniversalBinary(SmallVectorImpl<ArchAndFile> &ArchFiles,
                              StringRef OutputFileName,
-                             const LinkOptions &Options, StringRef SDKPath) {
+                             const LinkOptions &Options, StringRef SDKPath,
+                             bool Fat64) {
   // No need to merge one file into a universal fat binary.
   if (ArchFiles.size() == 1) {
     if (auto E = ArchFiles.front().File->keep(OutputFileName)) {
@@ -94,13 +97,17 @@ bool generateUniversalBinary(SmallVectorImpl<ArchAndFile> &ArchFiles,
   for (auto &Thin : ArchFiles)
     Args.push_back(Thin.path());
 
-  // Align segments to match dsymutil-classic alignment
+  // Align segments to match dsymutil-classic alignment.
   for (auto &Thin : ArchFiles) {
     Thin.Arch = getArchName(Thin.Arch);
     Args.push_back("-segalign");
     Args.push_back(Thin.Arch);
     Args.push_back("20");
   }
+
+  // Use a 64-bit fat header if requested.
+  if (Fat64)
+    Args.push_back("-fat64");
 
   Args.push_back("-output");
   Args.push_back(OutputFileName.data());
@@ -387,6 +394,19 @@ bool generateDsymCompanion(
   bool Is64Bit = Writer.is64Bit();
   MachO::symtab_command SymtabCmd = InputBinary.getSymtabLoadCommand();
 
+  // Get the ptrauth ABI version (for arm64 subtypes).
+  std::optional<unsigned> PtrAuthABIVersion;
+  bool PtrAuthKernelABIVersion = false;
+  unsigned CPUType = InputBinary.getHeader().cputype;
+  unsigned CPUSubTypeField = InputBinary.getHeader().cpusubtype;
+  if (CPUType == MachO::CPU_TYPE_ARM64 &&
+      MachO::CPU_SUBTYPE_ARM64E_IS_VERSIONED_PTRAUTH_ABI(CPUSubTypeField)) {
+    PtrAuthABIVersion =
+        MachO::CPU_SUBTYPE_ARM64E_PTRAUTH_VERSION(CPUSubTypeField);
+    PtrAuthKernelABIVersion =
+        MachO::CPU_SUBTYPE_ARM64E_IS_KERNEL_PTRAUTH_ABI(CPUSubTypeField);
+  }
+
   // Compute the number of load commands we will need.
   unsigned LoadCommandSize = 0;
   unsigned NumLoadCommands = 0;
@@ -507,7 +527,9 @@ bool generateDsymCompanion(
   SymtabStart = alignTo(SymtabStart, 0x1000);
 
   // We gathered all the information we need, start emitting the output file.
-  Writer.writeHeader(MachO::MH_DSYM, NumLoadCommands, LoadCommandSize, false);
+  Writer.writeHeader(MachO::MH_DSYM, NumLoadCommands, LoadCommandSize,
+                     /*SubsectionsViaSymbols=*/false, PtrAuthABIVersion,
+                     PtrAuthKernelABIVersion);
 
   // Write the load commands.
   assert(OutFile.tell() == HeaderSize);

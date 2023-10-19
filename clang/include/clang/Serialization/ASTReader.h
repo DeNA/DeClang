@@ -32,6 +32,7 @@
 #include "clang/Serialization/ModuleFile.h"
 #include "clang/Serialization/ModuleFileExtension.h"
 #include "clang/Serialization/ModuleManager.h"
+#include "clang/Serialization/SourceLocationEncoding.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -84,7 +85,6 @@ class GlobalModuleIndex;
 struct HeaderFileInfo;
 class HeaderSearchOptions;
 class LangOptions;
-class LazyASTUnresolvedSet;
 class MacroInfo;
 class InMemoryModuleCache;
 class NamedDecl;
@@ -94,7 +94,6 @@ class ObjCInterfaceDecl;
 class PCHContainerReader;
 class Preprocessor;
 class PreprocessorOptions;
-struct QualifierInfo;
 class Sema;
 class SourceManager;
 class Stmt;
@@ -165,11 +164,29 @@ public:
 
   /// Receives the header search options.
   ///
+  /// \param HSOpts The read header search options. The following fields are
+  ///               missing and are reported in ReadHeaderSearchPaths():
+  ///               UserEntries, SystemHeaderPrefixes, VFSOverlayFiles.
+  ///
   /// \returns true to indicate the header search options are invalid, or false
   /// otherwise.
   virtual bool ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
                                        StringRef SpecificModuleCachePath,
                                        bool Complain) {
+    return false;
+  }
+
+  /// Receives the header search paths.
+  ///
+  /// \param HSOpts The read header search paths. Only the following fields are
+  ///               initialized: UserEntries, SystemHeaderPrefixes,
+  ///               VFSOverlayFiles. The rest is reported in
+  ///               ReadHeaderSearchOptions().
+  ///
+  /// \returns true to indicate the header search paths are invalid, or false
+  /// otherwise.
+  virtual bool ReadHeaderSearchPaths(const HeaderSearchOptions &HSOpts,
+                                     bool Complain) {
     return false;
   }
 
@@ -222,6 +239,26 @@ public:
   /// AST file imported by this AST file.
   virtual void visitImport(StringRef ModuleName, StringRef Filename) {}
 
+  /// Called for each CAS filesystem root ID.
+  ///
+  /// \returns true to indicate \p RootID is invalid, or false otherwise.
+  virtual bool readCASFileSystemRootID(StringRef RootID, bool Complain) {
+    return false;
+  }
+
+  /// Called for each CAS include-tree root ID.
+  ///
+  /// \returns true to indicate \p RootID is invalid, or false otherwise.
+  virtual bool readIncludeTreeID(StringRef ID, bool Complain) { return false; }
+
+  /// Called for each module cache key.
+  ///
+  /// \returns true to indicate the key cannot be loaded.
+  virtual bool readModuleCacheKey(StringRef ModuleName, StringRef Filename,
+                                  StringRef CacheKey) {
+    return false;
+  }
+
   /// Indicates that a particular module file extension has been read.
   virtual void readModuleFileExtension(
                  const ModuleFileExtensionMetadata &Metadata) {}
@@ -267,6 +304,10 @@ public:
                        serialization::ModuleKind Kind) override;
   bool visitInputFile(StringRef Filename, bool isSystem,
                       bool isOverridden, bool isExplicitModule) override;
+  bool readCASFileSystemRootID(StringRef RootID, bool Complain) override;
+  bool readIncludeTreeID(StringRef ID, bool Complain) override;
+  bool readModuleCacheKey(StringRef ModuleName, StringRef Filename,
+                          StringRef CacheKey) override;
   void readModuleFileExtension(
          const ModuleFileExtensionMetadata &Metadata) override;
 };
@@ -382,7 +423,7 @@ public:
     /// The AST file was written by a different version of Clang.
     VersionMismatch,
 
-    /// The AST file was writtten with a different language/target
+    /// The AST file was written with a different language/target
     /// configuration.
     ConfigurationMismatch,
 
@@ -398,6 +439,8 @@ public:
   using ModuleReverseIterator = ModuleManager::ModuleReverseIterator;
 
 private:
+  using LocSeq = SourceLocationSequence;
+
   /// The receiver of some callbacks invoked by ASTReader.
   std::unique_ptr<ASTReaderListener> Listener;
 
@@ -688,7 +731,7 @@ private:
     Module *Mod;
 
     /// The kind of module reference.
-    enum { Import, Export, Conflict } Kind;
+    enum { Import, Export, Conflict, Affecting } Kind;
 
     /// The local ID of the module that is being exported.
     unsigned ID;
@@ -1128,6 +1171,10 @@ private:
   llvm::SmallDenseMap<CXXRecordDecl *, llvm::SmallVector<DataPointers, 2>, 2>
       PendingOdrMergeFailures;
 
+  /// C/ObjC record definitions in which we found an ODR violation.
+  llvm::SmallDenseMap<RecordDecl *, llvm::SmallVector<RecordDecl *, 2>, 2>
+      PendingRecordOdrMergeFailures;
+
   /// Function definitions in which we found an ODR violation.
   llvm::SmallDenseMap<FunctionDecl *, llvm::SmallVector<FunctionDecl *, 2>, 2>
       PendingFunctionOdrMergeFailures;
@@ -1232,18 +1279,8 @@ private:
   /// Reads a statement from the specified cursor.
   Stmt *ReadStmtFromStream(ModuleFile &F);
 
-  struct InputFileInfo {
-    std::string Filename;
-    uint64_t ContentHash;
-    off_t StoredSize;
-    time_t StoredTime;
-    bool Overridden;
-    bool Transient;
-    bool TopLevelModuleMap;
-  };
-
-  /// Reads the stored information about an input file.
-  InputFileInfo readInputFileInfo(ModuleFile &F, unsigned ID);
+  /// Retrieve the stored information about an input file.
+  serialization::InputFileInfo getInputFileInfo(ModuleFile &F, unsigned ID);
 
   /// Retrieve the file entry and 'overridden' bit for an input
   /// file in the given module file.
@@ -1336,6 +1373,7 @@ private:
   llvm::Error ReadSourceManagerBlock(ModuleFile &F);
   llvm::BitstreamCursor &SLocCursorForID(int ID);
   SourceLocation getImportLocation(ModuleFile *F);
+  void readIncludedFiles(ModuleFile &F, StringRef Blob, Preprocessor &PP);
   ASTReadResult ReadModuleMapFileBlock(RecordData &Record, ModuleFile &F,
                                        const ModuleFile *ImportedBy,
                                        unsigned ClientLoadCapabilities);
@@ -1717,21 +1755,23 @@ public:
   /// Read the control block for the named AST file.
   ///
   /// \returns true if an error occurred, false otherwise.
-  static bool
-  readASTFileControlBlock(StringRef Filename, FileManager &FileMgr,
-                          const PCHContainerReader &PCHContainerRdr,
-                          bool FindModuleFileExtensions,
-                          ASTReaderListener &Listener,
-                          bool ValidateDiagnosticOptions);
+  static bool readASTFileControlBlock(StringRef Filename, FileManager &FileMgr,
+                                      const InMemoryModuleCache &ModuleCache,
+                                      const PCHContainerReader &PCHContainerRdr,
+                                      bool FindModuleFileExtensions,
+                                      ASTReaderListener &Listener,
+                                      bool ValidateDiagnosticOptions);
 
   /// Determine whether the given AST file is acceptable to load into a
   /// translation unit with the given language and target options.
   static bool isAcceptableASTFile(StringRef Filename, FileManager &FileMgr,
+                                  const InMemoryModuleCache &ModuleCache,
                                   const PCHContainerReader &PCHContainerRdr,
                                   const LangOptions &LangOpts,
                                   const TargetOptions &TargetOpts,
                                   const PreprocessorOptions &PPOpts,
-                                  StringRef ExistingModuleCachePath);
+                                  StringRef ExistingModuleCachePath,
+                                  bool RequireStrictOptionMatches = false);
 
   /// Returns the suggested contents of the predefines buffer,
   /// which contains a (typically-empty) subset of the predefines
@@ -1833,10 +1873,6 @@ public:
   /// Retrieve the module file that owns the given declaration, or NULL
   /// if the declaration is not from a module file.
   ModuleFile *getOwningModuleFile(const Decl *D);
-
-  /// Get the best name we know for the module that owns the given
-  /// declaration, or an empty string if the declaration is not from a module.
-  std::string getOwningModuleNameForDiagnostic(const Decl *D);
 
   /// Returns the source location for the decl \p ID.
   SourceLocation getSourceLocationForDeclID(serialization::GlobalDeclID ID);
@@ -2148,16 +2184,16 @@ public:
 
   /// Read a source location from raw form and return it in its
   /// originating module file's source location space.
-  SourceLocation
-  ReadUntranslatedSourceLocation(SourceLocation::UIntTy Raw) const {
-    return SourceLocation::getFromRawEncoding((Raw >> 1) |
-                                              (Raw << (8 * sizeof(Raw) - 1)));
+  SourceLocation ReadUntranslatedSourceLocation(SourceLocation::UIntTy Raw,
+                                                LocSeq *Seq = nullptr) const {
+    return SourceLocationEncoding::decode(Raw, Seq);
   }
 
   /// Read a source location from raw form.
   SourceLocation ReadSourceLocation(ModuleFile &ModuleFile,
-                                    SourceLocation::UIntTy Raw) const {
-    SourceLocation Loc = ReadUntranslatedSourceLocation(Raw);
+                                    SourceLocation::UIntTy Raw,
+                                    LocSeq *Seq = nullptr) const {
+    SourceLocation Loc = ReadUntranslatedSourceLocation(Raw, Seq);
     return TranslateSourceLocation(ModuleFile, Loc);
   }
 
@@ -2177,14 +2213,26 @@ public:
 
   /// Read a source location.
   SourceLocation ReadSourceLocation(ModuleFile &ModuleFile,
-                                    const RecordDataImpl &Record,
-                                    unsigned &Idx) {
-    return ReadSourceLocation(ModuleFile, Record[Idx++]);
+                                    const RecordDataImpl &Record, unsigned &Idx,
+                                    LocSeq *Seq = nullptr) {
+    return ReadSourceLocation(ModuleFile, Record[Idx++], Seq);
+  }
+
+  /// Read a FileID.
+  FileID ReadFileID(ModuleFile &F, const RecordDataImpl &Record,
+                    unsigned &Idx) const {
+    return TranslateFileID(F, FileID::get(Record[Idx++]));
+  }
+
+  /// Translate a FileID from another module file's FileID space into ours.
+  FileID TranslateFileID(ModuleFile &F, FileID FID) const {
+    assert(FID.ID >= 0 && "Reading non-local FileID.");
+    return FileID::get(F.SLocEntryBaseID + FID.ID - 1);
   }
 
   /// Read a source range.
-  SourceRange ReadSourceRange(ModuleFile &F,
-                              const RecordData &Record, unsigned &Idx);
+  SourceRange ReadSourceRange(ModuleFile &F, const RecordData &Record,
+                              unsigned &Idx, LocSeq *Seq = nullptr);
 
   // Read a string
   static std::string ReadString(const RecordData &Record, unsigned &Idx);
@@ -2312,8 +2360,7 @@ public:
   /// Visit all the top-level module maps loaded when building the given module
   /// file.
   void visitTopLevelModuleMaps(serialization::ModuleFile &MF,
-                               llvm::function_ref<
-                                   void(const FileEntry *)> Visitor);
+                               llvm::function_ref<void(FileEntryRef)> Visitor);
 
   bool isProcessingUpdateRecords() { return ProcessingUpdateRecords; }
 };

@@ -14,29 +14,46 @@
 #ifndef LLVM_CLANG_LIB_CODEGEN_ADDRESS_H
 #define LLVM_CLANG_LIB_CODEGEN_ADDRESS_H
 
-#include "llvm/IR/Constants.h"
 #include "clang/AST/CharUnits.h"
+#include "llvm/ADT/PointerIntPair.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/Support/MathExtras.h"
 
 namespace clang {
 namespace CodeGen {
 
+// Indicates whether a pointer is known not to be null.
+enum KnownNonNull_t { NotKnownNonNull, KnownNonNull };
+
 /// An aligned address.
 class Address {
-  llvm::Value *Pointer;
+  llvm::PointerIntPair<llvm::Value *, 1, bool> PointerAndKnownNonNull;
+  llvm::Type *ElementType;
   CharUnits Alignment;
+
+protected:
+  Address(std::nullptr_t) : ElementType(nullptr) {}
+
 public:
-  Address(llvm::Value *pointer, CharUnits alignment)
-      : Pointer(pointer), Alignment(alignment) {
-    assert((!alignment.isZero() || pointer == nullptr) &&
-           "creating valid address with invalid alignment");
+  Address(llvm::Value *Pointer, llvm::Type *ElementType, CharUnits Alignment,
+          KnownNonNull_t IsKnownNonNull = NotKnownNonNull)
+      : PointerAndKnownNonNull(Pointer, IsKnownNonNull),
+        ElementType(ElementType), Alignment(Alignment) {
+    assert(Pointer != nullptr && "Pointer cannot be null");
+    assert(ElementType != nullptr && "Element type cannot be null");
+    assert(llvm::cast<llvm::PointerType>(Pointer->getType())
+               ->isOpaqueOrPointeeTypeMatches(ElementType) &&
+           "Incorrect pointer element type");
   }
 
-  static Address invalid() { return Address(nullptr, CharUnits()); }
-  bool isValid() const { return Pointer != nullptr; }
+  static Address invalid() { return Address(nullptr); }
+  bool isValid() const {
+    return PointerAndKnownNonNull.getPointer() != nullptr;
+  }
 
   llvm::Value *getPointer() const {
     assert(isValid());
-    return Pointer;
+    return PointerAndKnownNonNull.getPointer();
   }
 
   /// Return the type of the pointer value.
@@ -45,11 +62,9 @@ public:
   }
 
   /// Return the type of the values stored in this address.
-  ///
-  /// When IR pointer types lose their element type, we should simply
-  /// store it in Address instead for the convenience of writing code.
   llvm::Type *getElementType() const {
-    return getType()->getElementType();
+    assert(isValid());
+    return ElementType;
   }
 
   /// Return the address space that this address resides in.
@@ -67,30 +82,58 @@ public:
     assert(isValid());
     return Alignment;
   }
+
+  /// Return address with different pointer, but same element type and
+  /// alignment.
+  Address withPointer(llvm::Value *NewPointer,
+                      KnownNonNull_t IsKnownNonNull) const {
+    return Address(NewPointer, getElementType(), getAlignment(),
+                   IsKnownNonNull);
+  }
+
+  /// Return address with different alignment, but same pointer and element
+  /// type.
+  Address withAlignment(CharUnits NewAlignment) const {
+    return Address(getPointer(), getElementType(), NewAlignment,
+                   isKnownNonNull());
+  }
+
+  /// Whether the pointer is known not to be null.
+  KnownNonNull_t isKnownNonNull() const {
+    assert(isValid());
+    return (KnownNonNull_t)PointerAndKnownNonNull.getInt();
+  }
+
+  /// Set the non-null bit.
+  Address setKnownNonNull() {
+    assert(isValid());
+    PointerAndKnownNonNull.setInt(true);
+    return *this;
+  }
 };
 
 /// A specialization of Address that requires the address to be an
 /// LLVM Constant.
 class ConstantAddress : public Address {
+  ConstantAddress(std::nullptr_t) : Address(nullptr) {}
+
 public:
-  ConstantAddress(llvm::Constant *pointer, CharUnits alignment)
-    : Address(pointer, alignment) {}
+  ConstantAddress(llvm::Constant *pointer, llvm::Type *elementType,
+                  CharUnits alignment)
+      : Address(pointer, elementType, alignment) {}
 
   static ConstantAddress invalid() {
-    return ConstantAddress(nullptr, CharUnits());
+    return ConstantAddress(nullptr);
   }
 
   llvm::Constant *getPointer() const {
     return llvm::cast<llvm::Constant>(Address::getPointer());
   }
 
-  ConstantAddress getBitCast(llvm::Type *ty) const {
-    return ConstantAddress(llvm::ConstantExpr::getBitCast(getPointer(), ty),
-                           getAlignment());
-  }
-
-  ConstantAddress getElementBitCast(llvm::Type *ty) const {
-    return getBitCast(ty->getPointerTo(getAddressSpace()));
+  ConstantAddress getElementBitCast(llvm::Type *ElemTy) const {
+    llvm::Constant *BitCast = llvm::ConstantExpr::getBitCast(
+        getPointer(), ElemTy->getPointerTo(getAddressSpace()));
+    return ConstantAddress(BitCast, ElemTy, getAlignment());
   }
 
   static bool isaImpl(Address addr) {
@@ -98,7 +141,7 @@ public:
   }
   static ConstantAddress castImpl(Address addr) {
     return ConstantAddress(llvm::cast<llvm::Constant>(addr.getPointer()),
-                           addr.getAlignment());
+                           addr.getElementType(), addr.getAlignment());
   }
 };
 
