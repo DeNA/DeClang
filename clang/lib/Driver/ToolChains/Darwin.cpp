@@ -1218,8 +1218,10 @@ DarwinClang::DarwinClang(const Driver &D, const llvm::Triple &Triple,
 
 void DarwinClang::addClangWarningOptions(ArgStringList &CC1Args) const {
   // Always error about undefined 'TARGET_OS_*' macros.
-  CC1Args.push_back("-Wundef-prefix=TARGET_OS_");
-  CC1Args.push_back("-Werror=undef-prefix");
+  //DECLANG CODES START
+  //CC1Args.push_back("-Wundef-prefix=TARGET_OS_");
+  //CC1Args.push_back("-Werror=undef-prefix");
+  //DECLANG CODES END
 
   // For modern targets, promote certain warnings to errors.
   if (isTargetWatchOSBased() || getTriple().isArch64Bit()) {

@@ -72,6 +72,7 @@ else
       cmake \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_DUMP=ON \
+        -DLLVM_ENABLE_ZSTD=OFF \
         -DLLVM_INCLUDE_BENCHMARKS=OFF \
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_TESTS=OFF \
@@ -88,6 +89,7 @@ else
       echo "Build for $build_arch"
       cmake \
         -DLLVM_ENABLE_DUMP=ON \
+        -DLLVM_ENABLE_ZSTD=OFF \
         -DLLVM_INCLUDE_BENCHMARKS=OFF \
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_TESTS=OFF \

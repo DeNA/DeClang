@@ -17,6 +17,7 @@
 #include "llvm/Transforms/AntiHack/Utils.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/IR/ValueSymbolTable.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/Transforms/Utils/Cloning.h"
