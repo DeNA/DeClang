@@ -102,6 +102,8 @@ std::string getClangToolFullVersion(StringRef ToolName) {
     OS << " " << repo;
   }
 
+  OS << " DeNA clang-swift5.9";
+
   return buf;
 }
 
