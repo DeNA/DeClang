@@ -25,7 +25,11 @@ done
 set -- "${POSITIONAL[@]}" # restore positional parameters
 
 if [[ $build_arch == "" ]]; then
-  build_arch="x86_64"
+  if [[ ${OS} == "Windows_NT" ]]; then
+    build_arch="x86_64"
+  else
+    build_arch=$(uname -m)
+  fi
 fi
 
 pushd $(dirname $0) > /dev/null

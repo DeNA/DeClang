@@ -44,6 +44,11 @@ void bar(int a)
   }
   else {
     printf("a!=1\n");
+    if (a == 2) {
+      printf("a==2\n");
+    } else {
+      printf("a!=2\n");
+    }
   }
 }
 

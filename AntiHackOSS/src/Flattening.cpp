@@ -14,9 +14,9 @@
 #include "llvm/Transforms/AntiHack/Flattening.h"
 #include "llvm/Transforms/AntiHack/Obfuscation.h"
 #include "llvm/Transforms/AntiHack/CryptoUtils.h"
-#include "llvm/Transforms/AntiHack/Utils.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/IR/ValueSymbolTable.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/IRReader/IRReader.h"
@@ -52,10 +52,10 @@ struct Flattening : public FunctionPass {
   ~Flattening();
   bool runOnFunction(Function &F);
   bool flatten(Function *f, std::string seed);
+  
+  void fixStack(Function *f);
+  bool valueEscapes(Instruction *Inst);
 
-  void split(Function *f, int SplitNum, const std::string seed);
-  bool containsPHI(BasicBlock *b);
-  void shuffle(std::vector<int> &vec);
 };
 }
 
@@ -71,7 +71,6 @@ Flattening::Flattening(llvm::json::Value* configJson, llvm::raw_fd_ostream *logF
   this->doFlattening = true;
   this->configJson = configJson;
   this->logFile = logFile;
-
 }
 
 Flattening::~Flattening()
@@ -84,6 +83,7 @@ bool Flattening::runOnFunction(Function &F) {
   }
 
   llvm::json::Object *jsonObj = configJson->getAsObject();
+
   if (jsonObj->getArray("flatten")) {
     llvm::json::Array *flattenArray = jsonObj->getArray("flatten");
 
@@ -95,7 +95,7 @@ bool Flattening::runOnFunction(Function &F) {
 
       std::string funcName = obj.getAsObject()->getString("name")->str();
       //(*logFile) << "[Frontend]: flattening, try match " << F.getName() << " with " << funcName << "\n";
-      //logFile->flush();
+      logFile->flush();
 
       llvm::Regex reFuncName(funcName);
 
@@ -103,10 +103,8 @@ bool Flattening::runOnFunction(Function &F) {
       if (reFuncName.match(F.getName()) && flattenedFuncs.find(F.getName().str()) == flattenedFuncs.end() ) {
         flattenedFuncs.insert(F.getName().str());
         (*logFile) << "[Frontend]: Flattening func " << F.getName() << "\n";
-        //F.print(*logFile);
         if (flatten(&F, seed) ) {
           (*logFile) << "[Frontend]: Successfully flattened func " << F.getName() << "\n";
-          //F.print(*logFile);
           logFile->flush();
         }
       }
@@ -133,7 +131,7 @@ bool Flattening::flatten(Function *f, std::string seed) {
   llvm::cryptoutils->get_bytes(scrambling_key, 16);
   // END OF SCRAMBLER
 
-  //FIXME: when llvm version >= 9, call LowerSwitchPass will crash
+  //FIXME: when llvm vesion >= 9, call LowerSwtichPass will crash
 #if LLVM_VERSION_MAJOR < 9
   // Lower switch
   FunctionPass *lower = createLowerSwitchPass();
@@ -144,20 +142,16 @@ bool Flattening::flatten(Function *f, std::string seed) {
   // Save all original BB
   for (Function::iterator i = f->begin(); i != f->end(); ++i) {
     BasicBlock *tmp = &*i;
-    //tmp->print(*logFile);
-    if (tmp->isEHPad() || tmp->isLandingPad() || isa<InvokeInst>(tmp->getTerminator()) ) {
-          (*logFile) << f->getName() << "[Frontend]: (Warning) Exception handing instructions is unsupported for flattening "
-            "in DeClang OSS version. Contact us if you really need to flatten functions with exception handling.\n";
-          return false;
-    }
     origBB.push_back(tmp);
 
     BasicBlock *bb = &*i;
     if (!isa<BranchInst>(bb->getTerminator()) && !isa<ReturnInst>(bb->getTerminator()) &&
-         !isa<UnreachableInst>(bb->getTerminator()) ) {
+        !isa<InvokeInst>(bb->getTerminator()) && !isa<UnreachableInst>(bb->getTerminator()) &&
+        !isa<ResumeInst>(bb->getTerminator()) && !isa<SwitchInst>(bb->getTerminator()) ) {
       (*logFile) << "[Frontend]: (Warning) " << f->getName() << " Terminator Error. Not Flattening.\n";
-      (*logFile) << "terminator: ";
+      *(logFile) << "[Frontend]: Terminator is: \n";
       bb->getTerminator()->print(*logFile);
+      *(logFile) << "\n";
       return false;
     }
   }
@@ -165,6 +159,11 @@ bool Flattening::flatten(Function *f, std::string seed) {
   // Nothing to flatten
   if (origBB.size() <= 1) {
     (*logFile) << f->getName() << "[Frontend]: (Warning) Function too small. Not Flattening.\n";
+    return false;
+  }
+  if (origBB.size() > 5000) {
+    (*logFile) << f->getName() << "[frontend]: bb count is 5000. skip flattening.\n";
+    logFile->flush();
     return false;
   }
 
@@ -235,8 +234,14 @@ bool Flattening::flatten(Function *f, std::string seed) {
   // Put all BB in the switch
   for (vector<BasicBlock *>::iterator b = origBB.begin(); b != origBB.end();
        ++b) {
+
     BasicBlock *i = *b;
     ConstantInt *numCase = NULL;
+
+    //Dont put LandingPad in switch statement
+    if (isa<LandingPadInst>(i->getFirstNonPHIOrDbgOrLifetime()) ) {
+      continue;
+    }
 
     // Move the BB inside the switch (only visual, no code logic)
     i->moveBefore(loopEnd);
@@ -259,10 +264,19 @@ bool Flattening::flatten(Function *f, std::string seed) {
       continue;
     }
 
+    //skip invalid terminator BB
+    if (isa<InvokeInst>(i->getTerminator()) ||
+        isa<UnreachableInst>(i->getTerminator()) ||
+        isa<ResumeInst>(i->getTerminator()) || 
+        isa<SwitchInst>(i->getTerminator()) ) {
+      continue;
+    }
+
     // If it's a non-conditional jump
     if (i->getTerminator()->getNumSuccessors() == 1) {
       // Get successor and delete terminator
       BasicBlock *succ = i->getTerminator()->getSuccessor(0);
+
       i->getTerminator()->eraseFromParent();
 
       // Get next case
@@ -319,84 +333,70 @@ bool Flattening::flatten(Function *f, std::string seed) {
       continue;
     }
   }
-  //f->dump();
-  fixStack(f);
+  
+  //f->print(*logFile);
+  //logFile->flush();
+  this->fixStack(f);
   return true;
 }
 
-void Flattening::split(Function *f, int SplitNum, string seed) {
+// Try to remove phi node and demote reg to stack
+void Flattening::fixStack(Function *f)
+{
+  // Insert all new allocas into entry block.
+  BasicBlock *BBEntry = &f->getEntryBlock();
+  assert(pred_empty(BBEntry) &&
+      "Entry block to function must not have predecessors!");
 
-  if (seed.size() == 0) {
-    (*logFile) << "[Frontend]: Config Error: missing 'seed' in flatten array\n";
-  }
-  llvm::cryptoutils->prng_seed(seed);
+  // Find first non-alloca instruction and create insertion point. This is
+  // safe if block is well-formed: it always have terminator, otherwise
+  // we'll get and assertion.
+  BasicBlock::iterator I = BBEntry->begin();
+  while (isa<AllocaInst>(I)) ++I;
 
+  CastInst *AllocaInsertionPoint = new BitCastInst(
+      Constant::getNullValue(Type::getInt32Ty(f->getContext())),
+      Type::getInt32Ty(f->getContext()), "reg2mem alloca point", &*I);
 
-  std::vector<BasicBlock *> origBB;
-  int splitN = SplitNum;
-
-  // Save all basic blocks
-  for (Function::iterator I = f->begin(), IE = f->end(); I != IE; ++I) {
-    origBB.push_back(&*I);
-  }
-
-  for (std::vector<BasicBlock *>::iterator I = origBB.begin(),
-                                           IE = origBB.end();
-       I != IE; ++I) {
-    BasicBlock *curr = *I;
-
-    // No need to split a 1 inst bb
-    // Or ones containing a PHI node
-    if (curr->size() < 2 || containsPHI(curr)) {
-      continue;
-    }
-
-    // Check splitN and current BB size
-    if ((size_t)splitN > curr->size()) {
-      splitN = curr->size() - 1;
-    }
-
-    // Generate splits point
-    std::vector<int> test;
-    for (unsigned i = 1; i < curr->size(); ++i) {
-      test.push_back(i);
-    }
-
-    // Shuffle
-    if (test.size() != 1) {
-      shuffle(test);
-      std::sort(test.begin(), test.begin() + splitN);
-    }
-
-    // Split
-    BasicBlock::iterator it = curr->begin();
-    BasicBlock *toSplit = curr;
-    int last = 0;
-    for (int i = 0; i < splitN; ++i) {
-      for (int j = 0; j < test[i] - last; ++j) {
-        ++it;
+  // Find the escaped instructions. But don't create stack slots for
+  // allocas in entry block.
+  std::list<Instruction*> WorkList;
+  for (BasicBlock &ibb : *f)
+    for (BasicBlock::iterator iib = ibb.begin(), iie = ibb.end(); iib != iie;
+        ++iib) {
+      if (!(isa<AllocaInst>(iib) && iib->getParent() == BBEntry) &&
+          valueEscapes(&*iib)) {
+        WorkList.push_front(&*iib);
       }
-      last = test[i];
-      if(toSplit->size() < 2)
-        continue;
-      toSplit = toSplit->splitBasicBlock(it, toSplit->getName() + ".split");
     }
 
+  // Demote escaped instructions
+  //NumRegsDemoted += WorkList.size();
+  for (Instruction *ilb : WorkList) {
+    DemoteRegToStack(*ilb, false, AllocaInsertionPoint);
   }
+
+  WorkList.clear();
+
+  // Find all phi's
+  for (BasicBlock &ibb : *f)
+    for (BasicBlock::iterator iib = ibb.begin(), iie = ibb.end(); iib != iie;
+        ++iib)
+      if (isa<PHINode>(iib))
+        WorkList.push_front(&*iib);
+
+  // Demote phi nodes
+  //NumPhisDemoted += WorkList.size();
+  for (Instruction *ilb : WorkList)
+    DemotePHIToStack(cast<PHINode>(ilb), AllocaInsertionPoint);
 }
 
-bool Flattening::containsPHI(BasicBlock *b) {
-  for (BasicBlock::iterator I = b->begin(), IE = b->end(); I != IE; ++I) {
-    if (isa<PHINode>(I)) {
+bool Flattening::valueEscapes(Instruction *Inst) {
+  const BasicBlock *BB = Inst->getParent();
+  for (const User *U : Inst->users()) {
+    const Instruction *UI = cast<Instruction>(U);
+    if (UI->getParent() != BB || isa<PHINode>(UI))
       return true;
-    }
   }
   return false;
-}
-
-void Flattening::shuffle(std::vector<int> &vec) {
-  int n = vec.size();
-  for (int i = n - 1; i > 0; --i) {
-    std::swap(vec[i], vec[cryptoutils->get_uint32_t() % (i + 1)]);
-  }
 }

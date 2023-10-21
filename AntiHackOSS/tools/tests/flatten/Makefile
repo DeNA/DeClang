@@ -1,25 +1,36 @@
-CXX=../../../../build/bin/clang++ 
-INC=/Applications/Xcode.app/Contents//Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/
-INC_CXX=/Applications/Xcode.app//Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include/c++/v1/
-LDPATH=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib
-x64:test.cpp config.json
-	DECLANG_HOME=. $(CXX) -w -Os -mmacosx-version-min=10.14.6 -std=c++03 -L$(LDPATH) -I$(INC) -I$(INC_CXX) -lc++ -lstdc++ -lSystem -g test.cpp -mllvm -antihack=./config.json -o test
-x64_ir:test.cpp config.json
-	DECLANG_HOME=. $(CXX) -w -Os -mmacosx-version-min=10.14.6 -std=c++03 -L$(LDPATH) -I$(INC) -I$(INC_CXX) -lc++ -lstdc++ -lSystem test.cpp -mllvm -antihack=./config.json -emit-llvm -S -o test.ll
-aarch64:test.cpp config.json
-	DECLANG_HOME=. $(CXX) -w -std=c++03 -I$(INC) -I$(INC_CXX) -c -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/10.0.0/lib/darwin/ -lclang_rt.ios -Os -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk test.cpp -mllvm -antihack=./config.json -mllvm --loop-unswitch-threshold=1 -o test
-aarch64_ir:test.cpp config.json
-	DECLANG_HOME=. $(CXX) -w -std=c++03 -I$(INC) -I$(INC_CXX) -c -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/10.0.0/lib/darwin/ -lclang_rt.ios -Os -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk test.cpp -mllvm -antihack=./config.json -mllvm --loop-unswitch-threshold=1 -emit-llvm -S -o test.ll
+CXX :=../../../../build/bin/clang++ 
 
+all: mac mac.ll ios ios.ll
 
-config.json:config.pre.json
+mac:test.cpp .DeClang/config.json
+	DECLANG_HOME=. $(CXX) -w -Os -std=c++11 --sysroot=$$(xcrun --show-sdk-path) -o $@ test.cpp 
+
+mac.ll:test.cpp .DeClang/config.json
+	DECLANG_HOME=. $(CXX) -w -Os -std=c++11 --sysroot=$$(xcrun --show-sdk-path) -emit-llvm -S -o $@ test.cpp
+
+ios:test.cpp .DeClang/config.json
+	DECLANG_HOME=. $(CXX) -target arm64-apple-ios12.4 -w -Os -std=c++11 --sysroot=$$(xcrun --sdk iphoneos --show-sdk-path) -o $@ test.cpp
+
+ios.ll:test.cpp .DeClang/config.json
+	DECLANG_HOME=. $(CXX) -w -Os -std=c++11 --sysroot=$$(xcrun --sdk iphoneos --show-sdk-path) -emit-llvm -S -o $@ test.cpp
+
+.DeClang/config.json: config.pre.json
 	mkdir -p ./.DeClang/
-	../../config/gen_config_mac_intel -path .
+	cp config.pre.json ./.DeClang
+	mkdir -p ./.DeClang/gen_config/bin/macOS/Intel
+	mkdir -p ./.DeClang/gen_config/bin/macOS/AppleSilicon
+	mkdir -p ./.DeClang/gen_config/bin/Windows
+	mkdir -p ./.DeClang/gen_config/bin/Linux
+	cp -v ../../../tools/config/gen_config_mac_intel ./.DeClang/gen_config/bin/macOS/Intel/gen_config
+	cp -v ../../../tools/config/gen_config_mac_applesilicon ./.DeClang/gen_config/bin/macOS/AppleSilicon/gen_config
+	cp -v ../../../tools/config/gen_config_linux ./.DeClang/gen_config/bin/Linux/gen_config
+	cp -v ../../../tools/config/gen_config_windows.exe ./.DeClang/gen_config/bin/Windows/gen_config.exe
+	cp -v ../../../tools/config/gen_config.sh ./.DeClang/gen_config.sh
+	DECLANG_HOME=. .DeClang/gen_config.sh
 
 clean:
-	rm -f *.o
-	rm -f test
-	rm -f test.ll
-	rm -f config.json
-	rm -rf *.dSYM
+	rm -f mac
+	rm -f mac.ll
+	rm -f ios
+	rm -f ios.ll
 	rm -rf ./.DeClang/
