@@ -12,7 +12,7 @@ ios:test.cpp .DeClang/config.json
 	DECLANG_HOME=. $(CXX) -target arm64-apple-ios12.4 -w -Os -std=c++11 --sysroot=$$(xcrun --sdk iphoneos --show-sdk-path) -o $@ test.cpp
 
 ios.ll:test.cpp .DeClang/config.json
-	DECLANG_HOME=. $(CXX) -w -Os -std=c++11 --sysroot=$$(xcrun --sdk iphoneos --show-sdk-path) -emit-llvm -S -o $@ test.cpp
+	DECLANG_HOME=. $(CXX) -target arm64-apple-ios12.4 -w -Os -std=c++11 --sysroot=$$(xcrun --sdk iphoneos --show-sdk-path) -emit-llvm -S -o $@ test.cpp
 
 .DeClang/config.json: config.pre.json
 	mkdir -p ./.DeClang/
