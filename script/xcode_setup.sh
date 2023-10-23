@@ -77,4 +77,8 @@ sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = YES;~COMPILER_INDEX_STORE_ENABLE = N
 sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = DEFAULT;~COMPILER_INDEX_STORE_ENABLE = NO;~g' "$pbxproj"
 sed -i '' $'s~GCC_PRECOMPILE_PREFIX_HEADER = YES;~GCC_PRECOMPILE_PREFIX_HEADER = NO;~g' "$pbxproj"
 
+TOOLCHAIN_PATH='--tool-chain-path=\\"'$HOMEDIR'/.DeClang/compiler\\"'
+SYSROOT_PATH='--sysroot-path=\\"'$(xcrun --sdk iphoneos --show-sdk-path)'\\"'
+sed -i '' "s#--compile-cpp#--compile-cpp $TOOLCHAIN_PATH $SYSROOT_PATH#" "$pbxproj"
+
 # popd >/dev/null
