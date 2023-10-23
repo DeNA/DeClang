@@ -23,6 +23,12 @@ else
   cp -v build/bin/clang++ ./Release/compiler/bin/
   cp -v build/bin/clang ./Release/compiler/bin/
   cp -r build/lib/clang/ ./Release/compiler/lib/clang/
+  if [[ $(uname -s) = "Darwin" ]]; then
+    mkdir -p ./Release/compiler/usr/bin
+    ln -s ../../bin/clang++ ./Release/compiler/usr/bin/clang++
+    ln -s ../../bin/clang ./Release/compiler/usr/bin/clang
+    ln -s /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/libtool ./Release/compiler/usr/bin/libtool
+  fi
 fi
 popd > /dev/null
 
