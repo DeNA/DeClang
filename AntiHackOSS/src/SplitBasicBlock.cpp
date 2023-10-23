@@ -62,7 +62,6 @@ SplitBasicBlock::SplitBasicBlock(llvm::json::Value* configJson, llvm::raw_fd_ost
   this->doSplit = true;
   this->configJson = configJson;
   this->logFile = logFile;
-
 }
 
 bool SplitBasicBlock::runOnFunction(Function &F) {
@@ -132,7 +131,7 @@ void SplitBasicBlock::split(Function *f, int SplitNum, std::string seed) {
     }
 
     // Check splitN and current BB size
-    if ((size_t)splitN > curr->size()) {
+    if ((size_t)splitN >= curr->size()) {
       splitN = curr->size() - 1;
     }
 
@@ -152,7 +151,7 @@ void SplitBasicBlock::split(Function *f, int SplitNum, std::string seed) {
     BasicBlock::iterator it = curr->begin();
     BasicBlock *toSplit = curr;
     int last = 0;
-    for (int i = 0; i < splitN; ++i) {
+    for (int i = 0; i < splitN-1; ++i) {
       for (int j = 0; j < test[i] - last; ++j) {
         ++it;
       }
