@@ -1369,21 +1369,24 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
 
   setLTOMode(Args);
 
+  //DECLANG CODES BEGIN
   // Process -fembed-bitcode= flags.
-  if (Arg *A = Args.getLastArg(options::OPT_fembed_bitcode_EQ)) {
-    StringRef Name = A->getValue();
-    unsigned Model = llvm::StringSwitch<unsigned>(Name)
-        .Case("off", EmbedNone)
-        .Case("all", EmbedBitcode)
-        .Case("bitcode", EmbedBitcode)
-        .Case("marker", EmbedMarker)
-        .Default(~0U);
-    if (Model == ~0U) {
-      Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args)
-                                                << Name;
-    } else
-      BitcodeEmbed = static_cast<BitcodeEmbedMode>(Model);
-  }
+  //if (Arg *A = Args.getLastArg(options::OPT_fembed_bitcode_EQ)) {
+  //  StringRef Name = A->getValue();
+  //  unsigned Model = llvm::StringSwitch<unsigned>(Name)
+  //      .Case("off", EmbedNone)
+  //      .Case("all", EmbedBitcode)
+  //      .Case("bitcode", EmbedBitcode)
+  //      .Case("marker", EmbedMarker)
+  //      .Default(~0U);
+
+  //  if (Model == ~0U) {
+  //    Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args)
+  //                                              << Name;
+  //  } else
+  //    BitcodeEmbed = static_cast<BitcodeEmbedMode>(Model);
+  //}
+  //DECLANG CODES END
 
   // Remove existing compilation database so that each job can append to it.
   if (Arg *A = Args.getLastArg(options::OPT_MJ))
