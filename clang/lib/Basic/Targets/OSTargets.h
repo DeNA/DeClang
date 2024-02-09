@@ -378,7 +378,9 @@ protected:
         Builder.defineMacro("__ANDROID_MIN_SDK_VERSION__", Twine(Maj));
         // This historical but ambiguous name for the minSdkVersion macro. Keep
         // defined for compatibility.
+        //DECLANG CODES BEGIN
         Builder.defineMacro("__ANDROID_API__", Twine(Maj));
+        //DECLANG CODES END
       }
     } else {
         Builder.defineMacro("__gnu_linux__");
