@@ -116,6 +116,7 @@ public:
                                ArrayRef<char> Data) final;
   CASID getID(ObjectRef Ref) const final;
   Optional<ObjectRef> getReference(const CASID &ID) const final;
+  Expected<bool> isMaterialized(ObjectRef Ref) const final;
   Expected<std::optional<ObjectHandle>> loadIfExists(ObjectRef Ref) final;
   Error validate(const CASID &ID) final {
     // Not supported yet. Always return success.
@@ -303,6 +304,11 @@ Optional<ObjectRef> GRPCRelayCAS::getReference(const CASID &ID) const {
   return toReference(I);
 }
 
+Expected<bool> GRPCRelayCAS::isMaterialized(ObjectRef Ref) const {
+  auto &I = asInMemoryIndexValue(Ref);
+  return (bool)I.Data.load();
+}
+
 Expected<std::optional<ObjectHandle>>
 GRPCRelayCAS::loadIfExists(ObjectRef Ref) {
   auto &I = asInMemoryIndexValue(Ref);
@@ -426,10 +432,10 @@ Error GRPCActionCache::putImpl(ArrayRef<uint8_t> ResolvedKey,
   return Error::success();
 }
 
-Expected<std::unique_ptr<ObjectStore>>
+Expected<std::shared_ptr<ObjectStore>>
 cas::createGRPCRelayCAS(const Twine &Path) {
   Error Err = Error::success();
-  auto CAS = std::make_unique<GRPCRelayCAS>(Path.str(), Err);
+  auto CAS = std::make_shared<GRPCRelayCAS>(Path.str(), Err);
   if (Err)
     return std::move(Err);
 

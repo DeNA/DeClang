@@ -18,7 +18,7 @@ using namespace llvm;
 using namespace llvm::cas;
 
 TEST_P(CASTest, ActionCacheHit) {
-  std::unique_ptr<ObjectStore> CAS = createObjectStore();
+  std::shared_ptr<ObjectStore> CAS = createObjectStore();
   std::unique_ptr<ActionCache> Cache = createActionCache();
 
   Optional<ObjectProxy> ID;
@@ -33,7 +33,7 @@ TEST_P(CASTest, ActionCacheHit) {
 }
 
 TEST_P(CASTest, ActionCacheMiss) {
-  std::unique_ptr<ObjectStore> CAS = createObjectStore();
+  std::shared_ptr<ObjectStore> CAS = createObjectStore();
   std::unique_ptr<ActionCache> Cache = createActionCache();
 
   Optional<ObjectProxy> ID1, ID2;
@@ -56,7 +56,7 @@ TEST_P(CASTest, ActionCacheMiss) {
 }
 
 TEST_P(CASTest, ActionCacheRewrite) {
-  std::unique_ptr<ObjectStore> CAS = createObjectStore();
+  std::shared_ptr<ObjectStore> CAS = createObjectStore();
   std::unique_ptr<ActionCache> Cache = createActionCache();
 
   Optional<ObjectProxy> ID1, ID2;
@@ -97,4 +97,46 @@ TEST(OnDiskActionCache, ActionCacheResultInvalid) {
   ASSERT_FALSE(CAS2->getReference(*Result2));
   // Write a different value will cause error.
   ASSERT_THAT_ERROR(Cache2->put(*ID3, *ID3), Failed());
+}
+
+TEST_P(CASTest, ActionCacheAsync) {
+  std::shared_ptr<ObjectStore> CAS = createObjectStore();
+  std::unique_ptr<ActionCache> Cache = createActionCache();
+
+  {
+    std::optional<ObjectProxy> ID;
+    ASSERT_THAT_ERROR(CAS->createProxy(std::nullopt, "1").moveInto(ID),
+                      Succeeded());
+    auto PutFuture = Cache->putFuture(*ID, *ID);
+    ASSERT_THAT_ERROR(PutFuture.get().take(), Succeeded());
+    auto GetFuture = Cache->getFuture(*ID);
+    std::optional<CASID> ResultID;
+    ASSERT_THAT_ERROR(GetFuture.get().take().moveInto(ResultID), Succeeded());
+    ASSERT_TRUE(ResultID);
+  }
+
+  std::optional<ObjectProxy> ID2;
+  ASSERT_THAT_ERROR(CAS->createProxy(std::nullopt, "2").moveInto(ID2),
+                    Succeeded());
+  {
+    std::promise<AsyncErrorValue> Promise;
+    auto Future = Promise.get_future();
+    Cache->putAsync(*ID2, *ID2, false,
+                    [Promise = std::move(Promise)](Error E) mutable {
+                      Promise.set_value(std::move(E));
+                    });
+    ASSERT_THAT_ERROR(Future.get().take(), Succeeded());
+  }
+  {
+    std::promise<AsyncCASIDValue> Promise;
+    auto Future = Promise.get_future();
+    Cache->getAsync(*ID2, false,
+                    [Promise = std::move(Promise)](
+                        Expected<std::optional<CASID>> Value) mutable {
+                      Promise.set_value(std::move(Value));
+                    });
+    std::optional<CASID> ResultID;
+    ASSERT_THAT_ERROR(Future.get().take().moveInto(ResultID), Succeeded());
+    ASSERT_TRUE(ResultID);
+  }
 }

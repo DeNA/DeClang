@@ -126,6 +126,11 @@ public:
   static bool GetOSVersionNumbers(uint64_t *major, uint64_t *minor,
                                   uint64_t *patch);
   static std::string GetMacCatalystVersionString();
+
+  static nub_process_t GetParentProcessID(nub_process_t child_pid);
+
+  static bool ProcessIsBeingDebugged(nub_process_t pid);
+
 #ifdef WITH_BKS
   static void BKSCleanupAfterAttach(const void *attach_token,
                                     DNBError &err_str);
@@ -382,6 +387,9 @@ private:
   void ReplyToAllExceptions();
   void PrivateResume();
   void StopProfileThread();
+
+  void RefineWatchpointStopInfo(nub_thread_t tid,
+                                struct DNBThreadStopInfo *stop_info);
 
   uint32_t Flags() const { return m_flags; }
   nub_state_t DoSIGSTOP(bool clear_bps_and_wps, bool allow_running,

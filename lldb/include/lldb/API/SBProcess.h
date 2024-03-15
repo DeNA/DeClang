@@ -16,6 +16,12 @@
 #include "lldb/API/SBTarget.h"
 #include <cstdio>
 
+namespace lldb_private {
+namespace python {
+class SWIGBridge;
+}
+} // namespace lldb_private
+
 namespace lldb {
 
 class SBEvent;
@@ -36,15 +42,13 @@ public:
 
   const lldb::SBProcess &operator=(const lldb::SBProcess &rhs);
 
-  SBProcess(const lldb::ProcessSP &process_sp);
-
   ~SBProcess();
 
   static const char *GetBroadcasterClassName();
 
   const char *GetPluginName();
 
-  // DEPRECATED: use GetPluginName()
+  LLDB_DEPRECATED_FIXME("Use GetPluginName()", "GetPluginName()")
   const char *GetShortPluginName();
 
   void Clear();
@@ -65,11 +69,13 @@ public:
 
   size_t GetAsyncProfileData(char *dst, size_t dst_len) const;
 
+#ifndef SWIG
   void ReportEventState(const lldb::SBEvent &event, FILE *out) const;
+#endif
 
   void ReportEventState(const lldb::SBEvent &event, SBFile file) const;
 
-  void ReportEventState(const lldb::SBEvent &event, FileSP file) const;
+  void ReportEventState(const lldb::SBEvent &event, FileSP BORROWED) const;
 
   void AppendEventStateReport(const lldb::SBEvent &event,
                               lldb::SBCommandReturnObject &result);
@@ -111,6 +117,7 @@ public:
   // Queue related functions
   uint32_t GetNumQueues();
 
+  // TODO: This technically takes a uint32_t in the interface file.
   lldb::SBQueue GetQueueAtIndex(size_t index);
 
   // Stepping related functions
@@ -195,7 +202,7 @@ public:
   size_t WriteMemory(addr_t addr, const void *buf, size_t size,
                      lldb::SBError &error);
 
-  size_t ReadCStringFromMemory(addr_t addr, void *buf, size_t size,
+  size_t ReadCStringFromMemory(addr_t addr, void *char_buf, size_t size,
                                lldb::SBError &error);
 
   uint64_t ReadUnsignedFromMemory(addr_t addr, uint32_t byte_size,
@@ -436,16 +443,22 @@ public:
 protected:
   friend class SBAddress;
   friend class SBBreakpoint;
+  friend class SBBreakpointCallbackBaton;
   friend class SBBreakpointLocation;
   friend class SBCommandInterpreter;
   friend class SBDebugger;
   friend class SBExecutionContext;
   friend class SBFunction;
   friend class SBModule;
+  friend class SBPlatform;
   friend class SBTarget;
   friend class SBThread;
   friend class SBValue;
   friend class lldb_private::QueueImpl;
+
+  friend class lldb_private::python::SWIGBridge;
+
+  SBProcess(const lldb::ProcessSP &process_sp);
 
   lldb::ProcessSP GetSP() const;
 

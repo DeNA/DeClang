@@ -586,7 +586,8 @@ public:
     return false;
   }
 
-  bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts, bool Complain,
+  bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
+                               bool ReadMacros, bool Complain,
                                std::string &SuggestedPredefines) override {
     this->PPOpts = PPOpts;
     return false;
@@ -815,7 +816,7 @@ std::unique_ptr<ASTUnit> ASTUnit::LoadFromASTFile(
                                      UserFilesAreVolatile);
   AST->ModuleCache = new InMemoryModuleCache;
   AST->HSOpts = std::make_shared<HeaderSearchOptions>();
-  AST->HSOpts->ModuleFormat = std::string(PCHContainerRdr.getFormat());
+  AST->HSOpts->ModuleFormat = std::string(PCHContainerRdr.getFormats().front());
   AST->HeaderInfo.reset(new HeaderSearch(AST->HSOpts,
                                          AST->getSourceManager(),
                                          AST->getDiagnostics(),

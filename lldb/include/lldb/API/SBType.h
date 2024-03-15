@@ -11,6 +11,12 @@
 
 #include "lldb/API/SBDefines.h"
 
+namespace lldb_private {
+namespace python {
+class SWIGBridge;
+}
+} // namespace lldb_private
+
 namespace lldb {
 
 class SBTypeList;
@@ -237,6 +243,8 @@ protected:
   friend class SBTypeList;
   friend class SBValue;
   friend class SBWatchpoint;
+
+  friend class lldb_private::python::SWIGBridge;
 
   SBType(const lldb_private::CompilerType &);
   SBType(const lldb::TypeSP &);

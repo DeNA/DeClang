@@ -69,6 +69,8 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <sstream>
 
 #ifdef LLDB_ENABLE_SWIFT
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
@@ -2282,7 +2284,6 @@ ModuleSP Target::GetOrCreateModule(const ModuleSpec &module_spec, bool notify,
         // each library in parallel.
         if (GetPreloadSymbols())
           module_sp->PreloadSymbols();
-
         llvm::SmallVector<ModuleSP, 1> replaced_modules;
         for (ModuleSP &old_module_sp : old_modules) {
           if (m_images.GetIndexForModule(old_module_sp.get()) !=
@@ -2752,13 +2753,13 @@ llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
         return;
       }
       if (log)
-        log->Printf("returned cached module-wide scratch context\n");
+        log->PutCString("returned cached module-wide scratch context");
       return;
     }
 
     if (!create_on_demand) {
       if (log)
-        log->Printf("not allowed to create a new context\n");
+        log->PutCString("not allowed to create a new context");
       return;
     }
 
@@ -2774,7 +2775,7 @@ llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
     auto &lock = GetSwiftScratchContextLock();
     if (!lock.try_lock()) {
       if (log)
-        log->Printf("couldn't acquire scratch context lock\n");
+        log->PutCString("couldn't acquire scratch context lock");
       return;
     }
     std::lock_guard<std::shared_mutex> unlock(lock, std::adopt_lock);
@@ -2803,7 +2804,7 @@ llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
     typesystem_sp->GetSwiftASTContext();
     m_scratch_typesystem_for_module.insert({key, typesystem_sp});
     if (log)
-      log->Printf("created module-wide scratch context\n");
+      log->PutCString("created module-wide scratch context");
     return;
   };
 
@@ -2814,7 +2815,7 @@ llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
     if (auto *cached_ts = get_cached_module_ts(lldb_module)) {
       reader = SwiftScratchContextReader(std::move(lock), *cached_ts);
       if (log)
-        log->Printf("returned module-wide scratch context\n");
+        log->PutCString("returned project-wide scratch context");
     }
   }
   // FIXME: Don't return the project-wide context after requesting the
@@ -2967,6 +2968,26 @@ void Target::SetDefaultArchitecture(const ArchSpec &arch) {
            "setting target's default architecture to  {0} ({1})",
            arch.GetArchitectureName(), arch.GetTriple().getTriple());
   Target::GetGlobalProperties().SetDefaultArchitecture(arch);
+}
+
+llvm::Error Target::SetLabel(llvm::StringRef label) {
+  size_t n = LLDB_INVALID_INDEX32;
+  if (llvm::to_integer(label, n))
+    return llvm::make_error<llvm::StringError>(
+        "Cannot use integer as target label.", llvm::inconvertibleErrorCode());
+  TargetList &targets = GetDebugger().GetTargetList();
+  for (size_t i = 0; i < targets.GetNumTargets(); i++) {
+    TargetSP target_sp = targets.GetTargetAtIndex(i);
+    if (target_sp && target_sp->GetLabel() == label) {
+      return llvm::make_error<llvm::StringError>(
+          llvm::formatv("Cannot use label '{0}' since it's set in target #{1}.",
+                        label, i),
+          llvm::inconvertibleErrorCode());
+    }
+  }
+
+  m_label = label.str();
+  return llvm::Error::success();
 }
 
 Target *Target::GetTargetFromContexts(const ExecutionContext *exe_ctx_ptr,
@@ -4759,6 +4780,10 @@ bool TargetProperties::SetPreferDynamicValue(lldb::DynamicValueType d) {
 }
 
 bool TargetProperties::GetPreloadSymbols() const {
+  if (INTERRUPT_REQUESTED(m_target->GetDebugger(), 
+      "Interrupted checking preload symbols")) {
+    return false;
+  }
   const uint32_t idx = ePropertyPreloadSymbols;
   return m_collection_sp->GetPropertyAtIndexAsBoolean(
       nullptr, idx, g_target_properties[idx].default_uint_value != 0);

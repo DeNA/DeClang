@@ -27,6 +27,7 @@
 #include "clang/Tooling/DependencyScanning/ModuleDepCollector.h"
 #include "clang/Tooling/DependencyScanning/ScanAndUpdateArgs.h"
 #include "clang/Tooling/Tooling.h"
+#include "llvm/CAS/CASProvidingFileSystem.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/Allocator.h"
@@ -315,6 +316,7 @@ public:
     ScanInstance.getFrontendOpts().GenerateGlobalModuleIndex = false;
     ScanInstance.getFrontendOpts().UseGlobalModuleIndex = false;
     ScanInstance.getFrontendOpts().ModulesShareFileManager = false;
+    ScanInstance.getHeaderSearchOpts().ModuleFormat = "raw";
 
     ScanInstance.setFileManager(FileMgr);
     // Support for virtual file system overlays.
@@ -430,6 +432,9 @@ public:
     // context hashing.
     ScanInstance.getHeaderSearchOpts().ModulesStrictContextHash = true;
 
+    // Avoid some checks and module map parsing when loading PCM files.
+    ScanInstance.getPreprocessorOpts().ModulesCheckRelocated = false;
+
     std::unique_ptr<FrontendAction> Action;
 
     if (ModuleName)
@@ -530,12 +535,11 @@ DependencyScanningWorker::DependencyScanningWorker(
       EagerLoadModules(Service.shouldEagerLoadModules()),
       CASOpts(Service.getCASOpts()), CAS(Service.getCAS()) {
   PCHContainerOps = std::make_shared<PCHContainerOperations>();
+  // We need to read object files from PCH built outside the scanner.
   PCHContainerOps->registerReader(
       std::make_unique<ObjectFilePCHContainerReader>());
-  // We don't need to write object files, but the current PCH implementation
-  // requires the writer to be registered as well.
-  PCHContainerOps->registerWriter(
-      std::make_unique<ObjectFilePCHContainerWriter>());
+  // The scanner itself writes only raw ast files.
+  PCHContainerOps->registerWriter(std::make_unique<RawPCHContainerWriter>());
 
   if (Service.useCASFS()) {
     CacheFS = Service.getSharedFS().createProxyFS();
@@ -641,8 +645,6 @@ bool DependencyScanningWorker::computeDependencies(
     auto InMemoryFS =
         llvm::makeIntrusiveRefCnt<llvm::vfs::InMemoryFileSystem>();
     InMemoryFS->setCurrentWorkingDirectory(WorkingDirectory);
-    OverlayFS->pushOverlay(InMemoryFS);
-    ModifiedFS = OverlayFS;
 
     SmallString<128> FakeInputPath;
     // TODO: We should retry the creation if the path already exists.
@@ -651,6 +653,16 @@ bool DependencyScanningWorker::computeDependencies(
                                     /*MakeAbsolute=*/false);
     InMemoryFS->addFile(FakeInputPath, 0, llvm::MemoryBuffer::getMemBuffer(""));
 
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> InMemoryOverlay =
+        InMemoryFS;
+    // If we are using a CAS but not dependency CASFS, we need to provide the
+    // fake input file in a CASProvidingFS for include-tree.
+    if (CAS && !DepCASFS)
+      InMemoryOverlay =
+          llvm::cas::createCASProvidingFileSystem(CAS, std::move(InMemoryFS));
+
+    OverlayFS->pushOverlay(InMemoryOverlay);
+    ModifiedFS = OverlayFS;
     ModifiedCommandLine = CommandLine;
     ModifiedCommandLine->emplace_back(FakeInputPath);
   }

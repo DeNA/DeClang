@@ -1,5 +1,6 @@
 // clang-format off
-
+// Failing due to a branch-only warning on some Linux platform.
+// REQUIRES: 122824216
 // RUN: %build -o %t.exe -- %s
 // RUN: env LLDB_USE_NATIVE_PDB_READER=1 %lldb -f %t.exe -s \
 // RUN:     %p/Inputs/lookup-by-types.lldbinit 2>&1 | FileCheck %s

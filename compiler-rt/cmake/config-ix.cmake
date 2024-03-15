@@ -583,6 +583,7 @@ if(APPLE)
     )
   set(LSAN_COMMON_SUPPORTED_ARCH ${SANITIZER_COMMON_SUPPORTED_ARCH})
   set(UBSAN_COMMON_SUPPORTED_ARCH ${SANITIZER_COMMON_SUPPORTED_ARCH})
+  set(ASAN_ABI_SUPPORTED_ARCH ${ALL_ASAN_ABI_SUPPORTED_ARCH})
   list_intersect(ASAN_SUPPORTED_ARCH
     ALL_ASAN_SUPPORTED_ARCH
     SANITIZER_COMMON_SUPPORTED_ARCH)
@@ -701,7 +702,7 @@ if(COMPILER_RT_SUPPORTED_ARCH)
 endif()
 message(STATUS "Compiler-RT supported architectures: ${COMPILER_RT_SUPPORTED_ARCH}")
 
-set(ALL_SANITIZERS asan;dfsan;msan;hwasan;tsan;safestack;cfi;scudo;ubsan_minimal;gwp_asan)
+set(ALL_SANITIZERS asan;dfsan;msan;hwasan;tsan;safestack;cfi;scudo;ubsan_minimal;gwp_asan;asan_abi)
 set(COMPILER_RT_SANITIZERS_TO_BUILD all CACHE STRING
     "sanitizers to build if supported on the target (all;${ALL_SANITIZERS})")
 list_replace(COMPILER_RT_SANITIZERS_TO_BUILD all "${ALL_SANITIZERS}")
@@ -721,6 +722,11 @@ else()
   set(COMPILER_RT_HAS_INTERCEPTION FALSE)
 endif()
 
+if (COMPILER_RT_HAS_SANITIZER_COMMON AND ASAN_SUPPORTED_ARCH AND APPLE)
+  set(COMPILER_RT_HAS_ASAN_ABI TRUE)
+else()
+  set(COMPILER_RT_HAS_ASAN_ABI FALSE)
+endif()
 if (COMPILER_RT_HAS_SANITIZER_COMMON AND ASAN_SUPPORTED_ARCH)
   set(COMPILER_RT_HAS_ASAN TRUE)
 else()

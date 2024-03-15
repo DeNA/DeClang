@@ -249,10 +249,12 @@ bool ScriptedThread::CalculateStopInfo() {
         StopInfo::CreateStopReasonWithBreakpointSiteID(*this, break_id);
   } break;
   case lldb::eStopReasonSignal: {
-    int signal;
+    unsigned int signal;
     llvm::StringRef description;
-    data_dict->GetValueForKeyAsInteger("signal", signal,
-                                       LLDB_INVALID_SIGNAL_NUMBER);
+    if (!data_dict->GetValueForKeyAsInteger("signal", signal)) {
+        signal = LLDB_INVALID_SIGNAL_NUMBER;
+        return false;
+    }
     data_dict->GetValueForKeyAsString("desc", description);
     stop_info_sp =
         StopInfo::CreateStopReasonWithSignal(*this, signal, description.data());
@@ -282,7 +284,7 @@ bool ScriptedThread::CalculateStopInfo() {
         auto fetch_data = [&raw_codes](StructuredData::Object *obj) {
           if (!obj)
             return false;
-          raw_codes.push_back(obj->GetIntegerValue());
+          raw_codes.push_back(obj->GetUnsignedIntegerValue());
           return true;
         };
 

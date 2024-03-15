@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <unordered_set>
 
 #include <TargetConditionals.h>
 #import <Foundation/Foundation.h>
@@ -1053,9 +1054,16 @@ void MachProcess::GetAllLoadedBinariesViaDYLDSPI(
     dyld_process_info info =
         m_dyld_process_info_create(m_task.TaskPort(), 0, &kern_ret);
     if (info) {
+      // There's a bug in the interaction between dyld and older dyld_sim's
+      // (e.g. from the iOS 15 simulator) that causes dyld to report the same
+      // binary twice.  We use this set to eliminate the duplicates.
+      __block std::unordered_set<uint64_t> seen_header_addrs;
       m_dyld_process_info_for_each_image(
           info,
           ^(uint64_t mach_header_addr, const uuid_t uuid, const char *path) {
+            auto res_pair = seen_header_addrs.insert(mach_header_addr);
+            if (!res_pair.second)
+              return;
             struct binary_image_information image;
             image.filename = path;
             uuid_copy(image.macho_info.uuid, uuid);
@@ -1190,6 +1198,8 @@ bool MachProcess::GetThreadStoppedReason(nub_thread_t tid,
   if (m_thread_list.GetThreadStoppedReason(tid, stop_info)) {
     if (m_did_exec)
       stop_info->reason = eStopTypeExec;
+    if (stop_info->reason == eStopTypeWatchpoint)
+      RefineWatchpointStopInfo(tid, stop_info);
     return true;
   }
   return false;
@@ -1331,6 +1341,135 @@ void MachProcess::StopProfileThread() {
   pthread_join(m_profile_thread, NULL);
   m_profile_thread = NULL;
   m_profile_events.ResetEvents(eMachProcessProfileCancel);
+}
+
+/// return 1 if bit position \a bit is set in \a value
+static uint32_t bit(uint32_t value, uint32_t bit) {
+  return (value >> bit) & 1u;
+}
+
+// return the bitfield "value[msbit:lsbit]".
+static uint64_t bits(uint64_t value, uint32_t msbit, uint32_t lsbit) {
+  assert(msbit >= lsbit);
+  uint64_t shift_left = sizeof(value) * 8 - 1 - msbit;
+  value <<=
+      shift_left; // shift anything above the msbit off of the unsigned edge
+  value >>= shift_left + lsbit; // shift it back again down to the lsbit
+                                // (including undoing any shift from above)
+  return value;                 // return our result
+}
+
+void MachProcess::RefineWatchpointStopInfo(
+    nub_thread_t tid, struct DNBThreadStopInfo *stop_info) {
+  const DNBBreakpoint *wp = m_watchpoints.FindNearestWatchpoint(
+      stop_info->details.watchpoint.mach_exception_addr);
+  if (wp) {
+    stop_info->details.watchpoint.addr = wp->Address();
+    stop_info->details.watchpoint.hw_idx = wp->GetHardwareIndex();
+    DNBLogThreadedIf(LOG_WATCHPOINTS,
+                     "MachProcess::RefineWatchpointStopInfo "
+                     "mach exception addr 0x%llx moved in to nearest "
+                     "watchpoint, 0x%llx-0x%llx",
+                     stop_info->details.watchpoint.mach_exception_addr,
+                     wp->Address(), wp->Address() + wp->ByteSize() - 1);
+  } else {
+    stop_info->details.watchpoint.addr =
+        stop_info->details.watchpoint.mach_exception_addr;
+  }
+
+  stop_info->details.watchpoint.esr_fields_set = false;
+  std::optional<uint64_t> esr, far;
+  nub_size_t num_reg_sets = 0;
+  const DNBRegisterSetInfo *reg_sets = GetRegisterSetInfo(tid, &num_reg_sets);
+  for (nub_size_t set = 0; set < num_reg_sets; set++) {
+    if (reg_sets[set].registers == NULL)
+      continue;
+    for (uint32_t reg = 0; reg < reg_sets[set].num_registers; ++reg) {
+      if (strcmp(reg_sets[set].registers[reg].name, "esr") == 0) {
+        DNBRegisterValue reg_value;
+        if (GetRegisterValue(tid, set, reg, &reg_value)) {
+          esr = reg_value.value.uint64;
+        }
+      }
+      if (strcmp(reg_sets[set].registers[reg].name, "far") == 0) {
+        DNBRegisterValue reg_value;
+        if (GetRegisterValue(tid, set, reg, &reg_value)) {
+          far = reg_value.value.uint64;
+        }
+      }
+    }
+  }
+
+  if (esr && far) {
+    if (*far != stop_info->details.watchpoint.mach_exception_addr) {
+      // AFAIK the kernel is going to put the FAR value in the mach
+      // exception, if they don't match, it's interesting enough to log it.
+      DNBLogThreadedIf(LOG_WATCHPOINTS,
+                       "MachProcess::RefineWatchpointStopInfo mach exception "
+                       "addr 0x%llx but FAR register has value 0x%llx",
+                       stop_info->details.watchpoint.mach_exception_addr, *far);
+    }
+    uint32_t exception_class = bits(*esr, 31, 26);
+
+    // "Watchpoint exception from a lower Exception level"
+    if (exception_class == 0b110100) {
+      stop_info->details.watchpoint.esr_fields_set = true;
+      // Documented in the ARM ARM A-Profile Dec 2022 edition
+      // Section D17.2 ("General system control registers"),
+      // Section D17.2.37 "ESR_EL1, Exception Syndrome Register (EL1)",
+      // "Field Descriptions"
+      // "ISS encoding for an exception from a Watchpoint exception"
+      uint32_t iss = bits(*esr, 23, 0);
+      stop_info->details.watchpoint.esr_fields.iss = iss;
+      stop_info->details.watchpoint.esr_fields.wpt =
+          bits(iss, 23, 18); // Watchpoint number
+      stop_info->details.watchpoint.esr_fields.wptv =
+          bit(iss, 17); // Watchpoint number Valid
+      stop_info->details.watchpoint.esr_fields.wpf =
+          bit(iss, 16); // Watchpoint might be false-positive
+      stop_info->details.watchpoint.esr_fields.fnp =
+          bit(iss, 15); // FAR not Precise
+      stop_info->details.watchpoint.esr_fields.vncr =
+          bit(iss, 13); // watchpoint from use of VNCR_EL2 reg by EL1
+      stop_info->details.watchpoint.esr_fields.fnv =
+          bit(iss, 10); // FAR not Valid
+      stop_info->details.watchpoint.esr_fields.cm =
+          bit(iss, 6); // Cache maintenance
+      stop_info->details.watchpoint.esr_fields.wnr =
+          bit(iss, 6); // Write not Read
+      stop_info->details.watchpoint.esr_fields.dfsc =
+          bits(iss, 5, 0); // Data Fault Status Code
+
+      DNBLogThreadedIf(LOG_WATCHPOINTS,
+                       "ESR watchpoint fields parsed: "
+                       "iss = 0x%x, wpt = %u, wptv = %d, wpf = %d, fnp = %d, "
+                       "vncr = %d, fnv = %d, cm = %d, wnr = %d, dfsc = 0x%x",
+                       stop_info->details.watchpoint.esr_fields.iss,
+                       stop_info->details.watchpoint.esr_fields.wpt,
+                       stop_info->details.watchpoint.esr_fields.wptv,
+                       stop_info->details.watchpoint.esr_fields.wpf,
+                       stop_info->details.watchpoint.esr_fields.fnp,
+                       stop_info->details.watchpoint.esr_fields.vncr,
+                       stop_info->details.watchpoint.esr_fields.fnv,
+                       stop_info->details.watchpoint.esr_fields.cm,
+                       stop_info->details.watchpoint.esr_fields.wnr,
+                       stop_info->details.watchpoint.esr_fields.dfsc);
+
+      if (stop_info->details.watchpoint.esr_fields.wptv) {
+        DNBLogThreadedIf(LOG_WATCHPOINTS,
+                         "Watchpoint Valid field true, "
+                         "finding startaddr of watchpoint %d",
+                         stop_info->details.watchpoint.esr_fields.wpt);
+        stop_info->details.watchpoint.hw_idx =
+            stop_info->details.watchpoint.esr_fields.wpt;
+        const DNBBreakpoint *wp = m_watchpoints.FindByHardwareIndex(
+            stop_info->details.watchpoint.esr_fields.wpt);
+        if (wp) {
+          stop_info->details.watchpoint.addr = wp->Address();
+        }
+      }
+    }
+  }
 }
 
 bool MachProcess::StartProfileThread() {
@@ -2690,16 +2829,21 @@ pid_t MachProcess::AttachForDebug(
           "attach to pid %d",
           getpid(), pid);
 
-      struct kinfo_proc kinfo;
-      int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
-      size_t len = sizeof(struct kinfo_proc);
-      if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), &kinfo, &len, NULL, 0) == 0 && len > 0) {
-        if (kinfo.kp_proc.p_flag & P_TRACED) {
-          ::snprintf(err_str, err_len, "%s - process %d is already being debugged", err.AsString(), pid);
+      if (ProcessIsBeingDebugged(pid)) {
+        nub_process_t ppid = GetParentProcessID(pid);
+        if (ppid == getpid()) {
+          snprintf(err_str, err_len,
+                   "%s - Failed to attach to pid %d, AttachForDebug() "
+                   "unable to ptrace(PT_ATTACHEXC)",
+                   err.AsString(), m_pid);
+        } else {
+          snprintf(err_str, err_len,
+                   "%s - process %d is already being debugged by pid %d",
+                   err.AsString(), pid, ppid);
           DNBLogError(
               "[LaunchAttach] (%d) MachProcess::AttachForDebug pid %d is "
-              "already being debugged",
-              getpid(), pid);
+              "already being debugged by pid %d",
+              getpid(), pid, ppid);
         }
       }
     }
@@ -2746,6 +2890,26 @@ std::string MachProcess::GetMacCatalystVersionString() {
       return version_str;
   }
   return {};
+}
+
+nub_process_t MachProcess::GetParentProcessID(nub_process_t child_pid) {
+  struct proc_bsdshortinfo proc;
+  if (proc_pidinfo(child_pid, PROC_PIDT_SHORTBSDINFO, 0, &proc,
+                   PROC_PIDT_SHORTBSDINFO_SIZE) == sizeof(proc)) {
+    return proc.pbsi_ppid;
+  }
+  return INVALID_NUB_PROCESS;
+}
+
+bool MachProcess::ProcessIsBeingDebugged(nub_process_t pid) {
+  struct kinfo_proc kinfo;
+  int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+  size_t len = sizeof(struct kinfo_proc);
+  if (sysctl(mib, sizeof(mib) / sizeof(mib[0]), &kinfo, &len, NULL, 0) == 0 &&
+      (kinfo.kp_proc.p_flag & P_TRACED))
+    return true;
+  else
+    return false;
 }
 
 #if defined(WITH_SPRINGBOARD) || defined(WITH_BKS) || defined(WITH_FBS)
@@ -3270,7 +3434,13 @@ pid_t MachProcess::LaunchForDebug(
                                       "%d (err = %i, errno = %i (%s))",
                          m_pid, err, ptrace_err.Status(),
                          ptrace_err.AsString());
-        launch_err.SetError(NUB_GENERIC_ERROR, DNBError::Generic);
+        char err_msg[PATH_MAX];
+
+        snprintf(err_msg, sizeof(err_msg),
+                 "Failed to attach to pid %d, LaunchForDebug() unable to "
+                 "ptrace(PT_ATTACHEXC)",
+                 m_pid);
+        launch_err.SetErrorString(err_msg);
       }
     } else {
       launch_err.Clear();
@@ -3646,6 +3816,10 @@ pid_t MachProcess::SBLaunchForDebug(const char *path, char const *argv[],
       m_flags |= eMachProcessFlagsAttached;
       DNBLogThreadedIf(LOG_PROCESS, "successfully attached to pid %d", m_pid);
     } else {
+      launch_err.SetErrorString(
+          "Failed to attach to pid %d, SBLaunchForDebug() unable to "
+          "ptrace(PT_ATTACHEXC)",
+          m_pid);
       SetState(eStateExited);
       DNBLogThreadedIf(LOG_PROCESS, "error: failed to attach to pid %d", m_pid);
     }
@@ -3865,6 +4039,10 @@ pid_t MachProcess::BoardServiceLaunchForDebug(
       m_flags |= eMachProcessFlagsAttached;
       DNBLog("[LaunchAttach] successfully attached to pid %d", m_pid);
     } else {
+      launch_err.SetErrorString(
+          "Failed to attach to pid %d, BoardServiceLaunchForDebug() unable to "
+          "ptrace(PT_ATTACHEXC)",
+          m_pid);
       SetState(eStateExited);
       DNBLog("[LaunchAttach] END (%d) error: failed to attach to pid %d",
              getpid(), m_pid);

@@ -41,6 +41,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/DynamicLibrary.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Threading.h"
 
 #include <cassert>
@@ -84,6 +85,8 @@ public:
     eBroadcastBitError = (1 << 2),
     eBroadcastSymbolChange = (1 << 3),
   };
+
+  using DebuggerList = std::vector<lldb::DebuggerSP>;
 
   static ConstString GetStaticBroadcasterClass();
 
@@ -316,8 +319,6 @@ public:
 
   llvm::StringRef GetAutosuggestionAnsiSuffix() const;
 
-  bool GetShowDontUsePoHint() const;
-
   bool GetUseSourceCache() const;
 
   bool SetUseSourceCache(bool use_source_cache);
@@ -375,6 +376,11 @@ public:
   bool IsHandlingEvents() const { return m_event_handler_thread.IsJoinable(); }
 
   Status RunREPL(lldb::LanguageType language, const char *repl_options);
+
+  bool REPLIsActive() { return m_io_handler_stack.REPLIsActive(); }
+
+  bool REPLIsEnabled() { return m_io_handler_stack.REPLIsEnabled(); }
+
   
   /// Interruption in LLDB:
   /// 
@@ -412,16 +418,75 @@ public:
   /// If you are on the RunCommandInterpreter thread, it will check the 
   /// command interpreter state, and if it is on another thread it will 
   /// check the debugger Interrupt Request state.
+  /// \param[in] cur_func
+  /// For reporting if the interruption was requested.  Don't provide this by
+  /// hand, use INTERRUPT_REQUESTED so this gets done consistently.
   ///
+  /// \param[in] formatv
+  /// A formatv string for the interrupt message.  If the elements of the 
+  /// message are expensive to compute, you can use the no-argument form of
+  /// InterruptRequested, then make up the report using REPORT_INTERRUPTION. 
+  /// 
   /// \return
   ///  A boolean value, if \b true an interruptible operation should interrupt
   ///  itself.
+  template <typename... Args>
+  bool InterruptRequested(const char *cur_func, 
+                          const char *formatv, Args &&... args) {
+    bool ret_val = InterruptRequested();
+    if (ret_val) {
+      if (!formatv)
+        formatv = "Unknown message";
+      if (!cur_func)
+        cur_func = "<UNKNOWN>";
+      ReportInterruption(InterruptionReport(cur_func, 
+                                            llvm::formatv(formatv, 
+                                            std::forward<Args>(args)...)));
+    }
+    return ret_val;
+  }
+  
+  
+  /// This handy define will keep you from having to generate a report for the
+  /// interruption by hand.  Use this except in the case where the arguments to
+  /// the message description are expensive to compute.
+#define INTERRUPT_REQUESTED(debugger, ...) \
+    (debugger).InterruptRequested(__func__, __VA_ARGS__)
+
+  // This form just queries for whether to interrupt, and does no reporting:
   bool InterruptRequested();
+  
+  // FIXME: Do we want to capture a backtrace at the interruption point?
+  class InterruptionReport {
+  public:
+    InterruptionReport(std::string function_name, std::string description) :
+        m_function_name(std::move(function_name)), 
+        m_description(std::move(description)),
+        m_interrupt_time(std::chrono::system_clock::now()),
+        m_thread_id(llvm::get_threadid()) {}
+        
+    InterruptionReport(std::string function_name, 
+        const llvm::formatv_object_base &payload);
 
-  bool REPLIsActive() { return m_io_handler_stack.REPLIsActive(); }
+  template <typename... Args>
+  InterruptionReport(std::string function_name,
+              const char *format, Args &&... args) :
+    InterruptionReport(function_name, llvm::formatv(format, std::forward<Args>(args)...)) {}
 
-  bool REPLIsEnabled() { return m_io_handler_stack.REPLIsEnabled(); }
+    std::string m_function_name;
+    std::string m_description;
+    const std::chrono::time_point<std::chrono::system_clock> m_interrupt_time;
+    const uint64_t m_thread_id;
+  };
+  void ReportInterruption(const InterruptionReport &report);
+#define REPORT_INTERRUPTION(debugger, ...) \
+    (debugger).ReportInterruption(Debugger::InterruptionReport(__func__, \
+                                                        __VA_ARGS__))
 
+  static DebuggerList DebuggersRequestingInterruption();
+
+public:
+  
   // This is for use in the command interpreter, when you either want the
   // selected target, or if no target is present you want to prime the dummy
   // target with entities that will be copied over to new targets.
@@ -481,6 +546,10 @@ public:
 
   static void ReportSymbolChange(const ModuleSpec &module_spec);
 
+  void
+  SetDestroyCallback(lldb_private::DebuggerDestroyCallback destroy_callback,
+                     void *baton);
+
 protected:
   friend class CommandInterpreter;
   friend class SwiftREPL;
@@ -525,6 +594,8 @@ protected:
                                    std::string message,
                                    llvm::Optional<lldb::user_id_t> debugger_id,
                                    std::once_flag *once);
+
+  void HandleDestroyCallback();
 
   void PrintProgress(const ProgressEventData &data);
 
@@ -628,6 +699,9 @@ protected:
   lldb::ListenerSP m_forward_listener_sp;
   llvm::once_flag m_clear_once;
   lldb::TargetSP m_dummy_target_sp;
+
+  lldb_private::DebuggerDestroyCallback m_destroy_callback = nullptr;
+  void *m_destroy_callback_baton = nullptr;
 
   uint32_t m_interrupt_requested = 0; ///< Tracks interrupt requests
   std::mutex m_interrupt_mutex;

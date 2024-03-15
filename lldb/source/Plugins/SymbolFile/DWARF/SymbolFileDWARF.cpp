@@ -13,6 +13,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Threading.h"
 
+#include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/ModuleSpec.h"
@@ -651,6 +652,15 @@ DWARFCompileUnit *SymbolFileDWARF::GetDWARFCompileUnit(CompileUnit *comp_unit) {
   DWARFUnit *dwarf_cu = DebugInfo().GetUnitAtIndex(comp_unit->GetID());
   if (dwarf_cu && dwarf_cu->GetUserData() == nullptr)
     dwarf_cu->SetUserData(comp_unit);
+
+  // This branch has several known issues in the DWARF 5 parser. Let users know.
+  if (dwarf_cu && dwarf_cu->GetVersion() > 4) {
+    static llvm::once_flag g_once_flag;
+    llvm::call_once(g_once_flag, []() {
+      Debugger::ReportError(
+          "This version of LLDB does not support DWARF version 5 or later.");
+    });
+  }
 
   // It must be DWARFCompileUnit when it created a CompileUnit.
   return llvm::cast_or_null<DWARFCompileUnit>(dwarf_cu);

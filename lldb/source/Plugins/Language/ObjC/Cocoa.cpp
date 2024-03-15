@@ -133,13 +133,30 @@ bool lldb_private::formatters::NSTimeZoneSummaryProvider(
       return true;
     }
   } else if (class_name == "_NSSwiftTimeZone") {
+    // CFTimeZoneRef is declared as follows:
+    //     typedef const struct CF_BRIDGED_TYPE(NSTimeZone) __CFTimeZone *
+    //     CFTimeZoneRef;
+    // From the available debug info, this appears to lldb as pointer to an
+    // opaque type, not an ObjC object. As a result, lldb does not correctly
+    // determine the correct dynamic type (because it doesn't try ObjC). With no
+    // dynamic type, this summary provider cannot access the inner `identifier`
+    // property.
+    //
+    // The fix here is to explicitly cast the value as `id`, and get the dynamic
+    // value from there.
+    ValueObjectSP dyn_valobj_sp;
+    if (valobj.GetTypeName() == "CFTimeZoneRef") {
+      auto id_type =
+          valobj.GetCompilerType().GetBasicTypeFromAST(lldb::eBasicTypeObjCID);
+      dyn_valobj_sp = valobj.Cast(id_type)->GetDynamicValue(
+          DynamicValueType::eDynamicDontRunTarget);
+    }
+
+    ValueObject &time_zone = dyn_valobj_sp ? *dyn_valobj_sp : valobj;
     llvm::ArrayRef<ConstString> identifier_path = {
-        ConstString("timeZone"),
-        ConstString("_timeZone"),
-        ConstString("some"),
-        ConstString("identifier"),
-    };
-    if (auto identifier_sp = valobj.GetChildAtNamePath(identifier_path)) {
+        ConstString("some"), ConstString("timeZone"), ConstString("_timeZone"),
+        ConstString("some"), ConstString("identifier")};
+    if (auto identifier_sp = time_zone.GetChildAtNamePath(identifier_path)) {
       std::string desc;
       if (identifier_sp->GetSummaryAsCString(desc, options)) {
         stream.PutCString(desc);
@@ -252,7 +269,8 @@ bool lldb_private::formatters::NSIndexSetSummaryProvider(
   if (!process_sp)
     return false;
 
-  ObjCLanguageRuntime *runtime = ObjCLanguageRuntime::Get(*process_sp);
+  AppleObjCRuntime *runtime = llvm::dyn_cast_or_null<AppleObjCRuntime>(
+      ObjCLanguageRuntime::Get(*process_sp));
 
   if (!runtime)
     return false;
@@ -279,20 +297,56 @@ bool lldb_private::formatters::NSIndexSetSummaryProvider(
 
   do {
     if (class_name == "NSIndexSet" || class_name == "NSMutableIndexSet") {
-      Status error;
-      uint32_t mode = process_sp->ReadUnsignedIntegerFromMemory(
-          valobj_addr + ptr_size, 4, 0, error);
-      if (error.Fail())
-        return false;
-      // this means the set is empty - count = 0
-      if ((mode & 1) == 1) {
-        count = 0;
+      // Foundation version 2000 added a bitmask if the index set fit in 64 bits
+      // and a Tagged Pointer version if the bitmask is small enough to fit in
+      // the tagged pointer payload.  
+      // It also changed the layout (but not the size) of the set descriptor.
+
+      // First check whether this is a tagged pointer.  The bitmask will be in
+      // the payload of the tagged pointer.
+      uint64_t payload;
+      if (runtime->GetFoundationVersion() >= 2000  
+          && descriptor->GetTaggedPointerInfo(nullptr, nullptr, &payload)) {
+        count = llvm::popcount(payload);
         break;
       }
-      if ((mode & 2) == 2)
-        mode = 1; // this means the set only has one range
-      else
-        mode = 2; // this means the set has multiple ranges
+      // The first 32 bits describe the index set in all cases:
+      Status error;
+      uint32_t mode = process_sp->ReadUnsignedIntegerFromMemory(
+            valobj_addr + ptr_size, 4, 0, error);
+      if (error.Fail())
+        return false;
+      // Now check if the index is held in a bitmask in the object:
+      if (runtime->GetFoundationVersion() >= 2000) {
+        // The first two bits are "isSingleRange" and "isBitfield".  If this is
+        // a bitfield we handle it here, otherwise set mode appropriately and
+        // the rest of the treatment is in common.
+        if ((mode & 2) == 2) {
+          // The bitfield is a 64 bit uint at the beginning of the data var.
+          uint64_t bitfield = process_sp->ReadUnsignedIntegerFromMemory(
+            valobj_addr + 2 * ptr_size, 8, 0, error);
+          if (error.Fail())
+            return false;
+          count = llvm::popcount(bitfield);
+          break;
+        }
+        // It wasn't a bitfield, so read the isSingleRange from its new loc:
+        if ((mode & 1) == 1)
+          mode = 1; // this means the set only has one range
+        else
+          mode = 2; // this means the set has multiple ranges
+      } else {
+        // this means the set is empty - count = 0
+        if ((mode & 1) == 1) {
+          count = 0;
+          break;
+        }
+      
+        if ((mode & 2) == 2)
+          mode = 1; // this means the set only has one range
+        else
+          mode = 2; // this means the set has multiple ranges
+      }
       if (mode == 1) {
         count = process_sp->ReadUnsignedIntegerFromMemory(
             valobj_addr + 3 * ptr_size, ptr_size, 0, error);

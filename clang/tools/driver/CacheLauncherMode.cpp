@@ -8,6 +8,7 @@
 
 #include "CacheLauncherMode.h"
 #include "clang/Basic/DiagnosticCAS.h"
+#include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Frontend/Utils.h"
@@ -41,7 +42,10 @@ static bool shouldCacheInvocation(ArrayRef<const char *> Args,
       llvm::remove_if(CheckArgs, [](StringRef Arg) { return Arg == "-###"; }),
       CheckArgs.end());
   CreateInvocationOptions Opts;
-  Opts.Diags = Diags;
+  // Ignore diagnostic parsing diagnostics; if they are real issues they will be
+  // seen when compiling. Just fallback to disabling caching here.
+  Opts.Diags = CompilerInstance::createDiagnostics(new DiagnosticOptions,
+                                                   new IgnoringDiagConsumer);
   // This enables picking the first invocation in a multi-arch build.
   Opts.RecoverOnError = true;
   std::shared_ptr<CompilerInvocation> CInvok =
@@ -163,18 +167,6 @@ static void addLauncherArgs(SmallVectorImpl<const char *> &Args,
                  ServicePath});
   }
   Args.append({"-greproducible"});
-
-  if (llvm::sys::Process::GetEnv("CLANG_CACHE_REDACT_TIME_MACROS")) {
-    // Remove use of these macros to get reproducible outputs. This can
-    // accompany CLANG_CACHE_TEST_DETERMINISTIC_OUTPUTS to avoid fatal errors
-    // when the source uses these macros.
-    Args.append({"-Wno-builtin-macro-redefined", "-D__DATE__=\"redacted\"",
-                 "-D__TIMESTAMP__=\"redacted\"", "-D__TIME__=\"redacted\""});
-  }
-  if (llvm::sys::Process::GetEnv(
-          "CLANG_CACHE_CHECK_REPRODUCIBLE_CACHING_ISSUES")) {
-    Args.append({"-Werror=reproducible-caching"});
-  }
 }
 
 static void addScanServerArgs(const char *SocketPath,
@@ -251,15 +243,6 @@ clang::handleClangCacheInvocation(SmallVectorImpl<const char *> &Args,
       return None;
     }
     addLauncherArgs(Args, Saver);
-    if (llvm::sys::Process::GetEnv("CLANG_CACHE_TEST_DETERMINISTIC_OUTPUTS")) {
-      // Run the compilation twice, without replaying, to check that we get the
-      // same compilation artifacts for the same key. If they are not the same
-      // the action cache will trigger a fatal error.
-      Args.append({"-Xclang", "-fcache-disable-replay"});
-      int Result = executeAsProcess(Args, Diags);
-      if (Result != 0)
-        return Result;
-    }
     return None;
   }
 

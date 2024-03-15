@@ -682,12 +682,12 @@ ModuleMap::findOrCreateModuleForHeaderInUmbrellaDir(const FileEntry *File) {
 }
 
 ArrayRef<ModuleMap::KnownHeader>
-ModuleMap::findAllModulesForHeader(const FileEntry *File) {
+ModuleMap::findAllModulesForHeader(const FileEntry *File, bool AllowCreation) {
   HeadersMap::iterator Known = findKnownHeader(File);
   if (Known != Headers.end())
     return Known->second;
 
-  if (findOrCreateModuleForHeaderInUmbrellaDir(File))
+  if (AllowCreation && findOrCreateModuleForHeaderInUmbrellaDir(File))
     return Headers.find(File)->second;
 
   return None;
@@ -810,7 +810,7 @@ Module *ModuleMap::findModule(StringRef Name) const {
   if (Known != Modules.end()) {
     Module *M = Known->getValue();
     // Notify callbacks that we found a module map for the module.
-    if (!M->DefinitionLoc.isInvalid())
+    if (M->DefinitionLoc.isValid() && !M->IsFromModuleFile)
       for (const auto &Cb : Callbacks)
         Cb->moduleMapFoundForModule(
             **getContainingModuleMapFile(M), M,
@@ -1265,6 +1265,20 @@ void ModuleMap::resolveHeaderDirectives(
   Mod->UnresolvedHeaders.swap(NewHeaders);
 }
 
+// FIXME: duplicates code in PPDirectives
+static bool isForModuleBuilding(const Module *M, StringRef CurrentModule,
+                                StringRef ModuleName) {
+  StringRef TopLevelName = M->getTopLevelModuleName();
+
+  // When building framework Foo, we wanna make sure that Foo *and* Foo_Private
+  // are textually included and no modules are built for both.
+  if (M->getTopLevelModule()->IsFramework && CurrentModule == ModuleName &&
+      !CurrentModule.endswith("_Private") && TopLevelName.endswith("_Private"))
+    TopLevelName = TopLevelName.drop_back(8);
+
+  return TopLevelName == CurrentModule;
+}
+
 void ModuleMap::addHeader(Module *Mod, Module::Header Header,
                           ModuleHeaderRole Role, bool Imported) {
   KnownHeader KH(Mod, Role);
@@ -1280,7 +1294,7 @@ void ModuleMap::addHeader(Module *Mod, Module::Header Header,
   Mod->Headers[headerRoleToKind(Role)].push_back(Header);
 
   bool isCompilingModuleHeader =
-      LangOpts.isCompilingModule() && Mod->getTopLevelModule() == SourceModule;
+      isForModuleBuilding(Mod, LangOpts.CurrentModule, LangOpts.ModuleName);
   if (!Imported || isCompilingModuleHeader) {
     // When we import HeaderFileInfo, the external source is expected to
     // set the isModuleHeader flag itself.
@@ -2040,10 +2054,28 @@ void ModuleMapParser::parseModuleDecl() {
   Module *ShadowingModule = nullptr;
   if (Module *Existing = Map.lookupModuleQualified(ModuleName, ActiveModule)) {
     // We might see a (re)definition of a module that we already have a
-    // definition for in two cases:
+    // definition for in four cases:
     //  - If we loaded one definition from an AST file and we've just found a
     //    corresponding definition in a module map file, or
-    bool LoadedFromASTFile = Existing->DefinitionLoc.isInvalid();
+    bool LoadedFromASTFile = Existing->IsFromModuleFile;
+    //  - If we previously inferred this module from different module map file.
+    bool Inferred = Existing->IsInferred;
+    //  - If we're building a framework that vends a module map, we might've
+    //    previously seen the one in intermediate products and now the system
+    //    one.
+    // FIXME: If we're parsing module map file that looks like this:
+    //          framework module FW { ... }
+    //          module FW.Sub { ... }
+    //        We can't check the framework qualifier, since it's not attached to
+    //        the definition of Sub. Checking that qualifier on \c Existing is
+    //        not correct either, since we might've previously seen:
+    //          module FW { ... }
+    //          module FW.Sub { ... }
+    //        We should enforce consistency of redefinitions so that we can rely
+    //        that \c Existing is part of a framework iff the redefinition of FW
+    //        we have just skipped had it too. Once we do that, stop checking
+    //        the local framework qualifier and only rely on \c Existing.
+    bool PartOfFramework = Framework || Existing->isPartOfFramework();
     //  - If we're building a (preprocessed) module and we've just loaded the
     //    module map file from which it was created.
     bool ParsedAsMainInput =
@@ -2051,7 +2083,8 @@ void ModuleMapParser::parseModuleDecl() {
         Map.LangOpts.CurrentModule == ModuleName &&
         SourceMgr.getDecomposedLoc(ModuleNameLoc).first !=
             SourceMgr.getDecomposedLoc(Existing->DefinitionLoc).first;
-    if (!ActiveModule && (LoadedFromASTFile || ParsedAsMainInput)) {
+    if (LoadedFromASTFile || Inferred || PartOfFramework || ParsedAsMainInput) {
+      ActiveModule = PreviousActiveModule;
       // Skip the module definition.
       skipUntil(MMToken::RBrace);
       if (Tok.is(MMToken::RBrace))

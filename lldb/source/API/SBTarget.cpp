@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/API/SBTarget.h"
+#include "lldb/Symbol/LocateSymbolFile.h"
 #include "lldb/Utility/Instrumentation.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/lldb-public.h"
@@ -1513,27 +1514,44 @@ lldb::SBModule SBTarget::AddModule(const char *path, const char *triple,
                                    const char *uuid_cstr, const char *symfile) {
   LLDB_INSTRUMENT_VA(this, path, triple, uuid_cstr, symfile);
 
-  lldb::SBModule sb_module;
   TargetSP target_sp(GetSP());
-  if (target_sp) {
-    ModuleSpec module_spec;
-    if (path)
-      module_spec.GetFileSpec().SetFile(path, FileSpec::Style::native);
+  if (!target_sp)
+    return {};
 
-    if (uuid_cstr)
-      module_spec.GetUUID().SetFromStringRef(uuid_cstr);
+  ModuleSpec module_spec;
+  if (path)
+    module_spec.GetFileSpec().SetFile(path, FileSpec::Style::native);
 
-    if (triple)
-      module_spec.GetArchitecture() = Platform::GetAugmentedArchSpec(
-          target_sp->GetPlatform().get(), triple);
-    else
-      module_spec.GetArchitecture() = target_sp->GetArchitecture();
+  if (uuid_cstr)
+    module_spec.GetUUID().SetFromStringRef(uuid_cstr);
 
-    if (symfile)
-      module_spec.GetSymbolFileSpec().SetFile(symfile, FileSpec::Style::native);
+  if (triple)
+    module_spec.GetArchitecture() =
+        Platform::GetAugmentedArchSpec(target_sp->GetPlatform().get(), triple);
+  else
+    module_spec.GetArchitecture() = target_sp->GetArchitecture();
 
-    sb_module.SetSP(target_sp->GetOrCreateModule(module_spec, true /* notify */));
+  if (symfile)
+    module_spec.GetSymbolFileSpec().SetFile(symfile, FileSpec::Style::native);
+
+  SBModule sb_module;
+  sb_module.SetSP(target_sp->GetOrCreateModule(module_spec, true /* notify */));
+  if (!sb_module.IsValid() && module_spec.GetUUID().IsValid()) {
+    Status error;
+    if (Symbols::DownloadObjectAndSymbolFile(module_spec, error,
+                                             /* force_lookup */ true)) {
+      if (FileSystem::Instance().Exists(module_spec.GetFileSpec())) {
+        sb_module.SetSP(
+            target_sp->GetOrCreateModule(module_spec, true /* notify */));
+      }
+    }
   }
+  // If the target hasn't initialized any architecture yet, use the
+  // binary's architecture.
+  if (sb_module.IsValid() && !target_sp->GetArchitecture().IsValid() &&
+      sb_module.GetSP()->GetArchitecture().IsValid())
+    target_sp->SetArchitecture(sb_module.GetSP()->GetArchitecture());
+
   return sb_module;
 }
 
@@ -1542,9 +1560,26 @@ lldb::SBModule SBTarget::AddModule(const SBModuleSpec &module_spec) {
 
   lldb::SBModule sb_module;
   TargetSP target_sp(GetSP());
-  if (target_sp)
+  if (target_sp) {
     sb_module.SetSP(target_sp->GetOrCreateModule(*module_spec.m_opaque_up,
                                                  true /* notify */));
+    if (!sb_module.IsValid() && module_spec.m_opaque_up->GetUUID().IsValid()) {
+      Status error;
+      if (Symbols::DownloadObjectAndSymbolFile(*module_spec.m_opaque_up, error,
+                                               /* force_lookup */ true)) {
+        if (FileSystem::Instance().Exists(
+                module_spec.m_opaque_up->GetFileSpec())) {
+          sb_module.SetSP(target_sp->GetOrCreateModule(*module_spec.m_opaque_up,
+                                                       true /* notify */));
+        }
+      }
+    }
+  }
+  // If the target hasn't initialized any architecture yet, use the
+  // binary's architecture.
+  if (sb_module.IsValid() && !target_sp->GetArchitecture().IsValid() &&
+      sb_module.GetSP()->GetArchitecture().IsValid())
+    target_sp->SetArchitecture(sb_module.GetSP()->GetArchitecture());
   return sb_module;
 }
 
@@ -1635,6 +1670,26 @@ const char *SBTarget::GetABIName() {
     return const_name.GetCString();
   }
   return nullptr;
+}
+
+const char *SBTarget::GetLabel() const {
+  LLDB_INSTRUMENT_VA(this);
+
+  TargetSP target_sp(GetSP());
+  if (!target_sp)
+    return nullptr;
+
+  return ConstString(target_sp->GetLabel().data()).AsCString();
+}
+
+SBError SBTarget::SetLabel(const char *label) {
+  LLDB_INSTRUMENT_VA(this, label);
+
+  TargetSP target_sp(GetSP());
+  if (!target_sp)
+    return Status("Couldn't get internal target object.");
+
+  return Status(target_sp->SetLabel(label));
 }
 
 uint32_t SBTarget::GetDataByteSize() {
@@ -1950,7 +2005,7 @@ SBValueList SBTarget::FindGlobalVariables(const char *name,
                                                  max_matches, variable_list);
       break;
     case eMatchTypeStartsWith:
-      regexstr = llvm::Regex::escape(name) + ".*";
+      regexstr = "^" + llvm::Regex::escape(name) + ".*";
       target_sp->GetImages().FindGlobalVariables(RegularExpression(regexstr),
                                                  max_matches, variable_list);
       break;
@@ -2150,6 +2205,18 @@ SBError SBTarget::ClearSectionLoadAddress(lldb::SBSection section) {
 SBError SBTarget::SetModuleLoadAddress(lldb::SBModule module,
                                        int64_t slide_offset) {
   LLDB_INSTRUMENT_VA(this, module, slide_offset);
+
+  if (slide_offset < 0) {
+    SBError sb_error;
+    sb_error.SetErrorStringWithFormat("slide must be positive");
+    return sb_error;
+  }
+
+  return SetModuleLoadAddress(module, static_cast<uint64_t>(slide_offset));
+}
+
+SBError SBTarget::SetModuleLoadAddress(lldb::SBModule module,
+                                               uint64_t slide_offset) {
 
   SBError sb_error;
 

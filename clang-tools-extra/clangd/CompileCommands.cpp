@@ -466,8 +466,8 @@ llvm::ArrayRef<ArgStripper::Rule> ArgStripper::rulesFor(llvm::StringRef Arg) {
     // Also grab prefixes for each option, these are not fully exposed.
     const char *const *Prefixes[DriverID::LastOption] = {nullptr};
 #define PREFIX(NAME, VALUE) static const char *const NAME[] = VALUE;
-#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
-               HELP, METAVAR, VALUES)                                          \
+#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
+               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
   Prefixes[DriverID::OPT_##ID] = PREFIX;
 #include "clang/Driver/Options.inc"
 #undef OPTION
@@ -478,8 +478,8 @@ llvm::ArrayRef<ArgStripper::Rule> ArgStripper::rulesFor(llvm::StringRef Arg) {
       DriverID AliasID;
       const void *AliasArgs;
     } AliasTable[] = {
-#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
-               HELP, METAVAR, VALUES)                                          \
+#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
+               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
   {DriverID::OPT_##ID, DriverID::OPT_##ALIAS, ALIASARGS},
 #include "clang/Driver/Options.inc"
 #undef OPTION

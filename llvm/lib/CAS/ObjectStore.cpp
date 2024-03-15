@@ -117,23 +117,33 @@ ObjectStore::getProxyIfExists(ObjectRef Ref) {
   return ObjectProxy::load(*this, Ref, *H);
 }
 
-std::future<AsyncProxyValue> ObjectStore::getProxyAsync(ObjectRef Ref) {
+std::future<AsyncProxyValue> ObjectStore::getProxyFuture(ObjectRef Ref) {
   std::promise<AsyncProxyValue> Promise;
   auto Future = Promise.get_future();
+  getProxyAsync(Ref, [Promise = std::move(Promise)](
+                         Expected<std::optional<ObjectProxy>> Obj) mutable {
+    Promise.set_value(std::move(Obj));
+  });
+  return Future;
+}
+
+void ObjectStore::getProxyAsync(
+    ObjectRef Ref,
+    unique_function<void(Expected<std::optional<ObjectProxy>>)> Callback) {
   // FIXME: there is potential for use-after-free for the 'this' pointer.
   // Either we should always allocate shared pointers for \c ObjectStore objects
   // and pass \c shared_from_this() or expect that the caller will not release
   // the \c ObjectStore before the callback returns.
-  loadIfExistsAsync(Ref, [this, Ref, Promise = std::move(Promise)](
-                             Expected<std::optional<ObjectHandle>> H) mutable {
-    if (!H)
-      Promise.set_value(H.takeError());
-    else if (!*H)
-      Promise.set_value(std::nullopt);
-    else
-      Promise.set_value(ObjectProxy::load(*this, Ref, **H));
-  });
-  return Future;
+  return loadIfExistsAsync(
+      Ref, [this, Ref, Callback = std::move(Callback)](
+               Expected<std::optional<ObjectHandle>> H) mutable {
+        if (!H)
+          Callback(H.takeError());
+        else if (!*H)
+          Callback(std::nullopt);
+        else
+          Callback(ObjectProxy::load(*this, Ref, **H));
+      });
 }
 
 Error ObjectStore::createUnknownObjectError(const CASID &ID) {
@@ -198,9 +208,46 @@ ObjectProxy::getMemoryBuffer(StringRef Name,
   return CAS->getMemoryBuffer(H, Name, RequiresNullTerminator);
 }
 
-static Expected<std::unique_ptr<ObjectStore>>
+static Expected<std::shared_ptr<ObjectStore>>
+createOnDiskCASImpl(const Twine &Path) {
+  return createOnDiskCAS(Path);
+}
+
+static Expected<std::shared_ptr<ObjectStore>>
 createInMemoryCASImpl(const Twine &) {
   return createInMemoryCAS();
+}
+
+static Expected<std::shared_ptr<ObjectStore>>
+createPluginCASImpl(const Twine &URL) {
+  // Format used is
+  //   plugin://${PATH_TO_PLUGIN}?${OPT1}=${VAL1}&${OPT2}=${VAL2}..
+  // "ondisk-path" as option is treated specially, the rest of options are
+  // passed to the plugin verbatim.
+  SmallString<256> PathBuf;
+  auto [PluginPath, Options] = URL.toStringRef(PathBuf).split('?');
+  std::string OnDiskPath;
+  SmallVector<std::pair<std::string, std::string>> PluginArgs;
+  while (!Options.empty()) {
+    StringRef Opt;
+    std::tie(Opt, Options) = Options.split('&');
+    auto [Name, Value] = Opt.split('=');
+    if (Name == "ondisk-path") {
+      OnDiskPath = Value;
+    } else {
+      PluginArgs.push_back({std::string(Name), std::string(Value)});
+    }
+  }
+
+  if (OnDiskPath.empty())
+    OnDiskPath = getDefaultOnDiskCASPath();
+
+  std::pair<std::shared_ptr<ObjectStore>, std::shared_ptr<ActionCache>> CASDBs;
+  if (Error E = createPluginCASDatabases(PluginPath, OnDiskPath, PluginArgs)
+                    .moveInto(CASDBs))
+    return std::move(E);
+
+  return std::move(CASDBs.first);
 }
 
 static ManagedStatic<StringMap<ObjectStoreCreateFuncTy *>> RegisteredScheme;
@@ -208,12 +255,13 @@ static ManagedStatic<StringMap<ObjectStoreCreateFuncTy *>> RegisteredScheme;
 static StringMap<ObjectStoreCreateFuncTy *> &getRegisteredScheme() {
   if (!RegisteredScheme.isConstructed()) {
     RegisteredScheme->insert({"mem://", &createInMemoryCASImpl});
-    RegisteredScheme->insert({"file://", &createOnDiskCAS});
+    RegisteredScheme->insert({"file://", &createOnDiskCASImpl});
+    RegisteredScheme->insert({"plugin://", &createPluginCASImpl});
   }
   return *RegisteredScheme;
 }
 
-Expected<std::unique_ptr<ObjectStore>>
+Expected<std::shared_ptr<ObjectStore>>
 cas::createCASFromIdentifier(StringRef Path) {
   for (auto &Scheme : getRegisteredScheme()) {
     if (Path.consume_front(Scheme.getKey()))

@@ -48,7 +48,7 @@ struct llcas_functions_t {
   llcas_digest_t (*objectid_get_digest)(llcas_cas_t, llcas_objectid_t);
 
   llcas_lookup_result_t (*cas_contains_object)(llcas_cas_t, llcas_objectid_t,
-                                               char **error);
+                                               bool globally, char **error);
 
   llcas_lookup_result_t (*cas_load_object)(llcas_cas_t, llcas_objectid_t,
                                            llcas_loaded_object_t *,
@@ -80,9 +80,18 @@ struct llcas_functions_t {
                                                       bool globally,
                                                       char **error);
 
+  void (*actioncache_get_for_digest_async)(llcas_cas_t, llcas_digest_t key,
+                                           bool globally, void *ctx_cb,
+                                           llcas_actioncache_get_cb);
+
   bool (*actioncache_put_for_digest)(llcas_cas_t, llcas_digest_t key,
                                      llcas_objectid_t value, bool globally,
                                      char **error);
+
+  void (*actioncache_put_for_digest_async)(llcas_cas_t, llcas_digest_t key,
+                                           llcas_objectid_t value,
+                                           bool globally, void *ctx_cb,
+                                           llcas_actioncache_put_cb);
 };
 
 #endif // LLVM_LIB_CAS_PLUGINAPI_H

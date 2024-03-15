@@ -657,6 +657,10 @@ class TagInfo : public CommonTypeInfo {
   unsigned IsFlagEnum : 1;
 
 public:
+  llvm::Optional<std::string> SwiftImportAs;
+  llvm::Optional<std::string> SwiftRetainOp;
+  llvm::Optional<std::string> SwiftReleaseOp;
+
   llvm::Optional<EnumExtensibilityKind> EnumExtensibility;
 
   TagInfo() : HasFlagEnum(0), IsFlagEnum(0) {}
@@ -674,6 +678,13 @@ public:
   TagInfo &operator|=(const TagInfo &RHS) {
     static_cast<CommonTypeInfo &>(*this) |= RHS;
 
+    if (!SwiftImportAs)
+      SwiftImportAs = RHS.SwiftImportAs;
+    if (!SwiftRetainOp)
+      SwiftRetainOp = RHS.SwiftRetainOp;
+    if (!SwiftReleaseOp)
+      SwiftReleaseOp = RHS.SwiftReleaseOp;
+
     if (!HasFlagEnum)
       setFlagEnum(RHS.isFlagEnum());
 
@@ -690,6 +701,9 @@ public:
 
 inline bool operator==(const TagInfo &LHS, const TagInfo &RHS) {
   return static_cast<const CommonTypeInfo &>(LHS) == RHS &&
+         LHS.SwiftImportAs == RHS.SwiftImportAs &&
+         LHS.SwiftRetainOp == RHS.SwiftRetainOp &&
+         LHS.SwiftReleaseOp == RHS.SwiftReleaseOp &&
          LHS.isFlagEnum() == RHS.isFlagEnum() &&
          LHS.EnumExtensibility == RHS.EnumExtensibility;
 }
@@ -735,12 +749,26 @@ namespace api_notes {
 /// The file extension used for the source representation of API notes.
 static const char SOURCE_APINOTES_EXTENSION[] = "apinotes";
 
-/// Opaque context ID used to refer to an Objective-C class or protocol.
+/// Opaque context ID used to refer to an Objective-C class or protocol or a C++
+/// namespace.
 class ContextID {
 public:
   unsigned Value;
 
   explicit ContextID(unsigned value) : Value(value) { }
+};
+
+enum class ContextKind : uint8_t {
+  ObjCClass = 0,
+  ObjCProtocol = 1,
+  Namespace = 2
+};
+
+struct Context {
+  ContextID id;
+  ContextKind kind;
+
+  Context(ContextID id, ContextKind kind) : id(id), kind(kind) {}
 };
 
 /// A temporary reference to an Objective-C selector, suitable for

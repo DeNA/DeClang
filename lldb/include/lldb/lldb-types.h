@@ -84,6 +84,7 @@ typedef void (*LogOutputCallback)(const char *, void *baton);
 typedef bool (*CommandOverrideCallback)(void *baton, const char **argv);
 typedef bool (*ExpressionCancelCallback)(ExpressionEvaluationPhase phase,
                                          void *baton);
+
 typedef void *ScriptObjectPtr;
 
 typedef uint64_t addr_t;

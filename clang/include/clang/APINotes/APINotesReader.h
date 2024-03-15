@@ -175,14 +175,18 @@ public:
   /// \param name The name of the global variable.
   ///
   /// \returns information about the global variable, if known.
-  VersionedInfo<GlobalVariableInfo> lookupGlobalVariable(llvm::StringRef name);
+  VersionedInfo<GlobalVariableInfo>
+  lookupGlobalVariable(llvm::StringRef name,
+                       std::optional<Context> context = std::nullopt);
 
   /// Look for information regarding the given global function.
   ///
   /// \param name The name of the global function.
   ///
   /// \returns information about the global function, if known.
-  VersionedInfo<GlobalFunctionInfo> lookupGlobalFunction(llvm::StringRef name);
+  VersionedInfo<GlobalFunctionInfo>
+  lookupGlobalFunction(llvm::StringRef name,
+                       std::optional<Context> context = std::nullopt);
 
   /// Look for information regarding the given enumerator.
   ///
@@ -197,14 +201,27 @@ public:
   /// \param name The name of the tag.
   ///
   /// \returns information about the tag, if known.
-  VersionedInfo<TagInfo> lookupTag(llvm::StringRef name);
+  VersionedInfo<TagInfo>
+  lookupTag(llvm::StringRef name,
+            std::optional<Context> context = std::nullopt);
 
   /// Look for information regarding the given typedef.
   ///
   /// \param name The name of the typedef.
   ///
   /// \returns information about the typedef, if known.
-  VersionedInfo<TypedefInfo> lookupTypedef(llvm::StringRef name);
+  VersionedInfo<TypedefInfo>
+  lookupTypedef(llvm::StringRef name,
+                std::optional<Context> context = std::nullopt);
+
+  /// Look for the context ID of the given C++ namespace.
+  ///
+  /// \param name The name of the class we're looking for.
+  ///
+  /// \returns The ID, if known.
+  llvm::Optional<ContextID>
+  lookupNamespaceID(llvm::StringRef name,
+                    llvm::Optional<ContextID> parentNamespaceID = llvm::None);
 };
 
 } // end namespace api_notes

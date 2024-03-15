@@ -57,9 +57,10 @@ using namespace object;
 namespace {
 enum ID {
   OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
-               HELPTEXT, METAVAR, VALUES)                                      \
-  OPT_##ID,
+#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
+               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
+  LLVM_MAKE_OPT_ID(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,   \
+                   FLAGS, PARAM, HELP, METAVAR, VALUES),
 #include "Options.inc"
 #undef OPTION
 };
@@ -69,13 +70,10 @@ enum ID {
 #undef PREFIX
 
 const opt::OptTable::Info InfoTable[] = {
-#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
-               HELPTEXT, METAVAR, VALUES)                                      \
-  {                                                                            \
-      PREFIX,      NAME,      HELPTEXT,                                        \
-      METAVAR,     OPT_##ID,  opt::Option::KIND##Class,                        \
-      PARAM,       FLAGS,     OPT_##GROUP,                                     \
-      OPT_##ALIAS, ALIASARGS, VALUES},
+#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
+               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
+  LLVM_CONSTRUCT_OPT_INFO(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS,       \
+                          ALIASARGS, FLAGS, PARAM, HELP, METAVAR, VALUES),
 #include "Options.inc"
 #undef OPTION
 };
@@ -102,7 +100,6 @@ struct DsymutilOptions {
   bool DumpStab = false;
   bool Flat = false;
   bool InputIsYAMLDebugMap = false;
-  bool PaperTrailWarnings = false;
   bool ForceKeepFunctionForStatic = false;
   std::string SymbolMap;
   std::string OutputFile;
@@ -193,11 +190,6 @@ static Error verifyOptions(const DsymutilOptions &Options) {
         "cannot use -o with multiple inputs in flat mode.",
         errc::invalid_argument);
 
-  if (Options.PaperTrailWarnings && Options.InputIsYAMLDebugMap)
-    return make_error<StringError>(
-        "paper trail warnings are not supported for YAML input.",
-        errc::invalid_argument);
-
   if (!Options.ReproducerPath.empty() &&
       Options.ReproMode != ReproducerMode::Use)
     return make_error<StringError>(
@@ -281,7 +273,6 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
   Options.DumpStab = Args.hasArg(OPT_symtab);
   Options.Flat = Args.hasArg(OPT_flat);
   Options.InputIsYAMLDebugMap = Args.hasArg(OPT_yaml_input);
-  Options.PaperTrailWarnings = Args.hasArg(OPT_papertrail);
 
   if (Expected<DWARFVerify> Verify = getVerifyKind(Args)) {
     Options.Verify = *Verify;
@@ -359,9 +350,6 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
 
   if (Options.DumpDebugMap || Options.LinkOpts.Verbose)
     Options.LinkOpts.Threads = 1;
-
-  if (getenv("RC_DEBUG_OPTIONS"))
-    Options.PaperTrailWarnings = true;
 
   if (opt::Arg *RemarksPrependPath = Args.getLastArg(OPT_remarks_prepend_path))
     Options.LinkOpts.RemarksPrependPath = RemarksPrependPath->getValue();
@@ -625,8 +613,8 @@ int dsymutil_main(int argc, char **argv) {
 
     auto DebugMapPtrsOrErr =
         parseDebugMap(Options.LinkOpts.VFS, InputFile, Options.Archs,
-                      Options.LinkOpts.PrependPath, Options.PaperTrailWarnings,
-                      Options.LinkOpts.Verbose, Options.InputIsYAMLDebugMap);
+                      Options.LinkOpts.PrependPath, Options.LinkOpts.Verbose,
+                      Options.InputIsYAMLDebugMap);
 
     if (auto EC = DebugMapPtrsOrErr.getError()) {
       WithColor::error() << "cannot parse the debug map for '" << InputFile

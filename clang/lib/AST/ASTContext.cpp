@@ -4665,7 +4665,10 @@ QualType ASTContext::getTypedefType(const TypedefNameDecl *Decl,
   }
   if (Underlying.isNull() || Decl->getUnderlyingType() == Underlying)
     return QualType(Decl->TypeForDecl, 0);
-  assert(hasSameType(Decl->getUnderlyingType(), Underlying));
+
+  // Temporarily disabled to unblock debugging with swift C++ interop
+  // FIXME: fix the underlying problem (rdar://114264253)
+  // assert(hasSameType(Decl->getUnderlyingType(), Underlying));
 
   llvm::FoldingSetNodeID ID;
   TypedefType::Profile(ID, Decl, Underlying);
@@ -7844,6 +7847,7 @@ ASTContext::getObjCPropertyImplDeclForPropertyDecl(
 /// kPropertyWeak = 'W'              // 'weak' property
 /// kPropertyStrong = 'P'            // property GC'able
 /// kPropertyNonAtomic = 'N'         // property non-atomic
+/// kPropertyOptional = '?'          // property optional
 /// };
 /// @endcode
 std::string
@@ -7868,6 +7872,9 @@ ASTContext::getObjCEncodingForPropertyDecl(const ObjCPropertyDecl *PD,
   // GCC has some special rules regarding encoding of properties which
   // closely resembles encoding of ivars.
   getObjCEncodingForPropertyType(PD->getType(), S);
+
+  if (PD->isOptional())
+    S += ",?";
 
   if (PD->isReadOnly()) {
     S += ",R";

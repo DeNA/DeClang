@@ -2446,7 +2446,8 @@ void Clang::DumpCompilationDatabase(Compilation &C, StringRef Filename,
     CWD = ".";
   CDB << "{ \"directory\": \"" << escape(*CWD) << "\"";
   CDB << ", \"file\": \"" << escape(Input.getFilename()) << "\"";
-  CDB << ", \"output\": \"" << escape(Output.getFilename()) << "\"";
+  if (Output.isFilename())
+    CDB << ", \"output\": \"" << escape(Output.getFilename()) << "\"";
   CDB << ", \"arguments\": [\"" << escape(D.ClangExecutable) << "\"";
   SmallString<128> Buf;
   Buf = "-x";
@@ -2458,7 +2459,8 @@ void Clang::DumpCompilationDatabase(Compilation &C, StringRef Filename,
     CDB << ", \"" << escape(Buf) << "\"";
   }
   CDB << ", \"" << escape(Input.getFilename()) << "\"";
-  CDB << ", \"-o\", \"" << escape(Output.getFilename()) << "\"";
+  if (Output.isFilename())
+    CDB << ", \"-o\", \"" << escape(Output.getFilename()) << "\"";
   for (auto &A: Args) {
     auto &O = A->getOption();
     // Skip language selection, which is positional.
@@ -4582,6 +4584,24 @@ void Clang::AddPrefixMappingOptions(const ArgList &Args, ArgStringList &CmdArgs,
   }
 }
 
+static void addCachingOptions(ArgStringList &CmdArgs) {
+  if (std::getenv("CLANG_CACHE_TEST_DETERMINISTIC_OUTPUTS"))
+    CmdArgs.push_back("-fcache-disable-replay");
+
+  if (std::getenv("CLANG_CACHE_REDACT_TIME_MACROS")) {
+    // Remove use of these macros to get reproducible outputs. This can
+    // accompany CLANG_CACHE_TEST_DETERMINISTIC_OUTPUTS to avoid fatal errors
+    // when the source uses these macros.
+    CmdArgs.push_back("-Wno-builtin-macro-redefined");
+    CmdArgs.push_back("-D__DATE__=\"redacted\"");
+    CmdArgs.push_back("-D__TIMESTAMP__=\"redacted\"");
+    CmdArgs.push_back("-D__TIME__=\"redacted\"");
+  }
+
+  if (std::getenv("CLANG_CACHE_CHECK_REPRODUCIBLE_CACHING_ISSUES"))
+    CmdArgs.push_back("-Werror=reproducible-caching");
+}
+
 void Clang::ConstructJob(Compilation &C, const JobAction &Job,
                          const InputInfo &Output, const InputInfoList &Inputs,
                          const ArgList &Args, const char *LinkingOutput) const {
@@ -5951,6 +5971,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &Job,
   // Handle -fdepscan-prefix-map-* options
   AddPrefixMappingOptions(Args, CmdArgs, D, Sysroot);
 
+  // Handle compile caching options.
+  addCachingOptions(CmdArgs);
+
   // Don't warn about "clang -c -DPIC -fPIC test.i" because libtool.m4 assumes
   // that "The compiler can only warn and ignore the option if not recognized".
   // When building with ccache, it will pass -D options to clang even on
@@ -6003,6 +6026,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &Job,
     }
     A->render(Args, CmdArgs);
   }
+
+  Args.AddAllArgs(CmdArgs, options::OPT_Wsystem_headers_in_module_EQ);
 
   if (Args.hasFlag(options::OPT_pedantic, options::OPT_no_pedantic, false))
     CmdArgs.push_back("-pedantic");

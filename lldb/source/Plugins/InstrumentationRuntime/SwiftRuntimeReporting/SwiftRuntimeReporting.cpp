@@ -105,8 +105,7 @@ static StructuredData::ArraySP ReadThreads(ProcessSP process_sp, addr_t addr) {
     for (size_t j = 0; j < num_frames; j++) {
       addr_t frame = process_sp->ReadUnsignedIntegerFromMemory(
           frames_ptr + j * ptr_size, ptr_size, 0, read_error);
-      trace->AddItem(
-          StructuredData::ObjectSP(new StructuredData::Integer(frame)));
+      trace->AddIntegerItem(frame);
     }
     StructuredData::DictionarySP thread(new StructuredData::Dictionary());
     thread->AddItem("trace", StructuredData::ObjectSP(trace));
@@ -286,7 +285,7 @@ SwiftRuntimeReporting::RetrieveReportData(ExecutionContextRef exe_ctx_ref) {
     }
 
     addr_t PC = addr.GetLoadAddress(&target);
-    trace->AddItem(StructuredData::ObjectSP(new StructuredData::Integer(PC)));
+    trace->AddIntegerItem(PC);
   }
 
   StructuredData::ArraySP threads(new StructuredData::Array());
@@ -418,9 +417,9 @@ SwiftRuntimeReporting::GetBacktracesFromExtendedStopInfo(
     StructuredData::ObjectSP info) {
   ThreadCollectionSP result;
   result.reset(new ThreadCollection());
-  
+
   ProcessSP process_sp = GetProcessSP();
-  
+
   if (info->GetObjectForDotSeparatedPath("instrumentation_class")
       ->GetStringValue() != "SwiftRuntimeReporting")
     return result;
@@ -431,7 +430,7 @@ SwiftRuntimeReporting::GetBacktracesFromExtendedStopInfo(
     std::vector<lldb::addr_t> PCs;
     auto trace = thread->GetObjectForDotSeparatedPath("trace")->GetAsArray();
     trace->ForEach([&PCs](StructuredData::Object *PC) -> bool {
-      PCs.push_back(PC->GetAsInteger()->GetValue());
+      PCs.push_back(PC->GetAsUnsignedInteger()->GetValue());
       return true;
     });
 
@@ -440,7 +439,7 @@ SwiftRuntimeReporting::GetBacktracesFromExtendedStopInfo(
 
     StructuredData::ObjectSP thread_id_obj =
         thread->GetObjectForDotSeparatedPath("tid");
-    tid_t tid = thread_id_obj ? thread_id_obj->GetIntegerValue() : 0;
+    tid_t tid = thread_id_obj ? thread_id_obj->GetUnsignedIntegerValue() : 0;
 
     HistoryThread *history_thread = new HistoryThread(*process_sp, tid, PCs);
     ThreadSP new_thread_sp(history_thread);

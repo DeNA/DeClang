@@ -232,7 +232,7 @@ Driver::Driver(StringRef ClangExecutable, StringRef TargetTriple,
 }
 
 void Driver::setDriverMode(StringRef Value) {
-  static const std::string OptName =
+  static StringRef OptName =
       getOpts().getOption(options::OPT_driver_mode).getPrefixedName();
   if (auto M = llvm::StringSwitch<llvm::Optional<DriverMode>>(Value)
                    .Case("gcc", GCCMode)
@@ -6410,7 +6410,7 @@ bool clang::driver::willEmitRemarks(const ArgList &Args) {
 
 llvm::StringRef clang::driver::getDriverMode(StringRef ProgName,
                                              ArrayRef<const char *> Args) {
-  static const std::string OptName =
+  static StringRef OptName =
       getDriverOptTable().getOption(options::OPT_driver_mode).getPrefixedName();
   llvm::StringRef Opt;
   for (StringRef Arg : Args) {

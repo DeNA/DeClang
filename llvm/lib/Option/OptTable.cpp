@@ -67,7 +67,7 @@ static inline bool operator<(const OptTable::Info &A, const OptTable::Info &B) {
   if (&A == &B)
     return false;
 
-  if (int N = StrCmpOptionName(A.Name, B.Name))
+  if (int N = StrCmpOptionName(A.getName().data(), B.getName().data()))
     return N < 0;
 
   for (const char * const *APre = A.Prefixes,
@@ -87,7 +87,7 @@ static inline bool operator<(const OptTable::Info &A, const OptTable::Info &B) {
 
 // Support lower_bound between info and an option name.
 static inline bool operator<(const OptTable::Info &I, const char *Name) {
-  return StrCmpOptionNameIgnoreCase(I.Name, Name) < 0;
+  return StrCmpOptionNameIgnoreCase(I.getName().data(), Name) < 0;
 }
 
 } // end namespace opt
@@ -183,10 +183,10 @@ static unsigned matchOption(const OptTable::Info *I, StringRef Str,
     StringRef Prefix(*Pre);
     if (Str.startswith(Prefix)) {
       StringRef Rest = Str.substr(Prefix.size());
-      bool Matched = IgnoreCase ? Rest.startswith_insensitive(I->Name)
-                                : Rest.startswith(I->Name);
+      bool Matched = IgnoreCase ? Rest.startswith_insensitive(I->getName())
+                                : Rest.startswith(I->getName());
       if (Matched)
-        return Prefix.size() + StringRef(I->Name).size();
+        return Prefix.size() + StringRef(I->getName()).size();
     }
   }
   return 0;
@@ -195,7 +195,7 @@ static unsigned matchOption(const OptTable::Info *I, StringRef Str,
 // Returns true if one of the Prefixes + In.Names matches Option
 static bool optionMatches(const OptTable::Info &In, StringRef Option) {
   if (In.Prefixes) {
-    StringRef InName(In.Name);
+    StringRef InName(In.getName());
     for (size_t I = 0; In.Prefixes[I]; I++)
       if (Option.endswith(InName))
         if (Option.slice(0, Option.size() - InName.size()) == In.Prefixes[I])
@@ -238,7 +238,7 @@ OptTable::findByPrefix(StringRef Cur, unsigned int DisableFlags) const {
       continue;
 
     for (int I = 0; In.Prefixes[I]; I++) {
-      std::string S = std::string(In.Prefixes[I]) + std::string(In.Name) + "\t";
+      std::string S = std::string(In.Prefixes[I]) + std::string(In.getName()) + "\t";
       if (In.HelpText)
         S += In.HelpText;
       if (StringRef(S).startswith(Cur) && S != std::string(Cur) + "\t")
@@ -258,7 +258,7 @@ unsigned OptTable::findNearest(StringRef Option, std::string &NearestString,
   unsigned BestDistance = UINT_MAX;
   for (const Info &CandidateInfo :
        ArrayRef<Info>(OptionInfos).drop_front(FirstSearchableIndex)) {
-    StringRef CandidateName = CandidateInfo.Name;
+    StringRef CandidateName = CandidateInfo.getName();
 
     // We can eliminate some option prefix/name pairs as candidates right away:
     // * Ignore option candidates with empty names, such as "--", or names
@@ -535,7 +535,7 @@ InputArgList OptTable::parseArgs(int Argc, char *const *Argv,
 
 static std::string getOptionHelpName(const OptTable &Opts, OptSpecifier Id) {
   const Option O = Opts.getOption(Id);
-  std::string Name = O.getPrefixedName();
+  std::string Name = O.getPrefixedName().str();
 
   // Add metavar, if used.
   switch (O.getKind()) {

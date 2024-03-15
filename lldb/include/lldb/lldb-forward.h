@@ -161,6 +161,7 @@ class PersistentExpressionState;
 class Platform;
 class Process;
 class ProcessAttachInfo;
+class ProcessLaunchInfo;
 class ProcessInfo;
 class ProcessInstanceInfo;
 class ProcessInstanceInfoMatch;
@@ -181,6 +182,7 @@ class Scalar;
 class ScriptInterpreter;
 class ScriptInterpreterLocker;
 class ScriptedMetadata;
+class ScriptedPlatformInterface;
 class ScriptedProcessInterface;
 class ScriptedThreadInterface;
 class ScriptedSyntheticChildren;
@@ -380,6 +382,8 @@ typedef std::shared_ptr<lldb_private::ScriptSummaryFormat>
     ScriptSummaryFormatSP;
 typedef std::shared_ptr<lldb_private::ScriptInterpreter> ScriptInterpreterSP;
 typedef std::shared_ptr<lldb_private::ScriptedMetadata> ScriptedMetadataSP;
+typedef std::unique_ptr<lldb_private::ScriptedPlatformInterface>
+    ScriptedPlatformInterfaceUP;
 typedef std::unique_ptr<lldb_private::ScriptedProcessInterface>
     ScriptedProcessInterfaceUP;
 typedef std::shared_ptr<lldb_private::ScriptedThreadInterface>

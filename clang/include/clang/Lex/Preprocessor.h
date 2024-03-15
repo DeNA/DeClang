@@ -1377,6 +1377,7 @@ public:
 
   /// Return true if this header has already been included.
   bool alreadyIncluded(const FileEntry *File) const {
+    HeaderInfo.getFileInfo(File);
     return IncludedFiles.count(File);
   }
 

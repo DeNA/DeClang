@@ -547,6 +547,12 @@ void MappingTraits<COFF::AuxiliaryCLRToken>::mapping(
   IO.mapRequired("SymbolTableIndex", ACT.SymbolTableIndex);
 }
 
+void MappingTraits<COFFYAML::SectionDataEntry>::mapping(
+    IO &IO, COFFYAML::SectionDataEntry &E) {
+  IO.mapOptional("UInt32", E.UInt32);
+  IO.mapOptional("Binary", E.Binary);
+}
+
 void MappingTraits<COFFYAML::Symbol>::mapping(IO &IO, COFFYAML::Symbol &S) {
   MappingNormalization<NStorageClass, uint8_t> NS(IO, S.Header.StorageClass);
 
@@ -586,11 +592,19 @@ void MappingTraits<COFFYAML::Section>::mapping(IO &IO, COFFYAML::Section &Sec) {
   else if (Sec.Name == ".debug$H")
     IO.mapOptional("GlobalHashes", Sec.DebugH);
 
-  // Uninitialized sections, such as .bss, typically have no data, but the size
-  // is carried in SizeOfRawData, even though PointerToRawData is zero.
-  if (Sec.SectionData.binary_size() == 0 &&
-      NC->Characteristics & COFF::IMAGE_SCN_CNT_UNINITIALIZED_DATA)
-    IO.mapOptional("SizeOfRawData", Sec.Header.SizeOfRawData);
+  IO.mapOptional("StructuredData", Sec.StructuredData);
+
+  if (!Sec.StructuredData.empty() && Sec.SectionData.binary_size()) {
+    IO.setError("StructuredData and SectionData can't be used together");
+    return;
+  }
+
+  IO.mapOptional("SizeOfRawData", Sec.Header.SizeOfRawData, 0U);
+
+  if (!Sec.StructuredData.empty() && Sec.Header.SizeOfRawData) {
+    IO.setError("StructuredData and SizeOfRawData can't be used together");
+    return;
+  }
 
   IO.mapOptional("Relocations", Sec.Relocations);
 }

@@ -804,6 +804,10 @@ def Wall : Flag<["-"], "Wall">, Group<W_Group>, Flags<[CC1Option, HelpHidden]>;
 def WCL4 : Flag<["-"], "WCL4">, Group<W_Group>, Flags<[CC1Option, HelpHidden]>;
 def Wsystem_headers : Flag<["-"], "Wsystem-headers">, Group<W_Group>, Flags<[CC1Option, HelpHidden]>;
 def Wno_system_headers : Flag<["-"], "Wno-system-headers">, Group<W_Group>, Flags<[CC1Option, HelpHidden]>;
+def Wsystem_headers_in_module_EQ : Joined<["-"], "Wsystem-headers-in-module=">,
+  Flags<[CC1Option, HelpHidden]>, MetaVarName<"<module>">,
+  HelpText<"Enable -Wsystem-headers when building <module>">,
+  MarshallingInfoStringVector<DiagnosticOpts<"SystemHeaderWarningsModules">>;
 def Wdeprecated : Flag<["-"], "Wdeprecated">, Group<W_Group>, Flags<[CC1Option]>,
   HelpText<"Enable warnings for deprecated constructs and define __DEPRECATED">;
 def Wno_deprecated : Flag<["-"], "Wno-deprecated">, Group<W_Group>, Flags<[CC1Option]>;
@@ -1756,6 +1760,10 @@ def fsanitize_address_outline_instrumentation : Flag<["-"], "fsanitize-address-o
 def fno_sanitize_address_outline_instrumentation : Flag<["-"], "fno-sanitize-address-outline-instrumentation">,
                                                    Group<f_clang_Group>,
                                                    HelpText<"Use default code inlining logic for the address sanitizer">;
+defm sanitize_stable_abi
+  : OptInCC1FFlag<"sanitize-stable-abi", "Stable  ", "Conventional ",
+    "ABI instrumentation for sanitizer runtime. Default: Conventional">;
+
 def fsanitize_memtag_mode_EQ : Joined<["-"], "fsanitize-memtag-mode=">,
                                         Group<f_clang_Group>,
                                         HelpText<"Set default MTE mode to 'sync' (default) or 'async'">;
@@ -2435,6 +2443,10 @@ defm modules_search_all : BoolFOption<"modules-search-all",
 defm implicit_modules : BoolFOption<"implicit-modules",
   LangOpts<"ImplicitModules">, DefaultTrue,
   NegFlag<SetFalse, [CC1Option]>, PosFlag<SetTrue>, BothFlags<[NoXarchOption,CoreOption]>>;
+def fno_modules_check_relocated : Joined<["-"], "fno-modules-check-relocated">,
+  Group<f_Group>, Flags<[CC1Option]>,
+  HelpText<"Skip checks for relocated modules when loading PCM files">,
+  MarshallingInfoNegativeFlag<PreprocessorOpts<"ModulesCheckRelocated">>;
 def fretain_comments_from_system_headers : Flag<["-"], "fretain-comments-from-system-headers">, Group<f_Group>, Flags<[CC1Option]>,
   MarshallingInfoFlag<LangOpts<"RetainCommentsFromSystemHeaders">>;
 def fmodule_header : Flag <["-"], "fmodule-header">, Group<f_Group>,
@@ -6644,6 +6656,11 @@ defm cache_compile_job : BoolFOption<"cache-compile-job",
 defm cache_disable_replay : BoolFOption<"cache-disable-replay",
     FrontendOpts<"DisableCachedCompileJobReplay">, DefaultFalse,
     PosFlag<SetTrue, [], "Disable replaying a cached compile job">,
+    NegFlag<SetFalse>>;
+
+defm modules_skip_diagnostic_options : BoolFOption<"modules-skip-diagnostic-options",
+    HeaderSearchOpts<"ModulesSkipDiagnosticOptions">, DefaultFalse,
+    PosFlag<SetTrue, [], "Disable writing diagnostic options">,
     NegFlag<SetFalse>>;
 
 def fcompilation_caching_service_path : Separate<["-"], "fcompilation-caching-service-path">,

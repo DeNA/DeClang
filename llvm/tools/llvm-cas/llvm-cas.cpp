@@ -57,6 +57,7 @@ static int import(ObjectStore &CAS, ObjectStore &UpstreamCAS,
                   ArrayRef<std::string> Objects);
 static int putCacheKey(ObjectStore &CAS, ActionCache &AC,
                        ArrayRef<std::string> Objects);
+static int getCacheResult(ObjectStore &CAS, ActionCache &AC, const CASID &ID);
 static int validateObject(ObjectStore &CAS, const CASID &ID);
 
 int main(int Argc, char **Argv) {
@@ -66,6 +67,11 @@ int main(int Argc, char **Argv) {
   cl::list<std::string> Objects(cl::Positional, cl::desc("<object>..."));
   cl::opt<std::string> CASPath("cas", cl::desc("Path to CAS on disk."),
                                cl::value_desc("path"));
+  cl::opt<std::string> CASPluginPath("fcas-plugin-path",
+                                     cl::desc("Path to plugin CAS library"),
+                                     cl::value_desc("path"));
+  cl::list<std::string> CASPluginOpts("fcas-plugin-option",
+                                      cl::desc("Plugin CAS Options"));
   cl::opt<std::string> UpstreamCASPath(
       "upstream-cas", cl::desc("Path to another CAS."), cl::value_desc("path"));
   cl::opt<std::string> DataPath("data",
@@ -90,6 +96,7 @@ int main(int Argc, char **Argv) {
     GetCASIDForFile,
     Import,
     PutCacheKey,
+    GetCacheResult,
     Validate,
   };
   cl::opt<CommandKind> Command(
@@ -113,6 +120,8 @@ int main(int Argc, char **Argv) {
           clEnumValN(Import, "import", "import objects from another CAS"),
           clEnumValN(PutCacheKey, "put-cache-key",
                      "set a value for a cache key"),
+          clEnumValN(GetCacheResult, "get-cache-result",
+                     "get the result value from a cache key"),
           clEnumValN(Validate, "validate", "validate the object for CASID")),
       cl::init(CommandKind::Invalid));
 
@@ -128,18 +137,28 @@ int main(int Argc, char **Argv) {
     ExitOnErr(
         createStringError(inconvertibleErrorCode(), "missing --cas=<path>"));
 
-  std::unique_ptr<ObjectStore> CAS;
-  std::unique_ptr<ActionCache> AC;
+  std::shared_ptr<ObjectStore> CAS;
+  std::shared_ptr<ActionCache> AC;
   std::optional<StringRef> CASFilePath;
   if (sys::path::is_absolute(CASPath)) {
     CASFilePath = CASPath;
-    std::tie(CAS, AC) = ExitOnErr(createOnDiskUnifiedCASDatabases(CASPath));
+    if (!CASPluginPath.empty()) {
+      SmallVector<std::pair<std::string, std::string>> PluginOptions;
+      for (const auto &PluginOpt : CASPluginOpts) {
+        auto [Name, Val] = StringRef(PluginOpt).split('=');
+        PluginOptions.push_back({std::string(Name), std::string(Val)});
+      }
+      std::tie(CAS, AC) = ExitOnErr(
+          createPluginCASDatabases(CASPluginPath, CASPath, PluginOptions));
+    } else {
+      std::tie(CAS, AC) = ExitOnErr(createOnDiskUnifiedCASDatabases(CASPath));
+    }
   } else {
     CAS = ExitOnErr(createCASFromIdentifier(CASPath));
   }
   assert(CAS);
 
-  std::unique_ptr<ObjectStore> UpstreamCAS;
+  std::shared_ptr<ObjectStore> UpstreamCAS;
   if (!UpstreamCASPath.empty())
     UpstreamCAS = ExitOnErr(createCASFromIdentifier(UpstreamCASPath));
 
@@ -181,18 +200,23 @@ int main(int Argc, char **Argv) {
     return import(*CAS, *UpstreamCAS, Objects);
   }
 
-  if (Command == PutCacheKey) {
+  if (Command == PutCacheKey || Command == GetCacheResult) {
     if (!AC)
       ExitOnErr(createStringError(inconvertibleErrorCode(),
                                   "no action-cache available"));
-    return putCacheKey(*CAS, *AC, Objects);
   }
+
+  if (Command == PutCacheKey)
+    return putCacheKey(*CAS, *AC, Objects);
 
   // Remaining commands need exactly one CAS object.
   if (Objects.size() > 1)
     ExitOnErr(createStringError(inconvertibleErrorCode(),
                                 "too many <object>s, expected 1"));
   CASID ID = ExitOnErr(CAS->parseID(Objects.front()));
+
+  if (Command == GetCacheResult)
+    return getCacheResult(*CAS, *AC, ID);
 
   if (Command == TraverseGraph)
     return traverseGraph(*CAS, ID);
@@ -417,16 +441,31 @@ int traverseGraph(ObjectStore &CAS, const CASID &ID) {
   return 0;
 }
 
-static Error recursiveAccess(CachingOnDiskFileSystem &FS, StringRef Path) {
+static Error
+recursiveAccess(CachingOnDiskFileSystem &FS, StringRef Path,
+                llvm::DenseSet<llvm::sys::fs::UniqueID> &SeenDirectories) {
   auto ST = FS.status(Path);
+
+  // Ignore missing entries, which can be a symlink to a missing file, which is
+  // not an error in the filesystem itself.
+  // FIXME: add status(follow=false) to VFS instead, which would let us detect
+  // this case directly.
+  if (ST.getError() == llvm::errc::no_such_file_or_directory)
+    return Error::success();
+
   if (!ST)
     return createFileError(Path, ST.getError());
 
-  if (ST->isDirectory()) {
+  // Check that this is the first time we see the directory to prevent infinite
+  // recursion into symlinks. The status() above will ensure all symlinks are
+  // ingested.
+  // FIXME: add status(follow=false) to VFS instead, and then only traverse
+  // a directory and not a symlink to a directory.
+  if (ST->isDirectory() && SeenDirectories.insert(ST->getUniqueID()).second) {
     std::error_code EC;
     for (llvm::vfs::directory_iterator I = FS.dir_begin(Path, EC), IE;
          !EC && I != IE; I.increment(EC)) {
-      auto Err = recursiveAccess(FS, I->path());
+      auto Err = recursiveAccess(FS, I->path(), SeenDirectories);
       if (Err)
         return Err;
     }
@@ -451,7 +490,8 @@ static Expected<ObjectProxy> ingestFileSystemImpl(ObjectStore &CAS,
 
   (*FS)->trackNewAccesses();
 
-  if (Error E = recursiveAccess(**FS, Path))
+  llvm::DenseSet<llvm::sys::fs::UniqueID> SeenDirectories;
+  if (Error E = recursiveAccess(**FS, Path, SeenDirectories))
     return std::move(E);
 
   return (*FS)->createTreeFromNewAccesses(
@@ -574,6 +614,18 @@ static int putCacheKey(ObjectStore &CAS, ActionCache &AC,
     Objects = Objects.drop_front(2);
     ExitOnErr(AC.put(Key, Result));
   }
+  return 0;
+}
+
+static int getCacheResult(ObjectStore &CAS, ActionCache &AC, const CASID &ID) {
+  ExitOnError ExitOnErr("llvm-cas: get-cache-result: ");
+
+  auto Result = ExitOnErr(AC.get(ID));
+  if (!Result) {
+    outs() << "result not found\n";
+    return 1;
+  }
+  outs() << *Result << "\n";
   return 0;
 }
 

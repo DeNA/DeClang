@@ -67,7 +67,9 @@ enum LipoID {
   LIPO_INVALID = 0, // This is not an option ID.
 #define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
                HELPTEXT, METAVAR, VALUES)                                      \
-  LIPO_##ID,
+  LLVM_MAKE_OPT_ID_WITH_ID_PREFIX(LIPO_, PREFIX, NAME, ID, KIND, GROUP, ALIAS, \
+                                  ALIASARGS, FLAGS, PARAM, HELPTEXT, METAVAR,  \
+                                  VALUES),
 #include "LipoOpts.inc"
 #undef OPTION
 };
@@ -81,10 +83,9 @@ const char *const *LIPO_nullptr = nullptr;
 const opt::OptTable::Info LipoInfoTable[] = {
 #define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
                HELPTEXT, METAVAR, VALUES)                                      \
-  {LIPO_##PREFIX, NAME,      HELPTEXT,                                         \
-   METAVAR,       LIPO_##ID, opt::Option::KIND##Class,                         \
-   PARAM,         FLAGS,     LIPO_##GROUP,                                     \
-   LIPO_##ALIAS,  ALIASARGS, VALUES},
+  LLVM_CONSTRUCT_OPT_INFO_WITH_ID_PREFIX(LIPO_, PREFIX, NAME, ID, KIND, GROUP, \
+                                         ALIAS, ALIASARGS, FLAGS, PARAM,       \
+                                         HELPTEXT, METAVAR, VALUES),
 #include "LipoOpts.inc"
 #undef OPTION
 };

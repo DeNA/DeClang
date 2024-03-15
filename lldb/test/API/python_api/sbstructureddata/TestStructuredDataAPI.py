@@ -26,6 +26,7 @@ class TestStructuredDataAPI(TestBase):
                 "key_dict": {
                     "key_string": "STRING",
                     "key_uint": 0xFFFFFFFF00000000,
+                    "key_sint": -42,
                     "key_float": 2.99,
                     "key_bool": True,
                     "key_array": ["23", "arr"],
@@ -63,6 +64,9 @@ class TestStructuredDataAPI(TestBase):
         # Tests for integer data type
         self.uint_struct_test(dict_struct)
 
+        # Tests for integer data type
+        self.sint_struct_test(dict_struct)
+
         # Tests for floating point data type
         self.double_struct_test(dict_struct)
 
@@ -80,6 +84,8 @@ class TestStructuredDataAPI(TestBase):
 
         py_dict = py_obj["key_dict"]
         self.assertEqual(py_dict["key_string"], "STRING")
+        self.assertEqual(py_dict["key_uint"], 0xFFFFFFFF00000000)
+        self.assertEqual(py_dict["key_sint"], -42)
         self.assertEqual(py_dict["key_float"], 2.99)
         self.assertEqual(py_dict["key_bool"], True)
         self.assertEqual(py_dict["key_array"], ["23", "arr"])
@@ -126,7 +132,7 @@ class TestStructuredDataAPI(TestBase):
             self.fail("Wrong type returned: " + str(dict_struct.GetType()))
 
         # Check Size API for 'dictionary' type
-        if not dict_struct.GetSize() == 5:
+        if not dict_struct.GetSize() == 6:
             self.fail("Wrong no of elements returned: " + str(dict_struct.GetSize()))
 
     def string_struct_test(self, dict_struct):
@@ -165,14 +171,38 @@ class TestStructuredDataAPI(TestBase):
         if not uint_struct.GetType() == lldb.eStructuredDataTypeInteger:
             self.fail("Wrong type returned: " + str(uint_struct.GetType()))
 
-        # Check API returning 'integer' value
-        output = uint_struct.GetIntegerValue()
+        # Check API returning unsigned integer value
+        output = uint_struct.GetUnsignedIntegerValue()
         if not output == 0xFFFFFFFF00000000:
             self.fail("wrong output: " + str(output))
 
         # Calling wrong API on a SBStructuredData
         # (e.g. getting a string value from an integer type structure)
         output = uint_struct.GetStringValue(25)
+        if output:
+            self.fail("Valid string " + output + " returned for an integer object")
+
+    def sint_struct_test(self, dict_struct):
+        # Check a valid SBStructuredData containing an signed integer.
+        # We intentionally make this smaller than what an uint64_t can hold but
+        # still small enough to fit a int64_t
+        sint_struct = lldb.SBStructuredData()
+        sint_struct = dict_struct.GetValueForKey("key_sint")
+        if not sint_struct.IsValid():
+            self.fail("A valid object should have been returned")
+
+        # Check Type API
+        if not sint_struct.GetType() == lldb.eStructuredDataTypeSignedInteger:
+            self.fail("Wrong type returned: " + str(sint_struct.GetType()))
+
+        # Check API returning signed integer value
+        output = sint_struct.GetSignedIntegerValue()
+        if not output == -42:
+            self.fail("wrong output: " + str(output))
+
+        # Calling wrong API on a SBStructuredData
+        # (e.g. getting a string value from an integer type structure)
+        output = sint_struct.GetStringValue(69)
         if output:
             self.fail("Valid string " + output + " returned for an integer object")
 

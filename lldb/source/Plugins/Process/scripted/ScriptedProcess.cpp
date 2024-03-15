@@ -151,7 +151,7 @@ Status ScriptedProcess::DoLoadCore() {
 Status ScriptedProcess::DoLaunch(Module *exe_module,
                                  ProcessLaunchInfo &launch_info) {
   LLDB_LOGF(GetLog(LLDBLog::Process), "ScriptedProcess::%s launching process", __FUNCTION__);
-  
+
   /* MARK: This doesn't reflect how lldb actually launches a process.
            In reality, it attaches to debugserver, then resume the process.
            That's not true in all cases.  If debugserver is remote, lldb
@@ -456,7 +456,7 @@ ScriptedProcess::GetLoadedDynamicLibrariesInfos() {
       return error_with_message("Couldn't create or get module.");
 
     lldb::addr_t load_addr = LLDB_INVALID_ADDRESS;
-    lldb::addr_t slide = LLDB_INVALID_OFFSET;
+    lldb::offset_t slide = LLDB_INVALID_OFFSET;
     dict->GetValueForKeyAsInteger("load_addr", load_addr);
     dict->GetValueForKeyAsInteger("slide", slide);
     if (load_addr == LLDB_INVALID_ADDRESS)

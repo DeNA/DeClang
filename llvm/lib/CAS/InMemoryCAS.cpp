@@ -220,6 +220,8 @@ public:
     return None;
   }
 
+  Expected<bool> isMaterialized(ObjectRef Ref) const final { return true; }
+
   ArrayRef<char> getDataConst(ObjectHandle Node) const final {
     return cast<InMemoryObject>(asInMemoryObject(Node)).getData();
   }

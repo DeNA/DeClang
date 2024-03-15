@@ -13,6 +13,8 @@
 #include "llvm/Support/VirtualOutputBackends.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/LockFileManager.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Signals.h"
@@ -213,6 +215,7 @@ public:
 
   Error initializeFD(Optional<int> &FD);
   Error initializeStream();
+  Error reset();
 
   OnDiskOutputFile(StringRef OutputPath, Optional<OutputConfig> Config,
                    const OnDiskOutputBackend::OutputSettings &Settings)
@@ -305,6 +308,8 @@ Error OnDiskOutputFile::initializeFD(Optional<int> &FD) {
       OF |= sys::fs::OF_TextWithCRLF;
     else if (Config.getText())
       OF |= sys::fs::OF_Text;
+    if (Config.getAppend())
+      OF |= sys::fs::OF_Append;
     if (std::error_code EC = sys::fs::openFileForWrite(
             OutputPath, NewFD, sys::fs::CD_CreateAlways, OF))
       return convertToOutputError(OutputPath, EC);
@@ -420,10 +425,23 @@ areFilesDifferent(const llvm::Twine &Source, const llvm::Twine &Destination) {
   return FileDifference::SameContents;
 }
 
-Error OnDiskOutputFile::keep() {
+Error OnDiskOutputFile::reset() {
   // Destroy the streams to flush them.
   BufferOS.reset();
+  if (!FileOS)
+    return Error::success();
+
+  // Remember the error in raw_fd_ostream to be reported later.
+  std::error_code EC = FileOS->error();
+  // Clear the error to avoid fatal error when reset.
+  FileOS->clear_error();
   FileOS.reset();
+  return errorCodeToError(EC);
+}
+
+Error OnDiskOutputFile::keep() {
+  if (auto E = reset())
+    return E;
 
   // Close the file descriptor and remove crash cleanup before exit.
   auto RemoveDiscardOnSignal = make_scope_exit([&]() {
@@ -433,6 +451,64 @@ Error OnDiskOutputFile::keep() {
 
   if (!TempPath)
     return Error::success();
+
+  // See if we should append instead of move.
+  if (Config.getAppend() && OutputPath != "-") {
+    // Read TempFile for the content to append.
+    auto Content = MemoryBuffer::getFile(*TempPath);
+    if (!Content)
+      return convertToTempFileOutputError(*TempPath, OutputPath,
+                                          Content.getError());
+    while (1) {
+      // Attempt to lock the output file.
+      // Only one process is allowed to append to this file at a time.
+      llvm::LockFileManager Locked(OutputPath);
+      switch (Locked) {
+      case llvm::LockFileManager::LFS_Error: {
+        // If we error acquiring a lock, we cannot ensure appends
+        // to the trace file are atomic - cannot ensure output correctness.
+        Locked.unsafeRemoveLockFile();
+        return convertToOutputError(
+            OutputPath, std::make_error_code(std::errc::no_lock_available));
+      }
+      case llvm::LockFileManager::LFS_Owned: {
+        // Lock acquired, perform the write and release the lock.
+        std::error_code EC;
+        llvm::raw_fd_ostream Out(OutputPath, EC, llvm::sys::fs::OF_Append);
+        if (EC)
+          return convertToOutputError(OutputPath, EC);
+        Out << (*Content)->getBuffer();
+        Out.close();
+        Locked.unsafeRemoveLockFile();
+        if (Out.has_error())
+          return convertToOutputError(OutputPath, Out.error());
+        // Remove temp file and done.
+        (void)sys::fs::remove(*TempPath);
+        return Error::success();
+      }
+      case llvm::LockFileManager::LFS_Shared: {
+        // Someone else owns the lock on this file, wait.
+        switch (Locked.waitForUnlock(256)) {
+        case llvm::LockFileManager::Res_Success:
+          LLVM_FALLTHROUGH;
+        case llvm::LockFileManager::Res_OwnerDied: {
+          continue; // try again to get the lock.
+        }
+        case llvm::LockFileManager::Res_Timeout: {
+          // We could error on timeout to avoid potentially hanging forever, but
+          // it may be more likely that an interrupted process failed to clear
+          // the lock, causing other waiting processes to time-out. Let's clear
+          // the lock and try again right away. If we do start seeing compiler
+          // hangs in this location, we will need to re-consider.
+          Locked.unsafeRemoveLockFile();
+          continue;
+        }
+        }
+        break;
+      }
+      }
+    }
+  }
 
   if (Config.getOnlyIfDifferent()) {
     auto Result = areFilesDifferent(*TempPath, OutputPath);
@@ -483,8 +559,8 @@ Error OnDiskOutputFile::keep() {
 
 Error OnDiskOutputFile::discard() {
   // Destroy the streams to flush them.
-  BufferOS.reset();
-  FileOS.reset();
+  if (auto E = reset())
+    return E;
 
   // Nothing on the filesystem to remove for stdout.
   if (OutputPath == "-")

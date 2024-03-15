@@ -41,7 +41,7 @@ Error CompileJobCacheResult::forEachLoadedOutput(
   size_t Count = getNumOutputs();
   for (size_t I = 0; I < Count; ++I) {
     ObjectRef Ref = getOutputObject(I);
-    FutureOutputs.push_back(getCAS().getProxyAsync(Ref));
+    FutureOutputs.push_back(getCAS().getProxyFuture(Ref));
   }
 
   // Make sure all the outputs have materialized.
@@ -70,6 +70,10 @@ Error CompileJobCacheResult::forEachLoadedOutput(
   return Error::success();
 }
 
+CompileJobCacheResult::Output CompileJobCacheResult::getOutput(size_t I) const {
+  return Output{getOutputObject(I), getOutputKind(I)};
+}
+
 Optional<CompileJobCacheResult::Output>
 CompileJobCacheResult::getOutput(OutputKind Kind) const {
   size_t Count = getNumOutputs();
@@ -86,9 +90,9 @@ StringRef CompileJobCacheResult::getOutputKindName(OutputKind Kind) {
   case OutputKind::MainOutput:
     return "main";
   case OutputKind::SerializedDiagnostics:
-    return "deps";
-  case OutputKind::Dependencies:
     return "diags";
+  case OutputKind::Dependencies:
+    return "deps";
   }
 }
 

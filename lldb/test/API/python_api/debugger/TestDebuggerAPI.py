@@ -147,3 +147,17 @@ class DebuggerAPITestCase(TestBase):
             platform2.GetWorkingDirectory().endswith("bar"),
             platform2.GetWorkingDirectory(),
         )
+
+    def test_SetDestroyCallback(self):
+        destroy_dbg_id = None
+
+        def foo(dbg_id):
+            # Need nonlocal to modify closure variable.
+            nonlocal destroy_dbg_id
+            destroy_dbg_id = dbg_id
+
+        self.dbg.SetDestroyCallback(foo)
+
+        original_dbg_id = self.dbg.GetID()
+        self.dbg.Destroy(self.dbg)
+        self.assertEqual(destroy_dbg_id, original_dbg_id)

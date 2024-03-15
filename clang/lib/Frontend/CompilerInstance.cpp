@@ -21,6 +21,7 @@
 #include "clang/Basic/Stack.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/Version.h"
+#include "clang/CAS/IncludeTree.h"
 #include "clang/Config/config.h"
 #include "clang/Frontend/CASDependencyCollector.h"
 #include "clang/Frontend/ChainedDiagnosticConsumer.h"
@@ -45,6 +46,7 @@
 #include "clang/Serialization/ASTReader.h"
 #include "clang/Serialization/GlobalModuleIndex.h"
 #include "clang/Serialization/InMemoryModuleCache.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CAS/ActionCache.h"
@@ -801,6 +803,52 @@ CompilerInstance::createCodeCompletionConsumer(Preprocessor &PP,
   return new PrintingCodeCompleteConsumer(Opts, OS);
 }
 
+static void loadAPINotesFromIncludeTree(cas::ObjectStore &DB,
+                                        api_notes::APINotesManager &APINotes,
+                                        DiagnosticsEngine &Diags,
+                                        StringRef IncludeTreeRootID) {
+  Expected<llvm::cas::CASID> RootID = DB.parseID(IncludeTreeRootID);
+  if (!RootID) {
+    llvm::consumeError(RootID.takeError());
+    Diags.Report(diag::err_cas_cannot_parse_include_tree_id)
+        << IncludeTreeRootID;
+    return;
+  }
+  Optional<llvm::cas::ObjectRef> Ref = DB.getReference(*RootID);
+  if (!Ref) {
+    Diags.Report(diag::err_cas_missing_include_tree_id) << IncludeTreeRootID;
+    return;
+  }
+  auto Root = cas::IncludeTreeRoot::get(DB, *Ref);
+  if (!Root) {
+    consumeError(Root.takeError());
+    Diags.Report(diag::err_cas_missing_include_tree_id) << IncludeTreeRootID;
+    return;
+  }
+  auto Notes = Root->getAPINotes();
+  if (!Notes) {
+    consumeError(Notes.takeError());
+    Diags.Report(diag::err_cas_cannot_load_api_notes_include_tree)
+        << IncludeTreeRootID;
+    return;
+  }
+  if (!*Notes)
+    return;
+  std::vector<StringRef> Buffers;
+
+  if (auto E = (*Notes)->forEachAPINotes([&](StringRef Buffer) {
+        Buffers.push_back(Buffer);
+        return llvm::Error::success();
+      })) {
+    consumeError(std::move(E));
+    Diags.Report(diag::err_cas_cannot_load_api_notes_include_tree)
+        << IncludeTreeRootID;
+    return;
+  }
+
+  APINotes.loadCurrentModuleAPINotesFromBuffer(Buffers);
+}
+
 void CompilerInstance::createSema(TranslationUnitKind TUKind,
                                   CodeCompleteConsumer *CompletionConsumer) {
   TheSema.reset(new Sema(getPreprocessor(), getASTContext(), getASTConsumer(),
@@ -812,10 +860,18 @@ void CompilerInstance::createSema(TranslationUnitKind TUKind,
   // If we're building a module and are supposed to load API notes,
   // notify the API notes manager.
   if (auto currentModule = getPreprocessor().getCurrentModule()) {
-    (void)TheSema->APINotes.loadCurrentModuleAPINotes(
-            currentModule,
-            getLangOpts().APINotesModules,
-            getAPINotesOpts().ModuleSearchPaths);
+    // If using include tree, APINotes for current module is loaded from include
+    // tree.
+    if (getFrontendOpts().CASIncludeTreeID.empty())
+      (void)TheSema->APINotes.loadCurrentModuleAPINotes(
+          currentModule, getLangOpts().APINotesModules,
+          getAPINotesOpts().ModuleSearchPaths);
+    else
+      loadAPINotesFromIncludeTree(
+          *getCASOpts().getOrCreateDatabases(getDiagnostics()).first,
+          TheSema->APINotes, getDiagnostics(),
+          getFrontendOpts().CASIncludeTreeID);
+
     // Check for any attributes we should add to the module
     for (auto reader : TheSema->APINotes.getCurrentModuleReaders()) {
       // swift_infer_import_as_member
@@ -1036,8 +1092,10 @@ bool CompilerInstance::ExecuteAction(FrontendAction &Act) {
   noteBottomOfStack();
 
   auto FinishDiagnosticClient = llvm::make_scope_exit([&]() {
-    // Notify the diagnostic client that all files were processed.
-    getDiagnosticClient().finish();
+    if (!getFrontendOpts().MayEmitDiagnosticsAfterProcessingSourceFiles) {
+      // Notify the diagnostic client that all files were processed.
+      getDiagnosticClient().finish();
+    }
   });
 
   raw_ostream &OS = getVerboseOutputStream();
@@ -1237,11 +1295,14 @@ compileModuleImpl(CompilerInstance &ImportingInstance, SourceLocation ImportLoc,
   // Force implicitly-built modules to hash the content of the module file.
   HSOpts.ModulesHashContent = true;
   FrontendOpts.Inputs = {Input};
+  FrontendOpts.MayEmitDiagnosticsAfterProcessingSourceFiles = false;
 
   // Don't free the remapped file buffers; they are owned by our caller.
   PPOpts.RetainRemappedFileBuffers = true;
 
-  Invocation->getDiagnosticOpts().VerifyDiagnostics = 0;
+  DiagnosticOptions &DiagOpts = Invocation->getDiagnosticOpts();
+  DiagOpts.VerifyDiagnostics = 0;
+
   assert(ImportingInstance.getInvocation().getModuleHash(
              ImportingInstance.getDiagnostics()) ==
              Invocation->getModuleHash(ImportingInstance.getDiagnostics()) &&
@@ -1259,6 +1320,9 @@ compileModuleImpl(CompilerInstance &ImportingInstance, SourceLocation ImportLoc,
   Instance.createDiagnostics(new ForwardingDiagnosticConsumer(
                                    ImportingInstance.getDiagnosticClient()),
                              /*ShouldOwnClient=*/true);
+
+  if (llvm::is_contained(DiagOpts.SystemHeaderWarningsModules, ModuleName))
+    Instance.getDiagnostics().setSuppressSystemWarnings(false);
 
   if (FrontendOpts.ModulesShareFileManager) {
     Instance.setFileManager(&ImportingInstance.getFileManager());
@@ -2411,7 +2475,7 @@ static bool addCachedModuleFileToInMemoryCache(
     llvm::report_fatal_error("missing main output");
   // FIXME: We wait to materialize each module file before proceeding, which
   // introduces latency for a network CAS. Instead we should collect all the
-  // module keys and materialize them concurrently using \c getProxyAsync, for
+  // module keys and materialize them concurrently using \c getProxyFuture, for
   // better network utilization.
   auto OutputProxy = CAS.getProxy(Output->Object);
   if (!OutputProxy) {

@@ -199,7 +199,7 @@ public:
   /// \returns true to indicate the preprocessor options are invalid, or false
   /// otherwise.
   virtual bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
-                                       bool Complain,
+                                       bool ReadMacros, bool Complain,
                                        std::string &SuggestedPredefines) {
     return false;
   }
@@ -294,7 +294,7 @@ public:
                                StringRef SpecificModuleCachePath,
                                bool Complain) override;
   bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
-                               bool Complain,
+                               bool ReadMacros, bool Complain,
                                std::string &SuggestedPredefines) override;
 
   void ReadCounter(const serialization::ModuleFile &M, unsigned Value) override;
@@ -328,7 +328,8 @@ public:
                          bool AllowCompatibleDifferences) override;
   bool ReadDiagnosticOptions(IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts,
                              bool Complain) override;
-  bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts, bool Complain,
+  bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
+                               bool ReadMacros, bool Complain,
                                std::string &SuggestedPredefines) override;
   bool ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
                                StringRef SpecificModuleCachePath,
@@ -349,7 +350,8 @@ class SimpleASTReaderListener : public ASTReaderListener {
 public:
   SimpleASTReaderListener(Preprocessor &PP) : PP(PP) {}
 
-  bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts, bool Complain,
+  bool ReadPreprocessorOptions(const PreprocessorOptions &PPOpts,
+                               bool ReadMacros, bool Complain,
                                std::string &SuggestedPredefines) override;
 };
 
@@ -961,8 +963,14 @@ public:
 
 private:
   /// A list of modules that were imported by precompiled headers or
-  /// any other non-module AST file.
-  SmallVector<ImportedSubmodule, 2> ImportedModules;
+  /// any other non-module AST file and have not yet been made visible. If a
+  /// module is made visible in the ASTReader, it will be transfered to
+  /// \c PendingImportedModulesSema.
+  SmallVector<ImportedSubmodule, 2> PendingImportedModules;
+
+  /// A list of modules that were imported by precompiled headers or
+  /// any other non-module AST file and have not yet been made visible for Sema.
+  SmallVector<ImportedSubmodule, 2> PendingImportedModulesSema;
   //@}
 
   /// The system include root to be used when loading the
@@ -1373,7 +1381,6 @@ private:
   llvm::Error ReadSourceManagerBlock(ModuleFile &F);
   llvm::BitstreamCursor &SLocCursorForID(int ID);
   SourceLocation getImportLocation(ModuleFile *F);
-  void readIncludedFiles(ModuleFile &F, StringRef Blob, Preprocessor &PP);
   ASTReadResult ReadModuleMapFileBlock(RecordData &Record, ModuleFile &F,
                                        const ModuleFile *ImportedBy,
                                        unsigned ClientLoadCapabilities);
@@ -2350,6 +2357,13 @@ public:
 
   /// Loads comments ranges.
   void ReadComments() override;
+
+  /// Visit all the input file infos of the given module file.
+  void visitInputFileInfos(
+      serialization::ModuleFile &MF, bool IncludeSystem,
+      llvm::function_ref<void(const serialization::InputFileInfo &IFI,
+                              bool IsSystem)>
+          Visitor);
 
   /// Visit all the input files of the given module file.
   void visitInputFiles(serialization::ModuleFile &MF,

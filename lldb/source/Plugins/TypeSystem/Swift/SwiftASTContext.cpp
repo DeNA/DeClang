@@ -210,28 +210,19 @@ CompilerType SwiftASTContext::GetCompilerType(swift::TypeBase *swift_type) {
   return {weak_from_this(), swift_type};
 }
 
-swift::Type TypeSystemSwiftTypeRef::GetSwiftType(CompilerType compiler_type) {
-  auto ts =
-      compiler_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwiftTypeRef>();
-  if (!ts)
-    return {};
-
-  // FIXME: Suboptimal performance, because the ConstString is looked up again.
-  ConstString mangled_name(
-      reinterpret_cast<const char *>(compiler_type.GetOpaqueQualType()));
-  if (auto *swift_ast_context = ts->GetSwiftASTContext())
-    return swift_ast_context->ReconstructType(mangled_name);
-  return {};
-}
-
 swift::Type SwiftASTContext::GetSwiftType(CompilerType compiler_type) {
   if (compiler_type.GetTypeSystem().isa_and_nonnull<SwiftASTContext>())
     return reinterpret_cast<swift::TypeBase *>(
         compiler_type.GetOpaqueQualType());
-  if (auto ts = compiler_type.GetTypeSystem()
-                    .dyn_cast_or_null<TypeSystemSwiftTypeRef>())
-    return ts->GetSwiftType(compiler_type);
 
+  // FIXME: Suboptimal performance, because the ConstString is looked up again.
+  if (auto ts = compiler_type.GetTypeSystem()
+      .dyn_cast_or_null<TypeSystemSwiftTypeRef>()) {
+    ConstString mangled_name(
+        reinterpret_cast<const char *>(compiler_type.GetOpaqueQualType()));
+    if (auto *swift_ast_context = ts->GetSwiftASTContext())
+      return swift_ast_context->ReconstructType(mangled_name);
+  }
   return {};
 }
 
@@ -1728,7 +1719,16 @@ static std::string GetSDKPath(std::string m_description, XcodeSDK sdk) {
   }
 
   std::string sdk_path = sdk_path_or_err->str();
-  LOG_PRINTF(GetLog(LLDBLog::Types), "Host SDK path: `%s` (XcodeSDK: %s)",
+  // GetSDKRoot reports no SDK as an empty string.
+  if (sdk_path.empty()) {
+    std::string sdk_spec = sdk.GetString().str();
+    Debugger::ReportError("LLDB couldn't find an SDK for \"" + sdk_spec + "\".");
+    HEALTH_LOG_PRINTF("Could not find an SDK for \"%s\". Try to verify that "
+                      "\"xcrun --show-sdk-path --sdk %s\" works.",
+                      sdk_spec.c_str(), sdk_spec.c_str());
+    return {};
+  }
+  LOG_PRINTF(GetLog(LLDBLog::Types), "Host SDK path: \"%s\" (XcodeSDK: %s)",
              sdk_path.c_str(), sdk.GetString().str().c_str());
   return sdk_path;
 }
@@ -2936,7 +2936,7 @@ swift::ASTContext *SwiftASTContext::GetASTContext() {
       GetLanguageOptions(), GetTypeCheckerOptions(), GetSILOptions(),
       GetSearchPathOptions(), GetClangImporterOptions(),
       GetSymbolGraphOptions(), GetSourceManager(), GetDiagnosticEngine(),
-      ReportModuleLoadingProgress));
+      /*OutputBackend=*/nullptr, ReportModuleLoadingProgress));
 
   if (getenv("LLDB_SWIFT_DUMP_DIAGS")) {
     // NOTE: leaking a swift::PrintingDiagnosticConsumer() here, but
@@ -3812,19 +3812,19 @@ void SwiftASTContext::RegisterSectionModules(
   llvm::Triple filter = GetTriple();
   auto parse_ast_section = [&](llvm::StringRef section_data_ref, size_t n,
                                size_t total) {
-    llvm::SmallVector<std::string, 4> swift_modules;
-    if (!swift::parseASTSection(*loader, section_data_ref, filter,
-                                swift_modules)) {
+    auto Result = swift::parseASTSection(*loader, section_data_ref, filter);
+    if (auto E = Result.takeError()) {
+      std::string error = toString(std::move(E));
       LOG_PRINTF(GetLog(LLDBLog::Types),
                  "failed to parse AST section %zu/%zu in image \"%s\" "
-                 "(filter=\"%s\").",
+                 "(filter=\"%s\"). %s",
                  n, total, module.GetFileSpec().GetFilename().GetCString(),
-                 filter.str().c_str());
+                 filter.str().c_str(), error.c_str());
       return;
     }
 
     // Collect the Swift module names referenced by the AST.
-    for (auto module_name : swift_modules) {
+    for (auto module_name : *Result) {
       module_names.push_back(module_name);
       LOG_PRINTF(GetLog(LLDBLog::Types),
                  "parsed module \"%s\" from Swift AST section %zu/%zu in "
@@ -5097,6 +5097,11 @@ bool SwiftASTContext::IsPossibleDynamicType(opaque_compiler_type_t type,
 
   if (can_type->getClassOrBoundGenericClass() ||
       can_type->isAnyExistentialType())
+    return true;
+
+  if (!IsImportedType(type) &&
+      (swift::isa<swift::EnumType>(can_type) ||
+       swift::isa<swift::BoundGenericEnumType>(can_type)))
     return true;
 
   // Dynamic Self types are resolved inside DoArchetypeBindingForType(),
@@ -6968,7 +6973,7 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
               continue;
 
             CompilerType child_type =
-                ToCompilerType(VD->getType().getPointer());
+                ToCompilerType(VD->getTypeInContext().getPointer());
             child_name = VD->getNameStr().str();
             if (!get_type_size(child_byte_size, child_type))
               return {};

@@ -5026,6 +5026,9 @@ void Sema::setTagNameForLinkagePurposes(TagDecl *TagFromDeclSpec,
 
   // Otherwise, set this as the anon-decl typedef for the tag.
   TagFromDeclSpec->setTypedefNameForAnonDecl(NewTD);
+
+  // Now that we have a name for the tag, process API notes again.
+  ProcessAPINotes(TagFromDeclSpec);
 }
 
 static unsigned GetDiagnosticTypeSpecifierID(DeclSpec::TST T) {
@@ -18069,6 +18072,9 @@ Decl *Sema::ActOnIvar(Scope *S,
   ObjCIvarDecl *NewID = ObjCIvarDecl::Create(Context, EnclosingContext,
                                              DeclStart, Loc, II, T,
                                              TInfo, ac, (Expr *)BitfieldWidth);
+
+  if (T->containsErrors())
+    NewID->setInvalidDecl();
 
   if (II) {
     NamedDecl *PrevDecl = LookupSingleName(S, II, Loc, LookupMemberName,

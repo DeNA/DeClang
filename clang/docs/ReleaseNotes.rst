@@ -274,6 +274,9 @@ Bug Fixes
 - Fix assert that fails when the expression causing the this pointer to be
   captured by a block is part of a constexpr if statement's branch and
   instantiation of the enclosing method causes the branch to be discarded.
+- Fix crash when emitting diagnostic for out of order designated initializers
+  in C++.
+  (`#63605 <https://github.com/llvm/llvm-project/issues/63605>`_)
 
 Improvements to Clang's diagnostics
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -420,6 +423,13 @@ Attribute Changes in Clang
 
 - Introduced a new function attribute ``__attribute__((nouwtable))`` to suppress
   LLVM IR ``uwtable`` function attribute.
+
+- When a non-variadic function is decorated with the ``format`` attribute,
+  Clang now checks that the format string would match the function's parameters'
+  types after default argument promotion. As a result, it's no longer an
+  automatic diagnostic to use parameters of types that the format style
+  supports but that are never the result of default argument promotion, such as
+  ``float``. (`#59824: <https://github.com/llvm/llvm-project/issues/59824>`_)
 
 - Updated the value returned by ``__has_c_attribute(nodiscard)`` to ``202003L``
   based on the final date specified by the C2x committee draft. We already

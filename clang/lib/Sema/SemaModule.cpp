@@ -269,10 +269,10 @@ Sema::ActOnModuleDecl(SourceLocation StartLoc, SourceLocation ModuleLoc,
     // module map defining it already.
     if (auto *M = Map.findModule(ModuleName)) {
       Diag(Path[0].second, diag::err_module_redefinition) << ModuleName;
-      if (M->DefinitionLoc.isValid())
+      if (M->DefinitionLoc.isValid() && !M->IsFromModuleFile)
         Diag(M->DefinitionLoc, diag::note_prev_module_definition);
       else if (Optional<FileEntryRef> FE = M->getASTFile())
-        Diag(M->DefinitionLoc, diag::note_prev_module_definition_from_ast_file)
+        Diag(SourceLocation(), diag::note_prev_module_definition_from_ast_file)
             << FE->getName();
       Mod = M;
       break;

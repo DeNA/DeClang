@@ -381,7 +381,7 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
     }
     // clang-format on
     image_infos[i].address =
-        image->GetValueForKey("load_address")->GetAsInteger()->GetValue();
+        image->GetValueForKey("load_address")->GetUnsignedIntegerValue();
     image_infos[i].file_spec.SetFile(
         image->GetValueForKey("pathname")->GetAsString()->GetValue(),
         FileSpec::Style::native);
@@ -389,13 +389,13 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
     StructuredData::Dictionary *mh =
         image->GetValueForKey("mach_header")->GetAsDictionary();
     image_infos[i].header.magic =
-        mh->GetValueForKey("magic")->GetAsInteger()->GetValue();
+        mh->GetValueForKey("magic")->GetUnsignedIntegerValue();
     image_infos[i].header.cputype =
-        mh->GetValueForKey("cputype")->GetAsInteger()->GetValue();
+        mh->GetValueForKey("cputype")->GetUnsignedIntegerValue();
     image_infos[i].header.cpusubtype =
-        mh->GetValueForKey("cpusubtype")->GetAsInteger()->GetValue();
+        mh->GetValueForKey("cpusubtype")->GetUnsignedIntegerValue();
     image_infos[i].header.filetype =
-        mh->GetValueForKey("filetype")->GetAsInteger()->GetValue();
+        mh->GetValueForKey("filetype")->GetUnsignedIntegerValue();
 
     if (image->HasKey("min_version_os_name")) {
       std::string os_name =
@@ -438,19 +438,19 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
 
     if (mh->HasKey("flags"))
       image_infos[i].header.flags =
-          mh->GetValueForKey("flags")->GetAsInteger()->GetValue();
+          mh->GetValueForKey("flags")->GetUnsignedIntegerValue();
     else
       image_infos[i].header.flags = 0;
 
     if (mh->HasKey("ncmds"))
       image_infos[i].header.ncmds =
-          mh->GetValueForKey("ncmds")->GetAsInteger()->GetValue();
+          mh->GetValueForKey("ncmds")->GetUnsignedIntegerValue();
     else
       image_infos[i].header.ncmds = 0;
 
     if (mh->HasKey("sizeofcmds"))
       image_infos[i].header.sizeofcmds =
-          mh->GetValueForKey("sizeofcmds")->GetAsInteger()->GetValue();
+          mh->GetValueForKey("sizeofcmds")->GetUnsignedIntegerValue();
     else
       image_infos[i].header.sizeofcmds = 0;
 
@@ -463,35 +463,32 @@ bool DynamicLoaderDarwin::JSONImageInformationIntoImageInfo(
           segments->GetItemAtIndex(j)->GetAsDictionary();
       segment.name =
           ConstString(seg->GetValueForKey("name")->GetAsString()->GetValue());
-      segment.vmaddr =
-          seg->GetValueForKey("vmaddr")->GetAsInteger()->GetValue();
-      segment.vmsize =
-          seg->GetValueForKey("vmsize")->GetAsInteger()->GetValue();
+      segment.vmaddr = seg->GetValueForKey("vmaddr")->GetUnsignedIntegerValue();
+      segment.vmsize = seg->GetValueForKey("vmsize")->GetUnsignedIntegerValue();
       segment.fileoff =
-          seg->GetValueForKey("fileoff")->GetAsInteger()->GetValue();
+          seg->GetValueForKey("fileoff")->GetUnsignedIntegerValue();
       segment.filesize =
-          seg->GetValueForKey("filesize")->GetAsInteger()->GetValue();
+          seg->GetValueForKey("filesize")->GetUnsignedIntegerValue();
       segment.maxprot =
-          seg->GetValueForKey("maxprot")->GetAsInteger()->GetValue();
+          seg->GetValueForKey("maxprot")->GetUnsignedIntegerValue();
 
       // Fields that aren't used by DynamicLoaderDarwin so debugserver doesn't
       // currently send them in the reply.
 
       if (seg->HasKey("initprot"))
         segment.initprot =
-            seg->GetValueForKey("initprot")->GetAsInteger()->GetValue();
+            seg->GetValueForKey("initprot")->GetUnsignedIntegerValue();
       else
         segment.initprot = 0;
 
       if (seg->HasKey("flags"))
-        segment.flags =
-            seg->GetValueForKey("flags")->GetAsInteger()->GetValue();
+        segment.flags = seg->GetValueForKey("flags")->GetUnsignedIntegerValue();
       else
         segment.flags = 0;
 
       if (seg->HasKey("nsects"))
         segment.nsects =
-            seg->GetValueForKey("nsects")->GetAsInteger()->GetValue();
+            seg->GetValueForKey("nsects")->GetUnsignedIntegerValue();
       else
         segment.nsects = 0;
 
@@ -1079,73 +1076,103 @@ DynamicLoaderDarwin::GetThreadLocalData(const lldb::ModuleSP module_sp,
 
   std::lock_guard<std::recursive_mutex> guard(m_mutex);
 
-  const uint32_t addr_size = m_process->GetAddressByteSize();
-  uint8_t buf[sizeof(lldb::addr_t) * 3];
-
   lldb_private::Address tls_addr;
-  if (module_sp->ResolveFileAddress(tls_file_addr, tls_addr)) {
-    Status error;
-    const size_t tsl_data_size = addr_size * 3;
-    Target &target = m_process->GetTarget();
-    if (target.ReadMemory(tls_addr, buf, tsl_data_size, error, true) ==
-        tsl_data_size) {
-      const ByteOrder byte_order = m_process->GetByteOrder();
-      DataExtractor data(buf, sizeof(buf), byte_order, addr_size);
-      lldb::offset_t offset = addr_size; // Skip the first pointer
-      const lldb::addr_t pthread_key = data.GetAddress(&offset);
-      const lldb::addr_t tls_offset = data.GetAddress(&offset);
-      if (pthread_key != 0) {
-        // First check to see if we have already figured out the location of
-        // TLS data for the pthread_key on a specific thread yet. If we have we
-        // can re-use it since its location will not change unless the process
-        // execs.
-        const tid_t tid = thread_sp->GetID();
-        auto tid_pos = m_tid_to_tls_map.find(tid);
-        if (tid_pos != m_tid_to_tls_map.end()) {
-          auto tls_pos = tid_pos->second.find(pthread_key);
-          if (tls_pos != tid_pos->second.end()) {
-            return tls_pos->second + tls_offset;
-          }
-        }
-        StackFrameSP frame_sp = thread_sp->GetStackFrameAtIndex(0);
-        if (frame_sp) {
-          TypeSystemClangSP scratch_ts_sp =
-              ScratchTypeSystemClang::GetForTarget(target);
+  if (!module_sp->ResolveFileAddress(tls_file_addr, tls_addr))
+    return LLDB_INVALID_ADDRESS;
 
-          if (!scratch_ts_sp)
-            return LLDB_INVALID_ADDRESS;
+  Target &target = m_process->GetTarget();
+  TypeSystemClangSP scratch_ts_sp =
+      ScratchTypeSystemClang::GetForTarget(target);
+  if (!scratch_ts_sp)
+    return LLDB_INVALID_ADDRESS;
 
-          CompilerType clang_void_ptr_type =
-              scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
-          Address pthread_getspecific_addr = GetPthreadSetSpecificAddress();
-          if (pthread_getspecific_addr.IsValid()) {
-            EvaluateExpressionOptions options;
+  CompilerType clang_void_ptr_type =
+      scratch_ts_sp->GetBasicType(eBasicTypeVoid).GetPointerType();
 
-            lldb::ThreadPlanSP thread_plan_sp(new ThreadPlanCallFunction(
-                *thread_sp, pthread_getspecific_addr, clang_void_ptr_type,
-                llvm::ArrayRef<lldb::addr_t>(pthread_key), options));
+  auto evaluate_tls_address = [this, &thread_sp, &clang_void_ptr_type](
+                                  Address func_ptr,
+                                  llvm::ArrayRef<addr_t> args) -> addr_t {
+    EvaluateExpressionOptions options;
 
-            DiagnosticManager execution_errors;
-            ExecutionContext exe_ctx(thread_sp);
-            lldb::ExpressionResults results = m_process->RunThreadPlan(
-                exe_ctx, thread_plan_sp, options, execution_errors);
+    lldb::ThreadPlanSP thread_plan_sp(new ThreadPlanCallFunction(
+        *thread_sp, func_ptr, clang_void_ptr_type, args, options));
 
-            if (results == lldb::eExpressionCompleted) {
-              lldb::ValueObjectSP result_valobj_sp =
-                  thread_plan_sp->GetReturnValueObject();
-              if (result_valobj_sp) {
-                const lldb::addr_t pthread_key_data =
-                    result_valobj_sp->GetValueAsUnsigned(0);
-                if (pthread_key_data) {
-                  m_tid_to_tls_map[tid].insert(
-                      std::make_pair(pthread_key, pthread_key_data));
-                  return pthread_key_data + tls_offset;
-                }
-              }
-            }
-          }
-        }
+    DiagnosticManager execution_errors;
+    ExecutionContext exe_ctx(thread_sp);
+    lldb::ExpressionResults results = m_process->RunThreadPlan(
+        exe_ctx, thread_plan_sp, options, execution_errors);
+
+    if (results == lldb::eExpressionCompleted) {
+      if (lldb::ValueObjectSP result_valobj_sp =
+              thread_plan_sp->GetReturnValueObject()) {
+        return result_valobj_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
       }
+    }
+    return LLDB_INVALID_ADDRESS;
+  };
+
+  // On modern apple platforms, there is a small data structure that looks
+  // approximately like this:
+  // struct TLS_Thunk {
+  //  void *(*get_addr)(struct TLS_Thunk *);
+  //  size_t key;
+  //  size_t offset;
+  // }
+  //
+  // The strategy is to take get_addr, call it with the address of the
+  // containing TLS_Thunk structure, and add the offset to the resulting
+  // pointer to get the data block.
+  //
+  // On older apple platforms, the key is treated as a pthread_key_t and passed
+  // to pthread_getspecific. The pointer returned from that call is added to
+  // offset to get the relevant data block.
+
+  const uint32_t addr_size = m_process->GetAddressByteSize();
+  uint8_t buf[sizeof(addr_t) * 3];
+  Status error;
+  const size_t tls_data_size = addr_size * 3;
+  const size_t bytes_read = target.ReadMemory(
+      tls_addr, buf, tls_data_size, error, /*force_live_memory = */ true);
+  if (bytes_read != tls_data_size || error.Fail())
+    return LLDB_INVALID_ADDRESS;
+
+  DataExtractor data(buf, sizeof(buf), m_process->GetByteOrder(), addr_size);
+  lldb::offset_t offset = 0;
+  const addr_t tls_thunk = data.GetAddress(&offset);
+  const addr_t key = data.GetAddress(&offset);
+  const addr_t tls_offset = data.GetAddress(&offset);
+
+  if (tls_thunk != 0) {
+    const addr_t fixed_tls_thunk = m_process->FixCodeAddress(tls_thunk);
+    Address thunk_load_addr;
+    if (target.ResolveLoadAddress(fixed_tls_thunk, thunk_load_addr)) {
+      const addr_t tls_load_addr = tls_addr.GetLoadAddress(&target);
+      const addr_t tls_data = evaluate_tls_address(
+          thunk_load_addr, llvm::ArrayRef<addr_t>(tls_load_addr));
+      if (tls_data != LLDB_INVALID_ADDRESS)
+        return tls_data + tls_offset;
+    }
+  }
+
+  if (key != 0) {
+    // First check to see if we have already figured out the location of
+    // TLS data for the pthread_key on a specific thread yet. If we have we
+    // can re-use it since its location will not change unless the process
+    // execs.
+    const tid_t tid = thread_sp->GetID();
+    auto tid_pos = m_tid_to_tls_map.find(tid);
+    if (tid_pos != m_tid_to_tls_map.end()) {
+      auto tls_pos = tid_pos->second.find(key);
+      if (tls_pos != tid_pos->second.end()) {
+        return tls_pos->second + tls_offset;
+      }
+    }
+    Address pthread_getspecific_addr = GetPthreadSetSpecificAddress();
+    if (pthread_getspecific_addr.IsValid()) {
+      const addr_t tls_data = evaluate_tls_address(pthread_getspecific_addr,
+                                                   llvm::ArrayRef<addr_t>(key));
+      if (tls_data != LLDB_INVALID_ADDRESS)
+        return tls_data + tls_offset;
     }
   }
   return LLDB_INVALID_ADDRESS;

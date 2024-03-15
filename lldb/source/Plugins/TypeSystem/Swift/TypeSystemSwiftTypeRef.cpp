@@ -34,9 +34,6 @@
 #include "swift/ClangImporter/ClangImporter.h"
 #include "swift/../../lib/ClangImporter/ClangAdapter.h"
 #include "swift/Frontend/Frontend.h"
-#include "swift/AST/ClangModuleLoader.h"
-#include "swift/Basic/Version.h"
-#include "swift/Strings.h"
 
 #include "clang/APINotes/APINotesManager.h"
 #include "clang/APINotes/APINotesReader.h"
@@ -599,7 +596,7 @@ TypeSystemSwiftTypeRef::ResolveTypeAlias(swift::Demangle::Demangler &dem,
   }
   NodePointer n = GetDemangledType(dem, desugared_name.GetStringRef());
   if (!n) {
-    LLDB_LOG(GetLog(LLDBLog::Types), "Unrecognized demangling %s",
+    LLDB_LOG(GetLog(LLDBLog::Types), "Unrecognized demangling {0}",
              desugared_name.AsCString());
     return {{}, {}};
   }
@@ -869,6 +866,7 @@ TypeSystemSwiftTypeRef::GetSwiftName(const clang::Decl *clang_decl,
     // The order is significant since some of these decl kinds are also
     // TagDecls.
     if (llvm::isa<clang::TypedefNameDecl>(clang_decl))
+      // FIXME: this should pass the correct context.
       swift_name = ExtractSwiftName(reader->lookupTypedef(default_name));
     else if (llvm::isa<clang::EnumConstantDecl>(clang_decl))
       swift_name = ExtractSwiftName(reader->lookupEnumConstant(default_name));
@@ -878,6 +876,7 @@ TypeSystemSwiftTypeRef::GetSwiftName(const clang::Decl *clang_decl,
       swift_name =
           ExtractSwiftName(reader->lookupObjCProtocolInfo(default_name));
     else if (llvm::isa<clang::TagDecl>(clang_decl))
+      // FIXME: this should pass the correct context.
       swift_name = ExtractSwiftName(reader->lookupTag(default_name));
     else {
       assert(false && "unhandled clang decl kind");
@@ -900,7 +899,7 @@ CompilerType TypeSystemSwiftTypeRef::GetBuiltinRawPointerType() {
 static bool IsImportedType(swift::Demangle::NodePointer node) {
   if (!node)
     return false;
-  if (node->hasText() && node->getText() == "__C")
+  if (node->hasText() && node->getText() == swift::MANGLING_MODULE_OBJC)
     return true;
   if (node->hasChildren())
     return IsImportedType(node->getFirstChild());
@@ -2223,9 +2222,10 @@ bool TypeSystemSwiftTypeRef::IsPossibleDynamicType(opaque_compiler_type_t type,
       case Node::Kind::ProtocolListWithAnyObject:
       case Node::Kind::ExistentialMetatype:
       case Node::Kind::DynamicSelf:
+      case Node::Kind::Enum:
+      case Node::Kind::BoundGenericEnum:
         return true;
-      case Node::Kind::BoundGenericStructure:
-      case Node::Kind::BoundGenericEnum: {
+      case Node::Kind::BoundGenericStructure: {
         if (node->getNumChildren() < 2)
           return false;
         NodePointer type_list = node->getLastChild();
@@ -3112,7 +3112,7 @@ CompilerType TypeSystemSwiftTypeRef::GetChildCompilerTypeAtIndex(
     assert(Equivalent(child_is_base_class, ast_child_is_base_class));
     assert(Equivalent(child_is_deref_of_parent, ast_child_is_deref_of_parent));
     // There are cases where only the runtime correctly detects an indirect enum.
-    ast_language_flags |= language_flags & LanguageFlags::eIsIndirectEnumCase;
+    ast_language_flags |= (language_flags & LanguageFlags::eIsIndirectEnumCase);
     assert(Equivalent(language_flags, ast_language_flags));
   });
 #endif
@@ -3847,10 +3847,8 @@ bool TypeSystemSwiftTypeRef::DumpTypeValue(
           }
         }
 
-      // No result available from the runtime, fallback to the AST.
-      // This can happen in two cases:
-      // 1. MultiPayloadEnums not currently supported by Swift reflection
-      // 2. Some clang imported enums
+      // No result available from the runtime, fallback to the AST. This occurs
+      // for some Clang imported enums
       if (auto *swift_ast_context = GetSwiftASTContext())
         return swift_ast_context->DumpTypeValue(
             ReconstructType(type), s, format, data, data_offset, data_byte_size,
@@ -3969,7 +3967,7 @@ static bool IsSIMDNode(NodePointer node) {
     NodePointer module = node->getFirstChild();
     NodePointer identifier = node->getChild(1);
     return module->getKind() == Node::Kind::Module &&
-           module->getText() == "__C" &&
+           module->getText() == swift::MANGLING_MODULE_OBJC &&
            identifier->getKind() == Node::Kind::Identifier &&
            identifier->getText().startswith("simd_");
   }

@@ -99,10 +99,9 @@ static size_t g_debugger_event_thread_stack_bytes = 8 * 1024 * 1024;
 
 #pragma mark Static Functions
 
-typedef std::vector<DebuggerSP> DebuggerList;
 static std::recursive_mutex *g_debugger_list_mutex_ptr =
     nullptr; // NOTE: intentional leak to avoid issues with C++ destructor chain
-static DebuggerList *g_debugger_list_ptr =
+static Debugger::DebuggerList *g_debugger_list_ptr =
     nullptr; // NOTE: intentional leak to avoid issues with C++ destructor chain
 static llvm::ThreadPool *g_thread_pool = nullptr;
 
@@ -213,7 +212,7 @@ Status Debugger::SetPropertyValue(const ExecutionContext *exe_ctx,
 
   TargetSP target_sp;
   LoadScriptFromSymFile load_script_old_value = eLoadScriptFromSymFileFalse;
-  if (is_load_script && exe_ctx->GetTargetSP()) {
+  if (is_load_script && exe_ctx && exe_ctx->GetTargetSP()) {
     target_sp = exe_ctx->GetTargetSP();
     load_script_old_value =
         target_sp->TargetProperties::GetLoadScriptFromSymbolFile();
@@ -423,12 +422,6 @@ llvm::StringRef Debugger::GetAutosuggestionAnsiSuffix() const {
   return m_collection_sp->GetPropertyAtIndexAsString(nullptr, idx, "");
 }
 
-bool Debugger::GetShowDontUsePoHint() const {
-  const uint32_t idx = ePropertyShowDontUsePoHint;  
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(nullptr,
-      idx, g_debugger_properties[idx].default_uint_value != 0);
-}
-
 bool Debugger::GetUseSourceCache() const {
   const uint32_t idx = ePropertyUseSourceCache;
   return m_collection_sp->GetPropertyAtIndexAsBoolean(
@@ -565,6 +558,12 @@ void Debugger::Terminate() {
   assert(g_debugger_list_ptr &&
          "Debugger::Terminate called without a matching Debugger::Initialize!");
 
+  if (g_debugger_list_ptr && g_debugger_list_mutex_ptr) {
+    std::lock_guard<std::recursive_mutex> guard(*g_debugger_list_mutex_ptr);
+    for (const auto &debugger : *g_debugger_list_ptr)
+      debugger->HandleDestroyCallback();
+  }
+
   if (g_thread_pool) {
     // The destructor will wait for all the threads to complete.
     delete g_thread_pool;
@@ -684,10 +683,18 @@ DebuggerSP Debugger::CreateInstance(lldb::LogOutputCallback log_callback,
   return debugger_sp;
 }
 
+void Debugger::HandleDestroyCallback() {
+  if (m_destroy_callback) {
+    m_destroy_callback(GetID(), m_destroy_callback_baton);
+    m_destroy_callback = nullptr;
+  }
+}
+
 void Debugger::Destroy(DebuggerSP &debugger_sp) {
   if (!debugger_sp)
     return;
 
+  debugger_sp->HandleDestroyCallback();
   CommandInterpreter &cmd_interpreter = debugger_sp->GetCommandInterpreter();
 
   if (cmd_interpreter.GetSaveSessionOnQuit()) {
@@ -1265,6 +1272,33 @@ bool Debugger::InterruptRequested() {
   return GetCommandInterpreter().WasInterrupted();
 }
 
+Debugger::InterruptionReport::InterruptionReport(std::string function_name, 
+    const llvm::formatv_object_base &payload) :  
+        m_function_name(std::move(function_name)), 
+        m_interrupt_time(std::chrono::system_clock::now()),
+        m_thread_id(llvm::get_threadid()) {
+  llvm::raw_string_ostream desc(m_description);
+  desc << payload << "\n";
+}
+
+void Debugger::ReportInterruption(const InterruptionReport &report) {
+    // For now, just log the description:
+  Log *log = GetLog(LLDBLog::Host);
+  LLDB_LOG(log, "Interruption: {0}", report.m_description);
+}
+
+Debugger::DebuggerList Debugger::DebuggersRequestingInterruption() {
+  DebuggerList result;
+  if (g_debugger_list_ptr && g_debugger_list_mutex_ptr) {
+    std::lock_guard<std::recursive_mutex> guard(*g_debugger_list_mutex_ptr);
+    for (auto debugger_sp : *g_debugger_list_ptr) {
+      if (debugger_sp->InterruptRequested())
+        result.push_back(debugger_sp);
+    }
+  }
+  return result;
+}
+
 size_t Debugger::GetNumDebuggers() {
   if (g_debugger_list_ptr && g_debugger_list_mutex_ptr) {
     std::lock_guard<std::recursive_mutex> guard(*g_debugger_list_mutex_ptr);
@@ -1350,6 +1384,12 @@ void Debugger::SetLoggingCallback(lldb::LogOutputCallback log_callback,
   // callback.
   m_callback_handler_sp =
       std::make_shared<CallbackLogHandler>(log_callback, baton);
+}
+
+void Debugger::SetDestroyCallback(
+    lldb_private::DebuggerDestroyCallback destroy_callback, void *baton) {
+  m_destroy_callback = destroy_callback;
+  m_destroy_callback_baton = baton;
 }
 
 static void PrivateReportProgress(Debugger &debugger, uint64_t progress_id,

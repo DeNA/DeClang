@@ -48,6 +48,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
+#include "llvm/Option/OptTable.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/FileSystem.h"
@@ -72,9 +73,10 @@ using namespace lldb_vscode;
 namespace {
 enum ID {
   OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
-               HELPTEXT, METAVAR, VALUES)                                      \
-  OPT_##ID,
+#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
+               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
+  LLVM_MAKE_OPT_ID(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,   \
+                   FLAGS, PARAM, HELP, METAVAR, VALUES),
 #include "Options.inc"
 #undef OPTION
 };
@@ -84,12 +86,10 @@ enum ID {
 #undef PREFIX
 
 static const llvm::opt::OptTable::Info InfoTable[] = {
-#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
-               HELPTEXT, METAVAR, VALUES)                                      \
-  {PREFIX,      NAME,      HELPTEXT,                                           \
-   METAVAR,     OPT_##ID,  llvm::opt::Option::KIND##Class,                     \
-   PARAM,       FLAGS,     OPT_##GROUP,                                        \
-   OPT_##ALIAS, ALIASARGS, VALUES},
+#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
+               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
+  LLVM_CONSTRUCT_OPT_INFO(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS,       \
+                          ALIASARGS, FLAGS, PARAM, HELP, METAVAR, VALUES),
 #include "Options.inc"
 #undef OPTION
 };

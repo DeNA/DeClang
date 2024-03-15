@@ -2085,6 +2085,7 @@ public:
   DISubprogram *getDeclaration() const {
     return cast_or_null<DISubprogram>(getRawDeclaration());
   }
+  void replaceDeclaration(DISubprogram *Decl) { replaceOperandWith(6, Decl); }
   DINodeArray getRetainedNodes() const {
     return cast_or_null<MDTuple>(getRawRetainedNodes());
   }

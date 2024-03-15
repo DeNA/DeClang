@@ -19,12 +19,6 @@
 #include "DWARFDefines.h"
 #include "SymbolFileDWARF.h"
 
-#include "swift/AST/ASTContext.h"
-#include "swift/AST/Decl.h"
-#include "swift/Demangling/Demangle.h"
-
-#include "clang/AST/DeclObjC.h"
-
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
@@ -37,6 +31,8 @@
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Status.h"
+
+#include "clang/AST/DeclObjC.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -168,7 +164,7 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
           m_swift_typesystem.GetTypeFromMangledTypename(mangled_name);
   }
 
-  if (!compiler_type && name) {
+  if (!compiler_type && die.Tag() == DW_TAG_typedef) {
     // Handle Archetypes, which are typedefs to RawPointerType.
     llvm::StringRef typedef_name = GetTypedefName(die);
     if (typedef_name.startswith("$sBp")) {

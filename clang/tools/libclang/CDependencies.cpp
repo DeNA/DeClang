@@ -110,6 +110,11 @@ void clang_experimental_DependencyScannerServiceOptions_setCASDatabases(
   unwrap(Opts)->Cache = DBs.Cache;
 }
 
+void clang_experimental_DependencyScannerServiceOptions_setCASOptions(
+    CXDependencyScannerServiceOptions Opts, CXCASOptions CASOpts) {
+  unwrap(Opts)->CASOpts = *cas::unwrap(CASOpts);
+}
+
 void clang_experimental_DependencyScannerServiceOptions_setObjectStore(
     CXDependencyScannerServiceOptions Opts, CXCASObjectStore CAS) {
   unwrap(Opts)->CAS = cas::unwrap(CAS)->CAS;
@@ -227,7 +232,7 @@ static CXErrorCode getFullDependencies(DependencyScanningWorker *Worker,
                                        LookupModuleOutputCallback LookupOutput,
                                        llvm::Optional<StringRef> ModuleName,
                                        HandleTUDepsCallback HandleTUDeps) {
-  llvm::StringSet<> AlreadySeen;
+  llvm::DenseSet<ModuleID> AlreadySeen;
   FullDependencyConsumer DepConsumer(AlreadySeen);
   auto Controller = DependencyScanningTool::createActionController(
       *Worker, std::move(LookupOutput));

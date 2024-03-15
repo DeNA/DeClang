@@ -1621,8 +1621,13 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
   }
 
   if (Sanitize.linkRuntimes()) {
-    if (Sanitize.needsAsanRt())
-      AddLinkSanitizerLibArgs(Args, CmdArgs, "asan");
+    if (Sanitize.needsAsanRt()) {
+      if (Sanitize.needsStableAbi()) {
+        AddLinkSanitizerLibArgs(Args, CmdArgs, "asan_abi", /*shared=*/false);
+      } else {
+        AddLinkSanitizerLibArgs(Args, CmdArgs, "asan");
+      }
+    }
     if (Sanitize.needsLsanRt())
       AddLinkSanitizerLibArgs(Args, CmdArgs, "lsan");
     if (Sanitize.needsUbsanRt()) {

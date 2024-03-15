@@ -1260,7 +1260,14 @@ bool GDBRemoteCommunicationClient::GetHostInfo(bool force) {
             if (!value.getAsInteger(0, pointer_byte_size))
               ++num_keys_decoded;
           } else if (name.equals("addressing_bits")) {
-            if (!value.getAsInteger(0, m_addressing_bits))
+            if (!value.getAsInteger(0, m_low_mem_addressing_bits)) {
+              ++num_keys_decoded;
+            }
+          } else if (name.equals("high_mem_addressing_bits")) {
+            if (!value.getAsInteger(0, m_high_mem_addressing_bits))
+              ++num_keys_decoded;
+          } else if (name.equals("low_mem_addressing_bits")) {
+            if (!value.getAsInteger(0, m_low_mem_addressing_bits))
               ++num_keys_decoded;
           } else if (name.equals("os_version") ||
                      name.equals("version")) // Older debugserver binaries used
@@ -1404,11 +1411,19 @@ GDBRemoteCommunicationClient::GetHostArchitecture() {
   return m_host_arch;
 }
 
-uint32_t GDBRemoteCommunicationClient::GetAddressingBits() {
+AddressableBits GDBRemoteCommunicationClient::GetAddressableBits() {
+  AddressableBits addressable_bits;
   if (m_qHostInfo_is_valid == eLazyBoolCalculate)
     GetHostInfo();
-  return m_addressing_bits;
+
+  if (m_low_mem_addressing_bits == m_high_mem_addressing_bits)
+    addressable_bits.SetAddressableBits(m_low_mem_addressing_bits);
+  else
+    addressable_bits.SetAddressableBits(m_low_mem_addressing_bits,
+                                        m_high_mem_addressing_bits);
+  return addressable_bits;
 }
+
 seconds GDBRemoteCommunicationClient::GetHostDefaultPacketTimeout() {
   if (m_qHostInfo_is_valid == eLazyBoolCalculate)
     GetHostInfo();
@@ -2629,7 +2644,7 @@ size_t GDBRemoteCommunicationClient::QueryGDBServer(
     uint16_t port = 0;
     if (StructuredData::ObjectSP port_osp =
             element->GetValueForKey(llvm::StringRef("port")))
-      port = port_osp->GetIntegerValue(0);
+      port = port_osp->GetUnsignedIntegerValue(0);
 
     std::string socket_name;
     if (StructuredData::ObjectSP socket_name_osp =
