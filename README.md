@@ -95,6 +95,24 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
 
 - Now you can build your project using your usual build pipeline.
 
+## Pre-Built Binaries
+
+- Release-Linux-*-ubuntu22.04.zip
+  - C/C++ compiler for Ubuntu 22.04
+- Release-MacArm-*.zip
+  - C/C++/ObjC compiler for AppleSilicon Mac
+- Release-MacIntel-*.zip
+  - C/C++/ObjC compiler for Intel Mac
+- Release-Win-*.zip
+  - C/C++ compiler for Windows
+- Release-Swift-Toolchain-*.zip
+  - Swift compiler for AppleSilicon/Intel Mac
+  - How to Insatll
+    1. Run `tar -xzf swift-LOCAL-*-a-osx.tar.gz -C ~/` to deploy
+    2. Open Xcode and select Xcode->Toolchains->Local Swift Development Snapshot
+    3. Edit your ~/.DeClang/config.pre.json and run `~/.DeClang/gen_config.sh`
+    4. Build your application in xcode
+
 ## Configuration
 
 - Edit config.pre.json in $DECLANG_HOME/.DeClang/ folder:

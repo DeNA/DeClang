@@ -79,6 +79,24 @@ $ bash release.sh v1.0.0
   bash $DECLANG_HOME/.DeClang/script/webgl_unset.sh {/path/to/unity_webgl_support}
   ```
 
+## ビルド済みバイナリ
+
+- Release-Linux-*-ubuntu22.04.zip
+  - C/C++ compiler for Ubuntu 22.04
+- Release-MacArm-*.zip
+  - C/C++/ObjC compiler for AppleSilicon Mac
+- Release-MacIntel-*.zip
+  - C/C++/ObjC compiler for Intel Mac
+- Release-Win-*.zip
+  - C/C++ compiler for Windows
+- Release-Swift-Toolchain-*.zip
+  - Swift compiler for AppleSilicon/Intel Mac
+  - インストール方法
+    1. `tar -xzf swift-LOCAL-*-a-osx.tar.gz -C ~/` を実行します
+    2. Xcode を開いて select Xcode->Toolchains->Local Swift Development Snapshot を選択します
+    3. ~/.DeClang/config.pre.json を編集して `~/.DeClang/gen_config.sh` を実行します
+    4. Xcodeであなたのアプリケーションをビルドします
+
 ## 使い方
 
 - $DECLANG_HOME/.DeClang配下のconfig.pre.jsonを編集します。
