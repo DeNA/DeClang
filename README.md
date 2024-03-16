@@ -1,6 +1,6 @@
 # DeClang
 
-<sub>[日本語はこちら](https://github.com/DeNA/DeClang/blob/swift/release/5.5/README_JP.md)</sub>
+<sub>[日本語はこちら](https://github.com/DeNA/DeClang/blob/swift/release/5.10/README_JP.md)</sub>
 
 ## Introduction
 
