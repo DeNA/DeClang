@@ -1,5 +1,6 @@
 # -*- Python -*-
 
+import json
 import os
 import platform
 import re
@@ -24,7 +25,7 @@ config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
 
 # suffixes: A list of file extensions to treat as test files. This is overriden
 # by individual lit.local.cfg files in the test subdirectories.
-config.suffixes = [".test", ".cpp", ".s"]
+config.suffixes = [".test", ".cpp", ".s", ".m"]
 
 # excludes: A list of directories to exclude from the testsuite. The 'Inputs'
 # subdirectories contain auxiliary inputs for various tests in their parent
@@ -37,13 +38,6 @@ config.test_source_root = os.path.dirname(__file__)
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.lldb_obj_root, "test", "Shell")
 
-# Begin Swift mod.
-# Swift's libReflection builds without ASAN, which causes a known
-# false positive in std::vector. If sanitizers are off, this is just
-# a no-op
-config.environment["ASAN_OPTIONS"] = "detect_container_overflow=0"
-# End Swift mod.
-
 # Propagate environment vars.
 llvm_config.with_system_environment(
     [
@@ -54,6 +48,22 @@ llvm_config.with_system_environment(
         "XDG_CACHE_HOME",
     ]
 )
+
+# Enable sanitizer runtime flags.
+if "Address" in config.llvm_use_sanitizer:
+    # Begin Swift mod.
+    # Swift's libReflection builds without ASAN, which causes a known
+    # false positive in std::vector. We also want to support testing a sanitized
+    # lldb using unsanitized llvm, clang, and swift libraries.
+    config.environment[
+        "ASAN_OPTIONS"
+    ] = "detect_container_overflow=0:detect_stack_use_after_return=1"
+    # End Swift mod.
+    if platform.system() == "Darwin":
+        config.environment["MallocNanoZone"] = "0"
+
+if "Thread" in config.llvm_use_sanitizer:
+    config.environment["TSAN_OPTIONS"] = "halt_on_error=1"
 
 # Support running the test suite under the lldb-repro wrapper. This makes it
 # possible to capture a test suite run and then rerun all the test from the
@@ -139,7 +149,7 @@ if config.lldb_enable_lua:
     config.available_features.add("lua")
 
 if config.lldb_enable_swift:
-    config.available_features.add("swift")
+    config.available_features.add('swift')
 
 if config.lldb_enable_lzma:
     config.available_features.add("lzma")
@@ -149,6 +159,20 @@ if shutil.which("xz") != None:
 
 if config.lldb_system_debugserver:
     config.available_features.add("system-debugserver")
+
+if config.have_lldb_server:
+    config.available_features.add("lldb-server")
+
+if config.objc_gnustep_dir:
+    config.available_features.add("objc-gnustep")
+    if platform.system() == "Windows":
+        # objc.dll must be in PATH since Windows has no rpath
+        config.environment["PATH"] = os.path.pathsep.join(
+            (
+                os.path.join(config.objc_gnustep_dir, "lib"),
+                config.environment.get("PATH", ""),
+            )
+        )
 
 # NetBSD permits setting dbregs either if one is root
 # or if user_set_dbregs is enabled
@@ -171,3 +195,18 @@ if can_set_dbregs:
 
 if "LD_PRELOAD" in os.environ:
     config.available_features.add("ld_preload-present")
+
+# Determine if a specific version of Xcode's linker contains a bug. We want to
+# skip affected tests if they contain this bug.
+if platform.system() == "Darwin":
+    try:
+        raw_version_details = subprocess.check_output(
+            ("xcrun", "ld", "-version_details")
+        )
+        version_details = json.loads(raw_version_details)
+        version = version_details.get("version", "0")
+        version_tuple = tuple(int(x) for x in version.split("."))
+        if (1000,) <= version_tuple <= (1109,):
+            config.available_features.add("ld_new-bug")
+    except:
+        pass

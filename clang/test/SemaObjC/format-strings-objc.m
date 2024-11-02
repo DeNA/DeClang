@@ -304,7 +304,6 @@ void test_os_log_format(char c, const char *pc, int i, int *pi, void *p, void *b
   __builtin_os_log_format(buf, @"%@", nss);
 }
 
-// rdar://23622446
 @interface RD23622446_Tester: NSObject
 
 + (void)stringWithFormat:(const char *)format, ... __attribute__((format(__printf__, 1, 2)));

@@ -16,7 +16,6 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/DebugInfo/CodeView/DebugStringTableSubsection.h"
 #include "llvm/DebugInfo/CodeView/StringsAndChecksums.h"
-#include "llvm/Object/COFF.h"
 #include "llvm/ObjectYAML/ObjectYAML.h"
 #include "llvm/ObjectYAML/yaml2obj.h"
 #include "llvm/Support/BinaryStreamWriter.h"
@@ -25,6 +24,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 #include <vector>
 
 using namespace llvm;
@@ -47,11 +47,7 @@ struct COFFParser {
   }
 
   bool isPE() const { return Obj.OptionalHeader.has_value(); }
-  bool is64Bit() const {
-    return Obj.Header.Machine == COFF::IMAGE_FILE_MACHINE_AMD64 ||
-           Obj.Header.Machine == COFF::IMAGE_FILE_MACHINE_ARM64 ||
-           Obj.Header.Machine == COFF::IMAGE_FILE_MACHINE_ARM64EC;
-  }
+  bool is64Bit() const { return COFF::is64Bit(Obj.Header.Machine); }
 
   uint32_t getFileAlignment() const {
     return Obj.OptionalHeader->Header.FileAlignment;
@@ -457,10 +453,9 @@ static bool writeCOFF(COFFParser &CP, raw_ostream &OS) {
     }
     for (uint32_t I = 0; I < CP.Obj.OptionalHeader->Header.NumberOfRvaAndSize;
          ++I) {
-      const Optional<COFF::DataDirectory> *DataDirectories =
+      const std::optional<COFF::DataDirectory> *DataDirectories =
           CP.Obj.OptionalHeader->DataDirectories;
-      uint32_t NumDataDir = sizeof(CP.Obj.OptionalHeader->DataDirectories) /
-                            sizeof(Optional<COFF::DataDirectory>);
+      uint32_t NumDataDir = std::size(CP.Obj.OptionalHeader->DataDirectories);
       if (I >= NumDataDir || !DataDirectories[I]) {
         OS << zeros(uint32_t(0));
         OS << zeros(uint32_t(0));
@@ -599,13 +594,28 @@ size_t COFFYAML::SectionDataEntry::size() const {
   size_t Size = Binary.binary_size();
   if (UInt32)
     Size += sizeof(*UInt32);
+  if (LoadConfig32)
+    Size += LoadConfig32->Size;
+  if (LoadConfig64)
+    Size += LoadConfig64->Size;
   return Size;
+}
+
+template <typename T> static void writeLoadConfig(T &S, raw_ostream &OS) {
+  OS.write(reinterpret_cast<const char *>(&S),
+           std::min(sizeof(S), static_cast<size_t>(S.Size)));
+  if (sizeof(S) < S.Size)
+    OS.write_zeros(S.Size - sizeof(S));
 }
 
 void COFFYAML::SectionDataEntry::writeAsBinary(raw_ostream &OS) const {
   if (UInt32)
     OS << binary_le(*UInt32);
   Binary.writeAsBinary(OS);
+  if (LoadConfig32)
+    writeLoadConfig(*LoadConfig32, OS);
+  if (LoadConfig64)
+    writeLoadConfig(*LoadConfig64, OS);
 }
 
 namespace llvm {

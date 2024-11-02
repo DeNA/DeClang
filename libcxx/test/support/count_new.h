@@ -9,9 +9,12 @@
 #ifndef COUNT_NEW_H
 #define COUNT_NEW_H
 
-# include <cstdlib>
-# include <cassert>
-# include <new>
+#include <algorithm>
+#include <cassert>
+#include <cerrno>
+#include <cstdlib>
+#include <new>
+#include <type_traits>
 
 #include "test_macros.h"
 
@@ -77,7 +80,6 @@ public:
     void newCalled(std::size_t s)
     {
         assert(disable_allocations == false);
-        assert(s);
         if (throw_after == 0) {
             throw_after = never_throw_value;
             detail::throw_bad_alloc_helper();
@@ -111,7 +113,6 @@ public:
     void newArrayCalled(std::size_t s)
     {
         assert(disable_allocations == false);
-        assert(s);
         if (throw_after == 0) {
             throw_after = never_throw_value;
             detail::throw_bad_alloc_helper();
@@ -409,11 +410,11 @@ void operator delete[](void* p) TEST_NOEXCEPT
 void* operator new(std::size_t s, std::align_val_t av) TEST_THROW_SPEC(std::bad_alloc) {
   const std::size_t a = static_cast<std::size_t>(av);
   getGlobalMemCounter()->alignedNewCalled(s, a);
-  void *ret;
+  void *ret = nullptr;
 #ifdef USE_ALIGNED_ALLOC
   ret = _aligned_malloc(s, a);
 #else
-  posix_memalign(&ret, a, s);
+  assert(posix_memalign(&ret, std::max(a, sizeof(void*)), s) != EINVAL);
 #endif
   if (ret == nullptr)
     detail::throw_bad_alloc_helper();
@@ -471,6 +472,40 @@ private:
     DisableAllocationGuard(DisableAllocationGuard const&);
     DisableAllocationGuard& operator=(DisableAllocationGuard const&);
 };
+
+#if TEST_STD_VER >= 20
+
+struct ConstexprDisableAllocationGuard {
+    TEST_CONSTEXPR_CXX14 explicit ConstexprDisableAllocationGuard(bool disable = true) : m_disabled(disable)
+    {
+        if (!TEST_IS_CONSTANT_EVALUATED) {
+            // Don't re-disable if already disabled.
+            if (globalMemCounter.disable_allocations == true) m_disabled = false;
+            if (m_disabled) globalMemCounter.disableAllocations();
+        } else {
+            m_disabled = false;
+        }
+    }
+
+    TEST_CONSTEXPR_CXX14 void release() {
+        if (!TEST_IS_CONSTANT_EVALUATED) {
+            if (m_disabled) globalMemCounter.enableAllocations();
+            m_disabled = false;
+        }
+    }
+
+    TEST_CONSTEXPR_CXX20 ~ConstexprDisableAllocationGuard() {
+        release();
+    }
+
+private:
+    bool m_disabled;
+
+    ConstexprDisableAllocationGuard(ConstexprDisableAllocationGuard const&);
+    ConstexprDisableAllocationGuard& operator=(ConstexprDisableAllocationGuard const&);
+};
+
+#endif
 
 struct RequireAllocationGuard {
     explicit RequireAllocationGuard(std::size_t RequireAtLeast = 1)

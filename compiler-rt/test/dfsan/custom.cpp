@@ -1,11 +1,12 @@
+// https://github.com/llvm/llvm-project/issues/60678
+// XFAIL: glibc-2.37
+
 // RUN: %clang_dfsan %s -o %t && DFSAN_OPTIONS="strict_data_dependencies=0" %run %t
 // RUN: %clang_dfsan -DSTRICT_DATA_DEPENDENCIES %s -o %t && %run %t
 // RUN: %clang_dfsan -DORIGIN_TRACKING -mllvm -dfsan-track-origins=1 -mllvm -dfsan-combine-pointer-labels-on-load=false -DSTRICT_DATA_DEPENDENCIES %s -o %t && %run %t
 // RUN: %clang_dfsan -DORIGIN_TRACKING -mllvm -dfsan-track-origins=1 -mllvm -dfsan-combine-pointer-labels-on-load=false %s -o %t && DFSAN_OPTIONS="strict_data_dependencies=0" %run %t
 //
 // Tests custom implementations of various glibc functions.
-//
-// REQUIRES: x86_64-target-arch
 
 #pragma clang diagnostic ignored "-Wformat-extra-args"
 
@@ -339,6 +340,7 @@ void test_strcat() {
   dfsan_origin dst_o = dfsan_get_origin((long)dst[0]);
   (void)dst_o;
   char *ret = strcat(p, src);
+
   ASSERT_LABEL(ret, k_label);
   ASSERT_EQ_ORIGIN(ret, p);
   assert(ret == dst);
@@ -366,6 +368,56 @@ void test_strcat() {
   ASSERT_LABEL(dst[11], j_label);
 }
 
+void test_strncat(int n) {
+  char src[] = "world";
+  int volatile x = 0; // buffer to ensure src and dst do not share origins
+  (void)x;
+  char dst[] = "hello \0    ";
+  int volatile y = 0; // buffer to ensure dst and p do not share origins
+  (void)y;
+  char *p = dst;
+  dfsan_set_label(k_label, &p, sizeof(p));
+  dfsan_set_label(i_label, src, sizeof(src));
+  dfsan_set_label(j_label, dst, sizeof(dst));
+  dfsan_origin dst_o = dfsan_get_origin((long)dst[0]);
+  (void)dst_o;
+  char *ret = strncat(p, src, n);
+
+  ASSERT_LABEL(ret, k_label);
+  ASSERT_EQ_ORIGIN(ret, p);
+  assert(ret == dst);
+  assert(strncmp(src, dst + 6, n) == 0);
+  // Origins are assigned for every 4 contiguous 4-aligned bytes. After
+  // appending src to dst, origins of src can overwrite origins of dst if their
+  // application adddresses are within [start_aligned_down, end_aligned_up).
+  // Other origins are not changed.
+  int pad = n % 4;
+  if (pad)
+    pad = 4 - pad;
+
+  char *start_aligned_down = (char *)(((size_t)(dst + 6)) & ~3UL);
+  char *end_aligned_up = (char *)(((size_t)(dst + 6 + n + pad)) & ~3UL);
+
+  for (int i = 0; i < 12; ++i) {
+    if (dst + i < start_aligned_down || dst + i >= end_aligned_up) {
+      ASSERT_INIT_ORIGIN(&dst[i], dst_o);
+    } else {
+      ASSERT_INIT_ORIGIN_EQ_ORIGIN(&dst[i], src[0]);
+    }
+  }
+  for (int i = 0; i < 6; ++i) {
+    ASSERT_LABEL(dst[i], j_label);
+  }
+  for (int i = 6; i < 6 + n; ++i) {
+    ASSERT_LABEL(dst[i], i_label);
+    assert(dfsan_get_label(dst[i]) == dfsan_get_label(src[i - 6]));
+  }
+  for (int i = 6 + n; i < strlen(dst); ++i) {
+    ASSERT_LABEL(dst[i], j_label);
+  }
+  ASSERT_LABEL(dst[11], j_label);
+}
+
 void test_strlen() {
   char str1[] = "str1";
   dfsan_set_label(i_label, &str1[3], 1);
@@ -377,6 +429,34 @@ void test_strlen() {
 #else
   ASSERT_LABEL(rv, i_label);
   ASSERT_EQ_ORIGIN(rv, str1[3]);
+#endif
+}
+
+void test_strnlen() {
+  char str1[] = "str1";
+  dfsan_set_label(i_label, &str1[3], 1);
+
+  int maxlen = 4;
+  dfsan_set_label(j_label, &maxlen, sizeof(maxlen));
+
+  int rv = strnlen(str1, maxlen);
+  assert(rv == 4);
+#ifdef STRICT_DATA_DEPENDENCIES
+  ASSERT_ZERO_LABEL(rv);
+#else
+  ASSERT_LABEL(rv, dfsan_union(i_label, j_label));
+  ASSERT_EQ_ORIGIN(rv, str1[3]);
+#endif
+
+  maxlen = 2;
+  dfsan_set_label(j_label, &maxlen, sizeof(maxlen));
+  rv = strnlen(str1, maxlen);
+  assert(rv == 2);
+#ifdef STRICT_DATA_DEPENDENCIES
+  ASSERT_ZERO_LABEL(rv);
+#else
+  ASSERT_LABEL(rv, j_label);
+  ASSERT_EQ_ORIGIN(rv, maxlen);
 #endif
 }
 
@@ -1629,6 +1709,51 @@ void test_strpbrk() {
 #endif
 }
 
+void test_strsep() {
+  char *s = strdup("Hello world/");
+  char *delim = strdup(" /");
+
+  char *p_s = s;
+  char *base = s;
+  char *p_delim = delim;
+
+  // taint delim bytes
+  dfsan_set_label(i_label, p_delim, strlen(p_delim));
+  // taint delim pointer
+  dfsan_set_label(j_label, &p_delim, sizeof(p_delim));
+  // taint the string data bytes
+  dfsan_set_label(k_label, s, 5);
+  // taint the string pointer
+  dfsan_set_label(m_label, &p_s, sizeof(p_s));
+
+  char *rv = strsep(&p_s, p_delim);
+  assert(rv == &base[0]);
+#ifdef STRICT_DATA_DEPENDENCIES
+  ASSERT_LABEL(rv, m_label);
+  ASSERT_READ_LABEL(rv, strlen(rv), k_label);
+#else
+  ASSERT_LABEL(rv, dfsan_union(dfsan_union(i_label, j_label),
+                               dfsan_union(k_label, m_label)));
+  ASSERT_INIT_ORIGIN_EQ_ORIGIN(&rv, p_s);
+#endif
+
+  // taint the remaining string's pointer
+  char **pp_s = &p_s;
+  char **pp_s_base = pp_s;
+  dfsan_set_label(n_label, pp_s, sizeof(pp_s));
+
+  rv = strsep(pp_s, p_delim);
+
+  assert(rv == &base[6]);
+#ifdef STRICT_DATA_DEPENDENCIES
+  ASSERT_LABEL(rv, n_label);
+  ASSERT_INIT_ORIGIN_EQ_ORIGIN(&rv, *pp_s);
+#else
+  ASSERT_LABEL(rv, dfsan_union(dfsan_union(i_label, j_label), n_label));
+  ASSERT_INIT_ORIGIN_EQ_ORIGIN(&rv, *pp_s);
+#endif
+}
+
 void test_memchr() {
   char str1[] = "str1";
   dfsan_set_label(i_label, &str1[3], 1);
@@ -2036,13 +2161,17 @@ int main(void) {
   test_strchr();
   test_strcmp();
   test_strcat();
+  test_strncat(5);
+  test_strncat(2);
   test_strcpy();
   test_strdup();
   test_strlen();
+  test_strnlen();
   test_strncasecmp();
   test_strncmp();
   test_strncpy();
   test_strpbrk();
+  test_strsep();
   test_strrchr();
   test_strstr();
   test_strtod();

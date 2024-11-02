@@ -1,6 +1,6 @@
-// RUN: not llvm-mc -triple aarch64-arm-none-eabi -mattr +rme -show-encoding %s 2> %t | FileCheck %s
+// RUN: not llvm-mc -triple aarch64 -mattr +rme -show-encoding %s 2> %t | FileCheck %s
 // RUN: FileCheck --check-prefix=CHECK-ERROR %s < %t
-// RUN: not llvm-mc -triple aarch64-arm-none-eabi -show-encoding %s 2> %t | FileCheck --check-prefix=CHECK-NO-RME %s
+// RUN: not llvm-mc -triple aarch64 -show-encoding %s 2> %t | FileCheck --check-prefix=CHECK-NO-RME %s
 // RUN: FileCheck --check-prefix=CHECK-NO-RME-ERROR %s < %t
 
 msr MFAR_EL3, x0
@@ -15,10 +15,10 @@ mrs x0, GPTBR_EL3
 // CHECK: mrs x0, MFAR_EL3    // encoding: [0xa0,0x60,0x3e,0xd5]
 // CHECK: mrs x0, GPCCR_EL3   // encoding: [0xc0,0x21,0x3e,0xd5]
 // CHECK: mrs x0, GPTBR_EL3   // encoding: [0x80,0x21,0x3e,0xd5]
+// CHECK-NO-RME: msr MFAR_EL3,  x0   // encoding: [0xa0,0x60,0x1e,0xd5]
 // CHECK-NO-RME-ERROR: [[@LINE-12]]:5: error: expected writable system register
 // CHECK-NO-RME-ERROR: [[@LINE-12]]:5: error: expected writable system register
-// CHECK-NO-RME-ERROR: [[@LINE-12]]:5: error: expected writable system register
-// CHECK-NO-RME-ERROR: [[@LINE-12]]:9: error: expected readable system register
+// CHECK-NO-RME: mrs x0, MFAR_EL3    // encoding: [0xa0,0x60,0x3e,0xd5]
 // CHECK-NO-RME-ERROR: [[@LINE-12]]:9: error: expected readable system register
 // CHECK-NO-RME-ERROR: [[@LINE-12]]:9: error: expected readable system register
 

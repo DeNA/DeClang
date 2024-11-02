@@ -43,23 +43,23 @@
 // EXTERNAL_I: "-isystem" "path"
 
 // RUN: %clang_cl /fp:fast /fp:except -### -- %s 2>&1 | FileCheck -check-prefix=fpexcept %s
-// fpexcept-NOT: -menable-unsafe-fp-math
+// fpexcept-NOT: -funsafe-math-optimizations
 // fpexcept: -ffp-exception-behavior=strict
 
 // RUN: %clang_cl /fp:fast /fp:except /fp:except- -### -- %s 2>&1 | FileCheck -check-prefix=fpexcept_ %s
-// fpexcept_: -menable-unsafe-fp-math
+// fpexcept_: -funsafe-math-optimizations
 // fpexcept_: -ffp-exception-behavior=ignore
 
 // RUN: %clang_cl /fp:precise /fp:fast -### -- %s 2>&1 | FileCheck -check-prefix=fpfast %s
-// fpfast: -menable-unsafe-fp-math
+// fpfast: -funsafe-math-optimizations
 // fpfast: -ffast-math
 
 // RUN: %clang_cl /fp:fast /fp:precise -### -- %s 2>&1 | FileCheck -check-prefix=fpprecise %s
-// fpprecise-NOT: -menable-unsafe-fp-math
+// fpprecise-NOT: -funsafe-math-optimizations
 // fpprecise-NOT: -ffast-math
 
 // RUN: %clang_cl /fp:fast /fp:strict -### -- %s 2>&1 | FileCheck -check-prefix=fpstrict %s
-// fpstrict-NOT: -menable-unsafe-fp-math
+// fpstrict-NOT: -funsafe-math-optimizations
 // fpstrict-NOT: -ffast-math
 // fpstrict: -ffp-contract=off
 
@@ -426,6 +426,8 @@
 // RUN:     /Bt \
 // RUN:     /Bt+ \
 // RUN:     /clr:pure \
+// RUN:     /d1import_no_registry \
+// RUN:     /d1nodatetime \
 // RUN:     /d2FH4 \
 // RUN:     /docname \
 // RUN:     /experimental:external \
@@ -602,7 +604,7 @@
 // STDCXX20: -std=c++20
 
 // RUN: %clang_cl -fmsc-version=1900 -TP -std:c++latest -### -- %s 2>&1 | FileCheck -check-prefix=STDCXXLATEST %s
-// STDCXXLATEST: -std=c++2b
+// STDCXXLATEST: -std=c++26
 
 // RUN: env CL="/Gy" %clang_cl -### -- %s 2>&1 | FileCheck -check-prefix=ENV-CL %s
 // ENV-CL: "-ffunction-sections"
@@ -644,6 +646,13 @@
 
 // RUN: %clang_cl /guard:ehcont -### -- %s 2>&1 | FileCheck -check-prefix=EHCONTGUARD %s
 // EHCONTGUARD: -ehcontguard
+
+// RUN: %clang_cl /guard:cf /guard:ehcont -Wall -Wno-msvc-not-found -### -- %s 2>&1 | \
+// RUN:   FileCheck -check-prefix=BOTHGUARD %s --implicit-check-not=warning:
+// BOTHGUARD: -cfguard
+// BOTHGUARD-SAME: -ehcontguard
+// BOTHGUARD: -guard:cf
+// BOTHGUARD-SAME: -guard:ehcont
 
 // RUN: %clang_cl /guard:foo -### -- %s 2>&1 | FileCheck -check-prefix=CFGUARDINVALID %s
 // CFGUARDINVALID: invalid value 'foo' in '/guard:'

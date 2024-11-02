@@ -9,6 +9,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/ScopedPrinter.h"
@@ -64,6 +65,7 @@
 #include "lldb/Target/ThreadPlanCallFunction.h"
 #include "lldb/Target/ThreadPlanStack.h"
 #include "lldb/Target/UnixSignals.h"
+#include "lldb/Target/VerboseTrapFrameRecognizer.h"
 #include "lldb/Utility/Event.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
@@ -96,9 +98,9 @@ class ProcessOptionValueProperties
 public:
   ProcessOptionValueProperties(ConstString name) : Cloneable(name) {}
 
-  const Property *GetPropertyAtIndex(const ExecutionContext *exe_ctx,
-                                     bool will_modify,
-                                     uint32_t idx) const override {
+  const Property *
+  GetPropertyAtIndex(size_t idx,
+                     const ExecutionContext *exe_ctx) const override {
     // When getting the value for a key from the process options, we will
     // always try and grab the setting from the current process if there is
     // one. Else we just use the one from this instance.
@@ -171,8 +173,8 @@ ProcessProperties::ProcessProperties(lldb_private::Process *process)
         std::make_shared<ProcessOptionValueProperties>(ConstString("process"));
     m_collection_sp->Initialize(g_process_properties);
     m_collection_sp->AppendProperty(
-        ConstString("thread"), ConstString("Settings specific to threads."),
-        true, Thread::GetGlobalProperties().GetValueProperties());
+        "thread", "Settings specific to threads.", true,
+        Thread::GetGlobalProperties().GetValueProperties());
   } else {
     m_collection_sp =
         OptionValueProperties::CreateLocalCopy(Process::GetGlobalProperties());
@@ -184,9 +186,9 @@ ProcessProperties::ProcessProperties(lldb_private::Process *process)
   m_experimental_properties_up =
       std::make_unique<ProcessExperimentalProperties>();
   m_collection_sp->AppendProperty(
-      ConstString(Properties::GetExperimentalSettingsName()),
-      ConstString("Experimental settings - setting these won't produce "
-                  "errors if the setting is not present."),
+      Properties::GetExperimentalSettingsName(),
+      "Experimental settings - setting these won't produce "
+      "errors if the setting is not present.",
       true, m_experimental_properties_up->GetValueProperties());
 }
 
@@ -194,189 +196,191 @@ ProcessProperties::~ProcessProperties() = default;
 
 bool ProcessProperties::GetDisableMemoryCache() const {
   const uint32_t idx = ePropertyDisableMemCache;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 uint64_t ProcessProperties::GetMemoryCacheLineSize() const {
   const uint32_t idx = ePropertyMemCacheLineSize;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_process_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_process_properties[idx].default_uint_value);
 }
 
 Args ProcessProperties::GetExtraStartupCommands() const {
   Args args;
   const uint32_t idx = ePropertyExtraStartCommand;
-  m_collection_sp->GetPropertyAtIndexAsArgs(nullptr, idx, args);
+  m_collection_sp->GetPropertyAtIndexAsArgs(idx, args);
   return args;
 }
 
 void ProcessProperties::SetExtraStartupCommands(const Args &args) {
   const uint32_t idx = ePropertyExtraStartCommand;
-  m_collection_sp->SetPropertyAtIndexFromArgs(nullptr, idx, args);
+  m_collection_sp->SetPropertyAtIndexFromArgs(idx, args);
 }
 
 FileSpec ProcessProperties::GetPythonOSPluginPath() const {
   const uint32_t idx = ePropertyPythonOSPluginPath;
-  return m_collection_sp->GetPropertyAtIndexAsFileSpec(nullptr, idx);
+  return GetPropertyAtIndexAs<FileSpec>(idx, {});
 }
 
 uint32_t ProcessProperties::GetVirtualAddressableBits() const {
   const uint32_t idx = ePropertyVirtualAddressableBits;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_process_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_process_properties[idx].default_uint_value);
 }
 
 void ProcessProperties::SetVirtualAddressableBits(uint32_t bits) {
   const uint32_t idx = ePropertyVirtualAddressableBits;
-  m_collection_sp->SetPropertyAtIndexAsUInt64(nullptr, idx, bits);
+  SetPropertyAtIndex(idx, static_cast<uint64_t>(bits));
 }
 
 uint32_t ProcessProperties::GetHighmemVirtualAddressableBits() const {
   const uint32_t idx = ePropertyHighmemVirtualAddressableBits;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_process_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_process_properties[idx].default_uint_value);
 }
 
 void ProcessProperties::SetHighmemVirtualAddressableBits(uint32_t bits) {
   const uint32_t idx = ePropertyHighmemVirtualAddressableBits;
-  m_collection_sp->SetPropertyAtIndexAsUInt64(nullptr, idx, bits);
+  SetPropertyAtIndex(idx, static_cast<uint64_t>(bits));
 }
 
 void ProcessProperties::SetPythonOSPluginPath(const FileSpec &file) {
   const uint32_t idx = ePropertyPythonOSPluginPath;
-  m_collection_sp->SetPropertyAtIndexAsFileSpec(nullptr, idx, file);
+  SetPropertyAtIndex(idx, file);
 }
 
 bool ProcessProperties::GetIgnoreBreakpointsInExpressions() const {
   const uint32_t idx = ePropertyIgnoreBreakpointsInExpressions;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 void ProcessProperties::SetIgnoreBreakpointsInExpressions(bool ignore) {
   const uint32_t idx = ePropertyIgnoreBreakpointsInExpressions;
-  m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, ignore);
+  SetPropertyAtIndex(idx, ignore);
 }
 
 bool ProcessProperties::GetUnwindOnErrorInExpressions() const {
   const uint32_t idx = ePropertyUnwindOnErrorInExpressions;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 void ProcessProperties::SetUnwindOnErrorInExpressions(bool ignore) {
   const uint32_t idx = ePropertyUnwindOnErrorInExpressions;
-  m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, ignore);
+  SetPropertyAtIndex(idx, ignore);
 }
 
 bool ProcessProperties::GetStopOnSharedLibraryEvents() const {
   const uint32_t idx = ePropertyStopOnSharedLibraryEvents;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 void ProcessProperties::SetStopOnSharedLibraryEvents(bool stop) {
   const uint32_t idx = ePropertyStopOnSharedLibraryEvents;
-  m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, stop);
+  SetPropertyAtIndex(idx, stop);
 }
 
 bool ProcessProperties::GetDisableLangRuntimeUnwindPlans() const {
   const uint32_t idx = ePropertyDisableLangRuntimeUnwindPlans;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 void ProcessProperties::SetDisableLangRuntimeUnwindPlans(bool disable) {
   const uint32_t idx = ePropertyDisableLangRuntimeUnwindPlans;
-  m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, disable);
+  SetPropertyAtIndex(idx, disable);
   m_process->Flush();
 }
 
 bool ProcessProperties::GetDetachKeepsStopped() const {
   const uint32_t idx = ePropertyDetachKeepsStopped;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 void ProcessProperties::SetDetachKeepsStopped(bool stop) {
   const uint32_t idx = ePropertyDetachKeepsStopped;
-  m_collection_sp->SetPropertyAtIndexAsBoolean(nullptr, idx, stop);
+  SetPropertyAtIndex(idx, stop);
 }
 
 bool ProcessProperties::GetWarningsOptimization() const {
   const uint32_t idx = ePropertyWarningOptimization;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 bool ProcessProperties::GetWarningsUnsupportedLanguage() const {
   const uint32_t idx = ePropertyWarningUnsupportedLanguage;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 #ifdef LLDB_ENABLE_SWIFT
 bool ProcessProperties::GetWarningsToolchainMismatch() const {
   const uint32_t idx = ePropertyWarningToolchainMismatch;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 #endif
 
 bool ProcessProperties::GetStopOnExec() const {
   const uint32_t idx = ePropertyStopOnExec;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 std::chrono::seconds ProcessProperties::GetUtilityExpressionTimeout() const {
   const uint32_t idx = ePropertyUtilityExpressionTimeout;
-  uint64_t value = m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_process_properties[idx].default_uint_value);
+  uint64_t value = GetPropertyAtIndexAs<uint64_t>(
+      idx, g_process_properties[idx].default_uint_value);
   return std::chrono::seconds(value);
 }
 
 std::chrono::seconds ProcessProperties::GetInterruptTimeout() const {
   const uint32_t idx = ePropertyInterruptTimeout;
-  uint64_t value = m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_process_properties[idx].default_uint_value);
+  uint64_t value = GetPropertyAtIndexAs<uint64_t>(
+      idx, g_process_properties[idx].default_uint_value);
   return std::chrono::seconds(value);
 }
 
 bool ProcessProperties::GetSteppingRunsAllThreads() const {
   const uint32_t idx = ePropertySteppingRunsAllThreads;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_process_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_process_properties[idx].default_uint_value != 0);
 }
 
 bool ProcessProperties::GetOSPluginReportsAllThreads() const {
   const bool fail_value = true;
   const Property *exp_property =
-      m_collection_sp->GetPropertyAtIndex(nullptr, true, ePropertyExperimental);
+      m_collection_sp->GetPropertyAtIndex(ePropertyExperimental);
   OptionValueProperties *exp_values =
       exp_property->GetValue()->GetAsProperties();
   if (!exp_values)
     return fail_value;
 
-  return exp_values->GetPropertyAtIndexAsBoolean(
-      nullptr, ePropertyOSPluginReportsAllThreads, fail_value);
+  return exp_values
+      ->GetPropertyAtIndexAs<bool>(ePropertyOSPluginReportsAllThreads)
+      .value_or(fail_value);
 }
 
 void ProcessProperties::SetOSPluginReportsAllThreads(bool does_report) {
   const Property *exp_property =
-      m_collection_sp->GetPropertyAtIndex(nullptr, true, ePropertyExperimental);
+      m_collection_sp->GetPropertyAtIndex(ePropertyExperimental);
   OptionValueProperties *exp_values =
       exp_property->GetValue()->GetAsProperties();
   if (exp_values)
-    exp_values->SetPropertyAtIndexAsBoolean(
-        nullptr, ePropertyOSPluginReportsAllThreads, does_report);
+    exp_values->SetPropertyAtIndex(ePropertyOSPluginReportsAllThreads,
+                                   does_report);
 }
 
 FollowForkMode ProcessProperties::GetFollowForkMode() const {
   const uint32_t idx = ePropertyFollowForkMode;
-  return (FollowForkMode)m_collection_sp->GetPropertyAtIndexAsEnumeration(
-      nullptr, idx, g_process_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<FollowForkMode>(
+      idx, static_cast<FollowForkMode>(
+               g_process_properties[idx].default_uint_value));
 }
 
 ProcessSP Process::FindPlugin(lldb::TargetSP target_sp,
@@ -426,8 +430,7 @@ ConstString &Process::GetStaticBroadcasterClass() {
 }
 
 Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp)
-    : Process(target_sp, listener_sp,
-              UnixSignals::Create(HostInfo::GetArchitecture())) {
+    : Process(target_sp, listener_sp, UnixSignals::CreateForHost()) {
   // This constructor just delegates to the full Process constructor,
   // defaulting to using the Host's UnixSignals.
 }
@@ -450,7 +453,7 @@ Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp,
       m_exit_status_mutex(), m_thread_mutex(), m_thread_list_real(this),
       m_thread_list(this), m_thread_plans(*this), m_extended_thread_list(this),
       m_extended_thread_stop_id(0), m_queue_list(this), m_queue_list_stop_id(0),
-      m_notifications(), m_image_tokens(), m_listener_sp(listener_sp),
+      m_watchpoint_resource_list(), m_notifications(), m_image_tokens(), m_listener_sp(listener_sp),
       m_breakpoint_site_list(), m_dynamic_checkers_up(),
       m_unix_signals_sp(unix_signals_sp), m_abi_sp(), m_process_input_reader(),
       m_stdio_communication("process.stdio"), m_stdio_communication_mutex(),
@@ -504,15 +507,15 @@ Process::Process(lldb::TargetSP target_sp, ListenerSP listener_sp,
 
   // Allow the platform to override the default cache line size
   OptionValueSP value_sp =
-      m_collection_sp
-          ->GetPropertyAtIndex(nullptr, true, ePropertyMemCacheLineSize)
+      m_collection_sp->GetPropertyAtIndex(ePropertyMemCacheLineSize)
           ->GetValue();
-  uint32_t platform_cache_line_size =
+  uint64_t platform_cache_line_size =
       target_sp->GetPlatform()->GetDefaultMemoryCacheLineSize();
   if (!value_sp->OptionWasSet() && platform_cache_line_size != 0)
-    value_sp->SetUInt64Value(platform_cache_line_size);
+    value_sp->SetValueAs(platform_cache_line_size);
 
   RegisterAssertFrameRecognizer(this);
+  RegisterVerboseTrapFrameRecognizer(*this);
 }
 
 Process::~Process() {
@@ -563,6 +566,7 @@ void Process::Finalize() {
   m_extended_thread_list.Destroy();
   m_queue_list.Clear();
   m_queue_list_stop_id = 0;
+  m_watchpoint_resource_list.Clear();
   std::vector<Notifications> empty_notifications;
   m_notifications.swap(empty_notifications);
   m_image_tokens.clear();
@@ -743,7 +747,7 @@ static bool
 BreakpointSiteMatchesREPLBreakpoint(const BreakpointSiteSP &bp_site_sp) {
   if (bp_site_sp) {
     size_t owner_idx = 0;
-    BreakpointLocationSP bp_loc_sp = bp_site_sp->GetOwnerAtIndex(owner_idx);
+    BreakpointLocationSP bp_loc_sp = bp_site_sp->GetConstituentAtIndex(owner_idx);
     while (bp_loc_sp) {
       Breakpoint &bp = bp_loc_sp->GetBreakpoint();
       if (bp.IsInternal()) {
@@ -751,7 +755,7 @@ BreakpointSiteMatchesREPLBreakpoint(const BreakpointSiteSP &bp_site_sp) {
         if (kind && strcmp(kind, "REPL") == 0)
           return true;
       }
-      bp_loc_sp = bp_site_sp->GetOwnerAtIndex(++owner_idx);
+      bp_loc_sp = bp_site_sp->GetConstituentAtIndex(++owner_idx);
     }
   }
   return false;
@@ -1527,7 +1531,7 @@ Status Process::ResumeSynchronous(Stream *stream) {
   Status error = PrivateResume();
   if (error.Success()) {
     StateType state =
-        WaitForProcessToStop(llvm::None, nullptr, true, listener_sp, stream,
+        WaitForProcessToStop(std::nullopt, nullptr, true, listener_sp, stream,
                              true /* use_run_lock */, SelectMostRelevantFrame);
     const bool must_be_alive =
         false; // eStateExited is ok, so this must be false
@@ -1720,11 +1724,12 @@ void Process::SetDynamicCheckers(DynamicCheckerFunctions *dynamic_checkers) {
   m_dynamic_checkers_up.reset(dynamic_checkers);
 }
 
-BreakpointSiteList &Process::GetBreakpointSiteList() {
+StopPointSiteList<BreakpointSite> &Process::GetBreakpointSiteList() {
   return m_breakpoint_site_list;
 }
 
-const BreakpointSiteList &Process::GetBreakpointSiteList() const {
+const StopPointSiteList<BreakpointSite> &
+Process::GetBreakpointSiteList() const {
   return m_breakpoint_site_list;
 }
 
@@ -1772,7 +1777,7 @@ Status Process::EnableBreakpointSiteByID(lldb::user_id_t break_id) {
 }
 
 lldb::break_id_t
-Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
+Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
                               bool use_hardware) {
   addr_t load_addr = LLDB_INVALID_ADDRESS;
 
@@ -1799,10 +1804,10 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
 
   // Reset the IsIndirect flag here, in case the location changes from pointing
   // to a indirect symbol to a regular symbol.
-  owner->SetIsIndirect(false);
+  constituent->SetIsIndirect(false);
 
-  if (owner->ShouldResolveIndirectFunctions()) {
-    Symbol *symbol = owner->GetAddress().CalculateSymbolContextSymbol();
+  if (constituent->ShouldResolveIndirectFunctions()) {
+    Symbol *symbol = constituent->GetAddress().CalculateSymbolContextSymbol();
     if (symbol && symbol->IsIndirect()) {
       Status error;
       Address symbol_address = symbol->GetAddress();
@@ -1812,37 +1817,37 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
             "warning: failed to resolve indirect function at 0x%" PRIx64
             " for breakpoint %i.%i: %s\n",
             symbol->GetLoadAddress(&GetTarget()),
-            owner->GetBreakpoint().GetID(), owner->GetID(),
+            constituent->GetBreakpoint().GetID(), constituent->GetID(),
             error.AsCString() ? error.AsCString() : "unknown error");
         return LLDB_INVALID_BREAK_ID;
       }
       Address resolved_address(load_addr);
       load_addr = resolved_address.GetOpcodeLoadAddress(&GetTarget());
-      owner->SetIsIndirect(true);
+      constituent->SetIsIndirect(true);
     } else
-      load_addr = owner->GetAddress().GetOpcodeLoadAddress(&GetTarget());
+      load_addr = constituent->GetAddress().GetOpcodeLoadAddress(&GetTarget());
   } else
-    load_addr = owner->GetAddress().GetOpcodeLoadAddress(&GetTarget());
+    load_addr = constituent->GetAddress().GetOpcodeLoadAddress(&GetTarget());
 
   if (load_addr != LLDB_INVALID_ADDRESS) {
     BreakpointSiteSP bp_site_sp;
 
-    // Look up this breakpoint site.  If it exists, then add this new owner,
-    // otherwise create a new breakpoint site and add it.
+    // Look up this breakpoint site.  If it exists, then add this new
+    // constituent, otherwise create a new breakpoint site and add it.
 
     bp_site_sp = m_breakpoint_site_list.FindByAddress(load_addr);
 
     if (bp_site_sp) {
-      bp_site_sp->AddOwner(owner);
-      owner->SetBreakpointSite(bp_site_sp);
+      bp_site_sp->AddConstituent(constituent);
+      constituent->SetBreakpointSite(bp_site_sp);
       return bp_site_sp->GetID();
     } else {
-      bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner,
-                                          load_addr, use_hardware));
+      bp_site_sp.reset(
+          new BreakpointSite(constituent, load_addr, use_hardware));
       if (bp_site_sp) {
         Status error = EnableBreakpointSite(bp_site_sp.get());
         if (error.Success()) {
-          owner->SetBreakpointSite(bp_site_sp);
+          constituent->SetBreakpointSite(bp_site_sp);
           return m_breakpoint_site_list.Add(bp_site_sp);
         } else {
           if (show_error || use_hardware) {
@@ -1850,7 +1855,8 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
             GetTarget().GetDebugger().GetErrorStream().Printf(
                 "warning: failed to set breakpoint site at 0x%" PRIx64
                 " for breakpoint %i.%i: %s\n",
-                load_addr, owner->GetBreakpoint().GetID(), owner->GetID(),
+                load_addr, constituent->GetBreakpoint().GetID(),
+                constituent->GetID(),
                 error.AsCString() ? error.AsCString() : "unknown error");
           }
         }
@@ -1861,11 +1867,12 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
   return LLDB_INVALID_BREAK_ID;
 }
 
-void Process::RemoveOwnerFromBreakpointSite(lldb::user_id_t owner_id,
-                                            lldb::user_id_t owner_loc_id,
-                                            BreakpointSiteSP &bp_site_sp) {
-  uint32_t num_owners = bp_site_sp->RemoveOwner(owner_id, owner_loc_id);
-  if (num_owners == 0) {
+void Process::RemoveConstituentFromBreakpointSite(
+    lldb::user_id_t constituent_id, lldb::user_id_t constituent_loc_id,
+    BreakpointSiteSP &bp_site_sp) {
+  uint32_t num_constituents =
+      bp_site_sp->RemoveConstituent(constituent_id, constituent_loc_id);
+  if (num_constituents == 0) {
     // Don't try to disable the site if we don't have a live process anymore.
     if (IsAlive())
       DisableBreakpointSite(bp_site_sp.get());
@@ -1876,7 +1883,7 @@ void Process::RemoveOwnerFromBreakpointSite(lldb::user_id_t owner_id,
 size_t Process::RemoveBreakpointOpcodesFromBuffer(addr_t bp_addr, size_t size,
                                                   uint8_t *buf) const {
   size_t bytes_removed = 0;
-  BreakpointSiteList bp_sites_in_range;
+  StopPointSiteList<BreakpointSite> bp_sites_in_range;
 
   if (m_breakpoint_site_list.FindInRange(bp_addr, bp_addr + size,
                                          bp_sites_in_range)) {
@@ -2297,7 +2304,7 @@ size_t Process::WriteMemory(addr_t addr, const void *buf, size_t size,
   // (enabled software breakpoints) any software traps (breakpoints) that we
   // may have placed in our tasks memory.
 
-  BreakpointSiteList bp_sites_in_range;
+  StopPointSiteList<BreakpointSite> bp_sites_in_range;
   if (!m_breakpoint_site_list.FindInRange(addr, addr + size, bp_sites_in_range))
     return WriteMemoryPrivate(addr, buf, size, error);
 
@@ -2574,13 +2581,13 @@ bool Process::GetLoadAddressPermissions(lldb::addr_t load_addr,
   return true;
 }
 
-Status Process::EnableWatchpoint(Watchpoint *watchpoint, bool notify) {
+Status Process::EnableWatchpoint(WatchpointSP wp_sp, bool notify) {
   Status error;
   error.SetErrorString("watchpoints are not supported");
   return error;
 }
 
-Status Process::DisableWatchpoint(Watchpoint *watchpoint, bool notify) {
+Status Process::DisableWatchpoint(WatchpointSP wp_sp, bool notify) {
   Status error;
   error.SetErrorString("watchpoints are not supported");
   return error;
@@ -2812,7 +2819,7 @@ Status Process::LoadCore() {
     // Wait for a stopped event since we just posted one above...
     lldb::EventSP event_sp;
     StateType state =
-        WaitForProcessToStop(llvm::None, &event_sp, true, listener_sp,
+        WaitForProcessToStop(std::nullopt, &event_sp, true, listener_sp,
                              nullptr, true, SelectMostRelevantFrame);
 
     if (!StateIsStoppedState(state, false)) {
@@ -3084,14 +3091,11 @@ void Process::CompleteAttach() {
   DidAttach(process_arch);
 
   if (process_arch.IsValid()) {
+    LLDB_LOG(log,
+             "Process::{0} replacing process architecture with DidAttach() "
+             "architecture: \"{1}\"",
+             __FUNCTION__, process_arch.GetTriple().getTriple());
     GetTarget().SetArchitecture(process_arch);
-    if (log) {
-      const char *triple_str = process_arch.GetTriple().getTriple().c_str();
-      LLDB_LOGF(log,
-                "Process::%s replacing process architecture with DidAttach() "
-                "architecture: %s",
-                __FUNCTION__, triple_str ? triple_str : "<null>");
-    }
   }
 
   // We just attached.  If we have a platform, ask it for the process
@@ -3215,7 +3219,7 @@ Status Process::ConnectRemote(llvm::StringRef remote_url) {
   if (error.Success()) {
     if (GetID() != LLDB_INVALID_PROCESS_ID) {
       EventSP event_sp;
-      StateType state = WaitForProcessStopPrivate(event_sp, llvm::None);
+      StateType state = WaitForProcessStopPrivate(event_sp, std::nullopt);
 
       if (state == eStateStopped || state == eStateCrashed) {
         // If we attached and actually have a process on the other end, then
@@ -3534,7 +3538,7 @@ Status Process::Signal(int signal) {
 
 void Process::SetUnixSignals(UnixSignalsSP &&signals_sp) {
   assert(signals_sp && "null signals_sp");
-  m_unix_signals_sp = signals_sp;
+  m_unix_signals_sp = std::move(signals_sp);
 }
 
 const lldb::UnixSignalsSP &Process::GetUnixSignals() {
@@ -3970,7 +3974,7 @@ thread_result_t Process::RunPrivateStateThread(bool is_secondary_thread) {
   bool interrupt_requested = false;
   while (!exit_now) {
     EventSP event_sp;
-    GetEventsPrivate(event_sp, llvm::None, control_only);
+    GetEventsPrivate(event_sp, std::nullopt, control_only);
     if (event_sp->BroadcasterIs(&m_private_state_control_broadcaster)) {
       LLDB_LOGF(log,
                 "Process::%s (arg = %p, pid = %" PRIu64
@@ -4097,12 +4101,11 @@ Process::ProcessEventData::ProcessEventData(const ProcessSP &process_sp,
 
 Process::ProcessEventData::~ProcessEventData() = default;
 
-ConstString Process::ProcessEventData::GetFlavorString() {
-  static ConstString g_flavor("Process::ProcessEventData");
-  return g_flavor;
+llvm::StringRef Process::ProcessEventData::GetFlavorString() {
+  return "Process::ProcessEventData";
 }
 
-ConstString Process::ProcessEventData::GetFlavor() const {
+llvm::StringRef Process::ProcessEventData::GetFlavor() const {
   return ProcessEventData::GetFlavorString();
 }
 
@@ -4449,7 +4452,7 @@ void Process::BroadcastStructuredData(const StructuredData::ObjectSP &object_sp,
 }
 
 StructuredDataPluginSP
-Process::GetStructuredDataPlugin(ConstString type_name) const {
+Process::GetStructuredDataPlugin(llvm::StringRef type_name) const {
   auto find_it = m_structured_data_plugin_map.find(type_name);
   if (find_it != m_structured_data_plugin_map.end())
     return find_it->second;
@@ -4800,12 +4803,12 @@ GetExpressionTimeout(const EvaluateExpressionOptions &options,
     return GetOneThreadExpressionTimeout(options);
 
   if (!options.GetTimeout())
-    return llvm::None;
+    return std::nullopt;
   else
     return *options.GetTimeout() - GetOneThreadExpressionTimeout(options);
 }
 
-static llvm::Optional<ExpressionResults>
+static std::optional<ExpressionResults>
 HandleStoppedEvent(lldb::tid_t thread_id, const ThreadPlanSP &thread_plan_sp,
                    RestorePlanState &restorer, const EventSP &event_sp,
                    EventSP &event_to_broadcast_sp,
@@ -4854,7 +4857,7 @@ HandleStoppedEvent(lldb::tid_t thread_id, const ThreadPlanSP &thread_plan_sp,
 
   if (!handle_interrupts &&
       Process::ProcessEventData::GetInterruptedFromEvent(event_sp.get()))
-    return llvm::None;
+    return std::nullopt;
 
   LLDB_LOG(log, "thread plan did not successfully complete");
   if (!options.DoesUnwindOnError())
@@ -4875,7 +4878,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
     if (log)
       log->Printf("RunThreadPlan could not acquire the RunThreadPlan lock.");
     diagnostic_manager.PutString(
-        eDiagnosticSeverityError,
+        eSeverityError,
         "RunThreadPlan could not acquire the RunThreadPlan lock.");
     return eExpressionSetupError;
   }
@@ -4885,27 +4888,26 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
 
   if (!thread_plan_sp) {
     diagnostic_manager.PutString(
-        eDiagnosticSeverityError,
-        "RunThreadPlan called with empty thread plan.");
+        lldb::eSeverityError, "RunThreadPlan called with empty thread plan.");
     return eExpressionSetupError;
   }
 
   if (!thread_plan_sp->ValidatePlan(nullptr)) {
     diagnostic_manager.PutString(
-        eDiagnosticSeverityError,
+        lldb::eSeverityError,
         "RunThreadPlan called with an invalid thread plan.");
     return eExpressionSetupError;
   }
 
   if (exe_ctx.GetProcessPtr() != this) {
-    diagnostic_manager.PutString(eDiagnosticSeverityError,
+    diagnostic_manager.PutString(lldb::eSeverityError,
                                  "RunThreadPlan called on wrong process.");
     return eExpressionSetupError;
   }
 
   Thread *thread = exe_ctx.GetThreadPtr();
   if (thread == nullptr) {
-    diagnostic_manager.PutString(eDiagnosticSeverityError,
+    diagnostic_manager.PutString(lldb::eSeverityError,
                                  "RunThreadPlan called with invalid thread.");
     return eExpressionSetupError;
   }
@@ -4940,7 +4942,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
 
   if (m_private_state.GetValue() != eStateStopped) {
     diagnostic_manager.PutString(
-        eDiagnosticSeverityError,
+        lldb::eSeverityError,
         "RunThreadPlan called while the private state was not stopped.");
     return eExpressionSetupError;
   }
@@ -4954,7 +4956,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
     selected_frame_sp = thread->GetSelectedFrame(DoNoSelectMostRelevantFrame);
     if (!selected_frame_sp) {
       diagnostic_manager.Printf(
-          eDiagnosticSeverityError,
+          lldb::eSeverityError,
           "RunThreadPlan called without a selected frame on thread %d",
           thread_idx_id);
       return eExpressionSetupError;
@@ -4965,7 +4967,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
   // be smaller than the overall timeout.
   if (options.GetOneThreadTimeout() && options.GetTimeout() &&
       *options.GetTimeout() < *options.GetOneThreadTimeout()) {
-    diagnostic_manager.PutString(eDiagnosticSeverityError,
+    diagnostic_manager.PutString(lldb::eSeverityError,
                                  "RunThreadPlan called with one thread "
                                  "timeout greater than total timeout");
     return eExpressionSetupError;
@@ -5094,7 +5096,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
     Event *other_events = listener_sp->PeekAtNextEvent();
     if (other_events != nullptr) {
       diagnostic_manager.PutString(
-          eDiagnosticSeverityError,
+          lldb::eSeverityError,
           "RunThreadPlan called with pending events on the queue.");
       return eExpressionSetupError;
     }
@@ -5137,7 +5139,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
           Status resume_error = PrivateResume();
           if (!resume_error.Success()) {
             diagnostic_manager.Printf(
-                eDiagnosticSeverityError,
+                lldb::eSeverityError,
                 "couldn't resume inferior the %d time: \"%s\".", num_resumes,
                 resume_error.AsCString());
             return_value = eExpressionSetupError;
@@ -5153,7 +5155,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
                     "resume %" PRIu32 ", exiting.",
                     num_resumes);
 
-          diagnostic_manager.Printf(eDiagnosticSeverityError,
+          diagnostic_manager.Printf(lldb::eSeverityError,
                                     "didn't get any event after resume %" PRIu32
                                     ", exiting.",
                                     num_resumes);
@@ -5189,7 +5191,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
           }
 
           diagnostic_manager.Printf(
-              eDiagnosticSeverityError,
+              lldb::eSeverityError,
               "didn't get running event after initial resume, got %s instead.",
               StateAsCString(stop_state));
           return_value = eExpressionSetupError;
@@ -5247,7 +5249,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
             const bool use_run_lock = false;
             Halt(clear_thread_plans, use_run_lock);
             return_value = eExpressionInterrupted;
-            diagnostic_manager.PutString(eDiagnosticSeverityRemark,
+            diagnostic_manager.PutString(lldb::eSeverityInfo,
                                          "execution halted by user interrupt.");
             LLDB_LOGF(log, "Process::RunThreadPlan(): Got  interrupted by "
                            "eBroadcastBitInterrupted, exiting.");
@@ -5300,7 +5302,7 @@ Process::RunThreadPlan(ExecutionContext &exe_ctx,
                 event_to_broadcast_sp = event_sp;
 
               diagnostic_manager.PutString(
-                  eDiagnosticSeverityError,
+                  lldb::eSeverityError,
                   "execution stopped with unexpected state.");
               return_value = eExpressionInterrupted;
               break;
@@ -5831,55 +5833,59 @@ void Process::Flush() {
 
 lldb::addr_t Process::GetCodeAddressMask() {
   if (uint32_t num_bits_setting = GetVirtualAddressableBits())
-    return ~((1ULL << num_bits_setting) - 1);
+    return AddressableBits::AddressableBitToMask(num_bits_setting);
 
   return m_code_address_mask;
 }
 
 lldb::addr_t Process::GetDataAddressMask() {
   if (uint32_t num_bits_setting = GetVirtualAddressableBits())
-    return ~((1ULL << num_bits_setting) - 1);
+    return AddressableBits::AddressableBitToMask(num_bits_setting);
 
   return m_data_address_mask;
 }
 
 lldb::addr_t Process::GetHighmemCodeAddressMask() {
   if (uint32_t num_bits_setting = GetHighmemVirtualAddressableBits())
-    return ~((1ULL << num_bits_setting) - 1);
+    return AddressableBits::AddressableBitToMask(num_bits_setting);
+
+  if (m_highmem_code_address_mask != LLDB_INVALID_ADDRESS_MASK)
+    return m_highmem_code_address_mask;
   return GetCodeAddressMask();
 }
 
 lldb::addr_t Process::GetHighmemDataAddressMask() {
   if (uint32_t num_bits_setting = GetHighmemVirtualAddressableBits())
-    return ~((1ULL << num_bits_setting) - 1);
+    return AddressableBits::AddressableBitToMask(num_bits_setting);
+
+  if (m_highmem_data_address_mask != LLDB_INVALID_ADDRESS_MASK)
+    return m_highmem_data_address_mask;
   return GetDataAddressMask();
 }
 
 void Process::SetCodeAddressMask(lldb::addr_t code_address_mask) {
-  Log *log = GetLog(LLDBLog::Process);
-  LLDB_LOGF(log, "Setting Process code address mask to 0x%" PRIx64,
-            code_address_mask);
+  LLDB_LOG(GetLog(LLDBLog::Process),
+           "Setting Process code address mask to {0:x}", code_address_mask);
   m_code_address_mask = code_address_mask;
 }
 
 void Process::SetDataAddressMask(lldb::addr_t data_address_mask) {
-  Log *log = GetLog(LLDBLog::Process);
-  LLDB_LOGF(log, "Setting Process data address mask to 0x%" PRIx64,
-            data_address_mask);
+  LLDB_LOG(GetLog(LLDBLog::Process),
+           "Setting Process data address mask to {0:x}", data_address_mask);
   m_data_address_mask = data_address_mask;
 }
 
 void Process::SetHighmemCodeAddressMask(lldb::addr_t code_address_mask) {
-  Log *log = GetLog(LLDBLog::Process);
-  LLDB_LOGF(log, "Setting Process highmem code address mask to 0x%" PRIx64,
-            code_address_mask);
+  LLDB_LOG(GetLog(LLDBLog::Process),
+           "Setting Process highmem code address mask to {0:x}",
+           code_address_mask);
   m_highmem_code_address_mask = code_address_mask;
 }
 
 void Process::SetHighmemDataAddressMask(lldb::addr_t data_address_mask) {
-  Log *log = GetLog(LLDBLog::Process);
-  LLDB_LOGF(log, "Setting Process highmem data address mask to 0x%" PRIx64,
-            data_address_mask);
+  LLDB_LOG(GetLog(LLDBLog::Process),
+           "Setting Process highmem data address mask to {0:x}",
+           data_address_mask);
   m_highmem_data_address_mask = data_address_mask;
 }
 
@@ -5995,7 +6001,7 @@ void Process::ModulesDidLoad(ModuleList &module_list) {
     LoadOperatingSystemPlugin(false);
 
   // Inform the structured-data plugins of the modified modules.
-  for (auto pair : m_structured_data_plugin_map) {
+  for (auto &pair : m_structured_data_plugin_map) {
     if (pair.second)
       pair.second->ModulesDidLoad(*this, module_list);
   }
@@ -6197,7 +6203,7 @@ Status Process::GetMemoryRegions(lldb_private::MemoryRegionInfos &region_list) {
 }
 
 Status
-Process::ConfigureStructuredData(ConstString type_name,
+Process::ConfigureStructuredData(llvm::StringRef type_name,
                                  const StructuredData::ObjectSP &config_sp) {
   // If you get this, the Process-derived class needs to implement a method to
   // enable an already-reported asynchronous structured data feature. See
@@ -6211,34 +6217,29 @@ void Process::MapSupportedStructuredDataPlugins(
 
   // Bail out early if there are no type names to map.
   if (supported_type_names.GetSize() == 0) {
-    LLDB_LOGF(log, "Process::%s(): no structured data types supported",
-              __FUNCTION__);
+    LLDB_LOG(log, "no structured data types supported");
     return;
   }
 
-  // Convert StructuredData type names to ConstString instances.
-  std::set<ConstString> const_type_names;
+  // These StringRefs are backed by the input parameter.
+  std::set<llvm::StringRef> type_names;
 
-  LLDB_LOGF(log,
-            "Process::%s(): the process supports the following async "
-            "structured data types:",
-            __FUNCTION__);
+  LLDB_LOG(log,
+           "the process supports the following async structured data types:");
 
   supported_type_names.ForEach(
-      [&const_type_names, &log](StructuredData::Object *object) {
-        if (!object) {
-          // Invalid - shouldn't be null objects in the array.
+      [&type_names, &log](StructuredData::Object *object) {
+        // There shouldn't be null objects in the array.
+        if (!object)
           return false;
-        }
 
-        auto type_name = object->GetAsString();
-        if (!type_name) {
-          // Invalid format - all type names should be strings.
+        // All type names should be strings.
+        const llvm::StringRef type_name = object->GetStringValue();
+        if (type_name.empty())
           return false;
-        }
 
-        const_type_names.insert(ConstString(type_name->GetValue()));
-        LLDB_LOG(log, "- {0}", type_name->GetValue());
+        type_names.insert(type_name);
+        LLDB_LOG(log, "- {0}", type_name);
         return true;
       });
 
@@ -6247,10 +6248,10 @@ void Process::MapSupportedStructuredDataPlugins(
   // we've consumed all the type names.
   // FIXME: should we return an error if there are type names nobody
   // supports?
-  for (uint32_t plugin_index = 0; !const_type_names.empty(); plugin_index++) {
+  for (uint32_t plugin_index = 0; !type_names.empty(); plugin_index++) {
     auto create_instance =
-           PluginManager::GetStructuredDataPluginCreateCallbackAtIndex(
-               plugin_index);
+        PluginManager::GetStructuredDataPluginCreateCallbackAtIndex(
+            plugin_index);
     if (!create_instance)
       break;
 
@@ -6263,8 +6264,8 @@ void Process::MapSupportedStructuredDataPlugins(
     }
 
     // For any of the remaining type names, map any that this plugin supports.
-    std::vector<ConstString> names_to_remove;
-    for (auto &type_name : const_type_names) {
+    std::vector<llvm::StringRef> names_to_remove;
+    for (llvm::StringRef type_name : type_names) {
       if (plugin_sp->SupportsStructuredDataType(type_name)) {
         m_structured_data_plugin_map.insert(
             std::make_pair(type_name, plugin_sp));
@@ -6275,8 +6276,8 @@ void Process::MapSupportedStructuredDataPlugins(
     }
 
     // Remove the type names that were consumed by this plugin.
-    for (auto &type_name : names_to_remove)
-      const_type_names.erase(type_name);
+    for (llvm::StringRef type_name : names_to_remove)
+      type_names.erase(type_name);
   }
 }
 
@@ -6293,7 +6294,7 @@ bool Process::RouteAsyncStructuredData(
     return false;
 
   // Grab the async structured type name (i.e. the feature/plugin name).
-  ConstString type_name;
+  llvm::StringRef type_name;
   if (!dictionary->GetValueForKeyAsString("type", type_name))
     return false;
 

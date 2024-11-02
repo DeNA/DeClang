@@ -75,7 +75,7 @@ Attribute TestI64ElementsAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseRSquare() || parser.parseGreater())
     return Attribute();
   return parser.getChecked<TestI64ElementsAttr>(
-      parser.getContext(), type.cast<ShapedType>(), elements);
+      parser.getContext(), llvm::cast<ShapedType>(type), elements);
 }
 
 void TestI64ElementsAttr::print(AsmPrinter &printer) const {
@@ -98,11 +98,10 @@ TestI64ElementsAttr::verify(function_ref<InFlightDiagnostic()> emitError,
   return success();
 }
 
-LogicalResult
-TestAttrWithFormatAttr::verify(function_ref<InFlightDiagnostic()> emitError,
-                               int64_t one, std::string two, IntegerAttr three,
-                               ArrayRef<int> four,
-                               ArrayRef<AttrWithTypeBuilderAttr> arrayOfAttrs) {
+LogicalResult TestAttrWithFormatAttr::verify(
+    function_ref<InFlightDiagnostic()> emitError, int64_t one, std::string two,
+    IntegerAttr three, ArrayRef<int> four, uint64_t five, ArrayRef<int> six,
+    ArrayRef<AttrWithTypeBuilderAttr> arrayOfAttrs) {
   if (four.size() != static_cast<unsigned>(one))
     return emitError() << "expected 'one' to equal 'four.size()'";
   return success();
@@ -150,20 +149,6 @@ void TestSubElementsAccessAttr::print(::mlir::AsmPrinter &printer) const {
           << ">";
 }
 
-void TestSubElementsAccessAttr::walkImmediateSubElements(
-    llvm::function_ref<void(mlir::Attribute)> walkAttrsFn,
-    llvm::function_ref<void(mlir::Type)> walkTypesFn) const {
-  walkAttrsFn(getFirst());
-  walkAttrsFn(getSecond());
-  walkAttrsFn(getThird());
-}
-
-Attribute TestSubElementsAccessAttr::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  assert(replAttrs.size() == 3 && "invalid number of replacement attributes");
-  return get(getContext(), replAttrs[0], replAttrs[1], replAttrs[2]);
-}
-
 //===----------------------------------------------------------------------===//
 // TestExtern1DI64ElementsAttr
 //===----------------------------------------------------------------------===//
@@ -171,23 +156,22 @@ Attribute TestSubElementsAccessAttr::replaceImmediateSubElements(
 ArrayRef<uint64_t> TestExtern1DI64ElementsAttr::getElements() const {
   if (auto *blob = getHandle().getBlob())
     return blob->getDataAs<uint64_t>();
-  return llvm::None;
+  return std::nullopt;
 }
 
 //===----------------------------------------------------------------------===//
 // TestCustomAnchorAttr
 //===----------------------------------------------------------------------===//
 
-static ParseResult parseTrueFalse(AsmParser &p,
-                                  FailureOr<Optional<int>> &result) {
+static ParseResult parseTrueFalse(AsmParser &p, std::optional<int> &result) {
   bool b;
   if (p.parseInteger(b))
     return failure();
-  result = Optional<int>(b);
+  result = b;
   return success();
 }
 
-static void printTrueFalse(AsmPrinter &p, Optional<int> result) {
+static void printTrueFalse(AsmPrinter &p, std::optional<int> result) {
   p << (*result ? "true" : "false");
 }
 

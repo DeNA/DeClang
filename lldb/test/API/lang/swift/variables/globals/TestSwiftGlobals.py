@@ -21,21 +21,10 @@ import unittest2
 
 
 class TestSwiftGlobals(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_swift_globals(self):
         """Check that we can examine module globals in the expression parser"""
         self.build()
-        self.do_test()
-
-    def setUp(self):
-        TestBase.setUp(self)
-        self.main_source = "main.swift"
-        self.main_source_spec = lldb.SBFileSpec(self.main_source)
-
-    def do_test(self):
-        """Check that we can examine module globals in the expression parser"""
         exe_name = "a.out"
         exe = self.getBuildArtifact(exe_name)
 
@@ -46,18 +35,19 @@ class TestSwiftGlobals(TestBase):
         # Target variables. This is not actually expected to work, but
         # also shouldn't crash.
         g_counter = target.EvaluateExpression("g_counter")
-        self.assertTrue(g_counter.IsValid(), "g_counter returned a valid value object.")
+        self.assertTrue(
+            g_counter.IsValid(),
+            "g_counter returned a valid value object.")
 
         # Set the breakpoints
+        main_source_spec = lldb.SBFileSpec('main.swift')
         outer_bkpt = target.BreakpointCreateBySourceRegex(
-            "Set top_level breakpoint here", self.main_source_spec
-        )
-        self.assertTrue(outer_bkpt.GetNumLocations() > 0, VALID_BREAKPOINT)
+            'Set top_level breakpoint here', main_source_spec)
+        self.assertGreater(outer_bkpt.GetNumLocations(), 0, VALID_BREAKPOINT)
 
         function_bkpt = target.BreakpointCreateBySourceRegex(
-            "Set function breakpoint here", self.main_source_spec
-        )
-        self.assertTrue(function_bkpt.GetNumLocations() > 0, VALID_BREAKPOINT)
+            'Set function breakpoint here', main_source_spec)
+        self.assertGreater(function_bkpt.GetNumLocations(), 0, VALID_BREAKPOINT)
 
         # Launch the process, and do not stop at the entry point.
         process = target.LaunchSimple(None, None, os.getcwd())
@@ -65,9 +55,10 @@ class TestSwiftGlobals(TestBase):
         self.assertTrue(process, PROCESS_IS_VALID)
 
         # Frame #0 should be at our breakpoint.
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, outer_bkpt)
+        threads = lldbutil.get_threads_stopped_at_breakpoint(
+            process, outer_bkpt)
 
-        self.assertTrue(len(threads) == 1)
+        self.assertEqual(len(threads), 1)
         self.thread = threads[0]
 
         # All the variables should be uninitialized at this point.  Maybe sure
@@ -81,56 +72,68 @@ class TestSwiftGlobals(TestBase):
         # Examine the variables before initialization:
 
         g_counter = frame.EvaluateExpression("g_counter", options)
-        self.assertTrue(g_counter.IsValid(), "g_counter returned a valid value object.")
+        self.assertTrue(
+            g_counter.IsValid(),
+            "g_counter returned a valid value object.")
         value = g_counter.GetValueAsSigned(error)
         self.assertSuccess(error, "Got a value for g_counter")
-        self.assertTrue(value == 0, "g_counter value is the uninitialized one.")
+        self.assertEqual(value, 0,
+            "g_counter value is the uninitialized one.")
 
         foo_var = frame.EvaluateExpression("my_foo", options)
-        self.assertTrue(foo_var.IsValid(), "foo_var returned a valid value object.")
+        self.assertTrue(
+            foo_var.IsValid(),
+            "foo_var returned a valid value object.")
         value = foo_var.GetValueAsUnsigned(error)
         self.assertSuccess(error, "foo_var has a value.")
-        self.assertTrue(value == 0, "foo_var is null before initialization.")
+        self.assertEqual(value, 0, "foo_var is null before initialization.")
 
         my_large_dude = frame.EvaluateExpression("my_large_dude", options)
-        self.assertTrue(
-            my_large_dude.IsValid(), "my_large_dude returned a valid value object."
-        )
+        self.assertTrue(my_large_dude.IsValid(),
+                        "my_large_dude returned a valid value object.")
         value = my_large_dude.GetValue()
         self.assertSuccess(error, "Got a value for my_large_dude")
-        self.assertTrue(value is None, "my_large_dude value is the uninitialized one.")
+        self.assertIsNone(
+            value,
+            "my_large_dude value is the uninitialized one.")
 
         # Now proceed to the breakpoint in our main function, make sure we can
         # still read these variables and they now have the right values.
         threads = lldbutil.continue_to_breakpoint(process, function_bkpt)
-        self.assertTrue(len(threads) == 1)
+        self.assertEqual(len(threads), 1)
 
         self.thread = threads[0]
 
         # Examine the variables before initialization:
 
         g_counter = frame.EvaluateExpression("g_counter", options)
-        self.assertTrue(g_counter.IsValid(), "g_counter returned a valid value object.")
+        self.assertTrue(
+            g_counter.IsValid(),
+            "g_counter returned a valid value object.")
         value = g_counter.GetValueAsSigned(error)
         self.assertSuccess(error, "Got a value for g_counter")
         self.assertTrue(value == 2, "g_counter value should be 2.")
 
         foo_var = frame.EvaluateExpression("my_foo", options)
-        self.assertTrue(foo_var.IsValid(), "foo_var returned a valid value object.")
+        self.assertTrue(
+            foo_var.IsValid(),
+            "foo_var returned a valid value object.")
         foo_var_x = foo_var.GetChildMemberWithName("x")
         self.assertTrue(foo_var_x.IsValid(), "Got value object for foo_var.x")
         value = foo_var_x.GetValueAsUnsigned(error)
         self.assertSuccess(error, "foo_var.x has a value.")
-        self.assertTrue(value == 1, "foo_var is null before initialization.")
+        self.assertEqual(value, 1, "foo_var is null before initialization.")
 
         my_large_dude = frame.EvaluateExpression("my_large_dude", options)
-        self.assertTrue(
-            my_large_dude.IsValid(), "my_large_dude returned a valid value object."
-        )
+        self.assertTrue(my_large_dude.IsValid(),
+                        "my_large_dude returned a valid value object.")
         my_large_dude_y = my_large_dude.GetChildMemberWithName("y")
         self.assertTrue(
-            my_large_dude_y.IsValid(), "Got value object for my_large_dude.y"
-        )
+            my_large_dude_y.IsValid(),
+            "Got value object for my_large_dude.y")
         value = my_large_dude_y.GetValueAsUnsigned(error)
         self.assertSuccess(error, "Got a value for my_large_dude.y")
-        self.assertTrue(value == 20, "my_large_dude value is the uninitialized one.")
+        self.assertEqual(
+            value, 20,
+            "my_large_dude value is the uninitialized one.")
+

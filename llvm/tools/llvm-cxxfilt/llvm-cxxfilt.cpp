@@ -7,16 +7,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringExtras.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Demangle/Demangle.h"
+#include "llvm/Demangle/StringViewExtras.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/LLVMDriver.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 #include <cstdlib>
 #include <iostream>
 
@@ -25,30 +27,29 @@ using namespace llvm;
 namespace {
 enum ID {
   OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_MAKE_OPT_ID(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,   \
-                   FLAGS, PARAM, HELP, METAVAR, VALUES),
+#define OPTION(...) LLVM_MAKE_OPT_ID(__VA_ARGS__),
 #include "Opts.inc"
 #undef OPTION
 };
 
-#define PREFIX(NAME, VALUE) const char *const NAME[] = VALUE;
+#define PREFIX(NAME, VALUE)                                                    \
+  static constexpr llvm::StringLiteral NAME##_init[] = VALUE;                  \
+  static constexpr llvm::ArrayRef<llvm::StringLiteral> NAME(                   \
+      NAME##_init, std::size(NAME##_init) - 1);
 #include "Opts.inc"
 #undef PREFIX
 
-const opt::OptTable::Info InfoTable[] = {
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_CONSTRUCT_OPT_INFO(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS,       \
-                          ALIASARGS, FLAGS, PARAM, HELP, METAVAR, VALUES),
+static constexpr opt::OptTable::Info InfoTable[] = {
+#define OPTION(...) LLVM_CONSTRUCT_OPT_INFO(__VA_ARGS__),
 #include "Opts.inc"
 #undef OPTION
 };
 
-class CxxfiltOptTable : public opt::OptTable {
+class CxxfiltOptTable : public opt::GenericOptTable {
 public:
-  CxxfiltOptTable() : OptTable(InfoTable) { setGroupedShortOptions(true); }
+  CxxfiltOptTable() : opt::GenericOptTable(InfoTable) {
+    setGroupedShortOptions(true);
+  }
 };
 } // namespace
 
@@ -63,10 +64,11 @@ static void error(const Twine &Message) {
 }
 
 static std::string demangle(const std::string &Mangled) {
-  const char *DecoratedStr = Mangled.c_str();
+  using llvm::itanium_demangle::starts_with;
+  std::string_view DecoratedStr = Mangled;
   if (StripUnderscore)
     if (DecoratedStr[0] == '_')
-      ++DecoratedStr;
+      DecoratedStr.remove_prefix(1);
 
   std::string Result;
   if (nonMicrosoftDemangle(DecoratedStr, Result))
@@ -76,11 +78,11 @@ static std::string demangle(const std::string &Mangled) {
   char *Undecorated = nullptr;
 
   if (Types)
-    Undecorated = itaniumDemangle(DecoratedStr, nullptr, nullptr, nullptr);
+    Undecorated = itaniumDemangle(DecoratedStr);
 
-  if (!Undecorated && strncmp(DecoratedStr, "__imp_", 6) == 0) {
+  if (!Undecorated && starts_with(DecoratedStr, "__imp_")) {
     Prefix = "import thunk for ";
-    Undecorated = itaniumDemangle(DecoratedStr + 6, nullptr, nullptr, nullptr);
+    Undecorated = itaniumDemangle(DecoratedStr.substr(6));
   }
 
   Result = Undecorated ? Prefix + Undecorated : Mangled;
@@ -138,7 +140,7 @@ static void demangleLine(llvm::raw_ostream &OS, StringRef Mangled, bool Split) {
   OS.flush();
 }
 
-int llvm_cxxfilt_main(int argc, char **argv) {
+int llvm_cxxfilt_main(int argc, char **argv, const llvm::ToolContext &) {
   InitLLVM X(argc, argv);
   BumpPtrAllocator A;
   StringSaver Saver(A);

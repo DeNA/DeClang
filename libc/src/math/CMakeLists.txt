@@ -18,6 +18,19 @@ function(add_math_entrypoint_object name)
     return()
   endif()
 
+  # The GPU optionally depends on vendor libraries. If we emitted one of these
+  # entrypoints it means the user requested it and we should use it instead.
+  get_fq_target_name("${LIBC_TARGET_ARCHITECTURE}.vendor.${name}" fq_vendor_specific_target_name)
+  if(TARGET ${fq_vendor_specific_target_name})
+    add_entrypoint_object(
+      ${name}
+      ALIAS
+      DEPENDS
+        .${LIBC_TARGET_ARCHITECTURE}.vendor.${name}
+    )
+    return()
+  endif()
+
   get_fq_target_name("generic.${name}" fq_generic_target_name)
   if(TARGET ${fq_generic_target_name})
     add_entrypoint_object(
@@ -40,32 +53,12 @@ function(add_math_entrypoint_object name)
   )
 endfunction()
 
-add_entrypoint_object(
-  fmaf
-  SRCS
-    fmaf.cpp
-  HDRS
-    fmaf.h
-  DEPENDS
-    libc.src.__support.FPUtil.fma
-  COMPILE_OPTIONS
-    -O3
-)
-
-add_entrypoint_object(
-  fma
-  SRCS
-    fma.cpp
-  HDRS
-    fma.h
-  DEPENDS
-    libc.src.__support.FPUtil.fma
-  COMPILE_OPTIONS
-    -O3
-)
-
 add_math_entrypoint_object(acosf)
+add_math_entrypoint_object(acoshf)
+
 add_math_entrypoint_object(asinf)
+add_math_entrypoint_object(asinhf)
+
 add_math_entrypoint_object(atanf)
 
 add_math_entrypoint_object(atanhf)
@@ -81,6 +74,8 @@ add_math_entrypoint_object(copysignl)
 add_math_entrypoint_object(cos)
 add_math_entrypoint_object(cosf)
 add_math_entrypoint_object(coshf)
+
+add_math_entrypoint_object(erff)
 
 add_math_entrypoint_object(expf)
 
@@ -101,6 +96,9 @@ add_math_entrypoint_object(fdiml)
 add_math_entrypoint_object(floor)
 add_math_entrypoint_object(floorf)
 add_math_entrypoint_object(floorl)
+
+add_math_entrypoint_object(fma)
+add_math_entrypoint_object(fmaf)
 
 add_math_entrypoint_object(fmax)
 add_math_entrypoint_object(fmaxf)
@@ -128,12 +126,16 @@ add_math_entrypoint_object(ldexp)
 add_math_entrypoint_object(ldexpf)
 add_math_entrypoint_object(ldexpl)
 
+add_math_entrypoint_object(log10)
 add_math_entrypoint_object(log10f)
 
+add_math_entrypoint_object(log1p)
 add_math_entrypoint_object(log1pf)
 
+add_math_entrypoint_object(log2)
 add_math_entrypoint_object(log2f)
 
+add_math_entrypoint_object(log)
 add_math_entrypoint_object(logf)
 
 add_math_entrypoint_object(logb)
@@ -183,6 +185,10 @@ add_math_entrypoint_object(rintl)
 add_math_entrypoint_object(round)
 add_math_entrypoint_object(roundf)
 add_math_entrypoint_object(roundl)
+
+add_math_entrypoint_object(scalbn)
+add_math_entrypoint_object(scalbnf)
+add_math_entrypoint_object(scalbnl)
 
 add_math_entrypoint_object(sincosf)
 

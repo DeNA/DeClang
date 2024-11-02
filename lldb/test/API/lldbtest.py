@@ -93,9 +93,9 @@ class LLDBTest(TestFormat):
         # libc++abi.dylib: terminating with uncaught exception of type \
         # std::__1::system_error: recursive_mutex lock failed: Invalid argument
         if (
-            "RESULT: PASSED" in err
-            and "recursive_mutex lock failed" in err
-            and exitCode != 0
+            'RESULT: PASSED' in err and
+            'recursive_mutex lock failed' in err and
+            exitCode != 0
         ):
             return lit.Test.FLAKYPASS, output
 

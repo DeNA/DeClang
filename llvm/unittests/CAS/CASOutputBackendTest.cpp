@@ -30,12 +30,14 @@ TEST(CASOutputBackendTest, createFiles) {
 
   auto Outputs = makeIntrusiveRefCnt<CASOutputBackend>(*CAS);
 
-  Optional<ObjectProxy> Content1;
-  Optional<ObjectProxy> Content2;
-  ASSERT_THAT_ERROR(CAS->createProxy(None, "content1").moveInto(Content1),
-                    Succeeded());
-  ASSERT_THAT_ERROR(CAS->createProxy(None, "content2").moveInto(Content2),
-                    Succeeded());
+  std::optional<ObjectProxy> Content1;
+  std::optional<ObjectProxy> Content2;
+  ASSERT_THAT_ERROR(
+      CAS->createProxy(std::nullopt, "content1").moveInto(Content1),
+      Succeeded());
+  ASSERT_THAT_ERROR(
+      CAS->createProxy(std::nullopt, "content2").moveInto(Content2),
+      Succeeded());
   std::string AbsolutePath1 = "/absolute/path/1";
   std::string AbsolutePath2 = "/absolute/path/2";
   std::string RelativePath = "relative/path/./2";
@@ -54,7 +56,7 @@ TEST(CASOutputBackendTest, createFiles) {
   for (const OutputDescription &OD : OutputDescriptions) {
     // Use consumeDiscardOnDestroy() so that early exits from
     // ASSERT_THAT_ERROR do not crash the unit test suite.
-    Optional<vfs::OutputFile> O;
+    std::optional<vfs::OutputFile> O;
     ASSERT_THAT_ERROR(
         consumeDiscardOnDestroy(Outputs->createFile(OD.Path)).moveInto(O),
         Succeeded());
@@ -64,7 +66,7 @@ TEST(CASOutputBackendTest, createFiles) {
 
   SmallVector<CASOutputBackend::OutputFile> OFs = Outputs->takeOutputs();
 
-  auto Array = makeArrayRef(OutputDescriptions);
+  auto Array = ArrayRef(OutputDescriptions);
   ASSERT_EQ(OFs.size(), Array.size());
   for (size_t I = 0, E = Array.size(); I != E; ++I) {
     EXPECT_EQ(Array[I].Path, OFs[I].Path);

@@ -140,6 +140,10 @@
 // CHECK-PROFILE-USE-DIR: "-fprofile-instrument-use-path={{.*}}.d/some/dir{{/|\\\\}}default.profdata"
 // CHECK-PROFILE-USE-FILE: "-fprofile-instrument-use-path=/tmp/somefile.prof"
 
+// RUN: %clang -### -S -fprofile-instr-use=%t.profdata -fdiagnostics-misexpect-tolerance=10 -Wmisexpect %s 2>&1 | FileCheck %s --check-prefix=CHECK-MISEXPECT-TOLLERANCE
+// CHECK-MISEXPECT-TOLLERANCE: "-fdiagnostics-misexpect-tolerance=10"
+// CHECK-MISEXPECT-TOLLERANCE-NOT: argument unused
+
 // RUN: %clang -### -S -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
 // RUN: %clang -### -S -fno-vectorize -fvectorize %s 2>&1 | FileCheck -check-prefix=CHECK-VECTORIZE %s
 // RUN: %clang -### -S -fno-vectorize %s 2>&1 | FileCheck -check-prefix=CHECK-NO-VECTORIZE %s
@@ -298,7 +302,6 @@
 // RUN:     -fno-reorder-blocks -freorder-blocks                              \
 // RUN:     -fno-schedule-insns2 -fschedule-insns2                            \
 // RUN:     -fno-stack-check                                                  \
-// RUN:     -fno-check-new -fcheck-new                                        \
 // RUN:     -ffriend-injection                                                \
 // RUN:     -fno-implement-inlines -fimplement-inlines                        \
 // RUN:     -fstack-check                                                     \
@@ -398,7 +401,7 @@
 // CHECK-WARNING-DAG: optimization flag '-falign-loops' is not supported
 // CHECK-WARNING-DAG: optimization flag '-falign-jumps' is not supported
 // CHECK-WARNING-DAG: optimization flag '-falign-jumps=100' is not supported
-// CHECK-WARNING-DAG: optimization flag '-fexcess-precision=100' is not supported
+// CHECK-WARNING-DAG: unsupported argument '100' to option '-fexcess-precision='
 // CHECK-WARNING-DAG: optimization flag '-fbranch-count-reg' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fcaller-saves' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fno-default-inline' is not supported
@@ -513,15 +516,6 @@
 // CHECK-CF-PROTECTION-BRANCH: -fcf-protection=branch
 // CHECK-NO-CF-PROTECTION-BRANCH-NOT: -fcf-protection=branch
 
-// RUN: %clang -### -S -fdebug-compilation-dir . %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
-// RUN: %clang -### -S -fdebug-compilation-dir=. %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
-// RUN: %clang -### -integrated-as -fdebug-compilation-dir . -x assembler %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
-// RUN: %clang -### -integrated-as -fdebug-compilation-dir=. -x assembler %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
-// RUN: %clang -### -S -ffile-compilation-dir=. %s 2>&1 | FileCheck -check-prefix=CHECK-DEBUG-COMPILATION-DIR %s
-// RUN: %clang -### -integrated-as -ffile-compilation-dir=. -x assembler %s 2>&1 | FileCheck -check-prefixes=CHECK-DEBUG-COMPILATION-DIR %s
-// CHECK-DEBUG-COMPILATION-DIR: "-fdebug-compilation-dir=."
-// CHECK-DEBUG-COMPILATION-DIR-NOT: "-ffile-compilation-dir=."
-
 // RUN: %clang -### -S -fprofile-instr-generate -fcoverage-compilation-dir=. %s 2>&1 | FileCheck -check-prefix=CHECK-COVERAGE-COMPILATION-DIR %s
 // RUN: %clang -### -S -fprofile-instr-generate -ffile-compilation-dir=. %s 2>&1 | FileCheck -check-prefix=CHECK-COVERAGE-COMPILATION-DIR %s
 // CHECK-COVERAGE-COMPILATION-DIR: "-fcoverage-compilation-dir=."
@@ -548,7 +542,7 @@
 // RUN: %clang -### -S -target x86_64-unknown-linux -fno-record-command-line -frecord-command-line %s 2>&1 | FileCheck -check-prefix=CHECK-RECORD-GCC-SWITCHES %s
 // RUN: %clang -### -S -target x86_64-unknown-linux -frecord-command-line -fno-record-command-line %s 2>&1 | FileCheck -check-prefix=CHECK-NO-RECORD-GCC-SWITCHES %s
 // Test with a couple examples of non-ELF object file formats
-// RUN: %clang -### -S -target x86_64-unknown-macosx -frecord-command-line %s 2>&1 | FileCheck -check-prefix=CHECK-RECORD-GCC-SWITCHES-ERROR %s
+// RUN: %clang -### -S -target x86_64-unknown-macosx -frecord-command-line %s 2>&1 | FileCheck -check-prefix=CHECK-RECORD-GCC-SWITCHES %s
 // RUN: %clang -### -S -target x86_64-unknown-windows -frecord-command-line %s 2>&1 | FileCheck -check-prefix=CHECK-RECORD-GCC-SWITCHES-ERROR %s
 // CHECK-RECORD-GCC-SWITCHES: "-record-command-line"
 // CHECK-NO-RECORD-GCC-SWITCHES-NOT: "-record-command-line"

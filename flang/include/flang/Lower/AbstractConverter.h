@@ -28,11 +28,6 @@ class KindMapping;
 class FirOpBuilder;
 } // namespace fir
 
-namespace fir {
-class KindMapping;
-class FirOpBuilder;
-} // namespace fir
-
 namespace Fortran {
 namespace common {
 template <typename>
@@ -56,6 +51,7 @@ class DerivedTypeSpec;
 } // namespace semantics
 
 namespace lower {
+class SymMap;
 namespace pft {
 struct Variable;
 }
@@ -81,7 +77,8 @@ public:
   virtual mlir::Value getSymbolAddress(SymbolRef sym) = 0;
 
   virtual fir::ExtendedValue
-  getSymbolExtendedValue(const Fortran::semantics::Symbol &sym) = 0;
+  getSymbolExtendedValue(const Fortran::semantics::Symbol &sym,
+                         Fortran::lower::SymMap *symMap = nullptr) = 0;
 
   /// Get the binding of an implied do variable by name.
   virtual mlir::Value impliedDoBinding(llvm::StringRef name) = 0;
@@ -104,6 +101,9 @@ public:
   virtual bool
   createHostAssociateVarClone(const Fortran::semantics::Symbol &sym) = 0;
 
+  virtual void
+  createHostAssociateVarCloneDealloc(const Fortran::semantics::Symbol &sym) = 0;
+
   virtual void copyHostAssociateVar(
       const Fortran::semantics::Symbol &sym,
       mlir::OpBuilder::InsertPoint *copyAssignIP = nullptr) = 0;
@@ -118,6 +118,17 @@ public:
       Fortran::semantics::Symbol::Flag flag, bool collectSymbols = true,
       bool collectHostAssociatedSymbols = false) = 0;
 
+  /// For the given literal constant \p expression, returns a unique name
+  /// that can be used to create a global object to represent this
+  /// literal constant. It will return the same name for equivalent
+  /// literal constant expressions. \p eleTy specifies the data type
+  /// of the constant elements. For array constants it specifies
+  /// the array's element type.
+  virtual llvm::StringRef
+  getUniqueLitName(mlir::Location loc,
+                   std::unique_ptr<Fortran::lower::SomeExpr> expression,
+                   mlir::Type eleTy) = 0;
+
   //===--------------------------------------------------------------------===//
   // Expressions
   //===--------------------------------------------------------------------===//
@@ -128,7 +139,7 @@ public:
   /// expression value. The clean-up for this temporary is added to \p context.
   virtual fir::ExtendedValue genExprAddr(const SomeExpr &expr,
                                          StatementContext &context,
-                                         mlir::Location *loc = nullptr) = 0;
+                                         mlir::Location *locPtr = nullptr) = 0;
 
   /// Generate the address of the location holding the expression, \p expr.
   fir::ExtendedValue genExprAddr(mlir::Location loc, const SomeExpr *expr,
@@ -143,7 +154,7 @@ public:
   /// Generate the computations of the expression to produce a value.
   virtual fir::ExtendedValue genExprValue(const SomeExpr &expr,
                                           StatementContext &context,
-                                          mlir::Location *loc = nullptr) = 0;
+                                          mlir::Location *locPtr = nullptr) = 0;
 
   /// Generate the computations of the expression, \p expr, to produce a value.
   fir::ExtendedValue genExprValue(mlir::Location loc, const SomeExpr *expr,
@@ -193,7 +204,7 @@ public:
   /// Generate the type from a category and kind and length parameters.
   virtual mlir::Type
   genType(Fortran::common::TypeCategory tc, int kind,
-          llvm::ArrayRef<std::int64_t> lenParameters = llvm::None) = 0;
+          llvm::ArrayRef<std::int64_t> lenParameters = std::nullopt) = 0;
   /// Generate the type from a DerivedTypeSpec.
   virtual mlir::Type genType(const Fortran::semantics::DerivedTypeSpec &) = 0;
   /// Generate the type from a Variable
@@ -203,6 +214,10 @@ public:
   /// object will be generated as a global.
   virtual void registerRuntimeTypeInfo(mlir::Location loc,
                                        SymbolRef typeInfoSym) = 0;
+
+  virtual void registerDispatchTableInfo(
+      mlir::Location loc,
+      const Fortran::semantics::DerivedTypeSpec *typeSpec) = 0;
 
   //===--------------------------------------------------------------------===//
   // Locations
@@ -215,6 +230,9 @@ public:
   /// Generate the location as converted from a CharBlock
   virtual mlir::Location genLocation(const Fortran::parser::CharBlock &) = 0;
 
+  /// Get the converter's current scope
+  virtual const Fortran::semantics::Scope &getCurrentScope() = 0;
+
   //===--------------------------------------------------------------------===//
   // FIR/MLIR
   //===--------------------------------------------------------------------===//
@@ -225,10 +243,17 @@ public:
   virtual mlir::ModuleOp &getModuleOp() = 0;
   /// Get the MLIRContext
   virtual mlir::MLIRContext &getMLIRContext() = 0;
-  /// Unique a symbol
+  /// Unique a symbol (add a containing scope specific prefix)
   virtual std::string mangleName(const Fortran::semantics::Symbol &) = 0;
+  /// Unique a derived type (add a containing scope specific prefix)
+  virtual std::string
+  mangleName(const Fortran::semantics::DerivedTypeSpec &) = 0;
+  /// Unique a compiler generated name (add a containing scope specific prefix)
+  virtual std::string mangleName(std::string &) = 0;
   /// Get the KindMap.
   virtual const fir::KindMapping &getKindMap() = 0;
+
+  virtual Fortran::lower::StatementContext &getFctCtx() = 0;
 
   AbstractConverter(const Fortran::lower::LoweringOptions &loweringOptions)
       : loweringOptions(loweringOptions) {}

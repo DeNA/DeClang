@@ -26,9 +26,11 @@
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/VirtualFileSystem.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Host.h"
+#include <stdlib.h>
 
 using llvm::StringRef;
 
@@ -63,7 +65,7 @@ createAndPopulateDiagOpts(llvm::ArrayRef<const char *> argv) {
 static int executeFC1Tool(llvm::SmallVectorImpl<const char *> &argV) {
   llvm::StringRef tool = argV[1];
   if (tool == "-fc1")
-    return fc1_main(makeArrayRef(argV).slice(2), argV[0]);
+    return fc1_main(llvm::ArrayRef(argV).slice(2), argV[0]);
 
   // Reject unknown tools.
   // ATM it only supports fc1. Any fc1[*] is rejected.
@@ -72,12 +74,14 @@ static int executeFC1Tool(llvm::SmallVectorImpl<const char *> &argV) {
   return 1;
 }
 
-static void ExpandResponseFiles(
-    llvm::StringSaver &saver, llvm::SmallVectorImpl<const char *> &args) {
+static void ExpandResponseFiles(llvm::StringSaver &saver,
+                                llvm::SmallVectorImpl<const char *> &args) {
   // We're defaulting to the GNU syntax, since we don't have a CL mode.
   llvm::cl::TokenizerCallback tokenizer = &llvm::cl::TokenizeGNUCommandLine;
   llvm::cl::ExpansionContext ExpCtx(saver.getAllocator(), tokenizer);
-  ExpCtx.expandResponseFiles(args);
+  if (llvm::Error Err = ExpCtx.expandResponseFiles(args)) {
+    llvm::errs() << toString(std::move(Err)) << '\n';
+  }
 }
 
 int main(int argc, const char **argv) {
@@ -94,8 +98,8 @@ int main(int argc, const char **argv) {
   ExpandResponseFiles(saver, args);
 
   // Check if flang-new is in the frontend mode
-  auto firstArg = std::find_if(
-      args.begin() + 1, args.end(), [](const char *a) { return a != nullptr; });
+  auto firstArg = std::find_if(args.begin() + 1, args.end(),
+                               [](const char *a) { return a != nullptr; });
   if (firstArg != args.end()) {
     if (llvm::StringRef(args[1]).startswith("-cc1")) {
       llvm::errs() << "error: unknown integrated tool '" << args[1] << "'. "
@@ -125,12 +129,35 @@ int main(int argc, const char **argv) {
 
   // Prepare the driver
   clang::driver::Driver theDriver(driverPath,
-      llvm::sys::getDefaultTargetTriple(), diags, "flang LLVM compiler");
+                                  llvm::sys::getDefaultTargetTriple(), diags,
+                                  "flang LLVM compiler");
   theDriver.setTargetAndMode(targetandMode);
   std::unique_ptr<clang::driver::Compilation> c(
       theDriver.BuildCompilation(args));
   llvm::SmallVector<std::pair<int, const clang::driver::Command *>, 4>
       failingCommands;
+
+  // Set the environment variable, FLANG_COMPILER_OPTIONS_STRING, to contain all
+  // the compiler options. This is intended for the frontend driver,
+  // flang-new -fc1, to enable the implementation of the COMPILER_OPTIONS
+  // intrinsic. To this end, the frontend driver requires the list of the
+  // original compiler options, which is not available through other means.
+  // TODO: This way of passing information between the compiler and frontend
+  // drivers is discouraged. We should find a better way not involving env
+  // variables.
+  std::string compilerOptsGathered;
+  llvm::raw_string_ostream os(compilerOptsGathered);
+  for (int i = 0; i < argc; ++i) {
+    os << argv[i];
+    if (i < argc - 1) {
+      os << ' ';
+    }
+  }
+#ifdef _WIN32
+  _putenv_s("FLANG_COMPILER_OPTIONS_STRING", compilerOptsGathered.c_str());
+#else
+  setenv("FLANG_COMPILER_OPTIONS_STRING", compilerOptsGathered.c_str(), 1);
+#endif
 
   // Run the driver
   int res = 1;

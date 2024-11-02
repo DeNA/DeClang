@@ -2,8 +2,6 @@
 // RUN: %clang_cc1 -verify=ref %s
 
 
-// ref-no-diagnostics
-
 constexpr int a = 10;
 constexpr const int &b = a;
 static_assert(a == b, "");
@@ -71,9 +69,22 @@ constexpr int testGetValue() {
 }
 static_assert(testGetValue() == 30, "");
 
-// FIXME: ExprWithCleanups + MaterializeTemporaryExpr not implemented
-constexpr const int &MCE = 1; // expected-error{{must be initialized by a constant expression}}
+constexpr const int &MCE = 20;
+static_assert(MCE == 20, "");
+static_assert(MCE == 30, ""); // expected-error {{static assertion failed}} \
+                              // expected-note {{evaluates to '20 == 30'}} \
+                              // ref-error {{static assertion failed}} \
+                              // ref-note {{evaluates to '20 == 30'}}
 
+constexpr int LocalMCE() {
+  const int &m = 100;
+  return m;
+}
+static_assert(LocalMCE() == 100, "");
+static_assert(LocalMCE() == 200, ""); // expected-error {{static assertion failed}} \
+                                      // expected-note {{evaluates to '100 == 200'}} \
+                                      // ref-error {{static assertion failed}} \
+                                      // ref-note {{evaluates to '100 == 200'}}
 
 struct S {
   int i, j;
@@ -83,9 +94,34 @@ constexpr int RefToMemberExpr() {
   S s{1, 2};
 
   int &j = s.i;
-  j += 10;
+  j = j + 10;
 
   return j;
 }
-// FIXME: Should be accepted.
-static_assert(RefToMemberExpr() == 11, ""); // expected-error {{not an integral constant expression}}
+static_assert(RefToMemberExpr() == 11, "");
+
+struct Ref {
+  int &a;
+};
+
+constexpr int RecordWithRef() {
+  int m = 100;
+  Ref r{m};
+  m = 200;
+  return r.a;
+}
+static_assert(RecordWithRef() == 200, "");
+
+
+struct Ref2 {
+  int &a;
+  constexpr Ref2(int &a) : a(a) {}
+};
+
+constexpr int RecordWithRef2() {
+  int m = 100;
+  Ref2 r(m);
+  m = 200;
+  return r.a;
+}
+static_assert(RecordWithRef2() == 200, "");

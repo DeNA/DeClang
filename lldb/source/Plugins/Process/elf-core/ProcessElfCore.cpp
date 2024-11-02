@@ -99,7 +99,7 @@ bool ProcessElfCore::CanDebug(lldb::TargetSP target_sp,
 ProcessElfCore::ProcessElfCore(lldb::TargetSP target_sp,
                                lldb::ListenerSP listener_sp,
                                const FileSpec &core_file)
-    : PostMortemProcess(target_sp, listener_sp), m_core_file(core_file) {}
+    : PostMortemProcess(target_sp, listener_sp, core_file) {}
 
 // Destructor
 ProcessElfCore::~ProcessElfCore() {
@@ -258,11 +258,11 @@ Status ProcessElfCore::DoLoadCore() {
     if (!m_nt_file_entries.empty()) {
       ModuleSpec exe_module_spec;
       exe_module_spec.GetArchitecture() = arch;
-      exe_module_spec.GetFileSpec().SetFile(
-          m_nt_file_entries[0].path.GetCString(), FileSpec::Style::native);
+      exe_module_spec.GetFileSpec().SetFile(m_nt_file_entries[0].path,
+                                            FileSpec::Style::native);
       if (exe_module_spec.GetFileSpec()) {
-        exe_module_sp = GetTarget().GetOrCreateModule(exe_module_spec, 
-                                                      true /* notify */);
+        exe_module_sp =
+            GetTarget().GetOrCreateModule(exe_module_spec, true /* notify */);
         if (exe_module_sp)
           GetTarget().SetExecutableModule(exe_module_sp, eLoadDependentsNo);
       }
@@ -920,6 +920,7 @@ llvm::Error ProcessElfCore::parseLinuxNotes(llvm::ArrayRef<CoreNote> notes) {
       if (status.Fail())
         return status.ToError();
       thread_data.signo = siginfo.si_signo;
+      thread_data.code = siginfo.si_code;
       break;
     }
     case ELF::NT_FILE: {
@@ -937,7 +938,7 @@ llvm::Error ProcessElfCore::parseLinuxNotes(llvm::ArrayRef<CoreNote> notes) {
       for (uint64_t i = 0; i < count; ++i) {
         const char *path = note.data.GetCStr(&offset);
         if (path && path[0])
-          m_nt_file_entries[i].path.SetCString(path);
+          m_nt_file_entries[i].path.assign(path);
       }
       break;
     }

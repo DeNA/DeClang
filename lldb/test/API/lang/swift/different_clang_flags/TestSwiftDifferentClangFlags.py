@@ -21,12 +21,10 @@ import os.path
 import unittest2
 
 import sys
-
 if sys.version_info.major == 2:
     import commands as subprocess
 else:
     import subprocess
-
 
 def execute_command(command):
     # print '%% %s' % (command)
@@ -38,32 +36,25 @@ def execute_command(command):
 
 
 class TestSwiftDifferentClangFlags(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @skipUnlessDarwin
     @swiftTest
     @skipIf(
         debug_info=decorators.no_match("dsym"),
-        bugnumber="This test requires a stripped binary and a dSYM",
-    )
+        bugnumber="This test requires a stripped binary and a dSYM")
     def test_swift_different_clang_flags(self):
         """Test that we use the right compiler flags when debugging"""
         self.build()
-        target, process, thread, modb_breakpoint = lldbutil.run_to_source_breakpoint(
-            self,
-            "break here",
-            lldb.SBFileSpec("modb.swift"),
-            exe_name=self.getBuildArtifact("main"),
-            extra_images=["moda", "modb"],
-        )
+        target, process, thread, modb_breakpoint = \
+            lldbutil.run_to_source_breakpoint(
+                self, 'break here', lldb.SBFileSpec("modb.swift"),
+                exe_name=self.getBuildArtifact("main"),
+                extra_images=['moda', 'modb'])
 
         main_breakpoint = target.BreakpointCreateBySourceRegex(
-            "break here", lldb.SBFileSpec("main.swift")
-        )
-        self.assertTrue(modb_breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
+            'break here',lldb.SBFileSpec('main.swift'))
+        self.assertTrue(
+            modb_breakpoint.GetNumLocations() > 0,
+            VALID_BREAKPOINT)
 
         var = self.frame().FindVariable("myThree")
         three = var.GetChildMemberWithName("three")
@@ -71,7 +62,8 @@ class TestSwiftDifferentClangFlags(TestBase):
         lldbutil.check_variable(self, three, False, value="3")
 
         process.Continue()
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, main_breakpoint)
+        threads = lldbutil.get_threads_stopped_at_breakpoint(
+            process, main_breakpoint)
 
         var = self.frame().FindVariable("a")
         lldbutil.check_variable(self, var, False, value="2")
@@ -80,3 +72,4 @@ class TestSwiftDifferentClangFlags(TestBase):
 
         var = self.frame().EvaluateExpression("fA()")
         lldbutil.check_variable(self, var, False, value="2")
+

@@ -55,7 +55,10 @@ public:
     target.addLegalOp<tosa::IfOp>();
     target.addLegalOp<tosa::ConstOp>();
     target.addLegalOp<tosa::WhileOp>();
+    target.addLegalOp<tosa::ConcatOp>();
     target.addLegalOp<tosa::SliceOp>();
+    target.addLegalOp<tosa::ReshapeOp>();
+    target.addLegalOp<tosa::PadOp>();
 
     target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
 
@@ -78,11 +81,13 @@ void mlir::tosa::addTosaToLinalgPasses(OpPassManager &pm,
     pm.addNestedPass<func::FuncOp>(tosa::createTosaOptionalDecompositions());
   pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
 
+  pm.addNestedPass<func::FuncOp>(tosa::createTosaInferShapesPass());
   pm.addNestedPass<func::FuncOp>(tosa::createTosaMakeBroadcastablePass());
   pm.addNestedPass<func::FuncOp>(tosa::createTosaToLinalgNamed());
   pm.addNestedPass<func::FuncOp>(createCanonicalizerPass());
   // TODO: Remove pass that operates on const tensor and enable optionality
   pm.addNestedPass<func::FuncOp>(tosa::createTosaLayerwiseConstantFoldPass());
   pm.addNestedPass<func::FuncOp>(tosa::createTosaMakeBroadcastablePass());
+  pm.addNestedPass<func::FuncOp>(tosa::createTosaValidationPass());
   pm.addNestedPass<func::FuncOp>(tosa::createTosaToLinalg());
 }

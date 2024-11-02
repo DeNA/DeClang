@@ -11,6 +11,11 @@
 #include "Symbols.h"
 #include "SyntheticSections.h"
 #include "Target.h"
+#include "llvm/Support/ELFAttributes.h"
+#include "llvm/Support/LEB128.h"
+#include "llvm/Support/RISCVAttributeParser.h"
+#include "llvm/Support/RISCVAttributes.h"
+#include "llvm/Support/RISCVISAInfo.h"
 #include "llvm/Support/TimeProfiler.h"
 
 using namespace llvm;
@@ -43,6 +48,11 @@ public:
 
 } // end anonymous namespace
 
+// These are internal relocation numbers for GP relaxation. They aren't part
+// of the psABI spec.
+#define INTERNAL_R_RISCV_GPREL_I 256
+#define INTERNAL_R_RISCV_GPREL_S 257
+
 const uint64_t dtpOffset = 0x800;
 
 enum Op {
@@ -57,6 +67,7 @@ enum Op {
 
 enum Reg {
   X_RA = 1,
+  X_GP = 3,
   X_TP = 4,
   X_T0 = 5,
   X_T1 = 6,
@@ -275,6 +286,7 @@ RelExpr RISCV::getRelExpr(const RelType type, const Symbol &s,
     return R_PC;
   case R_RISCV_CALL:
   case R_RISCV_CALL_PLT:
+  case R_RISCV_PLT32:
     return R_PLT_PC;
   case R_RISCV_GOT_HI20:
     return R_GOT_PC;
@@ -284,7 +296,6 @@ RelExpr RISCV::getRelExpr(const RelType type, const Symbol &s,
   case R_RISCV_TLS_GD_HI20:
     return R_TLSGD_PC;
   case R_RISCV_TLS_GOT_HI20:
-    config->hasTlsIe = true;
     return R_GOT_PC;
   case R_RISCV_TPREL_HI20:
   case R_RISCV_TPREL_LO12_I:
@@ -431,6 +442,20 @@ void RISCV::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     return;
   }
 
+  case INTERNAL_R_RISCV_GPREL_I:
+  case INTERNAL_R_RISCV_GPREL_S: {
+    Defined *gp = ElfSym::riscvGlobalPointer;
+    int64_t displace = SignExtend64(val - gp->getVA(), bits);
+    checkInt(loc, displace, 12, rel);
+    uint32_t insn = (read32le(loc) & ~(31 << 15)) | (X_GP << 15);
+    if (rel.type == INTERNAL_R_RISCV_GPREL_I)
+      insn = setLO12_I(insn, displace);
+    else
+      insn = setLO12_S(insn, displace);
+    write32le(loc, insn);
+    return;
+  }
+
   case R_RISCV_ADD8:
     *loc += val;
     return;
@@ -469,6 +494,7 @@ void RISCV::relocate(uint8_t *loc, const Relocation &rel, uint64_t val) const {
     return;
   case R_RISCV_SET32:
   case R_RISCV_32_PCREL:
+  case R_RISCV_PLT32:
     write32le(loc, val);
     return;
 
@@ -514,20 +540,28 @@ static void initSymbolAnchors() {
       continue;
     for (InputSection *sec : getInputSections(*osec, storage)) {
       sec->relaxAux = make<RISCVRelaxAux>();
-      if (sec->relocations.size()) {
+      if (sec->relocs().size()) {
         sec->relaxAux->relocDeltas =
-            std::make_unique<uint32_t[]>(sec->relocations.size());
+            std::make_unique<uint32_t[]>(sec->relocs().size());
         sec->relaxAux->relocTypes =
-            std::make_unique<RelType[]>(sec->relocations.size());
+            std::make_unique<RelType[]>(sec->relocs().size());
       }
     }
   }
   // Store anchors (st_value and st_value+st_size) for symbols relative to text
   // sections.
+  //
+  // For a defined symbol foo, we may have `d->file != file` with --wrap=foo.
+  // We should process foo, as the defining object file's symbol table may not
+  // contain foo after redirectSymbols changed the foo entry to __wrap_foo. To
+  // avoid adding a Defined that is undefined in one object file, use
+  // `!d->scriptDefined` to exclude symbols that are definitely not wrapped.
+  //
+  // `relaxAux->anchors` may contain duplicate symbols, but that is fine.
   for (InputFile *file : ctx.objectFiles)
     for (Symbol *sym : file->getSymbols()) {
       auto *d = dyn_cast<Defined>(sym);
-      if (!d || d->file != file)
+      if (!d || (d->file != file && !d->scriptDefined))
         continue;
       if (auto *sec = dyn_cast_or_null<InputSection>(d->section))
         if (sec->flags & SHF_EXECINSTR && sec->relaxAux) {
@@ -557,7 +591,7 @@ static void relaxCall(const InputSection &sec, size_t i, uint64_t loc,
                       Relocation &r, uint32_t &remove) {
   const bool rvc = config->eflags & EF_RISCV_RVC;
   const Symbol &sym = *r.sym;
-  const uint64_t insnPair = read64le(sec.rawData.data() + r.offset);
+  const uint64_t insnPair = read64le(sec.content().data() + r.offset);
   const uint32_t rd = extractBits(insnPair, 32 + 11, 32 + 7);
   const uint64_t dest =
       (r.expr == R_PLT_PC ? sym.getPltVA() : sym.getVA()) + r.addend;
@@ -585,7 +619,7 @@ static void relaxTlsLe(const InputSection &sec, size_t i, uint64_t loc,
   uint64_t val = r.sym->getVA(r.addend);
   if (hi20(val) != 0)
     return;
-  uint32_t insn = read32le(sec.rawData.data() + r.offset);
+  uint32_t insn = read32le(sec.content().data() + r.offset);
   switch (r.type) {
   case R_RISCV_TPREL_HI20:
   case R_RISCV_TPREL_ADD:
@@ -608,31 +642,40 @@ static void relaxTlsLe(const InputSection &sec, size_t i, uint64_t loc,
   }
 }
 
+static void relaxHi20Lo12(const InputSection &sec, size_t i, uint64_t loc,
+                          Relocation &r, uint32_t &remove) {
+  const Defined *gp = ElfSym::riscvGlobalPointer;
+  if (!gp)
+    return;
+
+  if (!isInt<12>(r.sym->getVA(r.addend) - gp->getVA()))
+    return;
+
+  switch (r.type) {
+  case R_RISCV_HI20:
+    // Remove lui rd, %hi20(x).
+    sec.relaxAux->relocTypes[i] = R_RISCV_RELAX;
+    remove = 4;
+    break;
+  case R_RISCV_LO12_I:
+    sec.relaxAux->relocTypes[i] = INTERNAL_R_RISCV_GPREL_I;
+    break;
+  case R_RISCV_LO12_S:
+    sec.relaxAux->relocTypes[i] = INTERNAL_R_RISCV_GPREL_S;
+    break;
+  }
+}
+
 static bool relax(InputSection &sec) {
   const uint64_t secAddr = sec.getVA();
   auto &aux = *sec.relaxAux;
   bool changed = false;
+  ArrayRef<SymbolAnchor> sa = ArrayRef(aux.anchors);
+  uint64_t delta = 0;
 
-  // Get st_value delta for symbols relative to this section from the previous
-  // iteration.
-  DenseMap<const Defined *, uint64_t> valueDelta;
-  ArrayRef<SymbolAnchor> sa = makeArrayRef(aux.anchors);
-  uint32_t delta = 0;
-  for (auto [i, r] : llvm::enumerate(sec.relocations)) {
-    for (; sa.size() && sa[0].offset <= r.offset; sa = sa.slice(1))
-      if (!sa[0].end)
-        valueDelta[sa[0].d] = delta;
-    delta = aux.relocDeltas[i];
-  }
-  for (const SymbolAnchor &sa : sa)
-    if (!sa.end)
-      valueDelta[sa.d] = delta;
-  sa = makeArrayRef(aux.anchors);
-  delta = 0;
-
-  std::fill_n(aux.relocTypes.get(), sec.relocations.size(), R_RISCV_NONE);
+  std::fill_n(aux.relocTypes.get(), sec.relocs().size(), R_RISCV_NONE);
   aux.writes.clear();
-  for (auto [i, r] : llvm::enumerate(sec.relocations)) {
+  for (auto [i, r] : llvm::enumerate(sec.relocs())) {
     const uint64_t loc = secAddr + r.offset - delta;
     uint32_t &cur = aux.relocDeltas[i], remove = 0;
     switch (r.type) {
@@ -647,17 +690,24 @@ static bool relax(InputSection &sec) {
     }
     case R_RISCV_CALL:
     case R_RISCV_CALL_PLT:
-      if (i + 1 != sec.relocations.size() &&
-          sec.relocations[i + 1].type == R_RISCV_RELAX)
+      if (i + 1 != sec.relocs().size() &&
+          sec.relocs()[i + 1].type == R_RISCV_RELAX)
         relaxCall(sec, i, loc, r, remove);
       break;
     case R_RISCV_TPREL_HI20:
     case R_RISCV_TPREL_ADD:
     case R_RISCV_TPREL_LO12_I:
     case R_RISCV_TPREL_LO12_S:
-      if (i + 1 != sec.relocations.size() &&
-          sec.relocations[i + 1].type == R_RISCV_RELAX)
+      if (i + 1 != sec.relocs().size() &&
+          sec.relocs()[i + 1].type == R_RISCV_RELAX)
         relaxTlsLe(sec, i, loc, r, remove);
+      break;
+    case R_RISCV_HI20:
+    case R_RISCV_LO12_I:
+    case R_RISCV_LO12_S:
+      if (i + 1 != sec.relocs().size() &&
+          sec.relocs()[i + 1].type == R_RISCV_RELAX)
+        relaxHi20Lo12(sec, i, loc, r, remove);
       break;
     }
 
@@ -668,7 +718,7 @@ static bool relax(InputSection &sec) {
       if (sa[0].end)
         sa[0].d->size = sa[0].offset - delta - sa[0].d->value;
       else
-        sa[0].d->value -= delta - valueDelta.find(sa[0].d)->second;
+        sa[0].d->value = sa[0].offset - delta;
     }
     delta += remove;
     if (delta != cur) {
@@ -681,11 +731,11 @@ static bool relax(InputSection &sec) {
     if (a.end)
       a.d->size = a.offset - delta - a.d->value;
     else
-      a.d->value -= delta - valueDelta.find(a.d)->second;
+      a.d->value = a.offset - delta;
   }
   // Inform assignAddresses that the size has changed.
-  if (!isUInt<16>(delta))
-    fatal("section size decrease is too large");
+  if (!isUInt<32>(delta))
+    fatal("section size decrease is too large: " + Twine(delta));
   sec.bytesDropped = delta;
   return changed;
 }
@@ -728,15 +778,15 @@ void elf::riscvFinalizeRelax(int passes) {
       if (!aux.relocDeltas)
         continue;
 
-      auto &rels = sec->relocations;
-      ArrayRef<uint8_t> old = sec->rawData;
-      size_t newSize =
-          old.size() - aux.relocDeltas[sec->relocations.size() - 1];
+      MutableArrayRef<Relocation> rels = sec->relocs();
+      ArrayRef<uint8_t> old = sec->content();
+      size_t newSize = old.size() - aux.relocDeltas[rels.size() - 1];
       size_t writesIdx = 0;
       uint8_t *p = context().bAlloc.Allocate<uint8_t>(newSize);
       uint64_t offset = 0;
       int64_t delta = 0;
-      sec->rawData = makeArrayRef(p, newSize);
+      sec->content_ = p;
+      sec->size = newSize;
       sec->bytesDropped = 0;
 
       // Update section content: remove NOPs for R_RISCV_ALIGN and rewrite
@@ -772,6 +822,9 @@ void elf::riscvFinalizeRelax(int passes) {
           }
         } else if (RelType newType = aux.relocTypes[i]) {
           switch (newType) {
+          case INTERNAL_R_RISCV_GPREL_I:
+          case INTERNAL_R_RISCV_GPREL_S:
+            break;
           case R_RISCV_RELAX:
             // Used by relaxTlsLe to indicate the relocation is ignored.
             break;
@@ -815,6 +868,201 @@ void elf::riscvFinalizeRelax(int passes) {
       }
     }
   }
+}
+
+namespace {
+// Representation of the merged .riscv.attributes input sections. The psABI
+// specifies merge policy for attributes. E.g. if we link an object without an
+// extension with an object with the extension, the output Tag_RISCV_arch shall
+// contain the extension. Some tools like objdump parse .riscv.attributes and
+// disabling some instructions if the first Tag_RISCV_arch does not contain an
+// extension.
+class RISCVAttributesSection final : public SyntheticSection {
+public:
+  RISCVAttributesSection()
+      : SyntheticSection(0, SHT_RISCV_ATTRIBUTES, 1, ".riscv.attributes") {}
+
+  size_t getSize() const override { return size; }
+  void writeTo(uint8_t *buf) override;
+
+  static constexpr StringRef vendor = "riscv";
+  DenseMap<unsigned, unsigned> intAttr;
+  DenseMap<unsigned, StringRef> strAttr;
+  size_t size = 0;
+};
+} // namespace
+
+static void mergeArch(RISCVISAInfo::OrderedExtensionMap &mergedExts,
+                      unsigned &mergedXlen, const InputSectionBase *sec,
+                      StringRef s) {
+  auto maybeInfo = RISCVISAInfo::parseNormalizedArchString(s);
+  if (!maybeInfo) {
+    errorOrWarn(toString(sec) + ": " + s + ": " +
+                llvm::toString(maybeInfo.takeError()));
+    return;
+  }
+
+  // Merge extensions.
+  RISCVISAInfo &info = **maybeInfo;
+  if (mergedExts.empty()) {
+    mergedExts = info.getExtensions();
+    mergedXlen = info.getXLen();
+  } else {
+    for (const auto &ext : info.getExtensions()) {
+      if (auto it = mergedExts.find(ext.first); it != mergedExts.end()) {
+        if (std::tie(it->second.MajorVersion, it->second.MinorVersion) >=
+            std::tie(ext.second.MajorVersion, ext.second.MinorVersion))
+          continue;
+      }
+      mergedExts[ext.first] = ext.second;
+    }
+  }
+}
+
+static RISCVAttributesSection *
+mergeAttributesSection(const SmallVector<InputSectionBase *, 0> &sections) {
+  RISCVISAInfo::OrderedExtensionMap exts;
+  const InputSectionBase *firstStackAlign = nullptr;
+  unsigned firstStackAlignValue = 0, xlen = 0;
+  bool hasArch = false;
+
+  in.riscvAttributes = std::make_unique<RISCVAttributesSection>();
+  auto &merged = static_cast<RISCVAttributesSection &>(*in.riscvAttributes);
+
+  // Collect all tags values from attributes section.
+  const auto &attributesTags = RISCVAttrs::getRISCVAttributeTags();
+  for (const InputSectionBase *sec : sections) {
+    RISCVAttributeParser parser;
+    if (Error e = parser.parse(sec->content(), support::little))
+      warn(toString(sec) + ": " + llvm::toString(std::move(e)));
+    for (const auto &tag : attributesTags) {
+      switch (RISCVAttrs::AttrType(tag.attr)) {
+        // Integer attributes.
+      case RISCVAttrs::STACK_ALIGN:
+        if (auto i = parser.getAttributeValue(tag.attr)) {
+          auto r = merged.intAttr.try_emplace(tag.attr, *i);
+          if (r.second) {
+            firstStackAlign = sec;
+            firstStackAlignValue = *i;
+          } else if (r.first->second != *i) {
+            errorOrWarn(toString(sec) + " has stack_align=" + Twine(*i) +
+                        " but " + toString(firstStackAlign) +
+                        " has stack_align=" + Twine(firstStackAlignValue));
+          }
+        }
+        continue;
+      case RISCVAttrs::UNALIGNED_ACCESS:
+        if (auto i = parser.getAttributeValue(tag.attr))
+          merged.intAttr[tag.attr] |= *i;
+        continue;
+
+        // String attributes.
+      case RISCVAttrs::ARCH:
+        if (auto s = parser.getAttributeString(tag.attr)) {
+          hasArch = true;
+          mergeArch(exts, xlen, sec, *s);
+        }
+        continue;
+
+        // Attributes which use the default handling.
+      case RISCVAttrs::PRIV_SPEC:
+      case RISCVAttrs::PRIV_SPEC_MINOR:
+      case RISCVAttrs::PRIV_SPEC_REVISION:
+        break;
+      }
+
+      // Fallback for deprecated priv_spec* and other unknown attributes: retain
+      // the attribute if all input sections agree on the value. GNU ld uses 0
+      // and empty strings as default values which are not dumped to the output.
+      // TODO Adjust after resolution to
+      // https://github.com/riscv-non-isa/riscv-elf-psabi-doc/issues/352
+      if (tag.attr % 2 == 0) {
+        if (auto i = parser.getAttributeValue(tag.attr)) {
+          auto r = merged.intAttr.try_emplace(tag.attr, *i);
+          if (!r.second && r.first->second != *i)
+            r.first->second = 0;
+        }
+      } else if (auto s = parser.getAttributeString(tag.attr)) {
+        auto r = merged.strAttr.try_emplace(tag.attr, *s);
+        if (!r.second && r.first->second != *s)
+          r.first->second = {};
+      }
+    }
+  }
+
+  if (hasArch) {
+    if (auto result = RISCVISAInfo::postProcessAndChecking(
+            std::make_unique<RISCVISAInfo>(xlen, exts))) {
+      merged.strAttr.try_emplace(RISCVAttrs::ARCH,
+                                 saver().save((*result)->toString()));
+    } else {
+      errorOrWarn(llvm::toString(result.takeError()));
+    }
+  }
+
+  // The total size of headers: format-version [ <section-length> "vendor-name"
+  // [ <file-tag> <size>.
+  size_t size = 5 + merged.vendor.size() + 1 + 5;
+  for (auto &attr : merged.intAttr)
+    if (attr.second != 0)
+      size += getULEB128Size(attr.first) + getULEB128Size(attr.second);
+  for (auto &attr : merged.strAttr)
+    if (!attr.second.empty())
+      size += getULEB128Size(attr.first) + attr.second.size() + 1;
+  merged.size = size;
+  return &merged;
+}
+
+void RISCVAttributesSection::writeTo(uint8_t *buf) {
+  const size_t size = getSize();
+  uint8_t *const end = buf + size;
+  *buf = ELFAttrs::Format_Version;
+  write32(buf + 1, size - 1);
+  buf += 5;
+
+  memcpy(buf, vendor.data(), vendor.size());
+  buf += vendor.size() + 1;
+
+  *buf = ELFAttrs::File;
+  write32(buf + 1, end - buf);
+  buf += 5;
+
+  for (auto &attr : intAttr) {
+    if (attr.second == 0)
+      continue;
+    buf += encodeULEB128(attr.first, buf);
+    buf += encodeULEB128(attr.second, buf);
+  }
+  for (auto &attr : strAttr) {
+    if (attr.second.empty())
+      continue;
+    buf += encodeULEB128(attr.first, buf);
+    memcpy(buf, attr.second.data(), attr.second.size());
+    buf += attr.second.size() + 1;
+  }
+}
+
+void elf::mergeRISCVAttributesSections() {
+  // Find the first input SHT_RISCV_ATTRIBUTES; return if not found.
+  size_t place =
+      llvm::find_if(ctx.inputSections,
+                    [](auto *s) { return s->type == SHT_RISCV_ATTRIBUTES; }) -
+      ctx.inputSections.begin();
+  if (place == ctx.inputSections.size())
+    return;
+
+  // Extract all SHT_RISCV_ATTRIBUTES sections into `sections`.
+  SmallVector<InputSectionBase *, 0> sections;
+  llvm::erase_if(ctx.inputSections, [&](InputSectionBase *s) {
+    if (s->type != SHT_RISCV_ATTRIBUTES)
+      return false;
+    sections.push_back(s);
+    return true;
+  });
+
+  // Add the merged section.
+  ctx.inputSections.insert(ctx.inputSections.begin() + place,
+                           mergeAttributesSection(sections));
 }
 
 TargetInfo *elf::getRISCVTargetInfo() {

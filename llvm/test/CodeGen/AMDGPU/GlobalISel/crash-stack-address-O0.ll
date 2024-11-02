@@ -7,7 +7,7 @@
 define amdgpu_kernel void @stack_write_fi() {
 ; CHECK-LABEL: stack_write_fi:
 ; CHECK:       ; %bb.0: ; %entry
-; CHECK-NEXT:    s_add_u32 s0, s0, s7
+; CHECK-NEXT:    s_add_u32 s0, s0, s17
 ; CHECK-NEXT:    s_addc_u32 s1, s1, 0
 ; CHECK-NEXT:    s_mov_b32 s5, 0
 ; CHECK-NEXT:    s_mov_b32 s4, 0
@@ -20,6 +20,6 @@ define amdgpu_kernel void @stack_write_fi() {
 ; CHECK-NEXT:    s_endpgm
 entry:
   %alloca = alloca i64, align 4, addrspace(5)
-  store volatile i64 0, i64 addrspace(5)* %alloca, align 4
+  store volatile i64 0, ptr addrspace(5) %alloca, align 4
   ret void
 }

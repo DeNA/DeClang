@@ -10,6 +10,7 @@
 #include <csignal>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "lldb/Breakpoint/BreakpointIDList.h"
@@ -98,29 +99,27 @@ PlatformProperties::PlatformProperties() {
 
 bool PlatformProperties::GetUseModuleCache() const {
   const auto idx = ePropertyUseModuleCache;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_platform_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_platform_properties[idx].default_uint_value != 0);
 }
 
 bool PlatformProperties::SetUseModuleCache(bool use_module_cache) {
-  return m_collection_sp->SetPropertyAtIndexAsBoolean(
-      nullptr, ePropertyUseModuleCache, use_module_cache);
+  return SetPropertyAtIndex(ePropertyUseModuleCache, use_module_cache);
 }
 
 FileSpec PlatformProperties::GetModuleCacheDirectory() const {
-  return m_collection_sp->GetPropertyAtIndexAsFileSpec(
-      nullptr, ePropertyModuleCacheDirectory);
+  return GetPropertyAtIndexAs<FileSpec>(ePropertyModuleCacheDirectory, {});
 }
 
 bool PlatformProperties::SetModuleCacheDirectory(const FileSpec &dir_spec) {
-  return m_collection_sp->SetPropertyAtIndexAsFileSpec(
-      nullptr, ePropertyModuleCacheDirectory, dir_spec);
+  return m_collection_sp->SetPropertyAtIndex(ePropertyModuleCacheDirectory,
+                                             dir_spec);
 }
 
 void PlatformProperties::SetDefaultModuleCacheDirectory(
     const FileSpec &dir_spec) {
   auto f_spec_opt = m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpec(
-        nullptr, false, ePropertyModuleCacheDirectory);
+      ePropertyModuleCacheDirectory);
   assert(f_spec_opt);
   f_spec_opt->SetDefaultValue(dir_spec);
 }
@@ -159,7 +158,7 @@ Status Platform::GetFileWithUUID(const FileSpec &platform_file,
 
 FileSpecList
 Platform::LocateExecutableScriptingResources(Target *target, Module &module,
-                                             Stream *feedback_stream) {
+                                             Stream &feedback_stream) {
   return FileSpecList();
 }
 
@@ -211,11 +210,10 @@ Status Platform::GetSharedModule(
     Status error(eErrorTypeGeneric);
     ModuleSpec resolved_spec;
     // Check if we have sysroot set.
-    if (m_sdk_sysroot) {
+    if (!m_sdk_sysroot.empty()) {
       // Prepend sysroot to module spec.
       resolved_spec = spec;
-      resolved_spec.GetFileSpec().PrependPathComponent(
-          m_sdk_sysroot.GetStringRef());
+      resolved_spec.GetFileSpec().PrependPathComponent(m_sdk_sysroot);
       // Try to get shared module with resolved spec.
       error = ModuleList::GetSharedModule(resolved_spec, module_sp,
                                           module_search_paths_ptr, old_modules,
@@ -298,7 +296,7 @@ void Platform::GetStatus(Stream &strm) {
   if (!os_version.empty()) {
     strm.Format("OS Version: {0}", os_version.getAsString());
 
-    if (llvm::Optional<std::string> s = GetOSBuildString())
+    if (std::optional<std::string> s = GetOSBuildString())
       strm.Format(" ({0})", *s);
 
     strm.EOL();
@@ -313,9 +311,9 @@ void Platform::GetStatus(Stream &strm) {
     strm.Printf(" Connected: %s\n", is_connected ? "yes" : "no");
   }
 
-  if (GetSDKRootDirectory()) {
-    strm.Format("   Sysroot: {0}\n", GetSDKRootDirectory());
-  }
+  if (const std::string &sdk_root = GetSDKRootDirectory(); !sdk_root.empty())
+    strm.Format("   Sysroot: {0}\n", sdk_root);
+
   if (GetWorkingDirectory()) {
     strm.Printf("WorkingDir: %s\n", GetWorkingDirectory().GetPath().c_str());
   }
@@ -327,7 +325,7 @@ void Platform::GetStatus(Stream &strm) {
   if (!specific_info.empty())
     strm.Printf("Platform-specific connection: %s\n", specific_info.c_str());
 
-  if (llvm::Optional<std::string> s = GetOSKernelDescription())
+  if (std::optional<std::string> s = GetOSKernelDescription())
     strm.Format("    Kernel: {0}\n", *s);
 }
 
@@ -373,13 +371,13 @@ llvm::VersionTuple Platform::GetOSVersion(Process *process) {
   return llvm::VersionTuple();
 }
 
-llvm::Optional<std::string> Platform::GetOSBuildString() {
+std::optional<std::string> Platform::GetOSBuildString() {
   if (IsHost())
     return HostInfo::GetOSBuildString();
   return GetRemoteOSBuildString();
 }
 
-llvm::Optional<std::string> Platform::GetOSKernelDescription() {
+std::optional<std::string> Platform::GetOSKernelDescription() {
   if (IsHost())
     return HostInfo::GetOSKernelDescription();
   return GetRemoteOSKernelDescription();
@@ -434,7 +432,7 @@ RecurseCopy_Callback(void *baton, llvm::sys::fs::file_type ft,
     // make the new directory and get in there
     FileSpec dst_dir = rc_baton->dst;
     if (!dst_dir.GetFilename())
-      dst_dir.SetFilename(src.GetLastPathComponent());
+      dst_dir.SetFilename(src.GetFilename());
     Status error = rc_baton->platform_ptr->MakeDirectory(
         dst_dir, lldb::eFilePermissionsDirectoryDefault);
     if (error.Fail()) {
@@ -992,14 +990,6 @@ uint32_t Platform::FindProcesses(const ProcessInstanceInfoMatch &match_info,
   return match_count;
 }
 
-ProcessInstanceInfoList Platform::GetAllProcesses() {
-  ProcessInstanceInfoList processes;
-  ProcessInstanceInfoMatch match;
-  assert(match.MatchAllProcesses());
-  FindProcesses(match, processes);
-  return processes;
-}
-
 Status Platform::LaunchProcess(ProcessLaunchInfo &launch_info) {
   Status error;
   Log *log = GetLog(LLDBLog::Platform);
@@ -1070,7 +1060,7 @@ lldb::ProcessSP Platform::DebugProcess(ProcessLaunchInfo &launch_info,
                                        Debugger &debugger, Target &target,
                                        Status &error) {
   Log *log = GetLog(LLDBLog::Platform);
-  LLDB_LOG(log, "target = {0})", &target);
+  LLDB_LOG(log, "target = {0}", &target);
 
   ProcessSP process_sp;
   // Make sure we stop at the entry point
@@ -1365,7 +1355,7 @@ static constexpr OptionDefinition g_caching_option_table[] = {
 };
 
 llvm::ArrayRef<OptionDefinition> OptionGroupPlatformRSync::GetDefinitions() {
-  return llvm::makeArrayRef(g_rsync_option_table);
+  return llvm::ArrayRef(g_rsync_option_table);
 }
 
 void OptionGroupPlatformRSync::OptionParsingStarting(
@@ -1413,7 +1403,7 @@ Platform::SetThreadCreationBreakpoint(lldb_private::Target &target) {
 }
 
 llvm::ArrayRef<OptionDefinition> OptionGroupPlatformSSH::GetDefinitions() {
-  return llvm::makeArrayRef(g_ssh_option_table);
+  return llvm::ArrayRef(g_ssh_option_table);
 }
 
 void OptionGroupPlatformSSH::OptionParsingStarting(
@@ -1446,7 +1436,7 @@ OptionGroupPlatformSSH::SetOptionValue(uint32_t option_idx,
 }
 
 llvm::ArrayRef<OptionDefinition> OptionGroupPlatformCaching::GetDefinitions() {
-  return llvm::makeArrayRef(g_caching_option_table);
+  return llvm::ArrayRef(g_caching_option_table);
 }
 
 void OptionGroupPlatformCaching::OptionParsingStarting(
@@ -1640,7 +1630,7 @@ Status Platform::DownloadModuleSlice(const FileSpec &src_file_spec,
     return error;
   }
 
-  std::vector<char> buffer(1024);
+  std::vector<char> buffer(512 * 1024);
   auto offset = src_offset;
   uint64_t total_bytes_read = 0;
   while (total_bytes_read < src_size) {
@@ -1818,7 +1808,7 @@ lldb::ProcessSP Platform::DoConnectProcess(llvm::StringRef connect_url,
 
   if (synchronous) {
     EventSP event_sp;
-    process_sp->WaitForProcessToStop(llvm::None, &event_sp, true, listener_sp,
+    process_sp->WaitForProcessToStop(std::nullopt, &event_sp, true, listener_sp,
                                      nullptr);
     process_sp->RestoreProcessEvents();
     bool pop_process_io_handler = false;
@@ -1866,7 +1856,7 @@ size_t Platform::GetSoftwareBreakpointTrapOpcode(Target &target,
     static const uint8_t g_arm_breakpoint_opcode[] = {0xf0, 0x01, 0xf0, 0xe7};
     static const uint8_t g_thumb_breakpoint_opcode[] = {0x01, 0xde};
 
-    lldb::BreakpointLocationSP bp_loc_sp(bp_site->GetOwnerAtIndex(0));
+    lldb::BreakpointLocationSP bp_loc_sp(bp_site->GetConstituentAtIndex(0));
     AddressClass addr_class = AddressClass::eUnknown;
 
     if (bp_loc_sp) {
@@ -1905,6 +1895,12 @@ size_t Platform::GetSoftwareBreakpointTrapOpcode(Target &target,
     trap_opcode_size = sizeof(g_hex_opcode);
   } break;
 
+  case llvm::Triple::msp430: {
+    static const uint8_t g_msp430_opcode[] = {0x43, 0x43};
+    trap_opcode = g_msp430_opcode;
+    trap_opcode_size = sizeof(g_msp430_opcode);
+  } break;
+
   case llvm::Triple::systemz: {
     static const uint8_t g_hex_opcode[] = {0x00, 0x01};
     trap_opcode = g_hex_opcode;
@@ -1940,8 +1936,22 @@ size_t Platform::GetSoftwareBreakpointTrapOpcode(Target &target,
   case llvm::Triple::riscv32:
   case llvm::Triple::riscv64: {
     static const uint8_t g_riscv_opcode[] = {0x73, 0x00, 0x10, 0x00}; // ebreak
-    trap_opcode = g_riscv_opcode;
-    trap_opcode_size = sizeof(g_riscv_opcode);
+    static const uint8_t g_riscv_opcode_c[] = {0x02, 0x90}; // c.ebreak
+    if (arch.GetFlags() & ArchSpec::eRISCV_rvc) {
+      trap_opcode = g_riscv_opcode_c;
+      trap_opcode_size = sizeof(g_riscv_opcode_c);
+    } else {
+      trap_opcode = g_riscv_opcode;
+      trap_opcode_size = sizeof(g_riscv_opcode);
+    }
+  } break;
+
+  case llvm::Triple::loongarch32:
+  case llvm::Triple::loongarch64: {
+    static const uint8_t g_loongarch_opcode[] = {0x05, 0x00, 0x2a,
+                                                 0x00}; // break 0x5
+    trap_opcode = g_loongarch_opcode;
+    trap_opcode_size = sizeof(g_loongarch_opcode);
   } break;
 
   default:
@@ -1961,6 +1971,14 @@ CompilerType Platform::GetSiginfoType(const llvm::Triple& triple) {
 
 Args Platform::GetExtraStartupCommands() {
   return {};
+}
+
+void Platform::SetLocateModuleCallback(LocateModuleCallback callback) {
+  m_locate_module_callback = callback;
+}
+
+Platform::LocateModuleCallback Platform::GetLocateModuleCallback() const {
+  return m_locate_module_callback;
 }
 
 PlatformSP PlatformList::GetOrCreate(llvm::StringRef name) {

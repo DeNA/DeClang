@@ -22,6 +22,7 @@
 using namespace llvm;
 using namespace llvm::cas;
 
+const char ThreadSafeFileSystem::ID = 0;
 void ThreadSafeFileSystem::anchor() {}
 void CachingOnDiskFileSystem::anchor() {}
 
@@ -76,7 +77,7 @@ public:
   /// status(TreePath, /*FollowSymlinks=*/false).
   Expected<DirectoryEntry *>
   makeEntry(DirectoryEntry &Parent, StringRef TreePath,
-            Optional<sys::fs::file_status> KnownStatus);
+            std::optional<sys::fs::file_status> KnownStatus);
 
   /// Preload the real path for \p Remaining, relative to \p From.
   /// \returns The real path entry if it can be computed, an error if the path
@@ -86,7 +87,7 @@ public:
   preloadRealPath(DirectoryEntry &From, StringRef Remaining);
 
   ErrorOr<vfs::Status> statusAndFileID(const Twine &Path,
-                                       Optional<CASID> &FileID) final;
+                                       std::optional<CASID> &FileID) final;
   ErrorOr<vfs::Status> status(const Twine &Path) final;
   bool exists(const Twine &Path) final;
   ErrorOr<std::unique_ptr<vfs::File>> openFileForRead(const Twine &Path) final;
@@ -100,7 +101,7 @@ public:
   }
 
   std::error_code getRealPath(const Twine &Path,
-                              SmallVectorImpl<char> &Output) const final;
+                              SmallVectorImpl<char> &Output) final;
   ErrorOr<vfs::directory_iterator> getDirectoryIterator(const Twine &Dir);
 
   std::error_code setCurrentWorkingDirectory(const Twine &Path) final;
@@ -181,7 +182,7 @@ private:
   IntrusiveRefCntPtr<FileSystemCache> Cache;
   WorkingDirectoryType WorkingDirectory;
 
-  Optional<ObjectRef> EmptyRef;
+  std::optional<ObjectRef> EmptyRef;
 };
 
 class DiscoveryInstanceImpl final : public FileSystemCache::DiscoveryInstance {
@@ -233,7 +234,7 @@ public:
     return Object->getMemoryBuffer(RequestedName.toStringRef(Storage));
   }
 
-  llvm::ErrorOr<Optional<cas::ObjectRef>> getObjectRefForContent() final {
+  llvm::ErrorOr<std::optional<cas::ObjectRef>> getObjectRefForContent() final {
     return Entry->getRef();
   }
 
@@ -363,7 +364,7 @@ Expected<FileSystemCache::DirectoryEntry *>
 CachingOnDiskFileSystemImpl::makeSymlinkTo(DirectoryEntry &Parent,
                                            StringRef TreePath,
                                            StringRef Target) {
-  Expected<ObjectRef> Node = DB.storeFromString(None, Target);
+  Expected<ObjectRef> Node = DB.storeFromString(std::nullopt, Target);
   if (!Node)
     return Node.takeError();
   return &Cache->makeSymlink(Parent, TreePath, *Node, Target);
@@ -389,7 +390,7 @@ CachingOnDiskFileSystemImpl::makeFile(DirectoryEntry &Parent,
 Expected<FileSystemCache::DirectoryEntry *>
 CachingOnDiskFileSystemImpl::makeEntry(
     DirectoryEntry &Parent, StringRef TreePath,
-    Optional<sys::fs::file_status> KnownStatus) {
+    std::optional<sys::fs::file_status> KnownStatus) {
   assert(Parent.isDirectory() && "Expected a directory");
 
   // lstat is extremely slow...
@@ -417,8 +418,8 @@ CachingOnDiskFileSystemImpl::makeEntry(
 
 ErrorOr<vfs::Status>
 CachingOnDiskFileSystemImpl::statusAndFileID(const Twine &Path,
-                                             Optional<CASID> &FileID) {
-  FileID = None;
+                                             std::optional<CASID> &FileID) {
+  FileID = std::nullopt;
   SmallString<128> Storage;
   StringRef PathRef = Path.toStringRef(Storage);
 
@@ -454,7 +455,7 @@ CachingOnDiskFileSystemImpl::getDirectoryEntry(const Twine &Path,
 
 std::error_code
 CachingOnDiskFileSystemImpl::getRealPath(const Twine &Path,
-                                         SmallVectorImpl<char> &Output) const {
+                                         SmallVectorImpl<char> &Output) {
   // We can get the real path, but it's not a const operation.
   const vfs::CachedDirectoryEntry *Entry = nullptr;
   if (Error E =
@@ -468,7 +469,7 @@ CachingOnDiskFileSystemImpl::getRealPath(const Twine &Path,
 }
 
 ErrorOr<vfs::Status> CachingOnDiskFileSystemImpl::status(const Twine &Path) {
-  Optional<CASID> IgnoredID;
+  std::optional<CASID> IgnoredID;
   return statusAndFileID(Path, IgnoredID);
 }
 
@@ -538,7 +539,8 @@ CachingOnDiskFileSystemImpl::getDirectoryIterator(const Twine &Path) {
   }
 
   for (StringRef TreePath : TreePaths)
-    if (Error E = makeEntry(*Entry, TreePath, /*KnownStatus=*/None).takeError())
+    if (Error E = makeEntry(*Entry, TreePath, /*KnownStatus=*/std::nullopt)
+                      .takeError())
       return errorToErrorCode(std::move(E));
 
   return Cache->getCachedVFSDirIter(

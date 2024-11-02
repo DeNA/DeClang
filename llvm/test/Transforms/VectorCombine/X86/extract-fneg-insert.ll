@@ -8,9 +8,8 @@ declare void @use(float)
 
 define <4 x float> @ext0_v4f32(<4 x float> %x, <4 x float> %y) {
 ; CHECK-LABEL: @ext0_v4f32(
-; CHECK-NEXT:    [[E:%.*]] = extractelement <4 x float> [[X:%.*]], i32 0
-; CHECK-NEXT:    [[N:%.*]] = fneg float [[E]]
-; CHECK-NEXT:    [[R:%.*]] = insertelement <4 x float> [[Y:%.*]], float [[N]], i32 0
+; CHECK-NEXT:    [[TMP1:%.*]] = fneg <4 x float> [[X:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = shufflevector <4 x float> [[Y:%.*]], <4 x float> [[TMP1]], <4 x i32> <i32 4, i32 1, i32 2, i32 3>
 ; CHECK-NEXT:    ret <4 x float> [[R]]
 ;
   %e = extractelement <4 x float> %x, i32 0
@@ -153,4 +152,32 @@ define <4 x float> @ext12_v4f32(<4 x float> %x, <4 x float> %y) {
   %n = fneg float %e
   %r = insertelement <4 x float> %y, float %n, i32 12
   ret <4 x float> %r
+}
+
+; This used to crash because we assumed matching a true, unary fneg instruction.
+
+define <2 x float> @ext1_v2f32_fsub(<2 x float> %x) {
+; CHECK-LABEL: @ext1_v2f32_fsub(
+; CHECK-NEXT:    [[TMP1:%.*]] = fneg <2 x float> [[X:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = shufflevector <2 x float> [[X]], <2 x float> [[TMP1]], <2 x i32> <i32 0, i32 3>
+; CHECK-NEXT:    ret <2 x float> [[R]]
+;
+  %e = extractelement <2 x float> %x, i32 1
+  %s = fsub float -0.0, %e
+  %r = insertelement <2 x float> %x, float %s, i32 1
+  ret <2 x float> %r
+}
+
+; This used to crash because we assumed matching a true, unary fneg instruction.
+
+define <2 x float> @ext1_v2f32_fsub_fmf(<2 x float> %x, <2 x float> %y) {
+; CHECK-LABEL: @ext1_v2f32_fsub_fmf(
+; CHECK-NEXT:    [[TMP1:%.*]] = fneg nnan nsz <2 x float> [[X:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = shufflevector <2 x float> [[Y:%.*]], <2 x float> [[TMP1]], <2 x i32> <i32 0, i32 3>
+; CHECK-NEXT:    ret <2 x float> [[R]]
+;
+  %e = extractelement <2 x float> %x, i32 1
+  %s = fsub nsz nnan float 0.0, %e
+  %r = insertelement <2 x float> %y, float %s, i32 1
+  ret <2 x float> %r
 }

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/BinaryFormat/MachO.h"
@@ -129,7 +130,7 @@ uint64_t MachObjectWriter::getPaddingSize(const MCSection *Sec,
   const MCSection &NextSec = *Layout.getSectionOrder()[Next];
   if (NextSec.isVirtualSection())
     return 0;
-  return offsetToAlignment(EndAddr, Align(NextSec.getAlignment()));
+  return offsetToAlignment(EndAddr, NextSec.getAlign());
 }
 
 void MachObjectWriter::writeHeader(MachO::HeaderFileType Type,
@@ -261,8 +262,7 @@ void MachObjectWriter::writeSection(const MCAsmLayout &Layout,
   }
   W.write<uint32_t>(FileOffset);
 
-  assert(isPowerOf2_32(Section.getAlignment()) && "Invalid alignment!");
-  W.write<uint32_t>(Log2_32(Section.getAlignment()));
+  W.write<uint32_t>(Log2(Section.getAlign()));
   W.write<uint32_t>(NumRelocations ? RelocationsStart : 0);
   W.write<uint32_t>(NumRelocations);
   W.write<uint32_t>(Flags);
@@ -549,9 +549,7 @@ void MachObjectWriter::bindIndirectSymbols(MCAssembler &Asm) {
     // Set the symbol type to undefined lazy, but only on construction.
     //
     // FIXME: Do not hardcode.
-    bool Created;
-    Asm.registerSymbol(*it->Symbol, &Created);
-    if (Created)
+    if (Asm.registerSymbol(*it->Symbol))
       cast<MCSymbolMachO>(it->Symbol)->setReferenceTypeUndefinedLazy(true);
   }
 }
@@ -662,7 +660,7 @@ void MachObjectWriter::computeSectionAddresses(const MCAssembler &Asm,
                                                const MCAsmLayout &Layout) {
   uint64_t StartAddress = 0;
   for (const MCSection *Sec : Layout.getSectionOrder()) {
-    StartAddress = alignTo(StartAddress, Sec->getAlignment());
+    StartAddress = alignTo(StartAddress, Sec->getAlign());
     SectionAddress[Sec] = StartAddress;
     StartAddress += Layout.getSectionAddressSize(Sec);
 
@@ -784,12 +782,11 @@ void MachObjectWriter::populateAddrSigSection(MCAssembler &Asm) {
   }
 }
 
-uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
-                                       const MCAsmLayout &Layout) {
-  uint64_t StartOffset = W.OS.tell();
-
+// BEGIN MCCAS
+void MachObjectWriter::prepareObject(MCAssembler &Asm,
+                                     const MCAsmLayout &Layout) {
+// END MCCAS
   populateAddrSigSection(Asm);
-
   // Compute symbol table information and bind symbol indices.
   computeSymbolTable(Asm, LocalSymbolData, ExternalSymbolData,
                      UndefinedSymbolData);
@@ -810,7 +807,11 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
       support::endian::write(OS, CGPE.Count, W.Endian);
     }
   }
-
+}
+// BEGIN MCCAS
+void MachObjectWriter::writeMachOHeader(MCAssembler &Asm,
+                                      const MCAsmLayout &Layout) {
+// END MCCAS
   unsigned NumSections = Asm.size();
   const MCAssembler::VersionInfoType &VersionInfo =
     Layout.getAssembler().getVersionInfo();
@@ -850,15 +851,17 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
   }
 
   // Add the loh load command size, if used.
-  uint64_t LOHRawSize = Asm.getLOHContainer().getEmitSize(*this, Layout);
-  uint64_t LOHSize = alignTo(LOHRawSize, is64Bit() ? 8 : 4);
+  // MCCAS: the two variable below became members.
+  LOHRawSize = Asm.getLOHContainer().getEmitSize(*this, Layout);
+  LOHSize = alignTo(LOHRawSize, is64Bit() ? 8 : 4);
   if (LOHSize) {
     ++NumLoadCommands;
     LoadCommandsSize += sizeof(MachO::linkedit_data_command);
   }
 
   // Add the symbol table load command sizes, if used.
-  unsigned NumSymbols = LocalSymbolData.size() + ExternalSymbolData.size() +
+  // MCCAS: the variable below became a member.
+  NumSymbols = LocalSymbolData.size() + ExternalSymbolData.size() +
     UndefinedSymbolData.size();
   if (NumSymbols) {
     NumLoadCommands += 2;
@@ -897,7 +900,8 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
   // The section data is padded to pointer size bytes.
   //
   // FIXME: Is this machine dependent?
-  unsigned SectionDataPadding =
+  // MCCAS: the variable below became a member.
+  SectionDataPadding =
       offsetToAlignment(SectionDataFileSize, is64Bit() ? Align(8) : Align(4));
   SectionDataFileSize += SectionDataPadding;
 
@@ -1026,7 +1030,12 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
   // Write the linker options load commands.
   for (const auto &Option : Asm.getLinkerOptions())
     writeLinkerOptionsLoadCommand(Option);
+// BEGIN MCCAS
+}
 
+void MachObjectWriter::writeSectionData(MCAssembler &Asm,
+                                        const MCAsmLayout &Layout) {
+// END MCCAS
   // Write the actual section data.
   for (const MCSection &Sec : Asm) {
     Asm.writeSectionData(W.OS, &Sec, Layout);
@@ -1037,7 +1046,12 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
 
   // Write the extra padding.
   W.OS.write_zeros(SectionDataPadding);
+// BEGIN MCCAS
+}
 
+void MachObjectWriter::writeRelocations(MCAssembler &Asm,
+                                        const MCAsmLayout &Layout) {
+// END MCCAS
   // Write the relocation entries.
   for (const MCSection &Sec : Asm) {
     // Write the section relocation entries, in reverse order to match 'as'
@@ -1048,7 +1062,12 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
       W.write<uint32_t>(Rel.MRE.r_word1);
     }
   }
+// BEGIN MCCAS
+}
 
+void MachObjectWriter::writeDataInCodeRegion(MCAssembler &Asm,
+                                             const MCAsmLayout &Layout) {
+// END MCCAS
   // Write out the data-in-code region payload, if there is one.
   for (MCAssembler::const_data_region_iterator
          it = Asm.data_region_begin(), ie = Asm.data_region_end();
@@ -1114,13 +1133,33 @@ uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
          {&LocalSymbolData, &ExternalSymbolData, &UndefinedSymbolData})
       for (MachSymbolData &Entry : *SymbolData)
         writeNlist(Entry, Layout);
+// BEGIN MCCAS
+  }
+}
 
+void MachObjectWriter::writeSymbolTable(MCAssembler &Asm,
+                                        const MCAsmLayout &Layout) {
+  if (NumSymbols)
+// END MCCAS
     // Write the string table.
     StringTable.write(W.OS);
-  }
+// BEGIN MCCAS
+}
+
+uint64_t MachObjectWriter::writeObject(MCAssembler &Asm,
+                                       const MCAsmLayout &Layout) {
+  uint64_t StartOffset = W.OS.tell();
+
+  prepareObject(Asm, Layout);
+  writeMachOHeader(Asm, Layout);
+  writeSectionData(Asm, Layout);
+  writeRelocations(Asm, Layout);
+  writeDataInCodeRegion(Asm, Layout);
+  writeSymbolTable(Asm, Layout);
 
   return W.OS.tell() - StartOffset;
 }
+// END MCCAS
 
 std::unique_ptr<MCObjectWriter>
 llvm::createMachObjectWriter(std::unique_ptr<MCMachObjectTargetWriter> MOTW,

@@ -16,56 +16,39 @@
 #define LLVM_CLANG_EXTRACTAPI_AVAILABILITY_INFO_H
 
 #include "clang/AST/Decl.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/VersionTuple.h"
 #include "llvm/Support/raw_ostream.h"
 
-using llvm::VersionTuple;
-
 namespace clang {
 namespace extractapi {
 
-/// Stores availability attributes of a symbol in a given domain.
+/// Stores availability attributes of a symbol.
 struct AvailabilityInfo {
   /// The domain for which this availability info item applies
   std::string Domain;
   VersionTuple Introduced;
   VersionTuple Deprecated;
   VersionTuple Obsoleted;
-  bool Unavailable;
-
-  AvailabilityInfo() = default;
-
-  AvailabilityInfo(StringRef Domain, VersionTuple I, VersionTuple D,
-                   VersionTuple O, bool U)
-      : Domain(Domain), Introduced(I), Deprecated(D), Obsoleted(O),
-        Unavailable(U) {}
-};
-
-class AvailabilitySet {
-private:
-  using AvailabilityList = llvm::SmallVector<AvailabilityInfo, 4>;
-  AvailabilityList Availabilities;
-
+  bool Unavailable = false;
   bool UnconditionallyDeprecated = false;
   bool UnconditionallyUnavailable = false;
 
-public:
-  AvailabilitySet(const Decl *Decl);
-  AvailabilitySet() = default;
+  AvailabilityInfo() = default;
 
-  AvailabilityList::const_iterator begin() const {
-    return Availabilities.begin();
+  /// Determine if this AvailabilityInfo represents the default availability.
+  bool isDefault() const { return *this == AvailabilityInfo(); }
+
+  /// Check if the symbol is unavailable unconditionally or
+  /// on the active platform and os version.
+  bool isUnavailable() const {
+    return Unavailable || isUnconditionallyUnavailable();
   }
-
-  AvailabilityList::const_iterator end() const { return Availabilities.end(); }
 
   /// Check if the symbol is unconditionally deprecated.
   ///
   /// i.e. \code __attribute__((deprecated)) \endcode
   bool isUnconditionallyDeprecated() const { return UnconditionallyDeprecated; }
-
   /// Check if the symbol is unconditionally unavailable.
   ///
   /// i.e. \code __attribute__((unavailable)) \endcode
@@ -73,9 +56,28 @@ public:
     return UnconditionallyUnavailable;
   }
 
-  /// Determine if this AvailabilitySet represents default availability.
-  bool isDefault() const { return Availabilities.empty(); }
+  AvailabilityInfo(StringRef Domain, VersionTuple I, VersionTuple D,
+                   VersionTuple O, bool U, bool UD, bool UU)
+      : Domain(Domain), Introduced(I), Deprecated(D), Obsoleted(O),
+        Unavailable(U), UnconditionallyDeprecated(UD),
+        UnconditionallyUnavailable(UU) {}
+
+  friend bool operator==(const AvailabilityInfo &Lhs,
+                         const AvailabilityInfo &Rhs);
+
+public:
+  static AvailabilityInfo createFromDecl(const Decl *Decl);
 };
+
+inline bool operator==(const AvailabilityInfo &Lhs,
+                       const AvailabilityInfo &Rhs) {
+  return std::tie(Lhs.Introduced, Lhs.Deprecated, Lhs.Obsoleted,
+                  Lhs.Unavailable, Lhs.UnconditionallyDeprecated,
+                  Lhs.UnconditionallyUnavailable) ==
+         std::tie(Rhs.Introduced, Rhs.Deprecated, Rhs.Obsoleted,
+                  Rhs.Unavailable, Rhs.UnconditionallyDeprecated,
+                  Rhs.UnconditionallyUnavailable);
+}
 
 } // namespace extractapi
 } // namespace clang

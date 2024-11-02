@@ -19,10 +19,8 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/BinaryFormat/MachO.h"
-#include "llvm/MC/StringTableBuilder.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -164,7 +162,7 @@ public:
 
   void addEntry(const InputSection *isec, uint64_t offset) {
     if (config->isPic)
-      locations.push_back({isec, offset});
+      locations.emplace_back(isec, offset);
   }
 
 private:
@@ -176,7 +174,7 @@ struct BindingEntry {
   int64_t addend;
   Location target;
   BindingEntry(int64_t addend, Location target)
-      : addend(addend), target(std::move(target)) {}
+      : addend(addend), target(target) {}
 };
 
 template <class Sym>
@@ -533,18 +531,6 @@ public:
   void writeTo(uint8_t *buf) const override;
   uint32_t getBlockCount() const;
   void writeHashes(uint8_t *buf) const;
-};
-
-class BitcodeBundleSection final : public SyntheticSection {
-public:
-  BitcodeBundleSection();
-  uint64_t getSize() const override { return xarSize; }
-  void finalize() override;
-  void writeTo(uint8_t *buf) const override;
-
-private:
-  llvm::SmallString<261> xarPath;
-  uint64_t xarSize;
 };
 
 class CStringSection : public SyntheticSection {

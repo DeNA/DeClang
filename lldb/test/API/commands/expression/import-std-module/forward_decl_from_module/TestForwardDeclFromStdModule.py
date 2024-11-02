@@ -38,5 +38,5 @@ class TestCase(TestBase):
         # declarations before their definitions.
         self.expect(
             "expr --raw -- v",
-            substrs=["(std::__1::vector<int>) $0 = {", "f = nullptr", "}"],
+            patterns=[r"\(std::__[^:]*::vector<int>\) \$0 = {", "f = nullptr", "}"],
         )

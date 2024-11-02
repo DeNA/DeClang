@@ -15,7 +15,6 @@ add_entrypoint_object(
     ../kill.h
   DEPENDS
     libc.include.signal
-    libc.include.errno
     libc.src.errno.errno
     libc.include.sys_syscall
     libc.src.__support.OSUtil.osutil
@@ -66,6 +65,19 @@ add_entrypoint_object(
 )
 
 add_entrypoint_object(
+  sigaltstack
+  SRCS
+    sigaltstack.cpp
+  HDRS
+    ../sigaltstack.h
+  DEPENDS
+    libc.include.signal
+    libc.include.sys_syscall
+    libc.src.__support.OSUtil.osutil
+    libc.src.errno.errno
+)
+
+add_entrypoint_object(
   sigprocmask
   SRCS
     sigprocmask.cpp
@@ -87,7 +99,6 @@ add_entrypoint_object(
     ../sigemptyset.h
   DEPENDS
     .signal_utils
-    libc.include.errno
     libc.include.signal
     libc.src.errno.errno
 )
@@ -100,7 +111,6 @@ add_entrypoint_object(
     ../sigaddset.h
   DEPENDS
     .signal_utils
-    libc.include.errno
     libc.include.signal
     libc.src.errno.errno
 )
@@ -124,7 +134,6 @@ add_entrypoint_object(
     ../sigfillset.h
   DEPENDS
     .signal_utils
-    libc.include.errno
     libc.include.signal
     libc.src.errno.errno
 )
@@ -137,7 +146,6 @@ add_entrypoint_object(
     ../sigdelset.h
   DEPENDS
     .signal_utils
-    libc.include.errno
     libc.include.signal
     libc.src.errno.errno
 )

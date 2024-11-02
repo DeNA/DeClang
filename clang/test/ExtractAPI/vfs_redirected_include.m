@@ -14,7 +14,7 @@
 // RUN: %t/vfsoverlay.yaml.in >> %t/vfsoverlay.yaml
 
 // Input headers use paths to the framework root/DSTROOT
-// RUN: %clang_cc1 -extract-api -v --product-name=MyFramework \
+// RUN: %clang_cc1 -extract-api --pretty-sgf -v --product-name=MyFramework \
 // RUN: -triple arm64-apple-macosx \
 // RUN: -iquote%t -ivfsoverlay %t/vfsoverlay.yaml -F%t/Frameworks \
 // RUN: -x objective-c-header \
@@ -35,7 +35,6 @@
 
 //--- vfsoverlay.yaml.in
 {
-    "version": 0,
     "case-sensitive": "false",
     "roots": [
         {
@@ -50,6 +49,7 @@
             "type": "directory"
         }
     ],
+    "version": 0
 }
 
 //--- MyFramework.h

@@ -11,6 +11,7 @@
 
 #if LLDB_ENABLE_PYTHON
 
+#include <optional>
 #include <sstream>
 #include <tuple>
 #include <type_traits>
@@ -246,9 +247,9 @@ ScriptedPythonInterface::ExtractValueFromPythonObject<lldb::DataExtractorSP>(
     python::PythonObject &p, Status &error);
 
 template <>
-llvm::Optional<MemoryRegionInfo>
+std::optional<MemoryRegionInfo>
 ScriptedPythonInterface::ExtractValueFromPythonObject<
-    llvm::Optional<MemoryRegionInfo>>(python::PythonObject &p, Status &error);
+    std::optional<MemoryRegionInfo>>(python::PythonObject &p, Status &error);
 
 } // namespace lldb_private
 

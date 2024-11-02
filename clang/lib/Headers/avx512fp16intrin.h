@@ -19,12 +19,6 @@
 typedef _Float16 __v32hf __attribute__((__vector_size__(64), __aligned__(64)));
 typedef _Float16 __m512h __attribute__((__vector_size__(64), __aligned__(64)));
 typedef _Float16 __m512h_u __attribute__((__vector_size__(64), __aligned__(1)));
-typedef _Float16 __v8hf __attribute__((__vector_size__(16), __aligned__(16)));
-typedef _Float16 __m128h __attribute__((__vector_size__(16), __aligned__(16)));
-typedef _Float16 __m128h_u __attribute__((__vector_size__(16), __aligned__(1)));
-typedef _Float16 __v16hf __attribute__((__vector_size__(32), __aligned__(32)));
-typedef _Float16 __m256h __attribute__((__vector_size__(32), __aligned__(32)));
-typedef _Float16 __m256h_u __attribute__((__vector_size__(32), __aligned__(1)));
 
 /* Define the default attributes for the functions in this file. */
 #define __DEFAULT_FN_ATTRS512                                                  \
@@ -198,22 +192,26 @@ _mm512_castph512_ph256(__m512h __a) {
 
 static __inline__ __m256h __DEFAULT_FN_ATTRS256
 _mm256_castph128_ph256(__m128h __a) {
-  return __builtin_shufflevector(__a, __a, 0, 1, 2, 3, 4, 5, 6, 7, -1, -1, -1,
-                                 -1, -1, -1, -1, -1);
+  return __builtin_shufflevector(__a, __builtin_nondeterministic_value(__a),
+                                  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 }
 
 static __inline__ __m512h __DEFAULT_FN_ATTRS512
 _mm512_castph128_ph512(__m128h __a) {
-  return __builtin_shufflevector(__a, __a, 0, 1, 2, 3, 4, 5, 6, 7, -1, -1, -1,
-                                 -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-                                 -1, -1, -1, -1, -1, -1, -1, -1, -1);
+  __m256h __b = __builtin_nondeterministic_value(__b);
+  return __builtin_shufflevector(
+      __builtin_shufflevector(__a, __builtin_nondeterministic_value(__a),
+                              0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+      __b, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+      20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31);
 }
 
 static __inline__ __m512h __DEFAULT_FN_ATTRS512
 _mm512_castph256_ph512(__m256h __a) {
-  return __builtin_shufflevector(__a, __a, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
-                                 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1,
-                                 -1, -1, -1, -1, -1, -1, -1, -1);
+  return __builtin_shufflevector(__a, __builtin_nondeterministic_value(__a), 0,
+                                 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+                                 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+                                 27, 28, 29, 30, 31);
 }
 
 /// Constructs a 256-bit floating-point vector of [16 x half] from a

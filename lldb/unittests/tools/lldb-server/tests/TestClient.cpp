@@ -221,7 +221,7 @@ unsigned int TestClient::GetPcRegisterId() {
 }
 
 Error TestClient::qProcessInfo() {
-  m_process_info = None;
+  m_process_info = std::nullopt;
   auto InfoOr = SendMessage<ProcessInfo>("qProcessInfo");
   if (!InfoOr)
     return InfoOr.takeError();

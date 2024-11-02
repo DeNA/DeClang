@@ -61,6 +61,7 @@ SystemRuntime *SystemRuntimeMacOSX::CreateInstance(Process *process) {
       case llvm::Triple::IOS:
       case llvm::Triple::TvOS:
       case llvm::Triple::WatchOS:
+      case llvm::Triple::XROS:
       // NEED_BRIDGEOS_TRIPLE case llvm::Triple::BridgeOS:
         create = triple_ref.getVendor() == llvm::Triple::Apple;
         break;
@@ -442,13 +443,13 @@ void SystemRuntimeMacOSX::ReadLibdispatchTSDIndexes() {
                                         dispatch_tsd_indexes_s);
 
       m_libdispatch_tsd_indexes.dti_version =
-          struct_reader.GetField<uint16_t>(ConstString("dti_version"));
+          struct_reader.GetField<uint16_t>("dti_version");
       m_libdispatch_tsd_indexes.dti_queue_index =
-          struct_reader.GetField<uint16_t>(ConstString("dti_queue_index"));
+          struct_reader.GetField<uint16_t>("dti_queue_index");
       m_libdispatch_tsd_indexes.dti_voucher_index =
-          struct_reader.GetField<uint16_t>(ConstString("dti_voucher_index"));
+          struct_reader.GetField<uint16_t>("dti_voucher_index");
       m_libdispatch_tsd_indexes.dti_qos_class_index =
-          struct_reader.GetField<uint16_t>(ConstString("dti_qos_class_index"));
+          struct_reader.GetField<uint16_t>("dti_qos_class_index");
     }
   }
 }

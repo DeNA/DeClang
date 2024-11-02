@@ -1,4 +1,4 @@
-; RUN: llc %s -o - -stop-before=finalize-isel -march=x86-64 \
+; RUN: llc -experimental-debug-variable-locations=true %s -o - -stop-before=finalize-isel -march=x86-64 \
 ; RUN: | FileCheck %s --check-prefixes=INSTRREFON
 ; RUN: llc %s -o - -stop-before=finalize-isel -march=x86-64 \
 ; RUN:    -experimental-debug-variable-locations=true \
@@ -13,7 +13,9 @@
 ;; by llc by default, and that it can be turned explicitly on or off as
 ;; desired.
 
+; INSTRREFON: debugInstrRef: true
 ; INSTRREFON: DBG_INSTR_REF
+; INSTRREFOFF: debugInstrRef: false
 ; INSTRREFOFF: DBG_VALUE
 
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"

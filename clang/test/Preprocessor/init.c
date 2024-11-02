@@ -8,14 +8,24 @@
 // BLOCKS:#define __BLOCKS__ 1
 // BLOCKS:#define __block __attribute__((__blocks__(byref)))
 //
+// RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=c++26 -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix CXX26 %s
+// RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=c++2c -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix CXX26 %s
 //
+// CXX26:#define __GNUG__ 4
+// CXX26:#define __GXX_EXPERIMENTAL_CXX0X__ 1
+// CXX26:#define __GXX_RTTI 1
+// CXX26:#define __GXX_WEAK__ 1
+// CXX26:#define __cplusplus 202400L
+// CXX26:#define __private_extern__ extern
+//
+// RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=c++23 -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix CXX2B %s
 // RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=c++2b -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix CXX2B %s
 //
 // CXX2B:#define __GNUG__ 4
 // CXX2B:#define __GXX_EXPERIMENTAL_CXX0X__ 1
 // CXX2B:#define __GXX_RTTI 1
 // CXX2B:#define __GXX_WEAK__ 1
-// CXX2B:#define __cplusplus 202101L
+// CXX2B:#define __cplusplus 202302L
 // CXX2B:#define __private_extern__ extern
 //
 // RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=c++20 -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix CXX2A %s
@@ -133,11 +143,20 @@
 // RUN: %clang_cc1 -ffreestanding -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix FREESTANDING %s
 // FREESTANDING:#define __STDC_HOSTED__ 0
 //
+// RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=gnu++26 -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix GXX26 %s
+// RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=gnu++2c -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix GXX26 %s
+//
+// GXX26:#define __GNUG__ 4
+// GXX26:#define __GXX_WEAK__ 1
+// GXX26:#define __cplusplus 202400L
+// GXX26:#define __private_extern__ extern
+//
+// RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=gnu++23 -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix GXX2B %s
 // RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=gnu++2b -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix GXX2B %s
 //
 // GXX2B:#define __GNUG__ 4
 // GXX2B:#define __GXX_WEAK__ 1
-// GXX2B:#define __cplusplus 202101L
+// GXX2B:#define __cplusplus 202302L
 // GXX2B:#define __private_extern__ extern
 //
 // RUN: %clang_cc1 -x c++ -fgnuc-version=4.2.1 -std=gnu++20 -E -dM < /dev/null | FileCheck -match-full-lines -check-prefix GXX2A %s
@@ -874,9 +893,6 @@
 
 // RUN: %clang_cc1 -E -dM -ffreestanding -fgnuc-version=4.2.1 -triple=sparc-none-none < /dev/null | FileCheck -match-full-lines -check-prefix SPARC -check-prefix SPARC-DEFAULT %s
 // RUN: %clang_cc1 -E -dM -ffreestanding -fgnuc-version=4.2.1 -triple=sparc-rtems-elf < /dev/null | FileCheck -match-full-lines -check-prefix SPARC -check-prefix SPARC-DEFAULT %s
-// Check that clang defines __NO_INLINE__ unconditionally (even at -O) to
-// work around Issue #47994.
-// RUN: %clang_cc1 -E -dM -triple=sparc-unknown-linux-gnu -O < /dev/null | FileCheck -match-full-lines -check-prefix SPARC-LINUX %s
 // RUN: %clang_cc1 -E -dM -ffreestanding -fgnuc-version=4.2.1 -triple=sparc-none-netbsd < /dev/null | FileCheck -match-full-lines -check-prefix SPARC -check-prefix SPARC-NETOPENBSD %s
 // RUN: %clang_cc1 -x c++ -E -dM -ffreestanding -fgnuc-version=4.2.1 -triple=sparc-none-none < /dev/null | FileCheck -match-full-lines -check-prefix SPARC -check-prefix SPARC-DEFAULT -check-prefix SPARC-DEFAULT-CXX %s
 //
@@ -1000,7 +1016,6 @@
 // SPARC:#define __LONG_LONG_MAX__ 9223372036854775807LL
 // SPARC:#define __LONG_MAX__ 2147483647L
 // SPARC-NOT:#define __LP64__
-// SPARC-LINUX:#define __NO_INLINE__ 1
 // SPARC:#define __POINTER_WIDTH__ 32
 // SPARC-DEFAULT:#define __PTRDIFF_TYPE__ int
 // SPARC-NETOPENBSD:#define __PTRDIFF_TYPE__ long int
@@ -1387,11 +1402,6 @@
 // SPARCV9:#define __SIZEOF_POINTER__ 8
 // SPARCV9:#define __UINTPTR_TYPE__ long unsigned int
 //
-// Check that clang defines __NO_INLINE__ unconditionally (even at -O) to
-// work around Issue #47994.
-// RUN: %clang_cc1 -E -dM -triple=sparc64-unknown-linux-gnu -O < /dev/null | FileCheck -match-full-lines -check-prefix SPARC64-LINUX %s
-// SPARC64-LINUX:#define __NO_INLINE__ 1
-//
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=sparc64-none-openbsd < /dev/null | FileCheck -match-full-lines -check-prefix SPARC64-OBSD %s
 // SPARC64-OBSD:#define __INT64_TYPE__ long long int
 // SPARC64-OBSD:#define __INTMAX_C_SUFFIX__ LL
@@ -1595,6 +1605,16 @@
 // WEBASSEMBLY-NEXT:#define __FLT_MIN_EXP__ (-125)
 // WEBASSEMBLY-NEXT:#define __FLT_MIN__ 1.17549435e-38F
 // WEBASSEMBLY-NEXT:#define __FLT_RADIX__ 2
+// WEBASSEMBLY-NEXT:#define __FPCLASS_NEGINF 0x0004
+// WEBASSEMBLY-NEXT:#define __FPCLASS_NEGNORMAL 0x0008
+// WEBASSEMBLY-NEXT:#define __FPCLASS_NEGSUBNORMAL 0x0010
+// WEBASSEMBLY-NEXT:#define __FPCLASS_NEGZERO 0x0020
+// WEBASSEMBLY-NEXT:#define __FPCLASS_POSINF 0x0200
+// WEBASSEMBLY-NEXT:#define __FPCLASS_POSNORMAL 0x0100
+// WEBASSEMBLY-NEXT:#define __FPCLASS_POSSUBNORMAL 0x0080
+// WEBASSEMBLY-NEXT:#define __FPCLASS_POSZERO 0x0040
+// WEBASSEMBLY-NEXT:#define __FPCLASS_QNAN 0x0002
+// WEBASSEMBLY-NEXT:#define __FPCLASS_SNAN 0x0001
 // WEBASSEMBLY-NEXT:#define __GCC_ATOMIC_BOOL_LOCK_FREE 2
 // WEBASSEMBLY-NEXT:#define __GCC_ATOMIC_CHAR16_T_LOCK_FREE 2
 // WEBASSEMBLY-NEXT:#define __GCC_ATOMIC_CHAR32_T_LOCK_FREE 2
@@ -1606,6 +1626,10 @@
 // WEBASSEMBLY-NEXT:#define __GCC_ATOMIC_SHORT_LOCK_FREE 2
 // WEBASSEMBLY-NEXT:#define __GCC_ATOMIC_TEST_AND_SET_TRUEVAL 1
 // WEBASSEMBLY-NEXT:#define __GCC_ATOMIC_WCHAR_T_LOCK_FREE 2
+// WEBASSEMBLY-NEXT:#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_1 1
+// WEBASSEMBLY-NEXT:#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_2 1
+// WEBASSEMBLY-NEXT:#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_4 1
+// WEBASSEMBLY-NEXT:#define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_8 1
 // WEBASSEMBLY-NEXT:#define __GNUC_MINOR__ {{.*}}
 // WEBASSEMBLY-NEXT:#define __GNUC_PATCHLEVEL__ {{.*}}
 // WEBASSEMBLY-NEXT:#define __GNUC_STDC_INLINE__ 1

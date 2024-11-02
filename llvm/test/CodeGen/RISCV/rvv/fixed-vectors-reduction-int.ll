@@ -4,21 +4,21 @@
 
 declare i8 @llvm.vector.reduce.add.v1i8(<1 x i8>)
 
-define i8 @vreduce_add_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_add_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v2i8(<2 x i8>)
 
-define i8 @vreduce_add_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_add_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
@@ -27,14 +27,14 @@ define i8 @vreduce_add_v2i8(<2 x i8>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v4i8(<4 x i8>)
 
-define i8 @vreduce_add_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_add_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
@@ -43,14 +43,14 @@ define i8 @vreduce_add_v4i8(<4 x i8>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v8i8(<8 x i8>)
 
-define i8 @vreduce_add_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_add_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
@@ -59,14 +59,14 @@ define i8 @vreduce_add_v8i8(<8 x i8>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v16i8(<16 x i8>)
 
-define i8 @vreduce_add_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_add_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
@@ -75,71 +75,65 @@ define i8 @vreduce_add_v16i8(<16 x i8>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v32i8(<32 x i8>)
 
-define i8 @vreduce_add_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_add_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v64i8(<64 x i8>)
 
-define i8 @vreduce_add_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_add_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v128i8(<128 x i8>)
 
-define i8 @vreduce_add_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_add_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.add.v256i8(<256 x i8>)
 
-define i8 @vreduce_add_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_add_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -148,32 +142,30 @@ define i8 @vreduce_add_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vadd.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.add.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.add.v1i16(<1 x i16>)
 
-define i16 @vreduce_add_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_add_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v1i16(<1 x i8>* %x) {
+define i16 @vwreduce_add_v1i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
@@ -181,13 +173,13 @@ define i16 @vwreduce_add_v1i16(<1 x i8>* %x) {
 ; CHECK-NEXT:    vsext.vf2 v9, v8
 ; CHECK-NEXT:    vmv.x.s a0, v9
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %e = sext <1 x i8> %v to <1 x i16>
   %red = call i16 @llvm.vector.reduce.add.v1i16(<1 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v1i16(<1 x i8>* %x) {
+define i16 @vwreduce_uadd_v1i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
@@ -195,7 +187,7 @@ define i16 @vwreduce_uadd_v1i16(<1 x i8>* %x) {
 ; CHECK-NEXT:    vzext.vf2 v9, v8
 ; CHECK-NEXT:    vmv.x.s a0, v9
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %e = zext <1 x i8> %v to <1 x i16>
   %red = call i16 @llvm.vector.reduce.add.v1i16(<1 x i16> %e)
   ret i16 %red
@@ -203,7 +195,7 @@ define i16 @vwreduce_uadd_v1i16(<1 x i8>* %x) {
 
 declare i16 @llvm.vector.reduce.add.v2i16(<2 x i16>)
 
-define i16 @vreduce_add_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_add_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
@@ -212,42 +204,40 @@ define i16 @vreduce_add_v2i16(<2 x i16>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v2i16(<2 x i8>* %x) {
+define i16 @vwreduce_add_v2i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v2i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
+; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
-; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
+; CHECK-NEXT:    vsetvli zero, zero, e8, mf8, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %e = sext <2 x i8> %v to <2 x i16>
   %red = call i16 @llvm.vector.reduce.add.v2i16(<2 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v2i16(<2 x i8>* %x) {
+define i16 @vwreduce_uadd_v2i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v2i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
+; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
-; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
+; CHECK-NEXT:    vsetvli zero, zero, e8, mf8, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %e = zext <2 x i8> %v to <2 x i16>
   %red = call i16 @llvm.vector.reduce.add.v2i16(<2 x i16> %e)
   ret i16 %red
@@ -255,7 +245,7 @@ define i16 @vwreduce_uadd_v2i16(<2 x i8>* %x) {
 
 declare i16 @llvm.vector.reduce.add.v4i16(<4 x i16>)
 
-define i16 @vreduce_add_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_add_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
@@ -264,42 +254,40 @@ define i16 @vreduce_add_v4i16(<4 x i16>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v4i16(<4 x i8>* %x) {
+define i16 @vwreduce_add_v4i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v4i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
+; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
-; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
+; CHECK-NEXT:    vsetvli zero, zero, e8, mf4, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %e = sext <4 x i8> %v to <4 x i16>
   %red = call i16 @llvm.vector.reduce.add.v4i16(<4 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v4i16(<4 x i8>* %x) {
+define i16 @vwreduce_uadd_v4i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v4i16:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
+; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
-; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
+; CHECK-NEXT:    vsetvli zero, zero, e8, mf4, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %e = zext <4 x i8> %v to <4 x i16>
   %red = call i16 @llvm.vector.reduce.add.v4i16(<4 x i16> %e)
   ret i16 %red
@@ -307,7 +295,7 @@ define i16 @vwreduce_uadd_v4i16(<4 x i8>* %x) {
 
 declare i16 @llvm.vector.reduce.add.v8i16(<8 x i16>)
 
-define i16 @vreduce_add_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_add_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -316,12 +304,12 @@ define i16 @vreduce_add_v8i16(<8 x i16>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v8i16(<8 x i8>* %x) {
+define i16 @vwreduce_add_v8i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -332,13 +320,13 @@ define i16 @vwreduce_add_v8i16(<8 x i8>* %x) {
 ; CHECK-NEXT:    vsetvli zero, zero, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %e = sext <8 x i8> %v to <8 x i16>
   %red = call i16 @llvm.vector.reduce.add.v8i16(<8 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v8i16(<8 x i8>* %x) {
+define i16 @vwreduce_uadd_v8i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -349,7 +337,7 @@ define i16 @vwreduce_uadd_v8i16(<8 x i8>* %x) {
 ; CHECK-NEXT:    vsetvli zero, zero, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %e = zext <8 x i8> %v to <8 x i16>
   %red = call i16 @llvm.vector.reduce.add.v8i16(<8 x i16> %e)
   ret i16 %red
@@ -357,7 +345,7 @@ define i16 @vwreduce_uadd_v8i16(<8 x i8>* %x) {
 
 declare i16 @llvm.vector.reduce.add.v16i16(<16 x i16>)
 
-define i16 @vreduce_add_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_add_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
@@ -366,42 +354,42 @@ define i16 @vreduce_add_v16i16(<16 x i16>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v16i16(<16 x i8>* %x) {
+define i16 @vwreduce_add_v16i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %e = sext <16 x i8> %v to <16 x i16>
   %red = call i16 @llvm.vector.reduce.add.v16i16(<16 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v16i16(<16 x i8>* %x) {
+define i16 @vwreduce_uadd_v16i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %e = zext <16 x i8> %v to <16 x i16>
   %red = call i16 @llvm.vector.reduce.add.v16i16(<16 x i16> %e)
   ret i16 %red
@@ -409,56 +397,54 @@ define i16 @vwreduce_uadd_v16i16(<16 x i8>* %x) {
 
 declare i16 @llvm.vector.reduce.add.v32i16(<32 x i16>)
 
-define i16 @vreduce_add_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_add_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v32i16(<32 x i8>* %x) {
+define i16 @vwreduce_add_v32i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v10
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %e = sext <32 x i8> %v to <32 x i16>
   %red = call i16 @llvm.vector.reduce.add.v32i16(<32 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v32i16(<32 x i8>* %x) {
+define i16 @vwreduce_uadd_v32i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v10
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %e = zext <32 x i8> %v to <32 x i16>
   %red = call i16 @llvm.vector.reduce.add.v32i16(<32 x i16> %e)
   ret i16 %red
@@ -466,56 +452,54 @@ define i16 @vwreduce_uadd_v32i16(<32 x i8>* %x) {
 
 declare i16 @llvm.vector.reduce.add.v64i16(<64 x i16>)
 
-define i16 @vreduce_add_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_add_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v64i16(<64 x i8>* %x) {
+define i16 @vwreduce_add_v64i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v12
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %e = sext <64 x i8> %v to <64 x i16>
   %red = call i16 @llvm.vector.reduce.add.v64i16(<64 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v64i16(<64 x i8>* %x) {
+define i16 @vwreduce_uadd_v64i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v12
 ; CHECK-NEXT:    vsetivli zero, 0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %e = zext <64 x i8> %v to <64 x i16>
   %red = call i16 @llvm.vector.reduce.add.v64i16(<64 x i16> %e)
   ret i16 %red
@@ -523,7 +507,7 @@ define i16 @vwreduce_uadd_v64i16(<64 x i8>* %x) {
 
 declare i16 @llvm.vector.reduce.add.v128i16(<128 x i16>)
 
-define i16 @vreduce_add_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_add_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -532,18 +516,16 @@ define i16 @vreduce_add_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle16.v v16, (a0)
 ; CHECK-NEXT:    vadd.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.add.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
-define i16 @vwreduce_add_v128i16(<128 x i8>* %x) {
+define i16 @vwreduce_add_v128i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -554,19 +536,19 @@ define i16 @vwreduce_add_v128i16(<128 x i8>* %x) {
 ; CHECK-NEXT:    vslidedown.vx v16, v8, a0
 ; CHECK-NEXT:    vsetvli zero, a0, e8, m4, ta, ma
 ; CHECK-NEXT:    vwadd.vv v24, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v8, zero
 ; CHECK-NEXT:    vsetvli zero, a0, e16, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v24, v8
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %e = sext <128 x i8> %v to <128 x i16>
   %red = call i16 @llvm.vector.reduce.add.v128i16(<128 x i16> %e)
   ret i16 %red
 }
 
-define i16 @vwreduce_uadd_v128i16(<128 x i8>* %x) {
+define i16 @vwreduce_uadd_v128i16(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -577,13 +559,13 @@ define i16 @vwreduce_uadd_v128i16(<128 x i8>* %x) {
 ; CHECK-NEXT:    vslidedown.vx v16, v8, a0
 ; CHECK-NEXT:    vsetvli zero, a0, e8, m4, ta, ma
 ; CHECK-NEXT:    vwaddu.vv v24, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a0, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v8, zero
 ; CHECK-NEXT:    vsetvli zero, a0, e16, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v24, v8
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %e = zext <128 x i8> %v to <128 x i16>
   %red = call i16 @llvm.vector.reduce.add.v128i16(<128 x i16> %e)
   ret i16 %red
@@ -591,19 +573,19 @@ define i16 @vwreduce_uadd_v128i16(<128 x i8>* %x) {
 
 declare i32 @llvm.vector.reduce.add.v1i32(<1 x i32>)
 
-define i32 @vreduce_add_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_add_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.add.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
-define i32 @vwreduce_add_v1i32(<1 x i16>* %x) {
+define i32 @vwreduce_add_v1i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
@@ -611,13 +593,13 @@ define i32 @vwreduce_add_v1i32(<1 x i16>* %x) {
 ; CHECK-NEXT:    vsext.vf2 v9, v8
 ; CHECK-NEXT:    vmv.x.s a0, v9
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %e = sext <1 x i16> %v to <1 x i32>
   %red = call i32 @llvm.vector.reduce.add.v1i32(<1 x i32> %e)
   ret i32 %red
 }
 
-define i32 @vwreduce_uadd_v1i32(<1 x i16>* %x) {
+define i32 @vwreduce_uadd_v1i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
@@ -625,7 +607,7 @@ define i32 @vwreduce_uadd_v1i32(<1 x i16>* %x) {
 ; CHECK-NEXT:    vzext.vf2 v9, v8
 ; CHECK-NEXT:    vmv.x.s a0, v9
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %e = zext <1 x i16> %v to <1 x i32>
   %red = call i32 @llvm.vector.reduce.add.v1i32(<1 x i32> %e)
   ret i32 %red
@@ -633,7 +615,7 @@ define i32 @vwreduce_uadd_v1i32(<1 x i16>* %x) {
 
 declare i32 @llvm.vector.reduce.add.v2i32(<2 x i32>)
 
-define i32 @vreduce_add_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_add_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
@@ -642,42 +624,40 @@ define i32 @vreduce_add_v2i32(<2 x i32>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.add.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
-define i32 @vwreduce_add_v2i32(<2 x i16>* %x) {
+define i32 @vwreduce_add_v2i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v2i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
+; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
-; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf4, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %e = sext <2 x i16> %v to <2 x i32>
   %red = call i32 @llvm.vector.reduce.add.v2i32(<2 x i32> %e)
   ret i32 %red
 }
 
-define i32 @vwreduce_uadd_v2i32(<2 x i16>* %x) {
+define i32 @vwreduce_uadd_v2i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v2i32:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
+; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
-; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
+; CHECK-NEXT:    vsetvli zero, zero, e16, mf4, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %e = zext <2 x i16> %v to <2 x i32>
   %red = call i32 @llvm.vector.reduce.add.v2i32(<2 x i32> %e)
   ret i32 %red
@@ -685,7 +665,7 @@ define i32 @vwreduce_uadd_v2i32(<2 x i16>* %x) {
 
 declare i32 @llvm.vector.reduce.add.v4i32(<4 x i32>)
 
-define i32 @vreduce_add_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_add_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -694,12 +674,12 @@ define i32 @vreduce_add_v4i32(<4 x i32>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.add.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
-define i32 @vwreduce_add_v4i32(<4 x i16>* %x) {
+define i32 @vwreduce_add_v4i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -710,13 +690,13 @@ define i32 @vwreduce_add_v4i32(<4 x i16>* %x) {
 ; CHECK-NEXT:    vsetvli zero, zero, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %e = sext <4 x i16> %v to <4 x i32>
   %red = call i32 @llvm.vector.reduce.add.v4i32(<4 x i32> %e)
   ret i32 %red
 }
 
-define i32 @vwreduce_uadd_v4i32(<4 x i16>* %x) {
+define i32 @vwreduce_uadd_v4i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -727,7 +707,7 @@ define i32 @vwreduce_uadd_v4i32(<4 x i16>* %x) {
 ; CHECK-NEXT:    vsetvli zero, zero, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %e = zext <4 x i16> %v to <4 x i32>
   %red = call i32 @llvm.vector.reduce.add.v4i32(<4 x i32> %e)
   ret i32 %red
@@ -735,7 +715,7 @@ define i32 @vwreduce_uadd_v4i32(<4 x i16>* %x) {
 
 declare i32 @llvm.vector.reduce.add.v8i32(<8 x i32>)
 
-define i32 @vreduce_add_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_add_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -744,42 +724,42 @@ define i32 @vreduce_add_v8i32(<8 x i32>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.add.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
-define i32 @vwreduce_add_v8i32(<8 x i16>* %x) {
+define i32 @vwreduce_add_v8i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 8, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %e = sext <8 x i16> %v to <8 x i32>
   %red = call i32 @llvm.vector.reduce.add.v8i32(<8 x i32> %e)
   ret i32 %red
 }
 
-define i32 @vwreduce_uadd_v8i32(<8 x i16>* %x) {
+define i32 @vwreduce_uadd_v8i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 8, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v9, zero
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v9
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %e = zext <8 x i16> %v to <8 x i32>
   %red = call i32 @llvm.vector.reduce.add.v8i32(<8 x i32> %e)
   ret i32 %red
@@ -787,7 +767,7 @@ define i32 @vwreduce_uadd_v8i32(<8 x i16>* %x) {
 
 declare i32 @llvm.vector.reduce.add.v16i32(<16 x i32>)
 
-define i32 @vreduce_add_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_add_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -796,42 +776,42 @@ define i32 @vreduce_add_v16i32(<16 x i32>* %x) {
 ; CHECK-NEXT:    vredsum.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.add.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
-define i32 @vwreduce_add_v16i32(<16 x i16>* %x) {
+define i32 @vwreduce_add_v16i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v10
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %e = sext <16 x i16> %v to <16 x i32>
   %red = call i32 @llvm.vector.reduce.add.v16i32(<16 x i32> %e)
   ret i32 %red
 }
 
-define i32 @vwreduce_uadd_v16i32(<16 x i16>* %x) {
+define i32 @vwreduce_uadd_v16i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v10
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %e = zext <16 x i16> %v to <16 x i32>
   %red = call i32 @llvm.vector.reduce.add.v16i32(<16 x i32> %e)
   ret i32 %red
@@ -839,56 +819,54 @@ define i32 @vwreduce_uadd_v16i32(<16 x i16>* %x) {
 
 declare i32 @llvm.vector.reduce.add.v32i32(<32 x i32>)
 
-define i32 @vreduce_add_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_add_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.add.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
-define i32 @vwreduce_add_v32i32(<32 x i16>* %x) {
+define i32 @vwreduce_add_v32i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vwredsum.vs v8, v8, v12
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %e = sext <32 x i16> %v to <32 x i32>
   %red = call i32 @llvm.vector.reduce.add.v32i32(<32 x i32> %e)
   ret i32 %red
 }
 
-define i32 @vwreduce_uadd_v32i32(<32 x i16>* %x) {
+define i32 @vwreduce_uadd_v32i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vwredsumu.vs v8, v8, v12
 ; CHECK-NEXT:    vsetivli zero, 0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %e = zext <32 x i16> %v to <32 x i32>
   %red = call i32 @llvm.vector.reduce.add.v32i32(<32 x i32> %e)
   ret i32 %red
@@ -896,7 +874,7 @@ define i32 @vwreduce_uadd_v32i32(<32 x i16>* %x) {
 
 declare i32 @llvm.vector.reduce.add.v64i32(<64 x i32>)
 
-define i32 @vreduce_add_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_add_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_add_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -905,18 +883,16 @@ define i32 @vreduce_add_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle32.v v16, (a0)
 ; CHECK-NEXT:    vadd.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.add.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
-define i32 @vwreduce_add_v64i32(<64 x i16>* %x) {
+define i32 @vwreduce_add_v64i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_add_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -927,19 +903,19 @@ define i32 @vwreduce_add_v64i32(<64 x i16>* %x) {
 ; CHECK-NEXT:    vslidedown.vx v16, v8, a0
 ; CHECK-NEXT:    vsetvli zero, a0, e16, m4, ta, ma
 ; CHECK-NEXT:    vwadd.vv v24, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v8, zero
 ; CHECK-NEXT:    vsetvli zero, a0, e32, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v24, v8
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %e = sext <64 x i16> %v to <64 x i32>
   %red = call i32 @llvm.vector.reduce.add.v64i32(<64 x i32> %e)
   ret i32 %red
 }
 
-define i32 @vwreduce_uadd_v64i32(<64 x i16>* %x) {
+define i32 @vwreduce_uadd_v64i32(ptr %x) {
 ; CHECK-LABEL: vwreduce_uadd_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -950,13 +926,13 @@ define i32 @vwreduce_uadd_v64i32(<64 x i16>* %x) {
 ; CHECK-NEXT:    vslidedown.vx v16, v8, a0
 ; CHECK-NEXT:    vsetvli zero, a0, e16, m4, ta, ma
 ; CHECK-NEXT:    vwaddu.vv v24, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a0, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v8, zero
 ; CHECK-NEXT:    vsetvli zero, a0, e32, m8, ta, ma
 ; CHECK-NEXT:    vredsum.vs v8, v24, v8
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %e = zext <64 x i16> %v to <64 x i32>
   %red = call i32 @llvm.vector.reduce.add.v64i32(<64 x i32> %e)
   ret i32 %red
@@ -964,15 +940,15 @@ define i32 @vwreduce_uadd_v64i32(<64 x i16>* %x) {
 
 declare i64 @llvm.vector.reduce.add.v1i64(<1 x i64>)
 
-define i64 @vreduce_add_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_add_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_add_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_add_v1i64:
@@ -981,21 +957,21 @@ define i64 @vreduce_add_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.add.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
-define i64 @vwreduce_add_v1i64(<1 x i32>* %x) {
+define i64 @vwreduce_add_v1i64(ptr %x) {
 ; RV32-LABEL: vwreduce_add_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle32.v v8, (a0)
 ; RV32-NEXT:    vsext.vf2 v9, v8
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v8, v9, a0
-; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    vmv.x.s a0, v9
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v9, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vwreduce_add_v1i64:
@@ -1005,22 +981,22 @@ define i64 @vwreduce_add_v1i64(<1 x i32>* %x) {
 ; RV64-NEXT:    vsext.vf2 v9, v8
 ; RV64-NEXT:    vmv.x.s a0, v9
 ; RV64-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %e = sext <1 x i32> %v to <1 x i64>
   %red = call i64 @llvm.vector.reduce.add.v1i64(<1 x i64> %e)
   ret i64 %red
 }
 
-define i64 @vwreduce_uadd_v1i64(<1 x i32>* %x) {
+define i64 @vwreduce_uadd_v1i64(ptr %x) {
 ; RV32-LABEL: vwreduce_uadd_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle32.v v8, (a0)
 ; RV32-NEXT:    vzext.vf2 v9, v8
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v8, v9, a0
-; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    vmv.x.s a0, v9
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v9, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vwreduce_uadd_v1i64:
@@ -1030,7 +1006,7 @@ define i64 @vwreduce_uadd_v1i64(<1 x i32>* %x) {
 ; RV64-NEXT:    vzext.vf2 v9, v8
 ; RV64-NEXT:    vmv.x.s a0, v9
 ; RV64-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %e = zext <1 x i32> %v to <1 x i64>
   %red = call i64 @llvm.vector.reduce.add.v1i64(<1 x i64> %e)
   ret i64 %red
@@ -1038,7 +1014,7 @@ define i64 @vwreduce_uadd_v1i64(<1 x i32>* %x) {
 
 declare i64 @llvm.vector.reduce.add.v2i64(<2 x i64>)
 
-define i64 @vreduce_add_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_add_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_add_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
@@ -1060,12 +1036,12 @@ define i64 @vreduce_add_v2i64(<2 x i64>* %x) {
 ; RV64-NEXT:    vredsum.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
-define i64 @vwreduce_add_v2i64(<2 x i32>* %x) {
+define i64 @vwreduce_add_v2i64(ptr %x) {
 ; RV32-LABEL: vwreduce_add_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
@@ -1091,13 +1067,13 @@ define i64 @vwreduce_add_v2i64(<2 x i32>* %x) {
 ; RV64-NEXT:    vsetvli zero, zero, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %e = sext <2 x i32> %v to <2 x i64>
   %red = call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %e)
   ret i64 %red
 }
 
-define i64 @vwreduce_uadd_v2i64(<2 x i32>* %x) {
+define i64 @vwreduce_uadd_v2i64(ptr %x) {
 ; RV32-LABEL: vwreduce_uadd_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
@@ -1123,7 +1099,7 @@ define i64 @vwreduce_uadd_v2i64(<2 x i32>* %x) {
 ; RV64-NEXT:    vsetvli zero, zero, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %e = zext <2 x i32> %v to <2 x i64>
   %red = call i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %e)
   ret i64 %red
@@ -1131,7 +1107,7 @@ define i64 @vwreduce_uadd_v2i64(<2 x i32>* %x) {
 
 declare i64 @llvm.vector.reduce.add.v4i64(<4 x i64>)
 
-define i64 @vreduce_add_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_add_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_add_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
@@ -1153,12 +1129,12 @@ define i64 @vreduce_add_v4i64(<4 x i64>* %x) {
 ; RV64-NEXT:    vredsum.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.add.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
-define i64 @vwreduce_add_v4i64(<4 x i32>* %x) {
+define i64 @vwreduce_add_v4i64(ptr %x) {
 ; RV32-LABEL: vwreduce_add_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -1167,10 +1143,9 @@ define i64 @vwreduce_add_v4i64(<4 x i32>* %x) {
 ; RV32-NEXT:    vmv.s.x v9, zero
 ; RV32-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; RV32-NEXT:    vwredsum.vs v8, v8, v9
-; RV32-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
+; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vsrl.vx v8, v8, a1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -1179,20 +1154,20 @@ define i64 @vwreduce_add_v4i64(<4 x i32>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; RV64-NEXT:    vle32.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 4, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v9, zero
 ; RV64-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; RV64-NEXT:    vwredsum.vs v8, v8, v9
 ; RV64-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %e = sext <4 x i32> %v to <4 x i64>
   %red = call i64 @llvm.vector.reduce.add.v4i64(<4 x i64> %e)
   ret i64 %red
 }
 
-define i64 @vwreduce_uadd_v4i64(<4 x i32>* %x) {
+define i64 @vwreduce_uadd_v4i64(ptr %x) {
 ; RV32-LABEL: vwreduce_uadd_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -1201,10 +1176,9 @@ define i64 @vwreduce_uadd_v4i64(<4 x i32>* %x) {
 ; RV32-NEXT:    vmv.s.x v9, zero
 ; RV32-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; RV32-NEXT:    vwredsumu.vs v8, v8, v9
-; RV32-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
+; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vsrl.vx v8, v8, a1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -1213,14 +1187,14 @@ define i64 @vwreduce_uadd_v4i64(<4 x i32>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; RV64-NEXT:    vle32.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 4, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v9, zero
 ; RV64-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; RV64-NEXT:    vwredsumu.vs v8, v8, v9
 ; RV64-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %e = zext <4 x i32> %v to <4 x i64>
   %red = call i64 @llvm.vector.reduce.add.v4i64(<4 x i64> %e)
   ret i64 %red
@@ -1228,7 +1202,7 @@ define i64 @vwreduce_uadd_v4i64(<4 x i32>* %x) {
 
 declare i64 @llvm.vector.reduce.add.v8i64(<8 x i64>)
 
-define i64 @vreduce_add_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_add_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_add_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
@@ -1250,12 +1224,12 @@ define i64 @vreduce_add_v8i64(<8 x i64>* %x) {
 ; RV64-NEXT:    vredsum.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.add.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
-define i64 @vwreduce_add_v8i64(<8 x i32>* %x) {
+define i64 @vwreduce_add_v8i64(ptr %x) {
 ; RV32-LABEL: vwreduce_add_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -1264,10 +1238,9 @@ define i64 @vwreduce_add_v8i64(<8 x i32>* %x) {
 ; RV32-NEXT:    vmv.s.x v10, zero
 ; RV32-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; RV32-NEXT:    vwredsum.vs v8, v8, v10
-; RV32-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
+; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vsrl.vx v8, v8, a1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -1276,20 +1249,20 @@ define i64 @vwreduce_add_v8i64(<8 x i32>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; RV64-NEXT:    vle32.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 8, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v10, zero
 ; RV64-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; RV64-NEXT:    vwredsum.vs v8, v8, v10
 ; RV64-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %e = sext <8 x i32> %v to <8 x i64>
   %red = call i64 @llvm.vector.reduce.add.v8i64(<8 x i64> %e)
   ret i64 %red
 }
 
-define i64 @vwreduce_uadd_v8i64(<8 x i32>* %x) {
+define i64 @vwreduce_uadd_v8i64(ptr %x) {
 ; RV32-LABEL: vwreduce_uadd_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -1298,10 +1271,9 @@ define i64 @vwreduce_uadd_v8i64(<8 x i32>* %x) {
 ; RV32-NEXT:    vmv.s.x v10, zero
 ; RV32-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; RV32-NEXT:    vwredsumu.vs v8, v8, v10
-; RV32-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
+; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vsrl.vx v8, v8, a1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -1310,14 +1282,14 @@ define i64 @vwreduce_uadd_v8i64(<8 x i32>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; RV64-NEXT:    vle32.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 8, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v10, zero
 ; RV64-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; RV64-NEXT:    vwredsumu.vs v8, v8, v10
 ; RV64-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %e = zext <8 x i32> %v to <8 x i64>
   %red = call i64 @llvm.vector.reduce.add.v8i64(<8 x i64> %e)
   ret i64 %red
@@ -1325,7 +1297,7 @@ define i64 @vwreduce_uadd_v8i64(<8 x i32>* %x) {
 
 declare i64 @llvm.vector.reduce.add.v16i64(<16 x i64>)
 
-define i64 @vreduce_add_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_add_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_add_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -1347,12 +1319,12 @@ define i64 @vreduce_add_v16i64(<16 x i64>* %x) {
 ; RV64-NEXT:    vredsum.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.add.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
-define i64 @vwreduce_add_v16i64(<16 x i32>* %x) {
+define i64 @vwreduce_add_v16i64(ptr %x) {
 ; RV32-LABEL: vwreduce_add_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -1361,10 +1333,9 @@ define i64 @vwreduce_add_v16i64(<16 x i32>* %x) {
 ; RV32-NEXT:    vmv.s.x v12, zero
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV32-NEXT:    vwredsum.vs v8, v8, v12
-; RV32-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
+; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vsrl.vx v8, v8, a1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -1373,20 +1344,20 @@ define i64 @vwreduce_add_v16i64(<16 x i32>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV64-NEXT:    vle32.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v12, zero
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV64-NEXT:    vwredsum.vs v8, v8, v12
 ; RV64-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %e = sext <16 x i32> %v to <16 x i64>
   %red = call i64 @llvm.vector.reduce.add.v16i64(<16 x i64> %e)
   ret i64 %red
 }
 
-define i64 @vwreduce_uadd_v16i64(<16 x i32>* %x) {
+define i64 @vwreduce_uadd_v16i64(ptr %x) {
 ; RV32-LABEL: vwreduce_uadd_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -1395,10 +1366,9 @@ define i64 @vwreduce_uadd_v16i64(<16 x i32>* %x) {
 ; RV32-NEXT:    vmv.s.x v12, zero
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV32-NEXT:    vwredsumu.vs v8, v8, v12
-; RV32-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
+; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vsrl.vx v8, v8, a1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -1407,14 +1377,14 @@ define i64 @vwreduce_uadd_v16i64(<16 x i32>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV64-NEXT:    vle32.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v12, zero
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV64-NEXT:    vwredsumu.vs v8, v8, v12
 ; RV64-NEXT:    vsetivli zero, 0, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %e = zext <16 x i32> %v to <16 x i64>
   %red = call i64 @llvm.vector.reduce.add.v16i64(<16 x i64> %e)
   ret i64 %red
@@ -1422,16 +1392,16 @@ define i64 @vwreduce_uadd_v16i64(<16 x i32>* %x) {
 
 declare i64 @llvm.vector.reduce.add.v32i64(<32 x i64>)
 
-define i64 @vreduce_add_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_add_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_add_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
 ; RV32-NEXT:    addi a0, a0, 128
 ; RV32-NEXT:    vle64.v v16, (a0)
-; RV32-NEXT:    vmv.s.x v24, zero
 ; RV32-NEXT:    vadd.vv v8, v8, v16
-; RV32-NEXT:    vredsum.vs v8, v8, v24
+; RV32-NEXT:    vmv.s.x v16, zero
+; RV32-NEXT:    vredsum.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
@@ -1445,17 +1415,17 @@ define i64 @vreduce_add_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
-; RV64-NEXT:    vmv.s.x v24, zero
 ; RV64-NEXT:    vadd.vv v8, v8, v16
-; RV64-NEXT:    vredsum.vs v8, v8, v24
+; RV64-NEXT:    vmv.s.x v16, zero
+; RV64-NEXT:    vredsum.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.add.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
-define i64 @vwreduce_add_v32i64(<32 x i32>* %x) {
+define i64 @vwreduce_add_v32i64(ptr %x) {
 ; RV32-LABEL: vwreduce_add_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    li a1, 32
@@ -1465,9 +1435,8 @@ define i64 @vwreduce_add_v32i64(<32 x i32>* %x) {
 ; RV32-NEXT:    vslidedown.vi v16, v8, 16
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV32-NEXT:    vwadd.vv v24, v8, v16
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
-; RV32-NEXT:    vmv.s.x v8, zero
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
+; RV32-NEXT:    vmv.s.x v8, zero
 ; RV32-NEXT:    vredsum.vs v8, v24, v8
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
@@ -1484,19 +1453,18 @@ define i64 @vwreduce_add_v32i64(<32 x i32>* %x) {
 ; RV64-NEXT:    vslidedown.vi v16, v8, 16
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV64-NEXT:    vwadd.vv v24, v8, v16
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
-; RV64-NEXT:    vmv.s.x v8, zero
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
+; RV64-NEXT:    vmv.s.x v8, zero
 ; RV64-NEXT:    vredsum.vs v8, v24, v8
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %e = sext <32 x i32> %v to <32 x i64>
   %red = call i64 @llvm.vector.reduce.add.v32i64(<32 x i64> %e)
   ret i64 %red
 }
 
-define i64 @vwreduce_uadd_v32i64(<32 x i32>* %x) {
+define i64 @vwreduce_uadd_v32i64(ptr %x) {
 ; RV32-LABEL: vwreduce_uadd_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    li a1, 32
@@ -1506,9 +1474,8 @@ define i64 @vwreduce_uadd_v32i64(<32 x i32>* %x) {
 ; RV32-NEXT:    vslidedown.vi v16, v8, 16
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV32-NEXT:    vwaddu.vv v24, v8, v16
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
-; RV32-NEXT:    vmv.s.x v8, zero
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
+; RV32-NEXT:    vmv.s.x v8, zero
 ; RV32-NEXT:    vredsum.vs v8, v24, v8
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
@@ -1525,13 +1492,12 @@ define i64 @vwreduce_uadd_v32i64(<32 x i32>* %x) {
 ; RV64-NEXT:    vslidedown.vi v16, v8, 16
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; RV64-NEXT:    vwaddu.vv v24, v8, v16
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
-; RV64-NEXT:    vmv.s.x v8, zero
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
+; RV64-NEXT:    vmv.s.x v8, zero
 ; RV64-NEXT:    vredsum.vs v8, v24, v8
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %e = zext <32 x i32> %v to <32 x i64>
   %red = call i64 @llvm.vector.reduce.add.v32i64(<32 x i64> %e)
   ret i64 %red
@@ -1539,7 +1505,7 @@ define i64 @vwreduce_uadd_v32i64(<32 x i32>* %x) {
 
 declare i64 @llvm.vector.reduce.add.v64i64(<64 x i64>)
 
-define i64 @vreduce_add_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_add_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_add_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -1579,19 +1545,20 @@ define i64 @vreduce_add_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vredsum.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.add.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
-define i64 @vwreduce_add_v64i64(<64 x i32>* %x) {
+define i64 @vwreduce_add_v64i64(ptr %x) {
 ; RV32-LABEL: vwreduce_add_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
 ; RV32-NEXT:    .cfi_def_cfa_offset 16
 ; RV32-NEXT:    csrr a1, vlenb
-; RV32-NEXT:    slli a1, a1, 5
+; RV32-NEXT:    slli a1, a1, 4
 ; RV32-NEXT:    sub sp, sp, a1
+; RV32-NEXT:    .cfi_escape 0x0f, 0x0d, 0x72, 0x00, 0x11, 0x10, 0x22, 0x11, 0x10, 0x92, 0xa2, 0x38, 0x00, 0x1e, 0x22 # sp + 16 + 16 * vlenb
 ; RV32-NEXT:    addi a1, a0, 128
 ; RV32-NEXT:    li a2, 32
 ; RV32-NEXT:    vsetvli zero, a2, e32, m8, ta, ma
@@ -1601,45 +1568,24 @@ define i64 @vwreduce_add_v64i64(<64 x i32>* %x) {
 ; RV32-NEXT:    vle32.v v16, (a1)
 ; RV32-NEXT:    vsetivli zero, 16, e32, m8, ta, ma
 ; RV32-NEXT:    vslidedown.vi v24, v8, 16
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    li a1, 24
-; RV32-NEXT:    mul a0, a0, a1
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
-; RV32-NEXT:    vslidedown.vi v24, v16, 16
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 3
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
+; RV32-NEXT:    vslidedown.vi v0, v16, 16
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    li a1, 24
-; RV32-NEXT:    mul a0, a0, a1
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vl8re8.v v24, (a0) # Unknown-size Folded Reload
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 3
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV32-NEXT:    vmv4r.v v8, v0
 ; RV32-NEXT:    vwadd.vv v0, v24, v8
 ; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 4
+; RV32-NEXT:    slli a0, a0, 3
 ; RV32-NEXT:    add a0, sp, a0
 ; RV32-NEXT:    addi a0, a0, 16
 ; RV32-NEXT:    vs8r.v v0, (a0) # Unknown-size Folded Spill
 ; RV32-NEXT:    addi a0, sp, 16
-; RV32-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV32-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV32-NEXT:    vwadd.vv v0, v8, v16
 ; RV32-NEXT:    vsetvli zero, zero, e64, m8, ta, ma
 ; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 4
+; RV32-NEXT:    slli a0, a0, 3
 ; RV32-NEXT:    add a0, sp, a0
 ; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV32-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV32-NEXT:    vadd.vv v8, v0, v8
 ; RV32-NEXT:    vmv.s.x v16, zero
 ; RV32-NEXT:    vredsum.vs v8, v8, v16
@@ -1648,7 +1594,7 @@ define i64 @vwreduce_add_v64i64(<64 x i32>* %x) {
 ; RV32-NEXT:    vsrl.vx v8, v8, a2
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    csrr a2, vlenb
-; RV32-NEXT:    slli a2, a2, 5
+; RV32-NEXT:    slli a2, a2, 4
 ; RV32-NEXT:    add sp, sp, a2
 ; RV32-NEXT:    addi sp, sp, 16
 ; RV32-NEXT:    ret
@@ -1658,8 +1604,9 @@ define i64 @vwreduce_add_v64i64(<64 x i32>* %x) {
 ; RV64-NEXT:    addi sp, sp, -16
 ; RV64-NEXT:    .cfi_def_cfa_offset 16
 ; RV64-NEXT:    csrr a1, vlenb
-; RV64-NEXT:    slli a1, a1, 5
+; RV64-NEXT:    slli a1, a1, 4
 ; RV64-NEXT:    sub sp, sp, a1
+; RV64-NEXT:    .cfi_escape 0x0f, 0x0d, 0x72, 0x00, 0x11, 0x10, 0x22, 0x11, 0x10, 0x92, 0xa2, 0x38, 0x00, 0x1e, 0x22 # sp + 16 + 16 * vlenb
 ; RV64-NEXT:    addi a1, a0, 128
 ; RV64-NEXT:    li a2, 32
 ; RV64-NEXT:    vsetvli zero, a2, e32, m8, ta, ma
@@ -1669,68 +1616,48 @@ define i64 @vwreduce_add_v64i64(<64 x i32>* %x) {
 ; RV64-NEXT:    vle32.v v16, (a1)
 ; RV64-NEXT:    vsetivli zero, 16, e32, m8, ta, ma
 ; RV64-NEXT:    vslidedown.vi v24, v8, 16
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    li a1, 24
-; RV64-NEXT:    mul a0, a0, a1
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
-; RV64-NEXT:    vslidedown.vi v24, v16, 16
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 3
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
+; RV64-NEXT:    vslidedown.vi v0, v16, 16
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    li a1, 24
-; RV64-NEXT:    mul a0, a0, a1
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vl8re8.v v24, (a0) # Unknown-size Folded Reload
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 3
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV64-NEXT:    vmv4r.v v8, v0
 ; RV64-NEXT:    vwadd.vv v0, v24, v8
 ; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 4
+; RV64-NEXT:    slli a0, a0, 3
 ; RV64-NEXT:    add a0, sp, a0
 ; RV64-NEXT:    addi a0, a0, 16
 ; RV64-NEXT:    vs8r.v v0, (a0) # Unknown-size Folded Spill
 ; RV64-NEXT:    addi a0, sp, 16
-; RV64-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV64-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV64-NEXT:    vwadd.vv v0, v8, v16
 ; RV64-NEXT:    vsetvli zero, zero, e64, m8, ta, ma
 ; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 4
+; RV64-NEXT:    slli a0, a0, 3
 ; RV64-NEXT:    add a0, sp, a0
 ; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV64-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV64-NEXT:    vadd.vv v8, v0, v8
 ; RV64-NEXT:    vmv.s.x v16, zero
 ; RV64-NEXT:    vredsum.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    csrr a1, vlenb
-; RV64-NEXT:    slli a1, a1, 5
+; RV64-NEXT:    slli a1, a1, 4
 ; RV64-NEXT:    add sp, sp, a1
 ; RV64-NEXT:    addi sp, sp, 16
 ; RV64-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %e = sext <64 x i32> %v to <64 x i64>
   %red = call i64 @llvm.vector.reduce.add.v64i64(<64 x i64> %e)
   ret i64 %red
 }
 
-define i64 @vwreduce_uadd_v64i64(<64 x i32>* %x) {
+define i64 @vwreduce_uadd_v64i64(ptr %x) {
 ; RV32-LABEL: vwreduce_uadd_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
 ; RV32-NEXT:    .cfi_def_cfa_offset 16
 ; RV32-NEXT:    csrr a1, vlenb
-; RV32-NEXT:    slli a1, a1, 5
+; RV32-NEXT:    slli a1, a1, 4
 ; RV32-NEXT:    sub sp, sp, a1
+; RV32-NEXT:    .cfi_escape 0x0f, 0x0d, 0x72, 0x00, 0x11, 0x10, 0x22, 0x11, 0x10, 0x92, 0xa2, 0x38, 0x00, 0x1e, 0x22 # sp + 16 + 16 * vlenb
 ; RV32-NEXT:    addi a1, a0, 128
 ; RV32-NEXT:    li a2, 32
 ; RV32-NEXT:    vsetvli zero, a2, e32, m8, ta, ma
@@ -1740,45 +1667,24 @@ define i64 @vwreduce_uadd_v64i64(<64 x i32>* %x) {
 ; RV32-NEXT:    vle32.v v16, (a1)
 ; RV32-NEXT:    vsetivli zero, 16, e32, m8, ta, ma
 ; RV32-NEXT:    vslidedown.vi v24, v8, 16
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    li a1, 24
-; RV32-NEXT:    mul a0, a0, a1
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
-; RV32-NEXT:    vslidedown.vi v24, v16, 16
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 3
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
+; RV32-NEXT:    vslidedown.vi v0, v16, 16
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    li a1, 24
-; RV32-NEXT:    mul a0, a0, a1
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vl8re8.v v24, (a0) # Unknown-size Folded Reload
-; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 3
-; RV32-NEXT:    add a0, sp, a0
-; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV32-NEXT:    vmv4r.v v8, v0
 ; RV32-NEXT:    vwaddu.vv v0, v24, v8
 ; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 4
+; RV32-NEXT:    slli a0, a0, 3
 ; RV32-NEXT:    add a0, sp, a0
 ; RV32-NEXT:    addi a0, a0, 16
 ; RV32-NEXT:    vs8r.v v0, (a0) # Unknown-size Folded Spill
 ; RV32-NEXT:    addi a0, sp, 16
-; RV32-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV32-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV32-NEXT:    vwaddu.vv v0, v8, v16
 ; RV32-NEXT:    vsetvli zero, zero, e64, m8, ta, ma
 ; RV32-NEXT:    csrr a0, vlenb
-; RV32-NEXT:    slli a0, a0, 4
+; RV32-NEXT:    slli a0, a0, 3
 ; RV32-NEXT:    add a0, sp, a0
 ; RV32-NEXT:    addi a0, a0, 16
-; RV32-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV32-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV32-NEXT:    vadd.vv v8, v0, v8
 ; RV32-NEXT:    vmv.s.x v16, zero
 ; RV32-NEXT:    vredsum.vs v8, v8, v16
@@ -1787,7 +1693,7 @@ define i64 @vwreduce_uadd_v64i64(<64 x i32>* %x) {
 ; RV32-NEXT:    vsrl.vx v8, v8, a2
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    csrr a2, vlenb
-; RV32-NEXT:    slli a2, a2, 5
+; RV32-NEXT:    slli a2, a2, 4
 ; RV32-NEXT:    add sp, sp, a2
 ; RV32-NEXT:    addi sp, sp, 16
 ; RV32-NEXT:    ret
@@ -1797,8 +1703,9 @@ define i64 @vwreduce_uadd_v64i64(<64 x i32>* %x) {
 ; RV64-NEXT:    addi sp, sp, -16
 ; RV64-NEXT:    .cfi_def_cfa_offset 16
 ; RV64-NEXT:    csrr a1, vlenb
-; RV64-NEXT:    slli a1, a1, 5
+; RV64-NEXT:    slli a1, a1, 4
 ; RV64-NEXT:    sub sp, sp, a1
+; RV64-NEXT:    .cfi_escape 0x0f, 0x0d, 0x72, 0x00, 0x11, 0x10, 0x22, 0x11, 0x10, 0x92, 0xa2, 0x38, 0x00, 0x1e, 0x22 # sp + 16 + 16 * vlenb
 ; RV64-NEXT:    addi a1, a0, 128
 ; RV64-NEXT:    li a2, 32
 ; RV64-NEXT:    vsetvli zero, a2, e32, m8, ta, ma
@@ -1808,55 +1715,34 @@ define i64 @vwreduce_uadd_v64i64(<64 x i32>* %x) {
 ; RV64-NEXT:    vle32.v v16, (a1)
 ; RV64-NEXT:    vsetivli zero, 16, e32, m8, ta, ma
 ; RV64-NEXT:    vslidedown.vi v24, v8, 16
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    li a1, 24
-; RV64-NEXT:    mul a0, a0, a1
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
-; RV64-NEXT:    vslidedown.vi v24, v16, 16
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 3
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vs8r.v v24, (a0) # Unknown-size Folded Spill
+; RV64-NEXT:    vslidedown.vi v0, v16, 16
 ; RV64-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    li a1, 24
-; RV64-NEXT:    mul a0, a0, a1
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vl8re8.v v24, (a0) # Unknown-size Folded Reload
-; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 3
-; RV64-NEXT:    add a0, sp, a0
-; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV64-NEXT:    vmv4r.v v8, v0
 ; RV64-NEXT:    vwaddu.vv v0, v24, v8
 ; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 4
+; RV64-NEXT:    slli a0, a0, 3
 ; RV64-NEXT:    add a0, sp, a0
 ; RV64-NEXT:    addi a0, a0, 16
 ; RV64-NEXT:    vs8r.v v0, (a0) # Unknown-size Folded Spill
 ; RV64-NEXT:    addi a0, sp, 16
-; RV64-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV64-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV64-NEXT:    vwaddu.vv v0, v8, v16
 ; RV64-NEXT:    vsetvli zero, zero, e64, m8, ta, ma
 ; RV64-NEXT:    csrr a0, vlenb
-; RV64-NEXT:    slli a0, a0, 4
+; RV64-NEXT:    slli a0, a0, 3
 ; RV64-NEXT:    add a0, sp, a0
 ; RV64-NEXT:    addi a0, a0, 16
-; RV64-NEXT:    vl8re8.v v8, (a0) # Unknown-size Folded Reload
+; RV64-NEXT:    vl8r.v v8, (a0) # Unknown-size Folded Reload
 ; RV64-NEXT:    vadd.vv v8, v0, v8
 ; RV64-NEXT:    vmv.s.x v16, zero
 ; RV64-NEXT:    vredsum.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    csrr a1, vlenb
-; RV64-NEXT:    slli a1, a1, 5
+; RV64-NEXT:    slli a1, a1, 4
 ; RV64-NEXT:    add sp, sp, a1
 ; RV64-NEXT:    addi sp, sp, 16
 ; RV64-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %e = zext <64 x i32> %v to <64 x i64>
   %red = call i64 @llvm.vector.reduce.add.v64i64(<64 x i64> %e)
   ret i64 %red
@@ -1864,150 +1750,142 @@ define i64 @vwreduce_uadd_v64i64(<64 x i32>* %x) {
 
 declare i8 @llvm.vector.reduce.and.v1i8(<1 x i8>)
 
-define i8 @vreduce_and_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_and_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v2i8(<2 x i8>)
 
-define i8 @vreduce_and_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_and_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v4i8(<4 x i8>)
 
-define i8 @vreduce_and_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_and_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v8i8(<8 x i8>)
 
-define i8 @vreduce_and_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_and_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v16i8(<16 x i8>)
 
-define i8 @vreduce_and_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_and_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v32i8(<32 x i8>)
 
-define i8 @vreduce_and_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_and_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v10, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v64i8(<64 x i8>)
 
-define i8 @vreduce_and_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_and_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v12, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v128i8(<128 x i8>)
 
-define i8 @vreduce_and_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_and_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.and.v256i8(<256 x i8>)
 
-define i8 @vreduce_and_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_and_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -2016,144 +1894,138 @@ define i8 @vreduce_and_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vand.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.and.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v1i16(<1 x i16>)
 
-define i16 @vreduce_and_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_and_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v2i16(<2 x i16>)
 
-define i16 @vreduce_and_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_and_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v4i16(<4 x i16>)
 
-define i16 @vreduce_and_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_and_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v8i16(<8 x i16>)
 
-define i16 @vreduce_and_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_and_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v16i16(<16 x i16>)
 
-define i16 @vreduce_and_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_and_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v10, -1
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v32i16(<32 x i16>)
 
-define i16 @vreduce_and_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_and_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v12, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v64i16(<64 x i16>)
 
-define i16 @vreduce_and_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_and_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.and.v128i16(<128 x i16>)
 
-define i16 @vreduce_and_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_and_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -2162,125 +2034,121 @@ define i16 @vreduce_and_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle16.v v16, (a0)
 ; CHECK-NEXT:    vand.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.and.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.and.v1i32(<1 x i32>)
 
-define i32 @vreduce_and_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_and_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.and.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.and.v2i32(<2 x i32>)
 
-define i32 @vreduce_and_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_and_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.and.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.and.v4i32(<4 x i32>)
 
-define i32 @vreduce_and_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_and_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.and.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.and.v8i32(<8 x i32>)
 
-define i32 @vreduce_and_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_and_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 8, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v10, -1
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.and.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.and.v16i32(<16 x i32>)
 
-define i32 @vreduce_and_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_and_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v12, -1
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.and.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.and.v32i32(<32 x i32>)
 
-define i32 @vreduce_and_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_and_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.and.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.and.v64i32(<64 x i32>)
 
-define i32 @vreduce_and_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_and_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_and_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -2289,28 +2157,28 @@ define i32 @vreduce_and_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle32.v v16, (a0)
 ; CHECK-NEXT:    vand.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredand.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.and.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.and.v1i64(<1 x i64>)
 
-define i64 @vreduce_and_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_and_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_and_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_and_v1i64:
@@ -2319,21 +2187,19 @@ define i64 @vreduce_and_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.and.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.and.v2i64(<2 x i64>)
 
-define i64 @vreduce_and_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_and_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_and_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.v.i v9, -1
-; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV32-NEXT:    vredand.vs v8, v8, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
@@ -2346,20 +2212,18 @@ define i64 @vreduce_and_v2i64(<2 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v9, -1
-; RV64-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV64-NEXT:    vredand.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.and.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.and.v4i64(<4 x i64>)
 
-define i64 @vreduce_and_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_and_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_and_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
@@ -2379,20 +2243,20 @@ define i64 @vreduce_and_v4i64(<4 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 4, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v10, -1
 ; RV64-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
 ; RV64-NEXT:    vredand.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.and.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.and.v8i64(<8 x i64>)
 
-define i64 @vreduce_and_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_and_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_and_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
@@ -2412,20 +2276,20 @@ define i64 @vreduce_and_v8i64(<8 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 8, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v12, -1
 ; RV64-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
 ; RV64-NEXT:    vredand.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.and.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.and.v16i64(<16 x i64>)
 
-define i64 @vreduce_and_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_and_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_and_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -2445,20 +2309,20 @@ define i64 @vreduce_and_v16i64(<16 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v16, -1
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vredand.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.and.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.and.v32i64(<32 x i64>)
 
-define i64 @vreduce_and_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_and_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_and_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -2484,20 +2348,20 @@ define i64 @vreduce_and_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
 ; RV64-NEXT:    vand.vv v8, v8, v16
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v16, -1
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vredand.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.and.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.and.v64i64(<64 x i64>)
 
-define i64 @vreduce_and_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_and_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_and_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -2535,34 +2399,34 @@ define i64 @vreduce_and_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vand.vv v16, v24, v16
 ; RV64-NEXT:    vand.vv v8, v8, v0
 ; RV64-NEXT:    vand.vv v8, v8, v16
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v16, -1
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vredand.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.and.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v1i8(<1 x i8>)
 
-define i8 @vreduce_or_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_or_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v2i8(<2 x i8>)
 
-define i8 @vreduce_or_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_or_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
@@ -2571,14 +2435,14 @@ define i8 @vreduce_or_v2i8(<2 x i8>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v4i8(<4 x i8>)
 
-define i8 @vreduce_or_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_or_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
@@ -2587,14 +2451,14 @@ define i8 @vreduce_or_v4i8(<4 x i8>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v8i8(<8 x i8>)
 
-define i8 @vreduce_or_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_or_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
@@ -2603,14 +2467,14 @@ define i8 @vreduce_or_v8i8(<8 x i8>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v16i8(<16 x i8>)
 
-define i8 @vreduce_or_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_or_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
@@ -2619,71 +2483,65 @@ define i8 @vreduce_or_v16i8(<16 x i8>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v32i8(<32 x i8>)
 
-define i8 @vreduce_or_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_or_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v64i8(<64 x i8>)
 
-define i8 @vreduce_or_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_or_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v128i8(<128 x i8>)
 
-define i8 @vreduce_or_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_or_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.or.v256i8(<256 x i8>)
 
-define i8 @vreduce_or_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_or_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -2692,34 +2550,32 @@ define i8 @vreduce_or_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vor.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.or.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v1i16(<1 x i16>)
 
-define i16 @vreduce_or_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_or_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v2i16(<2 x i16>)
 
-define i16 @vreduce_or_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_or_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
@@ -2728,14 +2584,14 @@ define i16 @vreduce_or_v2i16(<2 x i16>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v4i16(<4 x i16>)
 
-define i16 @vreduce_or_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_or_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
@@ -2744,14 +2600,14 @@ define i16 @vreduce_or_v4i16(<4 x i16>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v8i16(<8 x i16>)
 
-define i16 @vreduce_or_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_or_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -2760,14 +2616,14 @@ define i16 @vreduce_or_v8i16(<8 x i16>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v16i16(<16 x i16>)
 
-define i16 @vreduce_or_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_or_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
@@ -2776,52 +2632,48 @@ define i16 @vreduce_or_v16i16(<16 x i16>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v32i16(<32 x i16>)
 
-define i16 @vreduce_or_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_or_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v64i16(<64 x i16>)
 
-define i16 @vreduce_or_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_or_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.or.v128i16(<128 x i16>)
 
-define i16 @vreduce_or_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_or_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -2830,34 +2682,32 @@ define i16 @vreduce_or_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle16.v v16, (a0)
 ; CHECK-NEXT:    vor.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.or.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.or.v1i32(<1 x i32>)
 
-define i32 @vreduce_or_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_or_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.or.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.or.v2i32(<2 x i32>)
 
-define i32 @vreduce_or_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_or_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
@@ -2866,14 +2716,14 @@ define i32 @vreduce_or_v2i32(<2 x i32>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.or.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.or.v4i32(<4 x i32>)
 
-define i32 @vreduce_or_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_or_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -2882,14 +2732,14 @@ define i32 @vreduce_or_v4i32(<4 x i32>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.or.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.or.v8i32(<8 x i32>)
 
-define i32 @vreduce_or_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_or_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -2898,14 +2748,14 @@ define i32 @vreduce_or_v8i32(<8 x i32>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.or.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.or.v16i32(<16 x i32>)
 
-define i32 @vreduce_or_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_or_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -2914,33 +2764,31 @@ define i32 @vreduce_or_v16i32(<16 x i32>* %x) {
 ; CHECK-NEXT:    vredor.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.or.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.or.v32i32(<32 x i32>)
 
-define i32 @vreduce_or_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_or_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.or.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.or.v64i32(<64 x i32>)
 
-define i32 @vreduce_or_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_or_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_or_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -2949,28 +2797,26 @@ define i32 @vreduce_or_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle32.v v16, (a0)
 ; CHECK-NEXT:    vor.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.or.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.or.v1i64(<1 x i64>)
 
-define i64 @vreduce_or_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_or_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_or_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_or_v1i64:
@@ -2979,14 +2825,14 @@ define i64 @vreduce_or_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.or.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.or.v2i64(<2 x i64>)
 
-define i64 @vreduce_or_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_or_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_or_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
@@ -3008,14 +2854,14 @@ define i64 @vreduce_or_v2i64(<2 x i64>* %x) {
 ; RV64-NEXT:    vredor.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.or.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.or.v4i64(<4 x i64>)
 
-define i64 @vreduce_or_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_or_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_or_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
@@ -3037,14 +2883,14 @@ define i64 @vreduce_or_v4i64(<4 x i64>* %x) {
 ; RV64-NEXT:    vredor.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.or.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.or.v8i64(<8 x i64>)
 
-define i64 @vreduce_or_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_or_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_or_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
@@ -3066,14 +2912,14 @@ define i64 @vreduce_or_v8i64(<8 x i64>* %x) {
 ; RV64-NEXT:    vredor.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.or.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.or.v16i64(<16 x i64>)
 
-define i64 @vreduce_or_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_or_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_or_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -3095,23 +2941,23 @@ define i64 @vreduce_or_v16i64(<16 x i64>* %x) {
 ; RV64-NEXT:    vredor.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.or.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.or.v32i64(<32 x i64>)
 
-define i64 @vreduce_or_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_or_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_or_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
 ; RV32-NEXT:    addi a0, a0, 128
 ; RV32-NEXT:    vle64.v v16, (a0)
-; RV32-NEXT:    vmv.s.x v24, zero
 ; RV32-NEXT:    vor.vv v8, v8, v16
-; RV32-NEXT:    vredor.vs v8, v8, v24
+; RV32-NEXT:    vmv.s.x v16, zero
+; RV32-NEXT:    vredor.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
@@ -3125,19 +2971,19 @@ define i64 @vreduce_or_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
-; RV64-NEXT:    vmv.s.x v24, zero
 ; RV64-NEXT:    vor.vv v8, v8, v16
-; RV64-NEXT:    vredor.vs v8, v8, v24
+; RV64-NEXT:    vmv.s.x v16, zero
+; RV64-NEXT:    vredor.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.or.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.or.v64i64(<64 x i64>)
 
-define i64 @vreduce_or_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_or_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_or_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -3177,28 +3023,28 @@ define i64 @vreduce_or_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vredor.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.or.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v1i8(<1 x i8>)
 
-define i8 @vreduce_xor_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_xor_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v2i8(<2 x i8>)
 
-define i8 @vreduce_xor_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_xor_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
@@ -3207,14 +3053,14 @@ define i8 @vreduce_xor_v2i8(<2 x i8>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v4i8(<4 x i8>)
 
-define i8 @vreduce_xor_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_xor_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
@@ -3223,14 +3069,14 @@ define i8 @vreduce_xor_v4i8(<4 x i8>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v8i8(<8 x i8>)
 
-define i8 @vreduce_xor_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_xor_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
@@ -3239,14 +3085,14 @@ define i8 @vreduce_xor_v8i8(<8 x i8>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v16i8(<16 x i8>)
 
-define i8 @vreduce_xor_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_xor_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
@@ -3255,71 +3101,65 @@ define i8 @vreduce_xor_v16i8(<16 x i8>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v32i8(<32 x i8>)
 
-define i8 @vreduce_xor_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_xor_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v64i8(<64 x i8>)
 
-define i8 @vreduce_xor_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_xor_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v128i8(<128 x i8>)
 
-define i8 @vreduce_xor_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_xor_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.xor.v256i8(<256 x i8>)
 
-define i8 @vreduce_xor_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_xor_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -3328,34 +3168,32 @@ define i8 @vreduce_xor_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vxor.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.xor.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v1i16(<1 x i16>)
 
-define i16 @vreduce_xor_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_xor_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v2i16(<2 x i16>)
 
-define i16 @vreduce_xor_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_xor_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
@@ -3364,14 +3202,14 @@ define i16 @vreduce_xor_v2i16(<2 x i16>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v4i16(<4 x i16>)
 
-define i16 @vreduce_xor_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_xor_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
@@ -3380,14 +3218,14 @@ define i16 @vreduce_xor_v4i16(<4 x i16>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v8i16(<8 x i16>)
 
-define i16 @vreduce_xor_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_xor_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -3396,14 +3234,14 @@ define i16 @vreduce_xor_v8i16(<8 x i16>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v16i16(<16 x i16>)
 
-define i16 @vreduce_xor_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_xor_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
@@ -3412,52 +3250,48 @@ define i16 @vreduce_xor_v16i16(<16 x i16>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v32i16(<32 x i16>)
 
-define i16 @vreduce_xor_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_xor_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v64i16(<64 x i16>)
 
-define i16 @vreduce_xor_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_xor_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.xor.v128i16(<128 x i16>)
 
-define i16 @vreduce_xor_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_xor_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -3466,34 +3300,32 @@ define i16 @vreduce_xor_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle16.v v16, (a0)
 ; CHECK-NEXT:    vxor.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.xor.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.xor.v1i32(<1 x i32>)
 
-define i32 @vreduce_xor_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_xor_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.xor.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.xor.v2i32(<2 x i32>)
 
-define i32 @vreduce_xor_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_xor_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
@@ -3502,14 +3334,14 @@ define i32 @vreduce_xor_v2i32(<2 x i32>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.xor.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.xor.v4i32(<4 x i32>)
 
-define i32 @vreduce_xor_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_xor_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -3518,14 +3350,14 @@ define i32 @vreduce_xor_v4i32(<4 x i32>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.xor.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.xor.v8i32(<8 x i32>)
 
-define i32 @vreduce_xor_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_xor_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -3534,14 +3366,14 @@ define i32 @vreduce_xor_v8i32(<8 x i32>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.xor.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.xor.v16i32(<16 x i32>)
 
-define i32 @vreduce_xor_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_xor_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -3550,33 +3382,31 @@ define i32 @vreduce_xor_v16i32(<16 x i32>* %x) {
 ; CHECK-NEXT:    vredxor.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.xor.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.xor.v32i32(<32 x i32>)
 
-define i32 @vreduce_xor_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_xor_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.xor.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.xor.v64i32(<64 x i32>)
 
-define i32 @vreduce_xor_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_xor_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_xor_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -3585,28 +3415,26 @@ define i32 @vreduce_xor_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle32.v v16, (a0)
 ; CHECK-NEXT:    vxor.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredxor.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.xor.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.xor.v1i64(<1 x i64>)
 
-define i64 @vreduce_xor_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_xor_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_xor_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_xor_v1i64:
@@ -3615,14 +3443,14 @@ define i64 @vreduce_xor_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.xor.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.xor.v2i64(<2 x i64>)
 
-define i64 @vreduce_xor_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_xor_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_xor_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
@@ -3644,14 +3472,14 @@ define i64 @vreduce_xor_v2i64(<2 x i64>* %x) {
 ; RV64-NEXT:    vredxor.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.xor.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.xor.v4i64(<4 x i64>)
 
-define i64 @vreduce_xor_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_xor_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_xor_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
@@ -3673,14 +3501,14 @@ define i64 @vreduce_xor_v4i64(<4 x i64>* %x) {
 ; RV64-NEXT:    vredxor.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.xor.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.xor.v8i64(<8 x i64>)
 
-define i64 @vreduce_xor_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_xor_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_xor_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
@@ -3702,14 +3530,14 @@ define i64 @vreduce_xor_v8i64(<8 x i64>* %x) {
 ; RV64-NEXT:    vredxor.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.xor.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.xor.v16i64(<16 x i64>)
 
-define i64 @vreduce_xor_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_xor_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_xor_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -3731,23 +3559,23 @@ define i64 @vreduce_xor_v16i64(<16 x i64>* %x) {
 ; RV64-NEXT:    vredxor.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.xor.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.xor.v32i64(<32 x i64>)
 
-define i64 @vreduce_xor_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_xor_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_xor_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
 ; RV32-NEXT:    addi a0, a0, 128
 ; RV32-NEXT:    vle64.v v16, (a0)
-; RV32-NEXT:    vmv.s.x v24, zero
 ; RV32-NEXT:    vxor.vv v8, v8, v16
-; RV32-NEXT:    vredxor.vs v8, v8, v24
+; RV32-NEXT:    vmv.s.x v16, zero
+; RV32-NEXT:    vredxor.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
@@ -3761,19 +3589,19 @@ define i64 @vreduce_xor_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
-; RV64-NEXT:    vmv.s.x v24, zero
 ; RV64-NEXT:    vxor.vv v8, v8, v16
-; RV64-NEXT:    vredxor.vs v8, v8, v24
+; RV64-NEXT:    vmv.s.x v16, zero
+; RV64-NEXT:    vredxor.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.xor.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.xor.v64i64(<64 x i64>)
 
-define i64 @vreduce_xor_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_xor_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_xor_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -3813,28 +3641,28 @@ define i64 @vreduce_xor_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vredxor.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.xor.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v1i8(<1 x i8>)
 
-define i8 @vreduce_smin_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_smin_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v2i8(<2 x i8>)
 
-define i8 @vreduce_smin_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_smin_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
@@ -3844,14 +3672,14 @@ define i8 @vreduce_smin_v2i8(<2 x i8>* %x) {
 ; CHECK-NEXT:    vredmin.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v4i8(<4 x i8>)
 
-define i8 @vreduce_smin_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_smin_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
@@ -3861,14 +3689,14 @@ define i8 @vreduce_smin_v4i8(<4 x i8>* %x) {
 ; CHECK-NEXT:    vredmin.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v8i8(<8 x i8>)
 
-define i8 @vreduce_smin_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_smin_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
@@ -3878,14 +3706,14 @@ define i8 @vreduce_smin_v8i8(<8 x i8>* %x) {
 ; CHECK-NEXT:    vredmin.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v16i8(<16 x i8>)
 
-define i8 @vreduce_smin_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_smin_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
@@ -3895,74 +3723,68 @@ define i8 @vreduce_smin_v16i8(<16 x i8>* %x) {
 ; CHECK-NEXT:    vredmin.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v32i8(<32 x i8>)
 
-define i8 @vreduce_smin_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_smin_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    li a0, 127
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredmin.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v64i8(<64 x i8>)
 
-define i8 @vreduce_smin_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_smin_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    li a0, 127
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredmin.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v128i8(<128 x i8>)
 
-define i8 @vreduce_smin_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_smin_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    li a0, 127
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredmin.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smin.v256i8(<256 x i8>)
 
-define i8 @vreduce_smin_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_smin_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -3972,34 +3794,32 @@ define i8 @vreduce_smin_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vmin.vv v8, v8, v16
 ; CHECK-NEXT:    li a0, 127
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredmin.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smin.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v1i16(<1 x i16>)
 
-define i16 @vreduce_smin_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_smin_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v2i16(<2 x i16>)
 
-define i16 @vreduce_smin_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_smin_v2i16(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v2i16:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
@@ -4021,14 +3841,14 @@ define i16 @vreduce_smin_v2i16(<2 x i16>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v4i16(<4 x i16>)
 
-define i16 @vreduce_smin_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_smin_v4i16(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v4i16:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
@@ -4050,14 +3870,14 @@ define i16 @vreduce_smin_v4i16(<4 x i16>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v8i16(<8 x i16>)
 
-define i16 @vreduce_smin_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_smin_v8i16(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v8i16:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -4079,14 +3899,14 @@ define i16 @vreduce_smin_v8i16(<8 x i16>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v16i16(<16 x i16>)
 
-define i16 @vreduce_smin_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_smin_v16i16(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v16i16:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
@@ -4108,14 +3928,14 @@ define i16 @vreduce_smin_v16i16(<16 x i16>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v32i16(<32 x i16>)
 
-define i16 @vreduce_smin_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_smin_v32i16(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v32i16:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    li a1, 32
@@ -4123,9 +3943,7 @@ define i16 @vreduce_smin_v32i16(<32 x i16>* %x) {
 ; RV32-NEXT:    vle16.v v8, (a0)
 ; RV32-NEXT:    lui a0, 8
 ; RV32-NEXT:    addi a0, a0, -1
-; RV32-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; RV32-NEXT:    vmv.s.x v12, a0
-; RV32-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; RV32-NEXT:    vredmin.vs v8, v8, v12
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    ret
@@ -4137,20 +3955,18 @@ define i16 @vreduce_smin_v32i16(<32 x i16>* %x) {
 ; RV64-NEXT:    vle16.v v8, (a0)
 ; RV64-NEXT:    lui a0, 8
 ; RV64-NEXT:    addiw a0, a0, -1
-; RV64-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v12, a0
-; RV64-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; RV64-NEXT:    vredmin.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v64i16(<64 x i16>)
 
-define i16 @vreduce_smin_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_smin_v64i16(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v64i16:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    li a1, 64
@@ -4158,9 +3974,7 @@ define i16 @vreduce_smin_v64i16(<64 x i16>* %x) {
 ; RV32-NEXT:    vle16.v v8, (a0)
 ; RV32-NEXT:    lui a0, 8
 ; RV32-NEXT:    addi a0, a0, -1
-; RV32-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; RV32-NEXT:    vmv.s.x v16, a0
-; RV32-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; RV32-NEXT:    vredmin.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    ret
@@ -4172,20 +3986,18 @@ define i16 @vreduce_smin_v64i16(<64 x i16>* %x) {
 ; RV64-NEXT:    vle16.v v8, (a0)
 ; RV64-NEXT:    lui a0, 8
 ; RV64-NEXT:    addiw a0, a0, -1
-; RV64-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v16, a0
-; RV64-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; RV64-NEXT:    vredmin.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smin.v128i16(<128 x i16>)
 
-define i16 @vreduce_smin_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_smin_v128i16(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v128i16:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    li a1, 64
@@ -4196,9 +4008,7 @@ define i16 @vreduce_smin_v128i16(<128 x i16>* %x) {
 ; RV32-NEXT:    vmin.vv v8, v8, v16
 ; RV32-NEXT:    lui a0, 8
 ; RV32-NEXT:    addi a0, a0, -1
-; RV32-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; RV32-NEXT:    vmv.s.x v16, a0
-; RV32-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; RV32-NEXT:    vredmin.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    ret
@@ -4213,34 +4023,32 @@ define i16 @vreduce_smin_v128i16(<128 x i16>* %x) {
 ; RV64-NEXT:    vmin.vv v8, v8, v16
 ; RV64-NEXT:    lui a0, 8
 ; RV64-NEXT:    addiw a0, a0, -1
-; RV64-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v16, a0
-; RV64-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; RV64-NEXT:    vredmin.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smin.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.smin.v1i32(<1 x i32>)
 
-define i32 @vreduce_smin_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_smin_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smin_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smin.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smin.v2i32(<2 x i32>)
 
-define i32 @vreduce_smin_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_smin_v2i32(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v2i32:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
@@ -4262,14 +4070,14 @@ define i32 @vreduce_smin_v2i32(<2 x i32>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smin.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smin.v4i32(<4 x i32>)
 
-define i32 @vreduce_smin_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_smin_v4i32(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v4i32:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -4291,14 +4099,14 @@ define i32 @vreduce_smin_v4i32(<4 x i32>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smin.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smin.v8i32(<8 x i32>)
 
-define i32 @vreduce_smin_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_smin_v8i32(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v8i32:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -4320,14 +4128,14 @@ define i32 @vreduce_smin_v8i32(<8 x i32>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smin.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smin.v16i32(<16 x i32>)
 
-define i32 @vreduce_smin_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_smin_v16i32(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v16i32:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -4349,14 +4157,14 @@ define i32 @vreduce_smin_v16i32(<16 x i32>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smin.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smin.v32i32(<32 x i32>)
 
-define i32 @vreduce_smin_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_smin_v32i32(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v32i32:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    li a1, 32
@@ -4364,9 +4172,7 @@ define i32 @vreduce_smin_v32i32(<32 x i32>* %x) {
 ; RV32-NEXT:    vle32.v v8, (a0)
 ; RV32-NEXT:    lui a0, 524288
 ; RV32-NEXT:    addi a0, a0, -1
-; RV32-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; RV32-NEXT:    vmv.s.x v16, a0
-; RV32-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; RV32-NEXT:    vredmin.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    ret
@@ -4378,20 +4184,18 @@ define i32 @vreduce_smin_v32i32(<32 x i32>* %x) {
 ; RV64-NEXT:    vle32.v v8, (a0)
 ; RV64-NEXT:    lui a0, 524288
 ; RV64-NEXT:    addiw a0, a0, -1
-; RV64-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v16, a0
-; RV64-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; RV64-NEXT:    vredmin.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smin.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smin.v64i32(<64 x i32>)
 
-define i32 @vreduce_smin_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_smin_v64i32(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v64i32:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    li a1, 32
@@ -4402,9 +4206,7 @@ define i32 @vreduce_smin_v64i32(<64 x i32>* %x) {
 ; RV32-NEXT:    vmin.vv v8, v8, v16
 ; RV32-NEXT:    lui a0, 524288
 ; RV32-NEXT:    addi a0, a0, -1
-; RV32-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; RV32-NEXT:    vmv.s.x v16, a0
-; RV32-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; RV32-NEXT:    vredmin.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    ret
@@ -4419,28 +4221,26 @@ define i32 @vreduce_smin_v64i32(<64 x i32>* %x) {
 ; RV64-NEXT:    vmin.vv v8, v8, v16
 ; RV64-NEXT:    lui a0, 524288
 ; RV64-NEXT:    addiw a0, a0, -1
-; RV64-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; RV64-NEXT:    vmv.s.x v16, a0
-; RV64-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; RV64-NEXT:    vredmin.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smin.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.smin.v1i64(<1 x i64>)
 
-define i64 @vreduce_smin_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_smin_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_smin_v1i64:
@@ -4449,14 +4249,14 @@ define i64 @vreduce_smin_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smin.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smin.v2i64(<2 x i64>)
 
-define i64 @vreduce_smin_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_smin_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -4491,14 +4291,14 @@ define i64 @vreduce_smin_v2i64(<2 x i64>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smin.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smin.v4i64(<4 x i64>)
 
-define i64 @vreduce_smin_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_smin_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -4533,14 +4333,14 @@ define i64 @vreduce_smin_v4i64(<4 x i64>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smin.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smin.v8i64(<8 x i64>)
 
-define i64 @vreduce_smin_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_smin_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -4575,14 +4375,14 @@ define i64 @vreduce_smin_v8i64(<8 x i64>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smin.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smin.v16i64(<16 x i64>)
 
-define i64 @vreduce_smin_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_smin_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -4617,14 +4417,14 @@ define i64 @vreduce_smin_v16i64(<16 x i64>* %x) {
 ; RV64-NEXT:    vredmin.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smin.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smin.v32i64(<32 x i64>)
 
-define i64 @vreduce_smin_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_smin_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_smin_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -4658,21 +4458,21 @@ define i64 @vreduce_smin_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
+; RV64-NEXT:    vmin.vv v8, v8, v16
 ; RV64-NEXT:    li a0, -1
 ; RV64-NEXT:    srli a0, a0, 1
-; RV64-NEXT:    vmv.s.x v24, a0
-; RV64-NEXT:    vmin.vv v8, v8, v16
-; RV64-NEXT:    vredmin.vs v8, v8, v24
+; RV64-NEXT:    vmv.s.x v16, a0
+; RV64-NEXT:    vredmin.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smin.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smin.v64i64(<64 x i64>)
 
-define i64 @vreduce_smin_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_smin_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_smin_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -4724,28 +4524,28 @@ define i64 @vreduce_smin_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vredmin.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smin.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v1i8(<1 x i8>)
 
-define i8 @vreduce_smax_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_smax_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v2i8(<2 x i8>)
 
-define i8 @vreduce_smax_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_smax_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
@@ -4755,14 +4555,14 @@ define i8 @vreduce_smax_v2i8(<2 x i8>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v4i8(<4 x i8>)
 
-define i8 @vreduce_smax_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_smax_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
@@ -4772,14 +4572,14 @@ define i8 @vreduce_smax_v4i8(<4 x i8>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v8i8(<8 x i8>)
 
-define i8 @vreduce_smax_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_smax_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
@@ -4789,14 +4589,14 @@ define i8 @vreduce_smax_v8i8(<8 x i8>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v16i8(<16 x i8>)
 
-define i8 @vreduce_smax_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_smax_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
@@ -4806,74 +4606,68 @@ define i8 @vreduce_smax_v16i8(<16 x i8>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v32i8(<32 x i8>)
 
-define i8 @vreduce_smax_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_smax_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    li a0, -128
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v64i8(<64 x i8>)
 
-define i8 @vreduce_smax_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_smax_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    li a0, -128
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v128i8(<128 x i8>)
 
-define i8 @vreduce_smax_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_smax_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    li a0, -128
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.smax.v256i8(<256 x i8>)
 
-define i8 @vreduce_smax_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_smax_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -4883,34 +4677,32 @@ define i8 @vreduce_smax_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vmax.vv v8, v8, v16
 ; CHECK-NEXT:    li a0, -128
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.smax.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v1i16(<1 x i16>)
 
-define i16 @vreduce_smax_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_smax_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v2i16(<2 x i16>)
 
-define i16 @vreduce_smax_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_smax_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
@@ -4920,14 +4712,14 @@ define i16 @vreduce_smax_v2i16(<2 x i16>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v4i16(<4 x i16>)
 
-define i16 @vreduce_smax_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_smax_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
@@ -4937,14 +4729,14 @@ define i16 @vreduce_smax_v4i16(<4 x i16>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v8i16(<8 x i16>)
 
-define i16 @vreduce_smax_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_smax_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -4954,14 +4746,14 @@ define i16 @vreduce_smax_v8i16(<8 x i16>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v16i16(<16 x i16>)
 
-define i16 @vreduce_smax_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_smax_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
@@ -4971,54 +4763,50 @@ define i16 @vreduce_smax_v16i16(<16 x i16>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v32i16(<32 x i16>)
 
-define i16 @vreduce_smax_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_smax_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    lui a0, 1048568
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, a0
-; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v64i16(<64 x i16>)
 
-define i16 @vreduce_smax_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_smax_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    lui a0, 1048568
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.smax.v128i16(<128 x i16>)
 
-define i16 @vreduce_smax_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_smax_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -5028,34 +4816,32 @@ define i16 @vreduce_smax_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    vle16.v v16, (a0)
 ; CHECK-NEXT:    vmax.vv v8, v8, v16
 ; CHECK-NEXT:    lui a0, 1048568
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.smax.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.smax.v1i32(<1 x i32>)
 
-define i32 @vreduce_smax_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_smax_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smax.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smax.v2i32(<2 x i32>)
 
-define i32 @vreduce_smax_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_smax_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
@@ -5065,14 +4851,14 @@ define i32 @vreduce_smax_v2i32(<2 x i32>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smax.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smax.v4i32(<4 x i32>)
 
-define i32 @vreduce_smax_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_smax_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -5082,14 +4868,14 @@ define i32 @vreduce_smax_v4i32(<4 x i32>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smax.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smax.v8i32(<8 x i32>)
 
-define i32 @vreduce_smax_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_smax_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -5099,14 +4885,14 @@ define i32 @vreduce_smax_v8i32(<8 x i32>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smax.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smax.v16i32(<16 x i32>)
 
-define i32 @vreduce_smax_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_smax_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -5116,34 +4902,32 @@ define i32 @vreduce_smax_v16i32(<16 x i32>* %x) {
 ; CHECK-NEXT:    vredmax.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smax.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smax.v32i32(<32 x i32>)
 
-define i32 @vreduce_smax_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_smax_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    lui a0, 524288
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smax.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.smax.v64i32(<64 x i32>)
 
-define i32 @vreduce_smax_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_smax_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_smax_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -5153,28 +4937,26 @@ define i32 @vreduce_smax_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    vle32.v v16, (a0)
 ; CHECK-NEXT:    vmax.vv v8, v8, v16
 ; CHECK-NEXT:    lui a0, 524288
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, a0
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredmax.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.smax.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.smax.v1i64(<1 x i64>)
 
-define i64 @vreduce_smax_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_smax_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_smax_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_smax_v1i64:
@@ -5183,14 +4965,14 @@ define i64 @vreduce_smax_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smax.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smax.v2i64(<2 x i64>)
 
-define i64 @vreduce_smax_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_smax_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_smax_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -5223,14 +5005,14 @@ define i64 @vreduce_smax_v2i64(<2 x i64>* %x) {
 ; RV64-NEXT:    vredmax.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smax.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smax.v4i64(<4 x i64>)
 
-define i64 @vreduce_smax_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_smax_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_smax_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -5263,14 +5045,14 @@ define i64 @vreduce_smax_v4i64(<4 x i64>* %x) {
 ; RV64-NEXT:    vredmax.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smax.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smax.v8i64(<8 x i64>)
 
-define i64 @vreduce_smax_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_smax_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_smax_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -5303,14 +5085,14 @@ define i64 @vreduce_smax_v8i64(<8 x i64>* %x) {
 ; RV64-NEXT:    vredmax.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smax.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smax.v16i64(<16 x i64>)
 
-define i64 @vreduce_smax_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_smax_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_smax_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -5343,14 +5125,14 @@ define i64 @vreduce_smax_v16i64(<16 x i64>* %x) {
 ; RV64-NEXT:    vredmax.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smax.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smax.v32i64(<32 x i64>)
 
-define i64 @vreduce_smax_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_smax_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_smax_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -5382,21 +5164,21 @@ define i64 @vreduce_smax_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
+; RV64-NEXT:    vmax.vv v8, v8, v16
 ; RV64-NEXT:    li a0, -1
 ; RV64-NEXT:    slli a0, a0, 63
-; RV64-NEXT:    vmv.s.x v24, a0
-; RV64-NEXT:    vmax.vv v8, v8, v16
-; RV64-NEXT:    vredmax.vs v8, v8, v24
+; RV64-NEXT:    vmv.s.x v16, a0
+; RV64-NEXT:    vredmax.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smax.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.smax.v64i64(<64 x i64>)
 
-define i64 @vreduce_smax_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_smax_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_smax_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    addi sp, sp, -16
@@ -5446,157 +5228,149 @@ define i64 @vreduce_smax_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vredmax.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.smax.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v1i8(<1 x i8>)
 
-define i8 @vreduce_umin_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_umin_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v2i8(<2 x i8>)
 
-define i8 @vreduce_umin_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_umin_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v4i8(<4 x i8>)
 
-define i8 @vreduce_umin_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_umin_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v8i8(<8 x i8>)
 
-define i8 @vreduce_umin_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_umin_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v16i8(<16 x i8>)
 
-define i8 @vreduce_umin_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_umin_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v32i8(<32 x i8>)
 
-define i8 @vreduce_umin_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_umin_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v10, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v64i8(<64 x i8>)
 
-define i8 @vreduce_umin_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_umin_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v12, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v128i8(<128 x i8>)
 
-define i8 @vreduce_umin_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_umin_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umin.v256i8(<256 x i8>)
 
-define i8 @vreduce_umin_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_umin_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -5605,144 +5379,138 @@ define i8 @vreduce_umin_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vminu.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umin.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v1i16(<1 x i16>)
 
-define i16 @vreduce_umin_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_umin_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v2i16(<2 x i16>)
 
-define i16 @vreduce_umin_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_umin_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v4i16(<4 x i16>)
 
-define i16 @vreduce_umin_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_umin_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v8i16(<8 x i16>)
 
-define i16 @vreduce_umin_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_umin_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v16i16(<16 x i16>)
 
-define i16 @vreduce_umin_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_umin_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v10, -1
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v32i16(<32 x i16>)
 
-define i16 @vreduce_umin_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_umin_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v12, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v64i16(<64 x i16>)
 
-define i16 @vreduce_umin_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_umin_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umin.v128i16(<128 x i16>)
 
-define i16 @vreduce_umin_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_umin_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -5751,125 +5519,121 @@ define i16 @vreduce_umin_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle16.v v16, (a0)
 ; CHECK-NEXT:    vminu.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umin.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.umin.v1i32(<1 x i32>)
 
-define i32 @vreduce_umin_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_umin_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umin.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umin.v2i32(<2 x i32>)
 
-define i32 @vreduce_umin_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_umin_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umin.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umin.v4i32(<4 x i32>)
 
-define i32 @vreduce_umin_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_umin_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v9, -1
-; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umin.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umin.v8i32(<8 x i32>)
 
-define i32 @vreduce_umin_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_umin_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 8, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v10, -1
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umin.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umin.v16i32(<16 x i32>)
 
-define i32 @vreduce_umin_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_umin_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetivli zero, 16, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v12, -1
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umin.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umin.v32i32(<32 x i32>)
 
-define i32 @vreduce_umin_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_umin_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umin.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umin.v64i32(<64 x i32>)
 
-define i32 @vreduce_umin_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_umin_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umin_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -5878,28 +5642,28 @@ define i32 @vreduce_umin_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle32.v v16, (a0)
 ; CHECK-NEXT:    vminu.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
+; CHECK-NEXT:    vsetvli zero, a1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.v.i v16, -1
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredminu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umin.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.umin.v1i64(<1 x i64>)
 
-define i64 @vreduce_umin_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_umin_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_umin_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_umin_v1i64:
@@ -5908,21 +5672,19 @@ define i64 @vreduce_umin_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umin.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umin.v2i64(<2 x i64>)
 
-define i64 @vreduce_umin_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_umin_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_umin_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vmv.v.i v9, -1
-; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV32-NEXT:    vredminu.vs v8, v8, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
@@ -5935,20 +5697,18 @@ define i64 @vreduce_umin_v2i64(<2 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v9, -1
-; RV64-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
 ; RV64-NEXT:    vredminu.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umin.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umin.v4i64(<4 x i64>)
 
-define i64 @vreduce_umin_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_umin_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_umin_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
@@ -5968,20 +5728,20 @@ define i64 @vreduce_umin_v4i64(<4 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 4, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v10, -1
 ; RV64-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
 ; RV64-NEXT:    vredminu.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umin.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umin.v8i64(<8 x i64>)
 
-define i64 @vreduce_umin_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_umin_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_umin_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
@@ -6001,20 +5761,20 @@ define i64 @vreduce_umin_v8i64(<8 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 8, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v12, -1
 ; RV64-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
 ; RV64-NEXT:    vredminu.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umin.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umin.v16i64(<16 x i64>)
 
-define i64 @vreduce_umin_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_umin_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_umin_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -6034,20 +5794,20 @@ define i64 @vreduce_umin_v16i64(<16 x i64>* %x) {
 ; RV64:       # %bb.0:
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vle64.v v8, (a0)
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v16, -1
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vredminu.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umin.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umin.v32i64(<32 x i64>)
 
-define i64 @vreduce_umin_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_umin_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_umin_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -6073,20 +5833,20 @@ define i64 @vreduce_umin_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
 ; RV64-NEXT:    vminu.vv v8, v8, v16
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v16, -1
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vredminu.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umin.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umin.v64i64(<64 x i64>)
 
-define i64 @vreduce_umin_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_umin_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_umin_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -6124,34 +5884,34 @@ define i64 @vreduce_umin_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vminu.vv v16, v24, v16
 ; RV64-NEXT:    vminu.vv v8, v8, v0
 ; RV64-NEXT:    vminu.vv v8, v8, v16
-; RV64-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
+; RV64-NEXT:    vsetivli zero, 16, e64, m1, ta, ma
 ; RV64-NEXT:    vmv.v.i v16, -1
 ; RV64-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV64-NEXT:    vredminu.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umin.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v1i8(<1 x i8>)
 
-define i8 @vreduce_umax_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_umax_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v2i8(<2 x i8>)
 
-define i8 @vreduce_umax_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_umax_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
@@ -6160,14 +5920,14 @@ define i8 @vreduce_umax_v2i8(<2 x i8>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v4i8(<4 x i8>)
 
-define i8 @vreduce_umax_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_umax_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
@@ -6176,14 +5936,14 @@ define i8 @vreduce_umax_v4i8(<4 x i8>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v8i8(<8 x i8>)
 
-define i8 @vreduce_umax_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_umax_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
@@ -6192,14 +5952,14 @@ define i8 @vreduce_umax_v8i8(<8 x i8>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v16i8(<16 x i8>)
 
-define i8 @vreduce_umax_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_umax_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
@@ -6208,71 +5968,65 @@ define i8 @vreduce_umax_v16i8(<16 x i8>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v32i8(<32 x i8>)
 
-define i8 @vreduce_umax_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_umax_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v10, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m2, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v64i8(<64 x i8>)
 
-define i8 @vreduce_umax_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_umax_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m4, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v128i8(<128 x i8>)
 
-define i8 @vreduce_umax_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_umax_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
 ; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.umax.v256i8(<256 x i8>)
 
-define i8 @vreduce_umax_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_umax_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -6281,34 +6035,32 @@ define i8 @vreduce_umax_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle8.v v16, (a0)
 ; CHECK-NEXT:    vmaxu.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e8, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e8, m8, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.umax.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v1i16(<1 x i16>)
 
-define i16 @vreduce_umax_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_umax_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v2i16(<2 x i16>)
 
-define i16 @vreduce_umax_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_umax_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
@@ -6317,14 +6069,14 @@ define i16 @vreduce_umax_v2i16(<2 x i16>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v4i16(<4 x i16>)
 
-define i16 @vreduce_umax_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_umax_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
@@ -6333,14 +6085,14 @@ define i16 @vreduce_umax_v4i16(<4 x i16>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v8i16(<8 x i16>)
 
-define i16 @vreduce_umax_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_umax_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -6349,14 +6101,14 @@ define i16 @vreduce_umax_v8i16(<8 x i16>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v16i16(<16 x i16>)
 
-define i16 @vreduce_umax_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_umax_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
@@ -6365,52 +6117,48 @@ define i16 @vreduce_umax_v16i16(<16 x i16>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v32i16(<32 x i16>)
 
-define i16 @vreduce_umax_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_umax_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v12, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m4, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v64i16(<64 x i16>)
 
-define i16 @vreduce_umax_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_umax_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
 ; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.umax.v128i16(<128 x i16>)
 
-define i16 @vreduce_umax_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_umax_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -6419,34 +6167,32 @@ define i16 @vreduce_umax_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle16.v v16, (a0)
 ; CHECK-NEXT:    vmaxu.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e16, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e16, m8, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.umax.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.umax.v1i32(<1 x i32>)
 
-define i32 @vreduce_umax_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_umax_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umax.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umax.v2i32(<2 x i32>)
 
-define i32 @vreduce_umax_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_umax_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
@@ -6455,14 +6201,14 @@ define i32 @vreduce_umax_v2i32(<2 x i32>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umax.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umax.v4i32(<4 x i32>)
 
-define i32 @vreduce_umax_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_umax_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -6471,14 +6217,14 @@ define i32 @vreduce_umax_v4i32(<4 x i32>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umax.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umax.v8i32(<8 x i32>)
 
-define i32 @vreduce_umax_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_umax_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -6487,14 +6233,14 @@ define i32 @vreduce_umax_v8i32(<8 x i32>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umax.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umax.v16i32(<16 x i32>)
 
-define i32 @vreduce_umax_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_umax_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -6503,33 +6249,31 @@ define i32 @vreduce_umax_v16i32(<16 x i32>* %x) {
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umax.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umax.v32i32(<32 x i32>)
 
-define i32 @vreduce_umax_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_umax_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
 ; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umax.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.umax.v64i32(<64 x i32>)
 
-define i32 @vreduce_umax_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_umax_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_umax_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -6538,28 +6282,26 @@ define i32 @vreduce_umax_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    addi a0, a0, 128
 ; CHECK-NEXT:    vle32.v v16, (a0)
 ; CHECK-NEXT:    vmaxu.vv v8, v8, v16
-; CHECK-NEXT:    vsetivli zero, 1, e32, m1, ta, ma
 ; CHECK-NEXT:    vmv.s.x v16, zero
-; CHECK-NEXT:    vsetvli zero, a1, e32, m8, ta, ma
 ; CHECK-NEXT:    vredmaxu.vs v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.umax.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.umax.v1i64(<1 x i64>)
 
-define i64 @vreduce_umax_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_umax_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_umax_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_umax_v1i64:
@@ -6568,14 +6310,14 @@ define i64 @vreduce_umax_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umax.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umax.v2i64(<2 x i64>)
 
-define i64 @vreduce_umax_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_umax_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_umax_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
@@ -6597,14 +6339,14 @@ define i64 @vreduce_umax_v2i64(<2 x i64>* %x) {
 ; RV64-NEXT:    vredmaxu.vs v8, v8, v9
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umax.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umax.v4i64(<4 x i64>)
 
-define i64 @vreduce_umax_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_umax_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_umax_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
@@ -6626,14 +6368,14 @@ define i64 @vreduce_umax_v4i64(<4 x i64>* %x) {
 ; RV64-NEXT:    vredmaxu.vs v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umax.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umax.v8i64(<8 x i64>)
 
-define i64 @vreduce_umax_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_umax_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_umax_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
@@ -6655,14 +6397,14 @@ define i64 @vreduce_umax_v8i64(<8 x i64>* %x) {
 ; RV64-NEXT:    vredmaxu.vs v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umax.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umax.v16i64(<16 x i64>)
 
-define i64 @vreduce_umax_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_umax_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_umax_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -6684,23 +6426,23 @@ define i64 @vreduce_umax_v16i64(<16 x i64>* %x) {
 ; RV64-NEXT:    vredmaxu.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umax.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umax.v32i64(<32 x i64>)
 
-define i64 @vreduce_umax_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_umax_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_umax_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
 ; RV32-NEXT:    addi a0, a0, 128
 ; RV32-NEXT:    vle64.v v16, (a0)
-; RV32-NEXT:    vmv.s.x v24, zero
 ; RV32-NEXT:    vmaxu.vv v8, v8, v16
-; RV32-NEXT:    vredmaxu.vs v8, v8, v24
+; RV32-NEXT:    vmv.s.x v16, zero
+; RV32-NEXT:    vredmaxu.vs v8, v8, v16
 ; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    li a1, 32
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
@@ -6714,19 +6456,19 @@ define i64 @vreduce_umax_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    addi a0, a0, 128
 ; RV64-NEXT:    vle64.v v16, (a0)
-; RV64-NEXT:    vmv.s.x v24, zero
 ; RV64-NEXT:    vmaxu.vv v8, v8, v16
-; RV64-NEXT:    vredmaxu.vs v8, v8, v24
+; RV64-NEXT:    vmv.s.x v16, zero
+; RV64-NEXT:    vredmaxu.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umax.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.umax.v64i64(<64 x i64>)
 
-define i64 @vreduce_umax_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_umax_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_umax_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -6766,28 +6508,28 @@ define i64 @vreduce_umax_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vredmaxu.vs v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.umax.v64i64(<64 x i64> %v)
   ret i64 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v1i8(<1 x i8>)
 
-define i8 @vreduce_mul_v1i8(<1 x i8>* %x) {
+define i8 @vreduce_mul_v1i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v1i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e8, mf8, ta, ma
 ; CHECK-NEXT:    vle8.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i8>, <1 x i8>* %x
+  %v = load <1 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v1i8(<1 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v2i8(<2 x i8>)
 
-define i8 @vreduce_mul_v2i8(<2 x i8>* %x) {
+define i8 @vreduce_mul_v2i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v2i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e8, mf8, ta, ma
@@ -6796,14 +6538,14 @@ define i8 @vreduce_mul_v2i8(<2 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vx v8, v8, a0
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i8>, <2 x i8>* %x
+  %v = load <2 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v2i8(<2 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v4i8(<4 x i8>)
 
-define i8 @vreduce_mul_v4i8(<4 x i8>* %x) {
+define i8 @vreduce_mul_v4i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v4i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e8, mf4, ta, ma
@@ -6814,14 +6556,14 @@ define i8 @vreduce_mul_v4i8(<4 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i8>, <4 x i8>* %x
+  %v = load <4 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v4i8(<4 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v8i8(<8 x i8>)
 
-define i8 @vreduce_mul_v8i8(<8 x i8>* %x) {
+define i8 @vreduce_mul_v8i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v8i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e8, mf2, ta, ma
@@ -6834,14 +6576,14 @@ define i8 @vreduce_mul_v8i8(<8 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i8>, <8 x i8>* %x
+  %v = load <8 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v8i8(<8 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v16i8(<16 x i8>)
 
-define i8 @vreduce_mul_v16i8(<16 x i8>* %x) {
+define i8 @vreduce_mul_v16i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v16i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e8, m1, ta, ma
@@ -6856,14 +6598,14 @@ define i8 @vreduce_mul_v16i8(<16 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i8>, <16 x i8>* %x
+  %v = load <16 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v16i8(<16 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v32i8(<32 x i8>)
 
-define i8 @vreduce_mul_v32i8(<32 x i8>* %x) {
+define i8 @vreduce_mul_v32i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v32i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -6881,14 +6623,14 @@ define i8 @vreduce_mul_v32i8(<32 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i8>, <32 x i8>* %x
+  %v = load <32 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v32i8(<32 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v64i8(<64 x i8>)
 
-define i8 @vreduce_mul_v64i8(<64 x i8>* %x) {
+define i8 @vreduce_mul_v64i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v64i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -6909,14 +6651,14 @@ define i8 @vreduce_mul_v64i8(<64 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i8>, <64 x i8>* %x
+  %v = load <64 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v64i8(<64 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v128i8(<128 x i8>)
 
-define i8 @vreduce_mul_v128i8(<128 x i8>* %x) {
+define i8 @vreduce_mul_v128i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v128i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -6940,14 +6682,14 @@ define i8 @vreduce_mul_v128i8(<128 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i8>, <128 x i8>* %x
+  %v = load <128 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v128i8(<128 x i8> %v)
   ret i8 %red
 }
 
 declare i8 @llvm.vector.reduce.mul.v256i8(<256 x i8>)
 
-define i8 @vreduce_mul_v256i8(<256 x i8>* %x) {
+define i8 @vreduce_mul_v256i8(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v256i8:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 128
@@ -6974,28 +6716,28 @@ define i8 @vreduce_mul_v256i8(<256 x i8>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <256 x i8>, <256 x i8>* %x
+  %v = load <256 x i8>, ptr %x
   %red = call i8 @llvm.vector.reduce.mul.v256i8(<256 x i8> %v)
   ret i8 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v1i16(<1 x i16>)
 
-define i16 @vreduce_mul_v1i16(<1 x i16>* %x) {
+define i16 @vreduce_mul_v1i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v1i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e16, mf4, ta, ma
 ; CHECK-NEXT:    vle16.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i16>, <1 x i16>* %x
+  %v = load <1 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v1i16(<1 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v2i16(<2 x i16>)
 
-define i16 @vreduce_mul_v2i16(<2 x i16>* %x) {
+define i16 @vreduce_mul_v2i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v2i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e16, mf4, ta, ma
@@ -7004,14 +6746,14 @@ define i16 @vreduce_mul_v2i16(<2 x i16>* %x) {
 ; CHECK-NEXT:    vmul.vx v8, v8, a0
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i16>, <2 x i16>* %x
+  %v = load <2 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v2i16(<2 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v4i16(<4 x i16>)
 
-define i16 @vreduce_mul_v4i16(<4 x i16>* %x) {
+define i16 @vreduce_mul_v4i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v4i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e16, mf2, ta, ma
@@ -7022,14 +6764,14 @@ define i16 @vreduce_mul_v4i16(<4 x i16>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i16>, <4 x i16>* %x
+  %v = load <4 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v4i16(<4 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v8i16(<8 x i16>)
 
-define i16 @vreduce_mul_v8i16(<8 x i16>* %x) {
+define i16 @vreduce_mul_v8i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v8i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e16, m1, ta, ma
@@ -7042,14 +6784,14 @@ define i16 @vreduce_mul_v8i16(<8 x i16>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i16>, <8 x i16>* %x
+  %v = load <8 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v8i16(<8 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v16i16(<16 x i16>)
 
-define i16 @vreduce_mul_v16i16(<16 x i16>* %x) {
+define i16 @vreduce_mul_v16i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v16i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e16, m2, ta, ma
@@ -7064,14 +6806,14 @@ define i16 @vreduce_mul_v16i16(<16 x i16>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i16>, <16 x i16>* %x
+  %v = load <16 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v16i16(<16 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v32i16(<32 x i16>)
 
-define i16 @vreduce_mul_v32i16(<32 x i16>* %x) {
+define i16 @vreduce_mul_v32i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v32i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -7089,14 +6831,14 @@ define i16 @vreduce_mul_v32i16(<32 x i16>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i16>, <32 x i16>* %x
+  %v = load <32 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v32i16(<32 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v64i16(<64 x i16>)
 
-define i16 @vreduce_mul_v64i16(<64 x i16>* %x) {
+define i16 @vreduce_mul_v64i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v64i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -7117,14 +6859,14 @@ define i16 @vreduce_mul_v64i16(<64 x i16>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i16>, <64 x i16>* %x
+  %v = load <64 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v64i16(<64 x i16> %v)
   ret i16 %red
 }
 
 declare i16 @llvm.vector.reduce.mul.v128i16(<128 x i16>)
 
-define i16 @vreduce_mul_v128i16(<128 x i16>* %x) {
+define i16 @vreduce_mul_v128i16(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v128i16:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 64
@@ -7148,28 +6890,28 @@ define i16 @vreduce_mul_v128i16(<128 x i16>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <128 x i16>, <128 x i16>* %x
+  %v = load <128 x i16>, ptr %x
   %red = call i16 @llvm.vector.reduce.mul.v128i16(<128 x i16> %v)
   ret i16 %red
 }
 
 declare i32 @llvm.vector.reduce.mul.v1i32(<1 x i32>)
 
-define i32 @vreduce_mul_v1i32(<1 x i32>* %x) {
+define i32 @vreduce_mul_v1i32(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v1i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 1, e32, mf2, ta, ma
 ; CHECK-NEXT:    vle32.v v8, (a0)
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <1 x i32>, <1 x i32>* %x
+  %v = load <1 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.mul.v1i32(<1 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.mul.v2i32(<2 x i32>)
 
-define i32 @vreduce_mul_v2i32(<2 x i32>* %x) {
+define i32 @vreduce_mul_v2i32(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v2i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 2, e32, mf2, ta, ma
@@ -7178,14 +6920,14 @@ define i32 @vreduce_mul_v2i32(<2 x i32>* %x) {
 ; CHECK-NEXT:    vmul.vx v8, v8, a0
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <2 x i32>, <2 x i32>* %x
+  %v = load <2 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.mul.v2i32(<2 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.mul.v4i32(<4 x i32>)
 
-define i32 @vreduce_mul_v4i32(<4 x i32>* %x) {
+define i32 @vreduce_mul_v4i32(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v4i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 4, e32, m1, ta, ma
@@ -7196,14 +6938,14 @@ define i32 @vreduce_mul_v4i32(<4 x i32>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v9
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <4 x i32>, <4 x i32>* %x
+  %v = load <4 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.mul.v4i32(<4 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.mul.v8i32(<8 x i32>)
 
-define i32 @vreduce_mul_v8i32(<8 x i32>* %x) {
+define i32 @vreduce_mul_v8i32(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v8i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 8, e32, m2, ta, ma
@@ -7216,14 +6958,14 @@ define i32 @vreduce_mul_v8i32(<8 x i32>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v10
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <8 x i32>, <8 x i32>* %x
+  %v = load <8 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.mul.v8i32(<8 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.mul.v16i32(<16 x i32>)
 
-define i32 @vreduce_mul_v16i32(<16 x i32>* %x) {
+define i32 @vreduce_mul_v16i32(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v16i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsetivli zero, 16, e32, m4, ta, ma
@@ -7238,14 +6980,14 @@ define i32 @vreduce_mul_v16i32(<16 x i32>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v12
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <16 x i32>, <16 x i32>* %x
+  %v = load <16 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.mul.v16i32(<16 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.mul.v32i32(<32 x i32>)
 
-define i32 @vreduce_mul_v32i32(<32 x i32>* %x) {
+define i32 @vreduce_mul_v32i32(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v32i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -7263,14 +7005,14 @@ define i32 @vreduce_mul_v32i32(<32 x i32>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <32 x i32>, <32 x i32>* %x
+  %v = load <32 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.mul.v32i32(<32 x i32> %v)
   ret i32 %red
 }
 
 declare i32 @llvm.vector.reduce.mul.v64i32(<64 x i32>)
 
-define i32 @vreduce_mul_v64i32(<64 x i32>* %x) {
+define i32 @vreduce_mul_v64i32(ptr %x) {
 ; CHECK-LABEL: vreduce_mul_v64i32:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    li a1, 32
@@ -7291,22 +7033,22 @@ define i32 @vreduce_mul_v64i32(<64 x i32>* %x) {
 ; CHECK-NEXT:    vmul.vv v8, v8, v16
 ; CHECK-NEXT:    vmv.x.s a0, v8
 ; CHECK-NEXT:    ret
-  %v = load <64 x i32>, <64 x i32>* %x
+  %v = load <64 x i32>, ptr %x
   %red = call i32 @llvm.vector.reduce.mul.v64i32(<64 x i32> %v)
   ret i32 %red
 }
 
 declare i64 @llvm.vector.reduce.mul.v1i64(<1 x i64>)
 
-define i64 @vreduce_mul_v1i64(<1 x i64>* %x) {
+define i64 @vreduce_mul_v1i64(ptr %x) {
 ; RV32-LABEL: vreduce_mul_v1i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 1, e64, m1, ta, ma
 ; RV32-NEXT:    vle64.v v8, (a0)
-; RV32-NEXT:    li a0, 32
-; RV32-NEXT:    vsrl.vx v9, v8, a0
-; RV32-NEXT:    vmv.x.s a1, v9
 ; RV32-NEXT:    vmv.x.s a0, v8
+; RV32-NEXT:    li a1, 32
+; RV32-NEXT:    vsrl.vx v8, v8, a1
+; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
 ;
 ; RV64-LABEL: vreduce_mul_v1i64:
@@ -7315,14 +7057,14 @@ define i64 @vreduce_mul_v1i64(<1 x i64>* %x) {
 ; RV64-NEXT:    vle64.v v8, (a0)
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <1 x i64>, <1 x i64>* %x
+  %v = load <1 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.mul.v1i64(<1 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.mul.v2i64(<2 x i64>)
 
-define i64 @vreduce_mul_v2i64(<2 x i64>* %x) {
+define i64 @vreduce_mul_v2i64(ptr %x) {
 ; RV32-LABEL: vreduce_mul_v2i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 2, e64, m1, ta, ma
@@ -7345,14 +7087,14 @@ define i64 @vreduce_mul_v2i64(<2 x i64>* %x) {
 ; RV64-NEXT:    vmul.vx v8, v8, a0
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <2 x i64>, <2 x i64>* %x
+  %v = load <2 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.mul.v2i64(<2 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.mul.v4i64(<4 x i64>)
 
-define i64 @vreduce_mul_v4i64(<4 x i64>* %x) {
+define i64 @vreduce_mul_v4i64(ptr %x) {
 ; RV32-LABEL: vreduce_mul_v4i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 4, e64, m2, ta, ma
@@ -7378,14 +7120,14 @@ define i64 @vreduce_mul_v4i64(<4 x i64>* %x) {
 ; RV64-NEXT:    vmul.vv v8, v8, v10
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <4 x i64>, <4 x i64>* %x
+  %v = load <4 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.mul.v4i64(<4 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.mul.v8i64(<8 x i64>)
 
-define i64 @vreduce_mul_v8i64(<8 x i64>* %x) {
+define i64 @vreduce_mul_v8i64(ptr %x) {
 ; RV32-LABEL: vreduce_mul_v8i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 8, e64, m4, ta, ma
@@ -7415,14 +7157,14 @@ define i64 @vreduce_mul_v8i64(<8 x i64>* %x) {
 ; RV64-NEXT:    vmul.vv v8, v8, v12
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <8 x i64>, <8 x i64>* %x
+  %v = load <8 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.mul.v8i64(<8 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.mul.v16i64(<16 x i64>)
 
-define i64 @vreduce_mul_v16i64(<16 x i64>* %x) {
+define i64 @vreduce_mul_v16i64(ptr %x) {
 ; RV32-LABEL: vreduce_mul_v16i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -7456,14 +7198,14 @@ define i64 @vreduce_mul_v16i64(<16 x i64>* %x) {
 ; RV64-NEXT:    vmul.vv v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <16 x i64>, <16 x i64>* %x
+  %v = load <16 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.mul.v16i64(<16 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.mul.v32i64(<32 x i64>)
 
-define i64 @vreduce_mul_v32i64(<32 x i64>* %x) {
+define i64 @vreduce_mul_v32i64(ptr %x) {
 ; RV32-LABEL: vreduce_mul_v32i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -7479,9 +7221,8 @@ define i64 @vreduce_mul_v32i64(<32 x i64>* %x) {
 ; RV32-NEXT:    vmul.vv v8, v8, v16
 ; RV32-NEXT:    vrgather.vi v16, v8, 1
 ; RV32-NEXT:    vmul.vv v8, v8, v16
-; RV32-NEXT:    vsetivli zero, 0, e32, m8, ta, ma
-; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    vsetivli zero, 1, e32, m8, ta, ma
+; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    vslidedown.vi v8, v8, 1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -7503,14 +7244,14 @@ define i64 @vreduce_mul_v32i64(<32 x i64>* %x) {
 ; RV64-NEXT:    vmul.vv v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <32 x i64>, <32 x i64>* %x
+  %v = load <32 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.mul.v32i64(<32 x i64> %v)
   ret i64 %red
 }
 
 declare i64 @llvm.vector.reduce.mul.v64i64(<64 x i64>)
 
-define i64 @vreduce_mul_v64i64(<64 x i64>* %x) nounwind {
+define i64 @vreduce_mul_v64i64(ptr %x) nounwind {
 ; RV32-LABEL: vreduce_mul_v64i64:
 ; RV32:       # %bb.0:
 ; RV32-NEXT:    vsetivli zero, 16, e64, m8, ta, ma
@@ -7532,9 +7273,8 @@ define i64 @vreduce_mul_v64i64(<64 x i64>* %x) nounwind {
 ; RV32-NEXT:    vmul.vv v8, v8, v16
 ; RV32-NEXT:    vrgather.vi v16, v8, 1
 ; RV32-NEXT:    vmul.vv v8, v8, v16
-; RV32-NEXT:    vsetivli zero, 0, e32, m8, ta, ma
-; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    vsetivli zero, 1, e32, m8, ta, ma
+; RV32-NEXT:    vmv.x.s a0, v8
 ; RV32-NEXT:    vslidedown.vi v8, v8, 1
 ; RV32-NEXT:    vmv.x.s a1, v8
 ; RV32-NEXT:    ret
@@ -7562,7 +7302,7 @@ define i64 @vreduce_mul_v64i64(<64 x i64>* %x) nounwind {
 ; RV64-NEXT:    vmul.vv v8, v8, v16
 ; RV64-NEXT:    vmv.x.s a0, v8
 ; RV64-NEXT:    ret
-  %v = load <64 x i64>, <64 x i64>* %x
+  %v = load <64 x i64>, ptr %x
   %red = call i64 @llvm.vector.reduce.mul.v64i64(<64 x i64> %v)
   ret i64 %red
 }

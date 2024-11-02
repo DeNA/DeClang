@@ -12,11 +12,11 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Serialization/ASTReader.h"
+#include <optional>
 
 #define DEBUG_TYPE "clang-tidy"
 
-namespace clang {
-namespace tooling {
+namespace clang::tooling {
 
 class ExpandModularHeadersPPCallbacks::FileRecorder {
 public:
@@ -39,7 +39,7 @@ public:
       return;
 
     // FIXME: Why is this happening? We might be losing contents here.
-    llvm::Optional<StringRef> Data = ContentCache.getBufferDataIfLoaded();
+    std::optional<StringRef> Data = ContentCache.getBufferDataIfLoaded();
     if (!Data)
       return;
 
@@ -79,6 +79,9 @@ ExpandModularHeadersPPCallbacks::ExpandModularHeadersPPCallbacks(
   OverlayFS->pushOverlay(InMemoryFs);
 
   Diags.setSourceManager(&Sources);
+  // FIXME: Investigate whatever is there better way to initialize DiagEngine
+  // or whatever DiagEngine can be shared by multiple preprocessors
+  ProcessWarningOptions(Diags, Compiler.getDiagnosticOpts());
 
   LangOpts.Modules = false;
 
@@ -162,13 +165,13 @@ void ExpandModularHeadersPPCallbacks::FileChanged(
 void ExpandModularHeadersPPCallbacks::InclusionDirective(
     SourceLocation DirectiveLoc, const Token &IncludeToken,
     StringRef IncludedFilename, bool IsAngled, CharSourceRange FilenameRange,
-    Optional<FileEntryRef> IncludedFile, StringRef SearchPath,
-    StringRef RelativePath, const Module *Imported,
+    OptionalFileEntryRef IncludedFile, StringRef SearchPath,
+    StringRef RelativePath, const Module *SuggestedModule, bool ModuleImported,
     SrcMgr::CharacteristicKind FileType) {
-  if (Imported) {
+  if (ModuleImported) {
     serialization::ModuleFile *MF =
         Compiler.getASTReader()->getModuleManager().lookup(
-            Imported->getASTFile());
+            SuggestedModule->getASTFile());
     handleModuleFile(MF);
   }
   parseToLocation(DirectiveLoc);
@@ -224,7 +227,7 @@ void ExpandModularHeadersPPCallbacks::PragmaDiagnostic(SourceLocation Loc,
   parseToLocation(Loc);
 }
 void ExpandModularHeadersPPCallbacks::HasInclude(SourceLocation Loc, StringRef,
-                                                 bool, Optional<FileEntryRef>,
+                                                 bool, OptionalFileEntryRef,
                                                  SrcMgr::CharacteristicKind) {
   parseToLocation(Loc);
 }
@@ -305,5 +308,4 @@ void ExpandModularHeadersPPCallbacks::Endif(SourceLocation Loc,
   parseToLocation(Loc);
 }
 
-} // namespace tooling
-} // namespace clang
+} // namespace clang::tooling

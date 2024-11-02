@@ -29,6 +29,47 @@ Expr<T> PackageConstantBounds(
   }
 }
 
+// If a DIM= argument to LBOUND(), UBOUND(), or SIZE() exists and has a valid
+// constant value, return in "dimVal" that value, less 1 (to make it suitable
+// for use as a C++ vector<> index).  Also check for erroneous constant values
+// and returns false on error.
+static bool CheckDimArg(const std::optional<ActualArgument> &dimArg,
+    const Expr<SomeType> &array, parser::ContextualMessages &messages,
+    bool isLBound, std::optional<int> &dimVal) {
+  dimVal.reset();
+  if (int rank{array.Rank()}; rank > 0 || IsAssumedRank(array)) {
+    auto named{ExtractNamedEntity(array)};
+    if (auto dim64{ToInt64(dimArg)}) {
+      if (*dim64 < 1) {
+        messages.Say("DIM=%jd dimension must be positive"_err_en_US, *dim64);
+        return false;
+      } else if (!IsAssumedRank(array) && *dim64 > rank) {
+        messages.Say(
+            "DIM=%jd dimension is out of range for rank-%d array"_err_en_US,
+            *dim64, rank);
+        return false;
+      } else if (!isLBound && named &&
+          semantics::IsAssumedSizeArray(named->GetLastSymbol()) &&
+          *dim64 == rank) {
+        messages.Say(
+            "DIM=%jd dimension is out of range for rank-%d assumed-size array"_err_en_US,
+            *dim64, rank);
+        return false;
+      } else if (IsAssumedRank(array)) {
+        if (*dim64 > common::maxRank) {
+          messages.Say(
+              "DIM=%jd dimension is too large for any array (maximum rank %d)"_err_en_US,
+              *dim64, common::maxRank);
+          return false;
+        }
+      } else {
+        dimVal = static_cast<int>(*dim64 - 1); // 1-based to 0-based
+      }
+    }
+  }
+  return true;
+}
+
 // Class to retrieve the constant bound of an expression which is an
 // array that devolves to a type of Constant<T>
 class GetConstantArrayBoundHelper {
@@ -115,21 +156,14 @@ Expr<Type<TypeCategory::Integer, KIND>> LBOUND(FoldingContext &context,
   using T = Type<TypeCategory::Integer, KIND>;
   ActualArguments &args{funcRef.arguments()};
   if (const auto *array{UnwrapExpr<Expr<SomeType>>(args[0])}) {
-    if (int rank{array->Rank()}; rank > 0) {
+    if (int rank{array->Rank()}; rank > 0 || IsAssumedRank(*array)) {
       std::optional<int> dim;
       if (funcRef.Rank() == 0) {
         // Optional DIM= argument is present: result is scalar.
-        if (auto dim64{GetInt64Arg(args[1])}) {
-          if (*dim64 < 1 || *dim64 > rank) {
-            context.messages().Say("DIM=%jd dimension is out of range for "
-                                   "rank-%d array"_err_en_US,
-                *dim64, rank);
-            return MakeInvalidIntrinsic<T>(std::move(funcRef));
-          } else {
-            dim = *dim64 - 1; // 1-based to 0-based
-          }
-        } else {
-          // DIM= is present but not constant
+        if (!CheckDimArg(args[1], *array, context.messages(), true, dim)) {
+          return MakeInvalidIntrinsic<T>(std::move(funcRef));
+        } else if (!dim) {
+          // DIM= is present but not constant, or error
           return Expr<T>{std::move(funcRef)};
         }
       }
@@ -169,20 +203,13 @@ Expr<Type<TypeCategory::Integer, KIND>> UBOUND(FoldingContext &context,
   using T = Type<TypeCategory::Integer, KIND>;
   ActualArguments &args{funcRef.arguments()};
   if (auto *array{UnwrapExpr<Expr<SomeType>>(args[0])}) {
-    if (int rank{array->Rank()}; rank > 0) {
+    if (int rank{array->Rank()}; rank > 0 || IsAssumedRank(*array)) {
       std::optional<int> dim;
       if (funcRef.Rank() == 0) {
         // Optional DIM= argument is present: result is scalar.
-        if (auto dim64{GetInt64Arg(args[1])}) {
-          if (*dim64 < 1 || *dim64 > rank) {
-            context.messages().Say("DIM=%jd dimension is out of range for "
-                                   "rank-%d array"_err_en_US,
-                *dim64, rank);
-            return MakeInvalidIntrinsic<T>(std::move(funcRef));
-          } else {
-            dim = *dim64 - 1; // 1-based to 0-based
-          }
-        } else {
+        if (!CheckDimArg(args[1], *array, context.messages(), false, dim)) {
+          return MakeInvalidIntrinsic<T>(std::move(funcRef));
+        } else if (!dim) {
           // DIM= is present but not constant
           return Expr<T>{std::move(funcRef)};
         }
@@ -193,12 +220,7 @@ Expr<Type<TypeCategory::Integer, KIND>> UBOUND(FoldingContext &context,
         if (symbol.Rank() == rank) {
           takeBoundsFromShape = false;
           if (dim) {
-            if (semantics::IsAssumedSizeArray(symbol) && *dim == rank - 1) {
-              context.messages().Say("DIM=%jd dimension is out of range for "
-                                     "rank-%d assumed-size array"_err_en_US,
-                  rank, rank);
-              return MakeInvalidIntrinsic<T>(std::move(funcRef));
-            } else if (auto ub{GetUBOUND(context, *named, *dim)}) {
+            if (auto ub{GetUBOUND(context, *named, *dim)}) {
               return Fold(context, ConvertToType<T>(std::move(*ub)));
             }
           } else {
@@ -237,8 +259,9 @@ Expr<Type<TypeCategory::Integer, KIND>> UBOUND(FoldingContext &context,
 }
 
 // COUNT()
-template <typename T>
+template <typename T, int maskKind>
 static Expr<T> FoldCount(FoldingContext &context, FunctionRef<T> &&ref) {
+  using LogicalResult = Type<TypeCategory::Logical, maskKind>;
   static_assert(T::category == TypeCategory::Integer);
   ActualArguments &arg{ref.arguments()};
   if (const Constant<LogicalResult> *mask{arg.empty()
@@ -246,12 +269,21 @@ static Expr<T> FoldCount(FoldingContext &context, FunctionRef<T> &&ref) {
               : Folder<LogicalResult>{context}.Folding(arg[0])}) {
     std::optional<int> dim;
     if (CheckReductionDIM(dim, context, arg, 1, mask->Rank())) {
-      auto accumulator{[&](Scalar<T> &element, const ConstantSubscripts &at) {
-        if (mask->At(at).IsTrue()) {
-          element = element.AddSigned(Scalar<T>{1}).value;
-        }
-      }};
-      return Expr<T>{DoReduction<T>(*mask, dim, Scalar<T>{}, accumulator)};
+      bool overflow{false};
+      auto accumulator{
+          [&mask, &overflow](Scalar<T> &element, const ConstantSubscripts &at) {
+            if (mask->At(at).IsTrue()) {
+              auto incremented{element.AddSigned(Scalar<T>{1})};
+              overflow |= incremented.overflow;
+              element = incremented.value;
+            }
+          }};
+      Constant<T> result{DoReduction<T>(*mask, dim, Scalar<T>{}, accumulator)};
+      if (overflow) {
+        context.messages().Say(
+            "Result of intrinsic function COUNT overflows its result type"_warn_en_US);
+      }
+      return Expr<T>{std::move(result)};
     }
   }
   return Expr<T>{std::move(ref)};
@@ -494,6 +526,15 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
   auto *intrinsic{std::get_if<SpecificIntrinsic>(&funcRef.proc().u)};
   CHECK(intrinsic);
   std::string name{intrinsic->name};
+  auto FromInt64{[&name, &context](std::int64_t n) {
+    Scalar<T> result{n};
+    if (result.ToInt64() != n) {
+      context.messages().Say(
+          "Result of intrinsic function '%s' (%jd) overflows its result type"_warn_en_US,
+          name, std::intmax_t{n});
+    }
+    return result;
+  }};
   if (name == "abs") { // incl. babs, iiabs, jiaabs, & kiabs
     return FoldElementalIntrinsic<T, T>(context, std::move(funcRef),
         ScalarFunc<T, T>([&context](const Scalar<T> &i) -> Scalar<T> {
@@ -528,7 +569,18 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
           cx->u);
     }
   } else if (name == "count") {
-    return FoldCount<T>(context, std::move(funcRef));
+    int maskKind = args[0]->GetType()->kind();
+    switch (maskKind) {
+      SWITCH_COVERS_ALL_CASES
+    case 1:
+      return FoldCount<T, 1>(context, std::move(funcRef));
+    case 2:
+      return FoldCount<T, 2>(context, std::move(funcRef));
+    case 4:
+      return FoldCount<T, 4>(context, std::move(funcRef));
+    case 8:
+      return FoldCount<T, 8>(context, std::move(funcRef));
+    }
   } else if (name == "digits") {
     if (const auto *cx{UnwrapExpr<Expr<SomeInteger>>(args[0])}) {
       return Expr<T>{common::visit(
@@ -550,8 +602,15 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
           cx->u)};
     }
   } else if (name == "dim") {
-    return FoldElementalIntrinsic<T, T, T>(
-        context, std::move(funcRef), &Scalar<T>::DIM);
+    return FoldElementalIntrinsic<T, T, T>(context, std::move(funcRef),
+        ScalarFunc<T, T, T>([&context](const Scalar<T> &x,
+                                const Scalar<T> &y) -> Scalar<T> {
+          auto result{x.DIM(y)};
+          if (result.overflow) {
+            context.messages().Say("DIM intrinsic folding overflow"_warn_en_US);
+          }
+          return result.value;
+        }));
   } else if (name == "dot_product") {
     return FoldDotProduct<T>(context, std::move(funcRef));
   } else if (name == "dshiftl" || name == "dshiftr") {
@@ -559,6 +618,23 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
         name == "dshiftl" ? &Scalar<T>::DSHIFTL : &Scalar<T>::DSHIFTR};
     // Third argument can be of any kind. However, it must be smaller or equal
     // than BIT_SIZE. It can be converted to Int4 to simplify.
+    if (const auto *argCon{Folder<T>(context).Folding(args[0])};
+        argCon && argCon->empty()) {
+    } else if (const auto *shiftCon{Folder<Int4>(context).Folding(args[2])}) {
+      for (const auto &scalar : shiftCon->values()) {
+        std::int64_t shiftVal{scalar.ToInt64()};
+        if (shiftVal < 0) {
+          context.messages().Say("SHIFT=%jd count for %s is negative"_err_en_US,
+              std::intmax_t{shiftVal}, name);
+          break;
+        } else if (shiftVal > T::Scalar::bits) {
+          context.messages().Say(
+              "SHIFT=%jd count for %s is greater than %d"_err_en_US,
+              std::intmax_t{shiftVal}, name, T::Scalar::bits);
+          break;
+        }
+      }
+    }
     return FoldElementalIntrinsic<T, T, T, Int4>(context, std::move(funcRef),
         ScalarFunc<T, T, T, Int4>(
             [&fptr](const Scalar<T> &i, const Scalar<T> &j,
@@ -592,13 +668,26 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
             name);
       } else {
         return common::visit(
-            [&funcRef, &context](const auto &str) -> Expr<T> {
+            [&funcRef, &context, &FromInt64](const auto &str) -> Expr<T> {
               using Char = typename std::decay_t<decltype(str)>::Result;
               return FoldElementalIntrinsic<T, Char>(context,
                   std::move(funcRef),
-                  ScalarFunc<T, Char>([](const Scalar<Char> &c) {
-                    return Scalar<T>{CharacterUtils<Char::kind>::ICHAR(c)};
-                  }));
+                  ScalarFunc<T, Char>(
+#ifndef _MSC_VER
+                      [&FromInt64](const Scalar<Char> &c) {
+                        return FromInt64(CharacterUtils<Char::kind>::ICHAR(c));
+                      }));
+#else // _MSC_VER
+      // MSVC 14 get confused by the original code above and
+      // ends up emitting an error about passing a std::string
+      // to the std::u16string instantiation of
+      // CharacterUtils<2>::ICHAR(). Can't find a work-around,
+      // so remove the FromInt64 error checking lambda that
+      // seems to have caused the proble.
+                      [](const Scalar<Char> &c) {
+                        return CharacterUtils<Char::kind>::ICHAR(c);
+                      }));
+#endif // _MSC_VER
             },
             someChar->u);
       }
@@ -631,42 +720,70 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
     } else {
       common::die("missing case to fold intrinsic function %s", name.c_str());
     }
+    if (const auto *argCon{Folder<T>(context).Folding(args[0])};
+        argCon && argCon->empty()) {
+    } else if (const auto *posCon{Folder<Int4>(context).Folding(args[1])}) {
+      for (const auto &scalar : posCon->values()) {
+        std::int64_t posVal{scalar.ToInt64()};
+        if (posVal < 0) {
+          context.messages().Say(
+              "bit position for %s (%jd) is negative"_err_en_US, name,
+              std::intmax_t{posVal});
+          break;
+        } else if (posVal >= T::Scalar::bits) {
+          context.messages().Say(
+              "bit position for %s (%jd) is not less than %d"_err_en_US, name,
+              std::intmax_t{posVal}, T::Scalar::bits);
+          break;
+        }
+      }
+    }
     return FoldElementalIntrinsic<T, T, Int4>(context, std::move(funcRef),
-        ScalarFunc<T, T, Int4>([&](const Scalar<T> &i,
-                                   const Scalar<Int4> &pos) -> Scalar<T> {
-          auto posVal{static_cast<int>(pos.ToInt64())};
-          if (posVal < 0) {
-            context.messages().Say(
-                "bit position for %s (%d) is negative"_err_en_US, name, posVal);
-          } else if (posVal >= i.bits) {
-            context.messages().Say(
-                "bit position for %s (%d) is not less than %d"_err_en_US, name,
-                posVal, i.bits);
-          }
-          return std::invoke(fptr, i, posVal);
-        }));
+        ScalarFunc<T, T, Int4>(
+            [&](const Scalar<T> &i, const Scalar<Int4> &pos) -> Scalar<T> {
+              return std::invoke(fptr, i, static_cast<int>(pos.ToInt64()));
+            }));
   } else if (name == "ibits") {
+    const auto *posCon{Folder<Int4>(context).Folding(args[1])};
+    const auto *lenCon{Folder<Int4>(context).Folding(args[2])};
+    if (const auto *argCon{Folder<T>(context).Folding(args[0])};
+        argCon && argCon->empty()) {
+    } else {
+      std::size_t posCt{posCon ? posCon->size() : 0};
+      std::size_t lenCt{lenCon ? lenCon->size() : 0};
+      std::size_t n{std::max(posCt, lenCt)};
+      for (std::size_t j{0}; j < n; ++j) {
+        int posVal{j < posCt || posCt == 1
+                ? static_cast<int>(posCon->values()[j % posCt].ToInt64())
+                : 0};
+        int lenVal{j < lenCt || lenCt == 1
+                ? static_cast<int>(lenCon->values()[j % lenCt].ToInt64())
+                : 0};
+        if (posVal < 0) {
+          context.messages().Say(
+              "bit position for IBITS(POS=%jd) is negative"_err_en_US,
+              std::intmax_t{posVal});
+          break;
+        } else if (lenVal < 0) {
+          context.messages().Say(
+              "bit length for IBITS(LEN=%jd) is negative"_err_en_US,
+              std::intmax_t{lenVal});
+          break;
+        } else if (posVal + lenVal > T::Scalar::bits) {
+          context.messages().Say(
+              "IBITS() must have POS+LEN (>=%jd) no greater than %d"_err_en_US,
+              std::intmax_t{posVal + lenVal}, T::Scalar::bits);
+          break;
+        }
+      }
+    }
     return FoldElementalIntrinsic<T, T, Int4, Int4>(context, std::move(funcRef),
-        ScalarFunc<T, T, Int4, Int4>([&](const Scalar<T> &i,
-                                         const Scalar<Int4> &pos,
-                                         const Scalar<Int4> &len) -> Scalar<T> {
-          auto posVal{static_cast<int>(pos.ToInt64())};
-          auto lenVal{static_cast<int>(len.ToInt64())};
-          if (posVal < 0) {
-            context.messages().Say(
-                "bit position for IBITS(POS=%d,LEN=%d) is negative"_err_en_US,
-                posVal, lenVal);
-          } else if (lenVal < 0) {
-            context.messages().Say(
-                "bit length for IBITS(POS=%d,LEN=%d) is negative"_err_en_US,
-                posVal, lenVal);
-          } else if (posVal + lenVal > i.bits) {
-            context.messages().Say(
-                "IBITS(POS=%d,LEN=%d) must have POS+LEN no greater than %d"_err_en_US,
-                posVal + lenVal, i.bits);
-          }
-          return i.IBITS(posVal, lenVal);
-        }));
+        ScalarFunc<T, T, Int4, Int4>(
+            [&](const Scalar<T> &i, const Scalar<Int4> &pos,
+                const Scalar<Int4> &len) -> Scalar<T> {
+              return i.IBITS(static_cast<int>(pos.ToInt64()),
+                  static_cast<int>(len.ToInt64()));
+            }));
   } else if (name == "index" || name == "scan" || name == "verify") {
     if (auto *charExpr{UnwrapExpr<Expr<SomeCharacter>>(args[0])}) {
       return common::visit(
@@ -676,27 +793,29 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
               return FoldElementalIntrinsic<T, TC, TC, LogicalResult>(context,
                   std::move(funcRef),
                   ScalarFunc<T, TC, TC, LogicalResult>{
-                      [&name](const Scalar<TC> &str, const Scalar<TC> &other,
-                          const Scalar<LogicalResult> &back) -> Scalar<T> {
-                        return name == "index"
-                            ? CharacterUtils<TC::kind>::INDEX(
-                                  str, other, back.IsTrue())
-                            : name == "scan" ? CharacterUtils<TC::kind>::SCAN(
-                                                   str, other, back.IsTrue())
-                                             : CharacterUtils<TC::kind>::VERIFY(
-                                                   str, other, back.IsTrue());
+                      [&name, &FromInt64](const Scalar<TC> &str,
+                          const Scalar<TC> &other,
+                          const Scalar<LogicalResult> &back) {
+                        return FromInt64(name == "index"
+                                ? CharacterUtils<TC::kind>::INDEX(
+                                      str, other, back.IsTrue())
+                                : name == "scan"
+                                ? CharacterUtils<TC::kind>::SCAN(
+                                      str, other, back.IsTrue())
+                                : CharacterUtils<TC::kind>::VERIFY(
+                                      str, other, back.IsTrue()));
                       }});
             } else {
               return FoldElementalIntrinsic<T, TC, TC>(context,
                   std::move(funcRef),
                   ScalarFunc<T, TC, TC>{
-                      [&name](const Scalar<TC> &str,
-                          const Scalar<TC> &other) -> Scalar<T> {
-                        return name == "index"
-                            ? CharacterUtils<TC::kind>::INDEX(str, other)
-                            : name == "scan"
-                            ? CharacterUtils<TC::kind>::SCAN(str, other)
-                            : CharacterUtils<TC::kind>::VERIFY(str, other);
+                      [&name, &FromInt64](
+                          const Scalar<TC> &str, const Scalar<TC> &other) {
+                        return FromInt64(name == "index"
+                                ? CharacterUtils<TC::kind>::INDEX(str, other)
+                                : name == "scan"
+                                ? CharacterUtils<TC::kind>::SCAN(str, other)
+                                : CharacterUtils<TC::kind>::VERIFY(str, other));
                       }});
             }
           },
@@ -728,40 +847,85 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
   } else if (name == "iparity") {
     return FoldBitReduction(
         context, std::move(funcRef), &Scalar<T>::IEOR, Scalar<T>{});
-  } else if (name == "ishft") {
-    return FoldElementalIntrinsic<T, T, Int4>(context, std::move(funcRef),
-        ScalarFunc<T, T, Int4>([&](const Scalar<T> &i,
-                                   const Scalar<Int4> &pos) -> Scalar<T> {
-          auto posVal{static_cast<int>(pos.ToInt64())};
-          if (posVal < -i.bits) {
+  } else if (name == "ishft" || name == "ishftc") {
+    const auto *argCon{Folder<T>(context).Folding(args[0])};
+    const auto *shiftCon{Folder<Int4>(context).Folding(args[1])};
+    const auto *shiftVals{shiftCon ? &shiftCon->values() : nullptr};
+    const auto *sizeCon{
+        args.size() == 3 ? Folder<Int4>(context).Folding(args[2]) : nullptr};
+    const auto *sizeVals{sizeCon ? &sizeCon->values() : nullptr};
+    if ((argCon && argCon->empty()) || !shiftVals || shiftVals->empty() ||
+        (sizeVals && sizeVals->empty())) {
+      // size= and shift= values don't need to be checked
+    } else {
+      for (const auto &scalar : *shiftVals) {
+        std::int64_t shiftVal{scalar.ToInt64()};
+        if (shiftVal < -T::Scalar::bits) {
+          context.messages().Say(
+              "SHIFT=%jd count for %s is less than %d"_err_en_US,
+              std::intmax_t{shiftVal}, name, -T::Scalar::bits);
+          break;
+        } else if (shiftVal > T::Scalar::bits) {
+          context.messages().Say(
+              "SHIFT=%jd count for %s is greater than %d"_err_en_US,
+              std::intmax_t{shiftVal}, name, T::Scalar::bits);
+          break;
+        }
+      }
+      if (sizeVals) {
+        for (const auto &scalar : *sizeVals) {
+          std::int64_t sizeVal{scalar.ToInt64()};
+          if (sizeVal <= 0) {
             context.messages().Say(
-                "SHIFT=%d count for ishft is less than %d"_err_en_US, posVal,
-                -i.bits);
-          } else if (posVal > i.bits) {
+                "SIZE=%jd count for ishftc is not positive"_err_en_US,
+                std::intmax_t{sizeVal}, name);
+            break;
+          } else if (sizeVal > T::Scalar::bits) {
             context.messages().Say(
-                "SHIFT=%d count for ishft is greater than %d"_err_en_US, posVal,
-                i.bits);
+                "SIZE=%jd count for ishftc is greater than %d"_err_en_US,
+                std::intmax_t{sizeVal}, T::Scalar::bits);
+            break;
           }
-          return i.ISHFT(posVal);
-        }));
-  } else if (name == "ishftc") {
-    if (args.at(2)) { // SIZE= is present
+        }
+        if (shiftVals->size() == 1 || sizeVals->size() == 1 ||
+            shiftVals->size() == sizeVals->size()) {
+          auto iters{std::max(shiftVals->size(), sizeVals->size())};
+          for (std::size_t j{0}; j < iters; ++j) {
+            auto shiftVal{static_cast<int>(
+                (*shiftVals)[j % shiftVals->size()].ToInt64())};
+            auto sizeVal{
+                static_cast<int>((*sizeVals)[j % sizeVals->size()].ToInt64())};
+            if (sizeVal > 0 && std::abs(shiftVal) > sizeVal) {
+              context.messages().Say(
+                  "SHIFT=%jd count for ishftc is greater in magnitude than SIZE=%jd"_err_en_US,
+                  std::intmax_t{shiftVal}, std::intmax_t{sizeVal});
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (name == "ishft") {
+      return FoldElementalIntrinsic<T, T, Int4>(context, std::move(funcRef),
+          ScalarFunc<T, T, Int4>(
+              [&](const Scalar<T> &i, const Scalar<Int4> &shift) -> Scalar<T> {
+                return i.ISHFT(static_cast<int>(shift.ToInt64()));
+              }));
+    } else if (!args.at(2)) { // ISHFTC(no SIZE=)
+      return FoldElementalIntrinsic<T, T, Int4>(context, std::move(funcRef),
+          ScalarFunc<T, T, Int4>(
+              [&](const Scalar<T> &i, const Scalar<Int4> &shift) -> Scalar<T> {
+                return i.ISHFTC(static_cast<int>(shift.ToInt64()));
+              }));
+    } else { // ISHFTC(with SIZE=)
       return FoldElementalIntrinsic<T, T, Int4, Int4>(context,
           std::move(funcRef),
           ScalarFunc<T, T, Int4, Int4>(
               [&](const Scalar<T> &i, const Scalar<Int4> &shift,
                   const Scalar<Int4> &size) -> Scalar<T> {
-                // Errors are caught in intrinsics.cpp
                 auto shiftVal{static_cast<int>(shift.ToInt64())};
                 auto sizeVal{static_cast<int>(size.ToInt64())};
                 return i.ISHFTC(shiftVal, sizeVal);
-              }));
-    } else { // no SIZE=
-      return FoldElementalIntrinsic<T, T, Int4>(context, std::move(funcRef),
-          ScalarFunc<T, T, Int4>(
-              [&](const Scalar<T> &i, const Scalar<Int4> &count) -> Scalar<T> {
-                auto countVal{static_cast<int>(count.ToInt64())};
-                return i.ISHFTC(countVal);
               }));
     }
   } else if (name == "izext" || name == "jzext") {
@@ -835,8 +999,8 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
           [&](const auto &kch) -> Expr<T> {
             using TC = typename std::decay_t<decltype(kch)>::Result;
             return FoldElementalIntrinsic<T, TC>(context, std::move(funcRef),
-                ScalarFunc<T, TC>{[](const Scalar<TC> &str) -> Scalar<T> {
-                  return CharacterUtils<TC::kind>::LEN_TRIM(str);
+                ScalarFunc<T, TC>{[&FromInt64](const Scalar<TC> &str) {
+                  return FromInt64(CharacterUtils<TC::kind>::LEN_TRIM(str));
                 }});
           },
           charExpr->u);
@@ -907,16 +1071,15 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
             }));
   } else if (name == "modulo") {
     return FoldElementalIntrinsic<T, T, T>(context, std::move(funcRef),
-        ScalarFuncWithContext<T, T, T>(
-            [](FoldingContext &context, const Scalar<T> &x,
-                const Scalar<T> &y) -> Scalar<T> {
-              auto result{x.MODULO(y)};
-              if (result.overflow) {
-                context.messages().Say(
-                    "modulo() folding overflowed"_warn_en_US);
-              }
-              return result.value;
-            }));
+        ScalarFuncWithContext<T, T, T>([](FoldingContext &context,
+                                           const Scalar<T> &x,
+                                           const Scalar<T> &y) -> Scalar<T> {
+          auto result{x.MODULO(y)};
+          if (result.overflow) {
+            context.messages().Say("modulo() folding overflowed"_warn_en_US);
+          }
+          return result.value;
+        }));
   } else if (name == "not") {
     return FoldElementalIntrinsic<T, T>(
         context, std::move(funcRef), &Scalar<T>::NOT);
@@ -982,7 +1145,7 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
       }
     }
   } else if (name == "selected_int_kind") {
-    if (auto p{GetInt64Arg(args[0])}) {
+    if (auto p{ToInt64(args[0])}) {
       return Expr<T>{context.targetCharacteristics().SelectedIntKind(*p)};
     }
   } else if (name == "selected_real_kind" ||
@@ -1013,51 +1176,49 @@ Expr<Type<TypeCategory::Integer, KIND>> FoldIntrinsicFunction(
     } else {
       common::die("missing case to fold intrinsic function %s", name.c_str());
     }
+    if (const auto *argCon{Folder<T>(context).Folding(args[0])};
+        argCon && argCon->empty()) {
+    } else if (const auto *shiftCon{Folder<Int4>(context).Folding(args[1])}) {
+      for (const auto &scalar : shiftCon->values()) {
+        std::int64_t shiftVal{scalar.ToInt64()};
+        if (shiftVal < 0) {
+          context.messages().Say("SHIFT=%jd count for %s is negative"_err_en_US,
+              std::intmax_t{shiftVal}, name, -T::Scalar::bits);
+          break;
+        } else if (shiftVal > T::Scalar::bits) {
+          context.messages().Say(
+              "SHIFT=%jd count for %s is greater than %d"_err_en_US,
+              std::intmax_t{shiftVal}, name, T::Scalar::bits);
+          break;
+        }
+      }
+    }
     return FoldElementalIntrinsic<T, T, Int4>(context, std::move(funcRef),
-        ScalarFunc<T, T, Int4>([&](const Scalar<T> &i,
-                                   const Scalar<Int4> &pos) -> Scalar<T> {
-          auto posVal{static_cast<int>(pos.ToInt64())};
-          if (posVal < 0) {
-            context.messages().Say(
-                "SHIFT=%d count for %s is negative"_err_en_US, posVal, name);
-          } else if (posVal > i.bits) {
-            context.messages().Say(
-                "SHIFT=%d count for %s is greater than %d"_err_en_US, posVal,
-                name, i.bits);
-          }
-          return std::invoke(fptr, i, posVal);
-        }));
+        ScalarFunc<T, T, Int4>(
+            [&](const Scalar<T> &i, const Scalar<Int4> &shift) -> Scalar<T> {
+              return std::invoke(fptr, i, static_cast<int>(shift.ToInt64()));
+            }));
   } else if (name == "sign") {
     return FoldElementalIntrinsic<T, T, T>(context, std::move(funcRef),
-        ScalarFunc<T, T, T>(
-            [&context](const Scalar<T> &j, const Scalar<T> &k) -> Scalar<T> {
-              typename Scalar<T>::ValueWithOverflow result{j.SIGN(k)};
-              if (result.overflow) {
-                context.messages().Say(
-                    "sign(integer(kind=%d)) folding overflowed"_warn_en_US,
-                    KIND);
-              }
-              return result.value;
-            }));
+        ScalarFunc<T, T, T>([&context](const Scalar<T> &j,
+                                const Scalar<T> &k) -> Scalar<T> {
+          typename Scalar<T>::ValueWithOverflow result{j.SIGN(k)};
+          if (result.overflow) {
+            context.messages().Say(
+                "sign(integer(kind=%d)) folding overflowed"_warn_en_US, KIND);
+          }
+          return result.value;
+        }));
   } else if (name == "size") {
     if (auto shape{GetContextFreeShape(context, args[0])}) {
-      if (auto &dimArg{args[1]}) { // DIM= is present, get one extent
-        if (auto dim{GetInt64Arg(args[1])}) {
-          int rank{GetRank(*shape)};
-          if (*dim >= 1 && *dim <= rank) {
-            const Symbol *symbol{UnwrapWholeSymbolDataRef(args[0])};
-            if (symbol && IsAssumedSizeArray(*symbol) && *dim == rank) {
-              context.messages().Say(
-                  "size(array,dim=%jd) of last dimension is not available for rank-%d assumed-size array dummy argument"_err_en_US,
-                  *dim, rank);
-              return MakeInvalidIntrinsic<T>(std::move(funcRef));
-            } else if (auto &extent{shape->at(*dim - 1)}) {
-              return Fold(context, ConvertToType<T>(std::move(*extent)));
-            }
-          } else {
-            context.messages().Say(
-                "size(array,dim=%jd) dimension is out of range for rank-%d array"_warn_en_US,
-                *dim, rank);
+      if (args[1]) { // DIM= is present, get one extent
+        std::optional<int> dim;
+        if (const auto *array{args[0].value().UnwrapExpr()}; array &&
+            !CheckDimArg(args[1], *array, context.messages(), false, dim)) {
+          return MakeInvalidIntrinsic<T>(std::move(funcRef));
+        } else if (dim) {
+          if (auto &extent{shape->at(*dim)}) {
+            return Fold(context, ConvertToType<T>(std::move(*extent)));
           }
         }
       } else if (auto extents{common::AllElementsPresent(std::move(*shape))}) {
@@ -1118,10 +1279,11 @@ Expr<TypeParamInquiry::Result> FoldOperation(
     }
   } else {
     // A "bare" type parameter: replace with its value, if that's now known
-    // in a current derived type instantiation, for KIND type parameters.
+    // in a current derived type instantiation.
     if (const auto *pdt{context.pdtInstance()}) {
+      auto restorer{context.WithoutPDTInstance()}; // don't loop
       bool isLen{false};
-      if (const semantics::Scope * scope{context.pdtInstance()->scope()}) {
+      if (const semantics::Scope * scope{pdt->scope()}) {
         auto iter{scope->find(parameterName)};
         if (iter != scope->end()) {
           const Symbol &symbol{*iter->second};
@@ -1159,11 +1321,11 @@ std::optional<std::int64_t> ToInt64(const Expr<SomeInteger> &expr) {
 }
 
 std::optional<std::int64_t> ToInt64(const Expr<SomeType> &expr) {
-  if (const auto *intExpr{UnwrapExpr<Expr<SomeInteger>>(expr)}) {
-    return ToInt64(*intExpr);
-  } else {
-    return std::nullopt;
-  }
+  return ToInt64(UnwrapExpr<Expr<SomeInteger>>(expr));
+}
+
+std::optional<std::int64_t> ToInt64(const ActualArgument &arg) {
+  return ToInt64(arg.UnwrapExpr());
 }
 
 #ifdef _MSC_VER // disable bogus warning about missing definitions

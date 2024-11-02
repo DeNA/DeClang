@@ -3,6 +3,7 @@ file(GLOB_RECURSE SWIG_SOURCES *.swig)
 file(GLOB SWIG_HEADERS
   ${LLDB_SOURCE_DIR}/include/lldb/API/*.h
   ${LLDB_SOURCE_DIR}/include/lldb/*.h
+  ${LLDB_BINARY_DIR}/include/lldb/API/SBLanguages.h
 )
 file(GLOB SWIG_PRIVATE_HEADERS
   ${LLDB_SOURCE_DIR}/include/lldb/lldb-private*.h
@@ -32,6 +33,7 @@ set(SWIG_COMMON_FLAGS
   -w361,362 # Ignore warnings about ignored operator overloads
   -features autodoc
   -I${LLDB_SOURCE_DIR}/include
+  -I${LLDB_BINARY_DIR}/include
   -I${CMAKE_CURRENT_SOURCE_DIR}
   ${DARWIN_EXTRAS}
 )
@@ -56,4 +58,14 @@ endif()
 
 if (LLDB_ENABLE_LUA)
   add_subdirectory(lua)
+endif()
+
+if(NOT ${LLDB_USE_STATIC_BINDINGS})
+  set(copy_static_bindings_script "${LLDB_SOURCE_DIR}/scripts/copy-static-bindings.py")
+  add_custom_target(update-static-bindings
+    COMMAND ${copy_static_bindings_script} ${CMAKE_BINARY_DIR}
+    COMMENT "Copying the generated bindings to the static bindings directory in source."
+    VERBATIM
+  )
+  add_dependencies(update-static-bindings swig_wrapper_python)
 endif()

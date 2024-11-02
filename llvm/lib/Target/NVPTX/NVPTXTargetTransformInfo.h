@@ -21,6 +21,7 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/CodeGen/TargetLowering.h"
+#include <optional>
 
 namespace llvm {
 
@@ -40,7 +41,7 @@ public:
       : BaseT(TM, F.getParent()->getDataLayout()), ST(TM->getSubtargetImpl()),
         TLI(ST->getTargetLowering()) {}
 
-  bool hasBranchDivergence() { return true; }
+  bool hasBranchDivergence(const Function *F = nullptr) { return true; }
 
   bool isSourceOfDivergence(const Value *V);
 
@@ -53,8 +54,8 @@ public:
            AS != AddressSpace::ADDRESS_SPACE_LOCAL && AS != ADDRESS_SPACE_PARAM;
   }
 
-  Optional<Instruction *> instCombineIntrinsic(InstCombiner &IC,
-                                               IntrinsicInst &II) const;
+  std::optional<Instruction *> instCombineIntrinsic(InstCombiner &IC,
+                                                    IntrinsicInst &II) const;
 
   // Loads and stores can be vectorized if the alignment is at least as big as
   // the load/store we want to vectorize.
@@ -89,9 +90,9 @@ public:
     return true;
   }
 
-  // Increase the inlining cost threshold by a factor of 5, reflecting that
+  // Increase the inlining cost threshold by a factor of 11, reflecting that
   // calls are particularly expensive in NVPTX.
-  unsigned getInliningThresholdMultiplier() { return 5; }
+  unsigned getInliningThresholdMultiplier() const { return 11; }
 
   InstructionCost getArithmeticInstrCost(
       unsigned Opcode, Type *Ty, TTI::TargetCostKind CostKind,

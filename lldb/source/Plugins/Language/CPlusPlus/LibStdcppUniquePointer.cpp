@@ -26,11 +26,11 @@ class LibStdcppUniquePtrSyntheticFrontEnd : public SyntheticChildrenFrontEnd {
 public:
   explicit LibStdcppUniquePtrSyntheticFrontEnd(lldb::ValueObjectSP valobj_sp);
 
-  size_t CalculateNumChildren() override;
+  llvm::Expected<uint32_t> CalculateNumChildren() override;
 
-  lldb::ValueObjectSP GetChildAtIndex(size_t idx) override;
+  lldb::ValueObjectSP GetChildAtIndex(uint32_t idx) override;
 
-  bool Update() override;
+  lldb::ChildCacheState Update() override;
 
   bool MightHaveChildren() override;
 
@@ -69,13 +69,11 @@ ValueObjectSP LibStdcppUniquePtrSyntheticFrontEnd::GetTuple() {
   if (!valobj_sp)
     return nullptr;
 
-  ValueObjectSP obj_child_sp =
-      valobj_sp->GetChildMemberWithName(ConstString("_M_t"), true);
+  ValueObjectSP obj_child_sp = valobj_sp->GetChildMemberWithName("_M_t");
   if (!obj_child_sp)
       return nullptr;
 
-  ValueObjectSP obj_subchild_sp =
-      obj_child_sp->GetChildMemberWithName(ConstString("_M_t"), true);
+  ValueObjectSP obj_subchild_sp = obj_child_sp->GetChildMemberWithName("_M_t");
 
   // if there is a _M_t subchild, the tuple is found in the obj_subchild_sp
   // (for libstdc++ 6.0.23).
@@ -86,11 +84,11 @@ ValueObjectSP LibStdcppUniquePtrSyntheticFrontEnd::GetTuple() {
   return obj_child_sp;
 }
 
-bool LibStdcppUniquePtrSyntheticFrontEnd::Update() {
+lldb::ChildCacheState LibStdcppUniquePtrSyntheticFrontEnd::Update() {
   ValueObjectSP tuple_sp = GetTuple();
 
   if (!tuple_sp)
-    return false;
+    return lldb::ChildCacheState::eRefetch;
 
   std::unique_ptr<SyntheticChildrenFrontEnd> tuple_frontend(
       LibStdcppTupleSyntheticFrontEndCreator(nullptr, tuple_sp));
@@ -119,13 +117,13 @@ bool LibStdcppUniquePtrSyntheticFrontEnd::Update() {
     }
   }
 
-  return false;
+  return lldb::ChildCacheState::eRefetch;
 }
 
 bool LibStdcppUniquePtrSyntheticFrontEnd::MightHaveChildren() { return true; }
 
 lldb::ValueObjectSP
-LibStdcppUniquePtrSyntheticFrontEnd::GetChildAtIndex(size_t idx) {
+LibStdcppUniquePtrSyntheticFrontEnd::GetChildAtIndex(uint32_t idx) {
   if (idx == 0 && m_ptr_obj)
     return m_ptr_obj->GetSP();
   if (idx == 1 && m_del_obj)
@@ -135,7 +133,8 @@ LibStdcppUniquePtrSyntheticFrontEnd::GetChildAtIndex(size_t idx) {
   return lldb::ValueObjectSP();
 }
 
-size_t LibStdcppUniquePtrSyntheticFrontEnd::CalculateNumChildren() {
+llvm::Expected<uint32_t>
+LibStdcppUniquePtrSyntheticFrontEnd::CalculateNumChildren() {
   if (m_del_obj)
     return 2;
   return 1;

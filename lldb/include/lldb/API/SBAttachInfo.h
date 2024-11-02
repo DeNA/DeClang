@@ -197,7 +197,6 @@ public:
 
 protected:
   friend class SBTarget;
-  friend class SBPlatform;
 
   friend class lldb_private::ScriptInterpreter;
 

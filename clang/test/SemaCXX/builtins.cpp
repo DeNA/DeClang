@@ -40,7 +40,7 @@ namespace addressof {
   struct U { int n : 5; } u;
   int *pbf = __builtin_addressof(u.n); // expected-error {{address of bit-field requested}}
 
-  S *ptmp = __builtin_addressof(S{}); // expected-error {{taking the address of a temporary}}
+  S *ptmp = __builtin_addressof(S{}); // expected-error {{taking the address of a temporary}} expected-warning {{temporary whose address is used as value of local variable 'ptmp' will be destroyed at the end of the full-expression}}
 }
 
 namespace function_start {
@@ -48,6 +48,7 @@ void a(void) {}
 int n;
 void *p = __builtin_function_start(n);               // expected-error {{argument must be a function}}
 static_assert(__builtin_function_start(a) == a, ""); // expected-error {{static assertion expression is not an integral constant expression}}
+// expected-note@-1 {{comparison of addresses of literals has unspecified value}}
 } // namespace function_start
 
 void no_ms_builtins() {
@@ -164,3 +165,9 @@ template<typename T> void test_builtin_complex(T v, double d) {
 template void test_builtin_complex(double, double);
 template void test_builtin_complex(float, double); // expected-note {{instantiation of}}
 template void test_builtin_complex(int, double); // expected-note {{instantiation of}}
+
+#ifdef __x86_64__
+// This previously would cause an assertion when emitting the note diagnostic.
+static void __builtin_cpu_init(); // expected-error {{static declaration of '__builtin_cpu_init' follows non-static declaration}} \
+                                     expected-note {{'__builtin_cpu_init' is a builtin with type 'void () noexcept'}}
+#endif

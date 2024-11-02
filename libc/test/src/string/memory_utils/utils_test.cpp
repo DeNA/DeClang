@@ -8,7 +8,7 @@
 
 #include "src/__support/CPP/array.h"
 #include "src/string/memory_utils/utils.h"
-#include "utils/UnitTest/Test.h"
+#include "test/UnitTest/Test.h"
 
 namespace __llvm_libc {
 
@@ -45,7 +45,7 @@ TEST(LlvmLibcUtilsTest, Log2) {
       6                                               // 64
   };
   for (size_t i = 0; i < kExpectedValues.size(); ++i)
-    EXPECT_EQ(log2(i), kExpectedValues[i]);
+    EXPECT_EQ(log2s(i), kExpectedValues[i]);
 }
 
 TEST(LlvmLibcUtilsTest, LEPowerOf2) {
@@ -72,55 +72,41 @@ TEST(LlvmLibcUtilsTest, GEPowerOf2) {
     EXPECT_EQ(ge_power2(i), kExpectedValues[i]);
 }
 
-using I = intptr_t;
+using UINT = uintptr_t;
 
 // Converts an offset into a pointer.
 const void *forge(size_t offset) {
   return reinterpret_cast<const void *>(offset);
 }
 
-TEST(LlvmLibcUtilsTest, OffsetToNextAligned) {
-  EXPECT_EQ(offset_to_next_aligned<16>(forge(0)), I(0));
-  EXPECT_EQ(offset_to_next_aligned<16>(forge(1)), I(15));
-  EXPECT_EQ(offset_to_next_aligned<16>(forge(16)), I(0));
-  EXPECT_EQ(offset_to_next_aligned<16>(forge(15)), I(1));
-  EXPECT_EQ(offset_to_next_aligned<32>(forge(16)), I(16));
+TEST(LlvmLibcUtilsTest, DistanceToNextAligned) {
+  EXPECT_EQ(distance_to_next_aligned<16>(forge(0)), UINT(16));
+  EXPECT_EQ(distance_to_next_aligned<16>(forge(1)), UINT(15));
+  EXPECT_EQ(distance_to_next_aligned<16>(forge(16)), UINT(16));
+  EXPECT_EQ(distance_to_next_aligned<16>(forge(15)), UINT(1));
+  EXPECT_EQ(distance_to_next_aligned<32>(forge(16)), UINT(16));
 }
 
-TEST(LlvmLibcUtilsTest, OffsetFromLastAligned) {
-  EXPECT_EQ(offset_from_last_aligned<16>(forge(0)), I(0));
-  EXPECT_EQ(offset_from_last_aligned<16>(forge(1)), I(1));
-  EXPECT_EQ(offset_from_last_aligned<16>(forge(16)), I(0));
-  EXPECT_EQ(offset_from_last_aligned<16>(forge(15)), I(15));
-  EXPECT_EQ(offset_from_last_aligned<32>(forge(16)), I(16));
+TEST(LlvmLibcUtilsTest, DistanceToAlignUp) {
+  EXPECT_EQ(distance_to_align_up<16>(forge(0)), UINT(0));
+  EXPECT_EQ(distance_to_align_up<16>(forge(1)), UINT(15));
+  EXPECT_EQ(distance_to_align_up<16>(forge(16)), UINT(0));
+  EXPECT_EQ(distance_to_align_up<16>(forge(15)), UINT(1));
+  EXPECT_EQ(distance_to_align_up<32>(forge(16)), UINT(16));
 }
 
-TEST(LlvmLibcUtilsTest, OffsetToNextCacheLine) {
-  EXPECT_GT(LLVM_LIBC_CACHELINE_SIZE, 0);
-  EXPECT_EQ(offset_to_next_cache_line(forge(0)), I(0));
-  EXPECT_EQ(offset_to_next_cache_line(forge(1)),
-            I(LLVM_LIBC_CACHELINE_SIZE - 1));
-  EXPECT_EQ(offset_to_next_cache_line(forge(LLVM_LIBC_CACHELINE_SIZE)), I(0));
-  EXPECT_EQ(offset_to_next_cache_line(forge(LLVM_LIBC_CACHELINE_SIZE - 1)),
-            I(1));
-}
-
-TEST(LlvmLibcUtilsTest, Adjust1) {
-  char a;
-  const size_t base_size = 10;
-  for (size_t I = -2; I < 2; ++I) {
-    auto *ptr = &a;
-    size_t size = base_size;
-    adjust(I, ptr, size);
-    EXPECT_EQ(intptr_t(ptr), intptr_t(&a + I));
-    EXPECT_EQ(size, base_size - I);
-  }
+TEST(LlvmLibcUtilsTest, DistanceToAlignDown) {
+  EXPECT_EQ(distance_to_align_down<16>(forge(0)), UINT(0));
+  EXPECT_EQ(distance_to_align_down<16>(forge(1)), UINT(1));
+  EXPECT_EQ(distance_to_align_down<16>(forge(16)), UINT(0));
+  EXPECT_EQ(distance_to_align_down<16>(forge(15)), UINT(15));
+  EXPECT_EQ(distance_to_align_down<32>(forge(16)), UINT(16));
 }
 
 TEST(LlvmLibcUtilsTest, Adjust2) {
   char a, b;
   const size_t base_size = 10;
-  for (size_t I = -2; I < 2; ++I) {
+  for (ptrdiff_t I = -2; I < 2; ++I) {
     auto *p1 = &a;
     auto *p2 = &b;
     size_t size = base_size;
@@ -131,19 +117,6 @@ TEST(LlvmLibcUtilsTest, Adjust2) {
   }
 }
 
-TEST(LlvmLibcUtilsTest, Align1) {
-  char a;
-  const size_t base_size = 10;
-  {
-    auto *ptr = &a;
-    size_t size = base_size;
-    align<128>(ptr, size);
-    EXPECT_TRUE(uintptr_t(ptr) % 128 == 0);
-    EXPECT_GE(ptr, &a);
-    EXPECT_EQ(size_t(ptr - &a), base_size - size);
-  }
-}
-
 TEST(LlvmLibcUtilsTest, Align2) {
   char a, b;
   const size_t base_size = 10;
@@ -151,10 +124,10 @@ TEST(LlvmLibcUtilsTest, Align2) {
     auto *p1 = &a;
     auto *p2 = &b;
     size_t size = base_size;
-    align<128, Arg::_1>(p1, p2, size);
+    align_to_next_boundary<128, Arg::P1>(p1, p2, size);
     EXPECT_TRUE(uintptr_t(p1) % 128 == 0);
-    EXPECT_GE(p1, &a);
-    EXPECT_GE(p2, &b);
+    EXPECT_GT(p1, &a);
+    EXPECT_GT(p2, &b);
     EXPECT_EQ(size_t(p1 - &a), base_size - size);
     EXPECT_EQ(size_t(p2 - &b), base_size - size);
   }
@@ -162,12 +135,65 @@ TEST(LlvmLibcUtilsTest, Align2) {
     auto *p1 = &a;
     auto *p2 = &b;
     size_t size = base_size;
-    align<128, Arg::_2>(p1, p2, size);
+    align_to_next_boundary<128, Arg::P2>(p1, p2, size);
     EXPECT_TRUE(uintptr_t(p2) % 128 == 0);
-    EXPECT_GE(p1, &a);
-    EXPECT_GE(p2, &b);
+    EXPECT_GT(p1, &a);
+    EXPECT_GT(p2, &b);
     EXPECT_EQ(size_t(p1 - &a), base_size - size);
     EXPECT_EQ(size_t(p2 - &b), base_size - size);
+  }
+}
+
+TEST(LlvmLibcUtilsTest, DisjointBuffers) {
+  char buf[3];
+  const char *const a = buf + 0;
+  const char *const b = buf + 1;
+  EXPECT_TRUE(is_disjoint(a, b, 0));
+  EXPECT_TRUE(is_disjoint(a, b, 1));
+  EXPECT_FALSE(is_disjoint(a, b, 2));
+
+  EXPECT_TRUE(is_disjoint(b, a, 0));
+  EXPECT_TRUE(is_disjoint(b, a, 1));
+  EXPECT_FALSE(is_disjoint(b, a, 2));
+}
+
+TEST(LlvmLibcUtilsTest, LoadStoreAligned) {
+  const uint64_t init = 0xDEAD'C0DE'BEEF'F00D;
+  CPtr const src = reinterpret_cast<CPtr>(&init);
+  uint64_t store;
+  Ptr const dst = reinterpret_cast<Ptr>(&store);
+
+  using LoadFun = uint64_t (*)(CPtr);
+  using StoreFun = void (*)(uint64_t, Ptr);
+
+  {
+    LoadFun ld = load_aligned<uint64_t, uint64_t>;
+    StoreFun st = store_aligned<uint64_t, uint64_t>;
+    const uint64_t loaded = ld(src);
+    EXPECT_EQ(init, loaded);
+    store = 0;
+    st(init, dst);
+    EXPECT_EQ(init, store);
+  }
+
+  {
+    LoadFun ld = load_aligned<uint64_t, uint32_t, uint32_t>;
+    StoreFun st = store_aligned<uint64_t, uint32_t, uint32_t>;
+    const uint64_t loaded = ld(src);
+    EXPECT_EQ(init, loaded);
+    store = 0;
+    st(init, dst);
+    EXPECT_EQ(init, store);
+  }
+
+  {
+    LoadFun ld = load_aligned<uint64_t, uint32_t, uint16_t, uint8_t, uint8_t>;
+    StoreFun st = store_aligned<uint64_t, uint32_t, uint16_t, uint8_t, uint8_t>;
+    const uint64_t loaded = ld(src);
+    EXPECT_EQ(init, loaded);
+    store = 0;
+    st(init, dst);
+    EXPECT_EQ(init, store);
   }
 }
 

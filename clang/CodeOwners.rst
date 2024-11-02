@@ -58,6 +58,12 @@ Analysis & CFG
 | sgatev\@google.com (email), sgatev (Phabricator), sgatev (GitHub)
 
 
+Experimental new constant interpreter
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+| Timm Bäder
+| tbaeder@redhat.com (email), tbaeder (Phabricator), tbaederr (GitHub)
+
+
 Modules & serialization
 ~~~~~~~~~~~~~~~~~~~~~~~
 | Chuanqi Xu
@@ -75,6 +81,12 @@ Templates
 
 Debug information
 ~~~~~~~~~~~~~~~~~
+| Adrian Prantl
+| aprantl\@apple.com (email), aprantl (Phabricator), adrian-prantl (GitHub)
+
+| David Blaikie
+| dblaikie\@gmail.com (email), dblaikie (Phabricator), dwblaikie (GitHub)
+
 | Eric Christopher
 | echristo\@gmail.com (email), echristo (Phabricator), echristo (GitHub)
 
@@ -196,6 +208,12 @@ General Windows support
 | rnk\@google.com (email), rnk (Phabricator), rnk (GitHub)
 
 
+Incremental compilation, REPLs, clang-repl
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+| Vassil Vassilev
+| Vassil.Vassilev\@cern.ch (email), v.g.vassilev (Phabricator), vgvassilev (GitHub)
+
+
 Standards Conformance
 ---------------------
 The following people are responsible for validating that changes are conforming
@@ -223,13 +241,13 @@ Objective-C/C++ conformance
 OpenMP conformance
 ~~~~~~~~~~~~~~~~~~
 | Alexey Bataev
-| a.bataev\@hotmail.com (email), ABataev (Phabricator), cilkplus (GitHub)
+| a.bataev\@hotmail.com (email), ABataev (Phabricator), alexey-bataev (GitHub)
 
 
 OpenCL conformance
 ~~~~~~~~~~~~~~~~~~
 | Anastasia Stulova
-| anastasia.stulova\@arm.com (email), Anastasia (Phabricator), AnastasiaStulova (GitHub)
+| anastasia\@compiler-experts.com (email), Anastasia (Phabricator), AnastasiaStulova (GitHub)
 
 
 SYCL conformance

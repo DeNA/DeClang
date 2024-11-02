@@ -52,12 +52,12 @@ static bool shouldCacheInvocation(ArrayRef<const char *> Args,
       createInvocation(CheckArgs, std::move(Opts));
   if (!CInvok)
     return false;
-  if (CInvok->getLangOpts()->Modules) {
+  if (CInvok->getLangOpts().Modules) {
     Diags->Report(diag::warn_clang_cache_disabled_caching)
         << "-fmodules is enabled";
     return false;
   }
-  if (CInvok->getLangOpts()->AsmPreprocessor) {
+  if (CInvok->getLangOpts().AsmPreprocessor) {
     Diags->Report(diag::warn_clang_cache_disabled_caching)
         << "assembler language mode is enabled";
     return false;
@@ -79,9 +79,10 @@ static int executeAsProcess(ArrayRef<const char *> Args,
     RefArgs.push_back(Arg);
   }
   std::string ErrMsg;
-  int Result = llvm::sys::ExecuteAndWait(RefArgs[0], RefArgs, /*Env*/ None,
-                                         /*Redirects*/ {}, /*SecondsToWait*/ 0,
-                                         /*MemoryLimit*/ 0, &ErrMsg);
+  int Result =
+      llvm::sys::ExecuteAndWait(RefArgs[0], RefArgs, /*Env*/ std::nullopt,
+                                /*Redirects*/ {}, /*SecondsToWait*/ 0,
+                                /*MemoryLimit*/ 0, &ErrMsg);
   if (!ErrMsg.empty()) {
     Diags.Report(diag::err_clang_cache_failed_execution) << ErrMsg;
   }
@@ -124,6 +125,7 @@ static void addCommonArgs(bool ForDriver, SmallVectorImpl<const char *> &Args,
 /// Arguments specific to \p clang-cache compiler launcher functionality.
 static void addLauncherArgs(SmallVectorImpl<const char *> &Args,
                             llvm::StringSaver &Saver) {
+
   if (const char *DaemonPath =
           ::getenv("CLANG_CACHE_SCAN_DAEMON_SOCKET_PATH")) {
     // Instruct clang to connect to scanning daemon that is listening on the
@@ -161,12 +163,26 @@ static void addLauncherArgs(SmallVectorImpl<const char *> &Args,
       Args.push_back(Saver.save("-fdepscan-prefix-map=" + PrefixMap).data());
     }
   }
-  if (const char *ServicePath =
-          ::getenv("LLVM_CACHE_REMOTE_SERVICE_SOCKET_PATH")) {
+
+  const char *ServicePath = ::getenv("LLVM_CACHE_REMOTE_SERVICE_SOCKET_PATH");
+
+  if (ServicePath) {
     Args.append({"-Xclang", "-fcompilation-caching-service-path", "-Xclang",
                  ServicePath});
   }
   Args.append({"-greproducible"});
+
+  if (!llvm::sys::Process::GetEnv("CLANG_CACHE_DISABLE_MCCAS") &&
+      !ServicePath) {
+    Args.push_back("-Xclang");
+    Args.push_back("-fcas-backend");
+    if (llvm::sys::Process::GetEnv("CLANG_CACHE_VERIFY_MCCAS")) {
+      Args.push_back("-Xclang");
+      Args.push_back("-fcas-backend-mode=verify");
+    }
+    Args.push_back("-mllvm");
+    Args.push_back("-cas-friendly-debug-info");
+  }
 }
 
 static void addScanServerArgs(const char *SocketPath,
@@ -176,13 +192,13 @@ static void addScanServerArgs(const char *SocketPath,
   addCommonArgs(/*ForDriver*/ false, Args, Saver);
 }
 
-Optional<int>
+std::optional<int>
 clang::handleClangCacheInvocation(SmallVectorImpl<const char *> &Args,
                                   llvm::StringSaver &Saver) {
   assert(Args.size() >= 1);
 
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts;
-  if (Optional<std::string> WarnOptsValue =
+  if (std::optional<std::string> WarnOptsValue =
           llvm::sys::Process::GetEnv("LLVM_CACHE_WARNINGS")) {
     SmallVector<const char *, 8> WarnOpts;
     WarnOpts.push_back(Args.front());
@@ -240,10 +256,10 @@ clang::handleClangCacheInvocation(SmallVectorImpl<const char *> &Args,
     if (!shouldCacheInvocation(Args, DiagsPtr)) {
       if (Diags.hasErrorOccurred())
         return 1;
-      return None;
+      return std::nullopt;
     }
     addLauncherArgs(Args, Saver);
-    return None;
+    return std::nullopt;
   }
 
   // FIXME: If it's invoking a different clang binary determine whether that

@@ -1,12 +1,14 @@
 # Exclude tests from libMLIR.so
 add_mlir_library(MLIRTestIR
   TestBuiltinAttributeInterfaces.cpp
+  TestBuiltinDistinctAttributes.cpp
   TestClone.cpp
   TestDiagnostics.cpp
   TestDominance.cpp
   TestFunc.cpp
   TestInterfaces.cpp
   TestMatchers.cpp
+  TestLazyLoading.cpp
   TestOpaqueLoc.cpp
   TestOperationEquals.cpp
   TestPrintDefUse.cpp
@@ -17,6 +19,7 @@ add_mlir_library(MLIRTestIR
   TestSymbolUses.cpp
   TestRegions.cpp
   TestTypes.cpp
+  TestUseListOrders.cpp
   TestVisitors.cpp
   TestVisitorsGeneric.cpp
 
@@ -24,6 +27,8 @@ add_mlir_library(MLIRTestIR
 
   LINK_LIBS PUBLIC
   MLIRPass
+  MLIRBytecodeReader
+  MLIRBytecodeWriter
   MLIRTestDialect
   )
 

@@ -42,6 +42,16 @@ LLCAS_PUBLIC void llcas_get_plugin_version(unsigned *major, unsigned *minor);
 LLCAS_PUBLIC void llcas_string_dispose(char *);
 
 /**
+ * Cancels the asynchronous query associated with the \c llcas_cancellable_t.
+ */
+LLCAS_PUBLIC void llcas_cancellable_cancel(llcas_cancellable_t);
+
+/**
+ * Releases memory associated with given \c llcas_cancellable_t.
+ */
+LLCAS_PUBLIC void llcas_cancellable_dispose(llcas_cancellable_t);
+
+/**
  * Options object to configure creation of \c llcas_cas_t. After passing to
  * \c llcas_cas_create, its memory can be released via
  * \c llcas_cas_options_dispose.
@@ -97,6 +107,39 @@ LLCAS_PUBLIC llcas_cas_t llcas_cas_create(llcas_cas_options_t, char **error);
  * using objects that originated from this \c llcas_cas_t instance.
  */
 LLCAS_PUBLIC void llcas_cas_dispose(llcas_cas_t);
+
+/**
+ * Get the local storage size of the CAS/cache data in bytes.
+ *
+ * \param error optional pointer to receive an error message if an error
+ * occurred. If set, the memory it points to needs to be released via
+ * \c llcas_string_dispose.
+ * \returns the local storage size of the CAS/cache data, or -1 if the
+ * implementation does not support reporting such size, or -2 if an error
+ * occurred.
+ */
+LLCAS_PUBLIC int64_t llcas_cas_get_ondisk_size(llcas_cas_t, char **error);
+
+/**
+ * Set the size for limiting disk storage growth.
+ *
+ * \param size_limit the maximum size limit in bytes. 0 means no limit. Negative
+ * values are invalid.
+ * \param error optional pointer to receive an error message if an error
+ * occurred. If set, the memory it points to needs to be released via
+ * \c llcas_string_dispose.
+ * \returns true if there was an error, false otherwise.
+ */
+LLCAS_PUBLIC bool
+llcas_cas_set_ondisk_size_limit(llcas_cas_t, int64_t size_limit, char **error);
+
+/**
+ * Prune local storage to reduce its size according to the desired size limit.
+ * Pruning can happen concurrently with other operations.
+ *
+ * \returns true if there was an error, false otherwise.
+ */
+LLCAS_PUBLIC bool llcas_cas_prune_ondisk_data(llcas_cas_t, char **error);
 
 /**
  * \returns the hash schema name that the plugin is using. The string memory it
@@ -194,10 +237,13 @@ LLCAS_PUBLIC llcas_lookup_result_t llcas_cas_load_object(
  * Whether the call is asynchronous or not depends on the implementation.
  *
  * \param ctx_cb pointer to pass to the callback function.
+ *
+ * \param[out] cancel_tok optional pointer to receive a \c llcas_cancellable_t.
  */
 LLCAS_PUBLIC void llcas_cas_load_object_async(llcas_cas_t, llcas_objectid_t,
                                               void *ctx_cb,
-                                              llcas_cas_load_object_cb);
+                                              llcas_cas_load_object_cb,
+                                              llcas_cancellable_t *cancel_tok);
 
 /**
  * Stores the object with the provided data buffer and \c llcas_objectid_t
@@ -267,11 +313,12 @@ LLCAS_PUBLIC llcas_lookup_result_t llcas_actioncache_get_for_digest(
  * implementation.
  *
  * \param ctx_cb pointer to pass to the callback function.
+ *
+ * \param[out] cancel_tok optional pointer to receive a \c llcas_cancellable_t.
  */
-LLCAS_PUBLIC void
-llcas_actioncache_get_for_digest_async(llcas_cas_t, llcas_digest_t key,
-                                       bool globally, void *ctx_cb,
-                                       llcas_actioncache_get_cb);
+LLCAS_PUBLIC void llcas_actioncache_get_for_digest_async(
+    llcas_cas_t, llcas_digest_t key, bool globally, void *ctx_cb,
+    llcas_actioncache_get_cb, llcas_cancellable_t *cancel_tok);
 
 /**
  * Associates a \c llcas_objectid_t \p value with a \p key. It is invalid to set
@@ -296,11 +343,12 @@ LLCAS_PUBLIC bool llcas_actioncache_put_for_digest(llcas_cas_t,
  * implementation.
  *
  * \param ctx_cb pointer to pass to the callback function.
+ *
+ * \param[out] cancel_tok optional pointer to receive a \c llcas_cancellable_t.
  */
-LLCAS_PUBLIC void
-llcas_actioncache_put_for_digest_async(llcas_cas_t, llcas_digest_t key,
-                                       llcas_objectid_t value, bool globally,
-                                       void *ctx_cb, llcas_actioncache_put_cb);
+LLCAS_PUBLIC void llcas_actioncache_put_for_digest_async(
+    llcas_cas_t, llcas_digest_t key, llcas_objectid_t value, bool globally,
+    void *ctx_cb, llcas_actioncache_put_cb, llcas_cancellable_t *cancel_tok);
 
 LLVM_C_EXTERN_C_END
 

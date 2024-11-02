@@ -69,7 +69,32 @@
 // RUN: %clang -### -c -g %s -target x86_64-apple-driverkit19.0 2>&1 \
 // RUN:             | FileCheck -check-prefix=G_STANDALONE \
 // RUN:                         -check-prefix=G_DWARF4 %s
-// RUN: %clang -### -c -fsave-optimization-record %s \
+// RUN: %clang -### -c -g %s -target x86_64-apple-macosx15 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF5 %s
+// RUN: %clang -### -c -g %s -target arm64-apple-ios17.0 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF4 %s
+// RUN: %clang -### -c -g %s -target arm64-apple-ios18.0 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF5 %s
+// RUN: %clang -### -c -g %s -target arm64_32-apple-watchos11 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF5 %s
+// RUN: %clang -### -c -g %s -target arm64-apple-tvos18.0 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF5 %s
+// RUN: %clang -### -c -g %s -target x86_64-apple-driverkit24.0 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF5 %s
+// RUN: %clang -### -c -g %s -target arm64-apple-xros1 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF4 %s
+// RUN: %clang -### -c -g %s -target arm64-apple-xros2 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE \
+// RUN:                         -check-prefix=G_DWARF5 %s
+//
+// RUN: %clang -### -c -fsave-optimization-record %s    \
 // RUN:        -target x86_64-apple-darwin 2>&1 \
 // RUN:             | FileCheck -check-prefix=GLTO_ONLY %s
 // RUN: %clang -### -c -g -fsave-optimization-record %s \
@@ -116,11 +141,19 @@
 // RUN: %clang -### %s -g -target x86_64-scei-ps5 2>&1 \
 // RUN:             | FileCheck -check-prefix=LDGARANGE %s
 
-// On the AIX, -g defaults to -gdbx and limited debug info.
+// On the AIX, -g defaults to limited debug info.
 // RUN: %clang -### -c -g %s -target powerpc-ibm-aix-xcoff 2>&1 \
-// RUN:             | FileCheck -check-prefix=G_LIMITED -check-prefix=G_DBX %s
+// RUN:             | FileCheck -check-prefix=G_LIMITED %s
 // RUN: %clang -### -c -g %s -target powerpc64-ibm-aix-xcoff 2>&1 \
-// RUN:             | FileCheck -check-prefix=G_LIMITED -check-prefix=G_DBX %s
+// RUN:             | FileCheck -check-prefix=G_LIMITED %s
+// RUN: %clang -### -c -g %s -target powerpc-ibm-aix-xcoff 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_NOTUNING %s
+// RUN: %clang -### -c -g %s -target powerpc64-ibm-aix-xcoff 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_NOTUNING %s
+// RUN: %clang -### -c -g -gdbx %s -target powerpc-ibm-aix-xcoff 2>&1 \
+// RUN:             | FileCheck -check-prefixes=G_LIMITED,G_DBX %s
+// RUN: %clang -### -c -g -gdbx %s -target powerpc64-ibm-aix-xcoff 2>&1 \
+// RUN:             | FileCheck -check-prefixes=G_LIMITED,G_DBX %s
 
 // For DBX, -g defaults to -gstrict-dwarf.
 // RUN: %clang -### -c -g %s -target powerpc-ibm-aix-xcoff 2>&1 \
@@ -292,6 +325,11 @@
 // RUN: %clang -### -target %itanium_abi_triple -gmodules -gline-directives-only %s 2>&1 \
 // RUN:        | FileCheck -check-prefix=GLIO_ONLY %s
 //
+// RUN: %clang -### -gmodules -gno-modules %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=NOGEXTREFS %s
+//
+// RUN: %clang -### -gno-modules %s 2>&1 | FileCheck -check-prefix=GNOMOD %s
+//
 // NOG_PS: "-cc1"
 // NOG_PS-NOT: "-dwarf-version=
 // NOG_PS: "-generate-arange-section"
@@ -377,8 +415,8 @@
 // LDGARANGE: {{".*ld.*"}} {{.*}}
 // LDGARANGE-NOT: "-plugin-opt=-generate-arange-section"
 // LLDGARANGE: {{".*lld.*"}} {{.*}} "-plugin-opt=-generate-arange-section"
-// SNLDTLTOGARANGE: {{".*orbis-ld.*"}} {{.*}} "-lto-thin-debug-options=-generate-arange-section"
-// SNLDFLTOGARANGE: {{".*orbis-ld.*"}} {{.*}} "-lto-debug-options=-generate-arange-section"
+// SNLDTLTOGARANGE: {{".*orbis-ld.*"}} {{.*}} "-lto-thin-debug-options= -generate-arange-section"
+// SNLDFLTOGARANGE: {{".*orbis-ld.*"}} {{.*}} "-lto-debug-options= -generate-arange-section"
 
 // PUB: -gpubnames
 //
@@ -399,6 +437,9 @@
 //
 // GEXTREFS: "-dwarf-ext-refs" "-fmodule-format=obj"
 // GEXTREFS: "-debug-info-kind={{standalone|constructor}}"
+// NOGEXTREFS-NOT: -dwarf-ext-refs
+//
+// GNOMOD-NOT: -debug-info-kind=
 
 // RUN: not %clang -cc1 -debug-info-kind=watkind 2>&1 | FileCheck -check-prefix=BADSTRING1 %s
 // BADSTRING1: error: invalid value 'watkind' in '-debug-info-kind=watkind'

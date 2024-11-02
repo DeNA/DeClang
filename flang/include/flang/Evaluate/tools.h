@@ -262,9 +262,9 @@ template <typename A> const Symbol *ExtractBareLenParameter(const A &expr) {
 }
 
 // If an expression simply wraps a DataRef, extract and return it.
-// The Boolean argument controls the handling of Substring and ComplexPart
+// The Boolean arguments control the handling of Substring and ComplexPart
 // references: when true (not default), it extracts the base DataRef
-// of a substring or complex part, if it has one.
+// of a substring or complex part.
 template <typename A>
 common::IfNoLvalue<std::optional<DataRef>, A> ExtractDataRef(
     const A &, bool intoSubstring, bool intoComplexPart) {
@@ -312,15 +312,15 @@ std::optional<DataRef> ExtractDataRef(const std::optional<A> &x,
 }
 template <typename A>
 std::optional<DataRef> ExtractDataRef(
-    const A *p, bool intoSubstring = false, bool intoComplexPart = false) {
+    A *p, bool intoSubstring = false, bool intoComplexPart = false) {
   if (p) {
-    return ExtractDataRef(*p, intoSubstring, intoComplexPart);
+    return ExtractDataRef(std::as_const(*p), intoSubstring, intoComplexPart);
   } else {
     return std::nullopt;
   }
 }
-std::optional<DataRef> ExtractDataRef(
-    const ActualArgument &, bool intoSubstring = false);
+std::optional<DataRef> ExtractDataRef(const ActualArgument &,
+    bool intoSubstring = false, bool intoComplexPart = false);
 
 std::optional<DataRef> ExtractSubstringBase(const Substring &);
 
@@ -583,9 +583,10 @@ template <TypeCategory TOCAT, typename VALUE> struct ConvertToKindHelper {
 template <TypeCategory TOCAT, typename VALUE>
 common::IfNoLvalue<Expr<SomeKind<TOCAT>>, VALUE> ConvertToKind(
     int kind, VALUE &&x) {
-  return common::SearchTypes(
-      ConvertToKindHelper<TOCAT, VALUE>{kind, std::move(x)})
-      .value();
+  auto result{common::SearchTypes(
+      ConvertToKindHelper<TOCAT, VALUE>{kind, std::move(x)})};
+  CHECK(result.has_value());
+  return *result;
 }
 
 // Given a type category CAT, SameKindExprs<CAT, N> is a variant that
@@ -969,6 +970,7 @@ bool IsAllocatableDesignator(const Expr<SomeType> &);
 // Procedure and pointer detection predicates
 bool IsProcedure(const Expr<SomeType> &);
 bool IsFunction(const Expr<SomeType> &);
+bool IsProcedurePointer(const Expr<SomeType> &);
 bool IsProcedurePointerTarget(const Expr<SomeType> &);
 bool IsBareNullPointer(const Expr<SomeType> *); // NULL() w/o MOLD= or type
 bool IsNullObjectPointer(const Expr<SomeType> &);
@@ -1199,6 +1201,8 @@ bool IsLenTypeParameter(const Symbol &);
 bool IsExtensibleType(const DerivedTypeSpec *);
 bool IsBuiltinDerivedType(const DerivedTypeSpec *derived, const char *name);
 bool IsBuiltinCPtr(const Symbol &);
+bool IsEventType(const DerivedTypeSpec *);
+bool IsLockType(const DerivedTypeSpec *);
 // Is this derived type TEAM_TYPE from module ISO_FORTRAN_ENV?
 bool IsTeamType(const DerivedTypeSpec *);
 // Is this derived type TEAM_TYPE, C_PTR, or C_FUNPTR?
@@ -1216,17 +1220,14 @@ bool IsEventTypeOrLockType(const DerivedTypeSpec *);
 // of the construct entity.
 // (E.g., for ASSOCIATE(x => y%z), ResolveAssociations(x) returns x,
 // while GetAssociationRoot(x) returns y.)
+// ResolveAssociationsExceptSelectRank() stops at a RANK case symbol.
 const Symbol &ResolveAssociations(const Symbol &);
 const Symbol &GetAssociationRoot(const Symbol &);
+const Symbol &ResolveAssociationsExceptSelectRank(const Symbol &);
 
 const Symbol *FindCommonBlockContaining(const Symbol &);
 int CountLenParameters(const DerivedTypeSpec &);
 int CountNonConstantLenParameters(const DerivedTypeSpec &);
-
-// 15.5.2.4(4), type compatibility for dummy and actual arguments.
-// Also used for assignment compatibility checking
-bool AreTypeParamCompatible(
-    const semantics::DerivedTypeSpec &, const semantics::DerivedTypeSpec &);
 
 const Symbol &GetUsedModule(const UseDetails &);
 const Symbol *FindFunctionResult(const Symbol &);
@@ -1235,6 +1236,8 @@ const Symbol *FindFunctionResult(const Symbol &);
 // Uses DynamicType::IsTkCompatible(), which handles the case of distinct
 // but identical derived types.
 bool AreTkCompatibleTypes(const DeclTypeSpec *x, const DeclTypeSpec *y);
+
+common::IgnoreTKRSet GetIgnoreTKR(const Symbol &);
 
 } // namespace Fortran::semantics
 

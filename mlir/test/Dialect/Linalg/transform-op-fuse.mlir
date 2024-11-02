@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s --test-transform-dialect-interpreter --split-input-file | FileCheck %s
+// RUN: mlir-opt %s --test-transform-dialect-interpreter --split-input-file -canonicalize | FileCheck %s
 
 // CHECK-LABEL: func.func @fuse_unary
 func.func @fuse_unary(%arg0: tensor<?x?xf32>, %arg1: tensor<?x?xf32>) -> tensor<?x?xf32> {
@@ -16,9 +16,10 @@ func.func @fuse_unary(%arg0: tensor<?x?xf32>, %arg1: tensor<?x?xf32>) -> tensor<
 }
 
 transform.sequence failures(propagate) {
-^bb1(%arg1: !pdl.operation):
-  %0 = transform.structured.match ops{["linalg.elemwise_binary"]} in %arg1
+^bb1(%arg1: !transform.any_op):
+  %0 = transform.structured.match ops{["linalg.elemwise_binary"]} in %arg1 : (!transform.any_op) -> !transform.any_op
   %1, %loops:2 = transform.structured.fuse %0 {tile_sizes = [32, 32], tile_interchange = [0, 1]}
+    : (!transform.any_op) -> (!transform.any_op, !transform.any_op, !transform.any_op)
 }
 
 // -----
@@ -43,11 +44,11 @@ func.func @fuse_unary(%arg0: tensor<?x?xf32>, %arg1: tensor<?x?xf32>) -> tensor<
 }
 
 transform.sequence failures(propagate) {
-^bb1(%arg1: !pdl.operation):
-  %0 = transform.structured.match ops{["linalg.elemwise_binary"]} in %arg1
+^bb1(%arg1: !transform.any_op):
+  %0 = transform.structured.match ops{["linalg.elemwise_binary"]} in %arg1 : (!transform.any_op) -> !transform.any_op
   %1, %loops:2 = transform.structured.fuse %0 {tile_sizes = [32, 32], tile_interchange = [0, 1]}
-  %loop = transform.cast %loops#0 : !pdl.operation to !transform.op<"scf.for">
-  transform.loop.peel %loop : (!transform.op<"scf.for">) -> !pdl.operation
+    : (!transform.any_op) -> (!transform.any_op, !transform.op<"scf.for">, !transform.any_op)
+  transform.loop.peel %loops#0 : (!transform.op<"scf.for">) -> !transform.any_op
 }
 
 // -----
@@ -61,15 +62,12 @@ func.func @interchange_reduction(%input: tensor<12x7x25xf32>) -> tensor<12x25xf3
 //   CHECK-DAG: %[[INIT:.+]] = tensor.empty()
 //   CHECK-DAG: %[[C5:.+]] = arith.constant 5 : index
 //   CHECK-DAG: %[[C7:.+]] = arith.constant 7 : index
+//   CHECK-DAG: %[[C4:.+]] = arith.constant 4 : index
 //       CHECK: %[[RES:.*]] = scf.for %[[IV0:.+]] = %{{.+}} to %{{.+}} step %[[C5]] iter_args(%[[FOR_ARG0:.+]] = %[[INIT]])
 //       CHECK:   scf.for %[[IV1:.+]] = %{{.+}} to %{{.+}} step %[[C7]] iter_args(%[[FOR_ARG1:.+]] = %[[FOR_ARG0]])
 //       CHECK:     %[[OUT_SLICE0:.+]] = tensor.extract_slice %[[INPUT]][%[[IV0]], 0, %[[IV1]]]
 //       CHECK:     %[[OUT_SLICE1:.+]] = tensor.extract_slice %[[FOR_ARG1]][%[[IV0]], %[[IV1]]]
 //       CHECK:     %[[FILL:.+]] = linalg.fill {{.+}} outs(%[[OUT_SLICE1]] : tensor<?x?xf32>)
-//
-// Extra 4 constant is introduced, discard it.
-//       CHECK:     arith.constant 4 : index
-//       CHECK:     %[[C4:.+]] = arith.constant 4 : index
 //       CHECK:     scf.for %[[IV2:.+]] = %{{.+}} to %{{.+}} step %[[C4]] iter_args(%[[FOR_ARG2:.+]] = %[[FILL]])
 //       CHECK:       %[[IN_SLICE:.+]] = tensor.extract_slice %[[OUT_SLICE0]]
 //       CHECK:       %[[OUT_SLICE2:.+]] = tensor.extract_slice %[[FOR_ARG2]][0, 0]
@@ -89,8 +87,34 @@ func.func @interchange_reduction(%input: tensor<12x7x25xf32>) -> tensor<12x25xf3
 }
 
 transform.sequence failures(propagate) {
-^bb1(%arg1: !pdl.operation):
-  %0 = transform.structured.match ops{["linalg.generic"]} in %arg1
+^bb1(%arg1: !transform.any_op):
+  %0 = transform.structured.match ops{["linalg.generic"]} in %arg1 : (!transform.any_op) -> !transform.any_op
   %1, %loops:2 = transform.structured.fuse %0 {tile_sizes = [5, 0, 7], tile_interchange = [0, 2, 1]}
+    : (!transform.any_op) -> (!transform.any_op, !transform.any_op, !transform.any_op)
   %2, %loops_2 = transform.structured.tile %1 [0, 4]
+    : (!transform.any_op) -> (!transform.any_op, !transform.any_op)
+}
+
+// -----
+
+// CHECK-LABEL: func.func @unpack_elemwise
+// CHECK:         %[[RES:.*]] = scf.for
+// CHECK:           scf.for
+// CHECK:             tensor.unpack
+// CHECK:             linalg.elemwise_unary
+// CHECK:         return %[[RES]]
+func.func @unpack_elemwise(%arg0: tensor<16x48x8x8xf32>, %arg1: tensor<128x384xf32>) -> tensor<128x384xf32> {
+  %0 = tensor.empty() : tensor<128x384xf32>
+  %1 = tensor.unpack %arg0 inner_dims_pos = [0, 1] inner_tiles = [8, 8] into %0
+      : tensor<16x48x8x8xf32> -> tensor<128x384xf32>
+  %2 = linalg.elemwise_unary ins(%1: tensor<128x384xf32>)
+                             outs(%arg1: tensor<128x384xf32>) -> tensor<128x384xf32>
+  return %2 : tensor<128x384xf32>
+}
+
+transform.sequence failures(propagate) {
+^bb1(%arg1: !transform.any_op):
+  %0 = transform.structured.match ops{["linalg.elemwise_unary"]} in %arg1 : (!transform.any_op) -> !transform.any_op
+  %1, %loops:2 = transform.structured.fuse %0 {tile_sizes = [16, 32], tile_interchange = [0, 1]}
+    : (!transform.any_op) -> (!transform.any_op, !transform.any_op, !transform.any_op)
 }

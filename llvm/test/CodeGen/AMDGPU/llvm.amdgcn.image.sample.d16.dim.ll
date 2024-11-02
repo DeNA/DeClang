@@ -46,7 +46,7 @@ main_body:
   ret half %tex
 }
 
-define amdgpu_ps half @image_sample_2d_f16_tfe(<8 x i32> inreg %rsrc, <4 x i32> inreg %samp, float %s, float %t, i32 addrspace(1)* inreg %out) {
+define amdgpu_ps half @image_sample_2d_f16_tfe(<8 x i32> inreg %rsrc, <4 x i32> inreg %samp, float %s, float %t, ptr addrspace(1) inreg %out) {
 ; TONGA-LABEL: image_sample_2d_f16_tfe:
 ; TONGA:       ; %bb.0: ; %main_body
 ; TONGA-NEXT:    s_mov_b64 s[14:15], exec
@@ -108,7 +108,6 @@ define amdgpu_ps half @image_sample_2d_f16_tfe(<8 x i32> inreg %rsrc, <4 x i32> 
 ; GFX10-NEXT:    s_waitcnt vmcnt(0)
 ; GFX10-NEXT:    v_mov_b32_e32 v0, v2
 ; GFX10-NEXT:    global_store_dword v4, v3, s[12:13]
-; GFX10-NEXT:    s_waitcnt_vscnt null, 0x0
 ; GFX10-NEXT:    ; return to shader part epilog
 ;
 ; GFX11-LABEL: image_sample_2d_f16_tfe:
@@ -123,13 +122,12 @@ define amdgpu_ps half @image_sample_2d_f16_tfe(<8 x i32> inreg %rsrc, <4 x i32> 
 ; GFX11-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-NEXT:    v_mov_b32_e32 v0, v2
 ; GFX11-NEXT:    global_store_b32 v4, v3, s[12:13]
-; GFX11-NEXT:    s_waitcnt_vscnt null, 0x0
 ; GFX11-NEXT:    ; return to shader part epilog
 main_body:
   %tex = call {half,i32} @llvm.amdgcn.image.sample.2d.f16i32.f32(i32 1, float %s, float %t, <8 x i32> %rsrc, <4 x i32> %samp, i1 false, i32 1, i32 0)
   %tex.vec = extractvalue {half, i32} %tex, 0
   %tex.err = extractvalue {half, i32} %tex, 1
-  store i32 %tex.err, i32 addrspace(1)* %out, align 4
+  store i32 %tex.err, ptr addrspace(1) %out, align 4
   ret half %tex.vec
 }
 

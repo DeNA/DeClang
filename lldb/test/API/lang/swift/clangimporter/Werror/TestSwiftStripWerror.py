@@ -3,26 +3,24 @@ from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
 
-
 class TestSwiftWerror(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
+
     NO_DEBUG_INFO_TESTCASE = True
 
-    def setUp(self):
-        TestBase.setUp(self)
-
     # Don't run ClangImporter tests if Clangimporter is disabled.
-    @skipIf(setting=("symbols.use-swift-clangimporter", "false"))
+    @expectedFailureAll(setting=('plugin.typesystem.clang.experimental-redecl-completion', 'true'))
+    @skipIf(setting=('symbols.use-swift-clangimporter', 'false'))
+    @skipIf(setting=('symbols.swift-precise-compiler-invocation', 'true'))
     @skipUnlessDarwin
     @swiftTest
     def test(self):
         """This tests that -Werror is removed from ClangImporter options by
-        introducing two conflicting macro definitions in different dylibs.
+           introducing two conflicting macro definitions in different dylibs.
         """
         self.build()
-        target, _, _, _ = lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("dylib.swift"), extra_images=["Dylib"]
-        )
+        target,  _, _, _ = lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec('dylib.swift'),
+            extra_images=['Dylib'])
 
         # Turn on logging.
         log = self.getBuildArtifact("types.log")

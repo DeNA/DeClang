@@ -575,6 +575,13 @@ bool PPCRegisterInfo::getRegAllocationHints(Register VirtReg,
   // as we are just looking to provide a hint.
   bool BaseImplRetVal = TargetRegisterInfo::getRegAllocationHints(
       VirtReg, Order, Hints, MF, VRM, Matrix);
+
+  // Don't use the allocation hints for ISAFuture.
+  // The WACC registers used in ISAFuture are unlike the ACC registers on
+  // Power 10 and so this logic to register allocation hints does not apply.
+  if (MF.getSubtarget<PPCSubtarget>().isISAFuture())
+    return BaseImplRetVal;
+
   // We are interested in instructions that copy values to ACC/UACC.
   // The copy into UACC will be simply a COPY to a subreg so we
   // want to allocate the corresponding physical subreg for the source.
@@ -588,7 +595,7 @@ bool PPCRegisterInfo::getRegAllocationHints(Register VirtReg,
     case TargetOpcode::COPY: {
       ResultOp = &Use.getOperand(0);
       ResultReg = ResultOp->getReg();
-      if (Register::isVirtualRegister(ResultReg) &&
+      if (ResultReg.isVirtual() &&
           MRI->getRegClass(ResultReg)->contains(PPC::UACC0) &&
           VRM->hasPhys(ResultReg)) {
         Register UACCPhys = VRM->getPhys(ResultReg);
@@ -1234,6 +1241,11 @@ static void spillRegPairs(MachineBasicBlock &MBB,
                           unsigned FrameIndex, bool IsLittleEndian,
                           bool IsKilled, bool TwoPairs) {
   unsigned Offset = 0;
+  // The register arithmetic in this function does not support virtual
+  // registers.
+  assert(!SrcReg.isVirtual() &&
+         "Spilling register pairs does not support virtual registers.");
+
   if (TwoPairs)
     Offset = IsLittleEndian ? 48 : 0;
   else
@@ -1279,6 +1291,18 @@ void PPCRegisterInfo::lowerOctWordSpilling(MachineBasicBlock::iterator II,
                 /* TwoPairs */ false);
   // Discard the original instruction.
   MBB.erase(II);
+}
+
+static void emitWAccSpillRestoreInfo(MachineBasicBlock &MBB, bool IsRestore) {
+#ifdef NDEBUG
+  return;
+#else
+  if (ReportAccMoves) {
+    dbgs() << "Emitting wacc register " << (IsRestore ? "restore" : "spill")
+           << ":\n";
+    MBB.dump();
+  }
+#endif
 }
 
 /// lowerACCSpilling - Generate the code for spilling the accumulator register.
@@ -1357,6 +1381,73 @@ void PPCRegisterInfo::lowerACCRestore(MachineBasicBlock::iterator II,
                     FrameIndex, IsLittleEndian ? 0 : 32);
   if (IsPrimed)
     BuildMI(MBB, II, DL, TII.get(PPC::XXMTACC), DestReg).addReg(DestReg);
+
+  // Discard the pseudo instruction.
+  MBB.erase(II);
+}
+
+/// lowerWACCSpilling - Generate the code for spilling the wide accumulator
+/// register.
+void PPCRegisterInfo::lowerWACCSpilling(MachineBasicBlock::iterator II,
+                                        unsigned FrameIndex) const {
+  MachineInstr &MI = *II; // SPILL_WACC <SrcReg>, <offset>
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const PPCSubtarget &Subtarget = MF.getSubtarget<PPCSubtarget>();
+  const TargetInstrInfo &TII = *Subtarget.getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+  bool IsLittleEndian = Subtarget.isLittleEndian();
+
+  emitWAccSpillRestoreInfo(MBB, false);
+
+  const TargetRegisterClass *RC = &PPC::VSRpRCRegClass;
+  Register VSRpReg0 = MF.getRegInfo().createVirtualRegister(RC);
+  Register VSRpReg1 = MF.getRegInfo().createVirtualRegister(RC);
+  Register SrcReg = MI.getOperand(0).getReg();
+
+  BuildMI(MBB, II, DL, TII.get(PPC::DMXXEXTFDMR512), VSRpReg0)
+      .addDef(VSRpReg1)
+      .addReg(SrcReg);
+
+  addFrameReference(BuildMI(MBB, II, DL, TII.get(PPC::STXVP))
+                        .addReg(VSRpReg0, RegState::Kill),
+                    FrameIndex, IsLittleEndian ? 32 : 0);
+  addFrameReference(BuildMI(MBB, II, DL, TII.get(PPC::STXVP))
+                        .addReg(VSRpReg1, RegState::Kill),
+                    FrameIndex, IsLittleEndian ? 0 : 32);
+
+  // Discard the pseudo instruction.
+  MBB.erase(II);
+}
+
+/// lowerWACCRestore - Generate the code to restore the wide accumulator
+/// register.
+void PPCRegisterInfo::lowerWACCRestore(MachineBasicBlock::iterator II,
+                                       unsigned FrameIndex) const {
+  MachineInstr &MI = *II; // <DestReg> = RESTORE_WACC <offset>
+  MachineBasicBlock &MBB = *MI.getParent();
+  MachineFunction &MF = *MBB.getParent();
+  const PPCSubtarget &Subtarget = MF.getSubtarget<PPCSubtarget>();
+  const TargetInstrInfo &TII = *Subtarget.getInstrInfo();
+  DebugLoc DL = MI.getDebugLoc();
+  bool IsLittleEndian = Subtarget.isLittleEndian();
+
+  emitWAccSpillRestoreInfo(MBB, true);
+
+  const TargetRegisterClass *RC = &PPC::VSRpRCRegClass;
+  Register VSRpReg0 = MF.getRegInfo().createVirtualRegister(RC);
+  Register VSRpReg1 = MF.getRegInfo().createVirtualRegister(RC);
+  Register DestReg = MI.getOperand(0).getReg();
+
+  addFrameReference(BuildMI(MBB, II, DL, TII.get(PPC::LXVP), VSRpReg0),
+                    FrameIndex, IsLittleEndian ? 32 : 0);
+  addFrameReference(BuildMI(MBB, II, DL, TII.get(PPC::LXVP), VSRpReg1),
+                    FrameIndex, IsLittleEndian ? 0 : 32);
+
+  // Kill VSRpReg0, VSRpReg1   (killedRegState::Killed)
+  BuildMI(MBB, II, DL, TII.get(PPC::DMXXINSTFDMR512), DestReg)
+      .addReg(VSRpReg0, RegState::Kill)
+      .addReg(VSRpReg1, RegState::Kill);
 
   // Discard the pseudo instruction.
   MBB.erase(II);
@@ -1485,7 +1576,7 @@ static unsigned getOffsetONFromFION(const MachineInstr &MI,
   return OffsetOperandNo;
 }
 
-void
+bool
 PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                                      int SPAdj, unsigned FIOperandNum,
                                      RegScavenger *RS) const {
@@ -1518,14 +1609,16 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
 
   if ((OpC == PPC::DYNAREAOFFSET || OpC == PPC::DYNAREAOFFSET8)) {
     lowerDynamicAreaOffset(II);
-    return;
+    // lowerDynamicAreaOffset erases II
+    return true;
   }
 
   // Special case for dynamic alloca.
   if (FPSI && FrameIndex == FPSI &&
       (OpC == PPC::DYNALLOC || OpC == PPC::DYNALLOC8)) {
     lowerDynamicAlloc(II);
-    return;
+    // lowerDynamicAlloc erases II
+    return true;
   }
 
   if (FPSI && FrameIndex == FPSI &&
@@ -1534,37 +1627,44 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
        OpC == PPC::PREPARE_PROBED_ALLOCA_NEGSIZE_SAME_REG_64 ||
        OpC == PPC::PREPARE_PROBED_ALLOCA_NEGSIZE_SAME_REG_32)) {
     lowerPrepareProbedAlloca(II);
-    return;
+    // lowerPrepareProbedAlloca erases II
+    return true;
   }
 
   // Special case for pseudo-ops SPILL_CR and RESTORE_CR, etc.
   if (OpC == PPC::SPILL_CR) {
     lowerCRSpilling(II, FrameIndex);
-    return;
+    return true;
   } else if (OpC == PPC::RESTORE_CR) {
     lowerCRRestore(II, FrameIndex);
-    return;
+    return true;
   } else if (OpC == PPC::SPILL_CRBIT) {
     lowerCRBitSpilling(II, FrameIndex);
-    return;
+    return true;
   } else if (OpC == PPC::RESTORE_CRBIT) {
     lowerCRBitRestore(II, FrameIndex);
-    return;
+    return true;
   } else if (OpC == PPC::SPILL_ACC || OpC == PPC::SPILL_UACC) {
     lowerACCSpilling(II, FrameIndex);
-    return;
+    return true;
   } else if (OpC == PPC::RESTORE_ACC || OpC == PPC::RESTORE_UACC) {
     lowerACCRestore(II, FrameIndex);
-    return;
+    return true;
   } else if (OpC == PPC::STXVP && DisableAutoPairedVecSt) {
     lowerOctWordSpilling(II, FrameIndex);
-    return;
+    return true;
+  } else if (OpC == PPC::SPILL_WACC) {
+    lowerWACCSpilling(II, FrameIndex);
+    return true;
+  } else if (OpC == PPC::RESTORE_WACC) {
+    lowerWACCRestore(II, FrameIndex);
+    return true;
   } else if (OpC == PPC::SPILL_QUADWORD) {
     lowerQuadwordSpilling(II, FrameIndex);
-    return;
+    return true;
   } else if (OpC == PPC::RESTORE_QUADWORD) {
     lowerQuadwordRestore(II, FrameIndex);
-    return;
+    return true;
   }
 
   // Replace the FrameIndex with base register with GPR1 (SP) or GPR31 (FP).
@@ -1621,7 +1721,7 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
                      OpC == TargetOpcode::STACKMAP ||
                      OpC == TargetOpcode::PATCHPOINT)) {
     MI.getOperand(OffsetOperandNo).ChangeToImmediate(Offset);
-    return;
+    return false;
   }
 
   // The offset doesn't fit into a single register, scavenge one to build the
@@ -1631,9 +1731,26 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   const TargetRegisterClass *G8RC = &PPC::G8RCRegClass;
   const TargetRegisterClass *GPRC = &PPC::GPRCRegClass;
   const TargetRegisterClass *RC = is64Bit ? G8RC : GPRC;
-  Register SRegHi = MF.getRegInfo().createVirtualRegister(RC),
-           SReg = MF.getRegInfo().createVirtualRegister(RC);
   unsigned NewOpcode = 0u;
+  bool ScavengingFailed = RS && RS->getRegsAvailable(RC).none() &&
+                          RS->getRegsAvailable(&PPC::VSFRCRegClass).any();
+  Register SRegHi, SReg, VSReg;
+
+  // The register scavenger is unable to get a GPR but can get a VSR. We
+  // need to stash a GPR into a VSR so that we can free one up.
+  if (ScavengingFailed && Subtarget.hasDirectMove()) {
+    // Pick a volatile register and if we are spilling/restoring that
+    // particular one, pick the next one.
+    SRegHi = SReg = is64Bit ? PPC::X4 : PPC::R4;
+    if (MI.getOperand(0).getReg() == SReg)
+      SRegHi = SReg = SReg + 1;
+    VSReg = MF.getRegInfo().createVirtualRegister(&PPC::VSFRCRegClass);
+    BuildMI(MBB, II, dl, TII.get(is64Bit ? PPC::MTVSRD : PPC::MTVSRWZ), VSReg)
+        .addReg(SReg);
+  } else {
+    SRegHi = MF.getRegInfo().createVirtualRegister(RC);
+    SReg = MF.getRegInfo().createVirtualRegister(RC);
+  }
 
   // Insert a set of rA with the full offset value before the ld, st, or add
   if (isInt<16>(Offset))
@@ -1673,6 +1790,12 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
   MI.getOperand(OperandBase).ChangeToRegister(StackReg, false);
   MI.getOperand(OperandBase + 1).ChangeToRegister(SReg, false, false, true);
 
+  // If we stashed a value from a GPR into a VSR, we need to get it back after
+  // spilling the register.
+  if (ScavengingFailed && Subtarget.hasDirectMove())
+    BuildMI(MBB, ++II, dl, TII.get(is64Bit ? PPC::MFVSRD : PPC::MFVSRWZ), SReg)
+        .addReg(VSReg);
+
   // Since these are not real X-Form instructions, we must
   // add the registers and access 0(NewReg) rather than
   // emitting the X-Form pseudo.
@@ -1686,6 +1809,7 @@ PPCRegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
     MI.getOperand(OperandBase + 1).ChangeToRegister(NewReg, false);
     MI.getOperand(OperandBase).ChangeToImmediate(0);
   }
+  return false;
 }
 
 Register PPCRegisterInfo::getFrameRegister(const MachineFunction &MF) const {

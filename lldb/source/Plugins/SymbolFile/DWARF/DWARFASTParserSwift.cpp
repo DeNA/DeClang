@@ -37,10 +37,12 @@
 using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::dwarf;
+using namespace lldb_private::plugin::dwarf;
 
 DWARFASTParserSwift::DWARFASTParserSwift(
     TypeSystemSwiftTypeRef &swift_typesystem)
-    : m_swift_typesystem(swift_typesystem) {}
+    : DWARFASTParser(Kind::DWARFASTParserSwift),
+      m_swift_typesystem(swift_typesystem) {}
 
 DWARFASTParserSwift::~DWARFASTParserSwift() {}
 
@@ -67,10 +69,10 @@ lldb::TypeSP DWARFASTParserSwift::ParseTypeFromDWARF(const SymbolContext &sc,
   ConstString name;
   ConstString preferred_name;
 
-  llvm::Optional<uint64_t> dwarf_byte_size;
+  std::optional<uint64_t> dwarf_byte_size;
 
-  DWARFAttributes attributes;
-  const size_t num_attributes = die.GetAttributes(attributes);
+  DWARFAttributes attributes = die.GetAttributes();
+  const size_t num_attributes = attributes.Size();
   DWARFFormValue type_attr;
 
   if (num_attributes > 0) {
@@ -222,12 +224,12 @@ Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
   DWARFRangeList func_ranges;
   const char *name = NULL;
   const char *mangled = NULL;
-  int decl_file = 0;
-  int decl_line = 0;
-  int decl_column = 0;
-  int call_file = 0;
-  int call_line = 0;
-  int call_column = 0;
+  std::optional<int> decl_file = 0;
+  std::optional<int> decl_line = 0;
+  std::optional<int> decl_column = 0;
+  std::optional<int> call_file = 0;
+  std::optional<int> call_line = 0;
+  std::optional<int> call_column = 0;
   DWARFExpressionList frame_base;
 
   if (die.Tag() != DW_TAG_subprogram)
@@ -241,9 +243,9 @@ Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
 
     Mangled func_name;
     if (mangled)
-      func_name.SetValue(ConstString(mangled), true);
+      func_name.SetValue(ConstString(mangled));
     else
-      func_name.SetValue(ConstString(name), false);
+      func_name.SetValue(ConstString(name));
 
     // See if this function can throw.  We can't get that from the
     // mangled name (even though the information is often there)
@@ -266,8 +268,8 @@ Function *DWARFASTParserSwift::ParseFunctionFromDWARF(
     std::unique_ptr<Declaration> decl_ap;
     if (decl_file != 0 || decl_line != 0 || decl_column != 0)
       decl_ap.reset(new Declaration(
-          comp_unit.GetSupportFiles().GetFileSpecAtIndex(decl_file), decl_line,
-          decl_column));
+          comp_unit.GetSupportFiles().GetFileSpecAtIndex(*decl_file), *decl_line,
+          *decl_column));
 
     const user_id_t func_user_id = die.GetID();
     bool is_generic_trampoline = die.IsGenericTrampoline();

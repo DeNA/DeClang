@@ -41,9 +41,9 @@ struct InlineScalarOperands : public OpRewritePattern<GenericOp> {
     SmallVector<size_t> scalarOperands;
     SmallVector<AffineMap> newIndexingMaps;
     SmallVector<Value> newOperands;
-    for (OpOperand *opOperand : genericOp.getInputOperands()) {
+    for (OpOperand *opOperand : genericOp.getDpsInputOperands()) {
       AffineMap map = genericOp.getMatchingIndexingMap(opOperand);
-      if (genericOp.isInputTensor(opOperand) && map.isConstant()) {
+      if (genericOp.isDpsInput(opOperand) && map.isConstant()) {
         scalarOperands.emplace_back(opOperand->getOperandNumber());
       } else {
         newIndexingMaps.emplace_back(map);
@@ -54,11 +54,11 @@ struct InlineScalarOperands : public OpRewritePattern<GenericOp> {
     if (scalarOperands.empty())
       return failure();
 
-    for (OpOperand *opOperand : genericOp.getOutputOperands())
+    for (OpOperand *opOperand : genericOp.getDpsInitOperands())
       newIndexingMaps.emplace_back(genericOp.getMatchingIndexingMap(opOperand));
 
     Location loc = genericOp->getLoc();
-    SmallVector<Value> outputOperands = genericOp.getOutputOperands();
+    SmallVector<Value> outputOperands = genericOp.getOutputs();
     auto newOp = rewriter.create<GenericOp>(
         loc, genericOp->getResultTypes(), newOperands, outputOperands,
         newIndexingMaps, genericOp.getIteratorTypesArray());
@@ -70,7 +70,7 @@ struct InlineScalarOperands : public OpRewritePattern<GenericOp> {
     rewriter.setInsertionPointToStart(body);
 
     for (auto idx : llvm::reverse(scalarOperands)) {
-      OpOperand *opOperand = genericOp.getInputOperand(idx);
+      OpOperand *opOperand = genericOp.getDpsInputOperand(idx);
       AffineMap map = genericOp.getMatchingIndexingMap(opOperand);
       SmallVector<int64_t> indices = map.getConstantResults();
       SmallVector<Value> indicesValues;
@@ -103,17 +103,15 @@ struct LinalgInlineScalarOperandsPass
     : public impl::LinalgInlineScalarOperandsBase<
           LinalgInlineScalarOperandsPass> {
   void runOnOperation() override {
-    func::FuncOp funcOp = getOperation();
-    MLIRContext *context = funcOp.getContext();
-    RewritePatternSet patterns(context);
-
+    Operation *op = getOperation();
+    MLIRContext &ctx = getContext();
+    RewritePatternSet patterns(&ctx);
     populateInlineConstantOperandsPatterns(patterns);
-    (void)applyPatternsAndFoldGreedily(funcOp.getBody(), std::move(patterns));
+    (void)applyPatternsAndFoldGreedily(op, std::move(patterns));
   }
 };
 } // namespace
 
-std::unique_ptr<OperationPass<func::FuncOp>>
-mlir::createLinalgInlineScalarOperandsPass() {
+std::unique_ptr<Pass> mlir::createLinalgInlineScalarOperandsPass() {
   return std::make_unique<LinalgInlineScalarOperandsPass>();
 }

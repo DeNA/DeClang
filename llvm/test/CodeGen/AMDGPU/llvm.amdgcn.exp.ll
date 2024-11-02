@@ -4,7 +4,7 @@
 
 declare void @llvm.amdgcn.exp.f32(i32, i32, float, float, float, float, i1, i1) #1
 declare void @llvm.amdgcn.exp.i32(i32, i32, i32, i32, i32, i32, i1, i1) #1
-declare float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32>, i32, i32, i32) #2
+declare float @llvm.amdgcn.raw.ptr.buffer.load.f32(ptr addrspace(8), i32, i32, i32) #2
 
 ; GCN-LABEL: {{^}}test_export_zeroes_f32:
 ; GCN: exp mrt0 off, off, off, off{{$}}
@@ -614,7 +614,7 @@ define amdgpu_kernel void @test_export_pos_before_param_ordered(float %x, float 
 define amdgpu_kernel void @test_export_pos_before_param_across_load(i32 %idx) #0 {
   call void @llvm.amdgcn.exp.f32(i32 32, i32 15, float 1.0, float 1.0, float 1.0, float 1.0, i1 false, i1 false)
   call void @llvm.amdgcn.exp.f32(i32 33, i32 15, float 1.0, float 1.0, float 1.0, float 0.5, i1 false, i1 false)
-  %load = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> undef, i32 %idx, i32 0, i32 0)
+  %load = call float @llvm.amdgcn.raw.ptr.buffer.load.f32(ptr addrspace(8) undef, i32 %idx, i32 0, i32 0)
   call void @llvm.amdgcn.exp.f32(i32 12, i32 15, float 0.0, float 0.0, float 0.0, float %load, i1 true, i1 false)
   ret void
 }
@@ -629,12 +629,10 @@ define amdgpu_kernel void @test_export_across_store_load(i32 %idx, float %v) #0 
   %data0 = alloca <4 x float>, align 8, addrspace(5)
   %data1 = alloca <4 x float>, align 8, addrspace(5)
   %cmp = icmp eq i32 %idx, 1
-  %data = select i1 %cmp, <4 x float> addrspace(5)* %data0, <4 x float> addrspace(5)* %data1
-  %sptr = getelementptr inbounds <4 x float>, <4 x float> addrspace(5)* %data, i32 0, i32 0
-  store float %v, float addrspace(5)* %sptr, align 8
+  %data = select i1 %cmp, ptr addrspace(5) %data0, ptr addrspace(5) %data1
+  store float %v, ptr addrspace(5) %data, align 8
   call void @llvm.amdgcn.exp.f32(i32 12, i32 15, float 0.0, float 0.0, float 0.0, float 1.0, i1 true, i1 false)
-  %ptr0 = getelementptr inbounds <4 x float>, <4 x float> addrspace(5)* %data0, i32 0, i32 0
-  %load0 = load float, float addrspace(5)* %ptr0, align 8
+  %load0 = load float, ptr addrspace(5) %data0, align 8
   call void @llvm.amdgcn.exp.f32(i32 32, i32 15, float %load0, float 0.0, float 1.0, float 0.0, i1 false, i1 false)
   call void @llvm.amdgcn.exp.f32(i32 33, i32 15, float %load0, float 0.0, float 1.0, float 0.0, i1 false, i1 false)
   ret void

@@ -203,8 +203,16 @@ TEST(AddressSanitizer, UAF_char) {
 TEST(AddressSanitizer, UAF_long_double) {
   if (sizeof(long double) == sizeof(double)) return;
   long double *p = Ident(new long double[10]);
+#if defined(_WIN32)
+  // https://google.github.io/googletest/advanced.html#regular-expression-syntax
+  // GoogleTest's regular expression engine on Windows does not support `[]`
+  // brackets.
+  EXPECT_DEATH(Ident(p)[12] = 0, "WRITE of size 10");
+  EXPECT_DEATH(Ident(p)[0] = Ident(p)[12], "READ of size 10");
+#else
   EXPECT_DEATH(Ident(p)[12] = 0, "WRITE of size 1[026]");
   EXPECT_DEATH(Ident(p)[0] = Ident(p)[12], "READ of size 1[026]");
+#endif
   delete [] Ident(p);
 }
 
@@ -623,7 +631,7 @@ NOINLINE void SigLongJmpFunc1(sigjmp_buf buf) {
 
 #if !defined(__ANDROID__) && !defined(__arm__) && !defined(__aarch64__) && \
     !defined(__mips__) && !defined(__mips64) && !defined(__s390__) &&      \
-    !defined(__riscv)
+    !defined(__riscv) && !defined(__loongarch__)
 NOINLINE void BuiltinLongJmpFunc1(jmp_buf buf) {
   // create three red zones for these two stack objects.
   int a;
@@ -646,9 +654,9 @@ TEST(AddressSanitizer, BuiltinLongJmpTest) {
   }
 }
 #endif  // !defined(__ANDROID__) && !defined(__arm__) &&
-        // !defined(__aarch64__) && !defined(__mips__)
-        // !defined(__mips64) && !defined(__s390__)
-        // !defined(__riscv)
+        // !defined(__aarch64__) && !defined(__mips__) &&
+        // !defined(__mips64) && !defined(__s390__) &&
+        // !defined(__riscv) && !defined(__loongarch__)
 
 TEST(AddressSanitizer, UnderscopeLongJmpTest) {
   static jmp_buf buf;

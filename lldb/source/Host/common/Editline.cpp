@@ -8,6 +8,7 @@
 
 #include <climits>
 #include <iomanip>
+#include <optional>
 
 #include "lldb/Host/Editline.h"
 
@@ -24,6 +25,7 @@
 #include "lldb/Utility/Timeout.h"
 
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Locale.h"
 #include "llvm/Support/Threading.h"
 
 using namespace lldb_private;
@@ -51,10 +53,6 @@ int setupterm(char *term, int fildes, int *errret);
 
 /// https://www.ecma-international.org/publications/files/ECMA-ST/Ecma-048.pdf
 #define ESCAPE "\x1b"
-/// Faint, decreased intensity or second colour.
-#define ANSI_FAINT ESCAPE "[2m"
-/// Normal colour or normal intensity (neither bold nor faint).
-#define ANSI_UNFAINT ESCAPE "[0m"
 #define ANSI_CLEAR_BELOW ESCAPE "[J"
 #define ANSI_CLEAR_RIGHT ESCAPE "[K"
 #define ANSI_SET_COLUMN_N ESCAPE "[%dG"
@@ -98,6 +96,10 @@ bool IsOnlySpaces(const EditLineStringType &content) {
       return false;
   }
   return true;
+}
+
+static size_t ColumnWidth(llvm::StringRef str) {
+  return llvm::sys::locale::columnWidth(str);
 }
 
 static int GetOperation(HistoryOperation op) {
@@ -327,14 +329,16 @@ std::string Editline::PromptForIndex(int line_index) {
   std::string continuation_prompt = prompt;
   if (m_set_continuation_prompt.length() > 0) {
     continuation_prompt = m_set_continuation_prompt;
-
     // Ensure that both prompts are the same length through space padding
-    while (continuation_prompt.length() < prompt.length()) {
-      continuation_prompt += ' ';
-    }
-    while (prompt.length() < continuation_prompt.length()) {
-      prompt += ' ';
-    }
+    const size_t prompt_width = ColumnWidth(prompt);
+    const size_t cont_prompt_width = ColumnWidth(continuation_prompt);
+    const size_t padded_prompt_width =
+        std::max(prompt_width, cont_prompt_width);
+    if (prompt_width < padded_prompt_width)
+      prompt += std::string(padded_prompt_width - prompt_width, ' ');
+    else if (cont_prompt_width < padded_prompt_width)
+      continuation_prompt +=
+          std::string(padded_prompt_width - cont_prompt_width, ' ');
   }
 
   if (use_line_numbers) {
@@ -352,7 +356,7 @@ void Editline::SetCurrentLine(int line_index) {
   m_current_prompt = PromptForIndex(line_index);
 }
 
-int Editline::GetPromptWidth() { return (int)PromptForIndex(0).length(); }
+size_t Editline::GetPromptWidth() { return ColumnWidth(PromptForIndex(0)); }
 
 bool Editline::IsEmacs() {
   const char *editor;
@@ -423,15 +427,13 @@ void Editline::MoveCursor(CursorLocation from, CursorLocation to) {
 void Editline::DisplayInput(int firstIndex) {
   fprintf(m_output_file, ANSI_SET_COLUMN_N ANSI_CLEAR_BELOW, 1);
   int line_count = (int)m_input_lines.size();
-  const char *faint = m_color_prompts ? ANSI_FAINT : "";
-  const char *unfaint = m_color_prompts ? ANSI_UNFAINT : "";
-
   for (int index = firstIndex; index < line_count; index++) {
-    fprintf(m_output_file, "%s"
-                           "%s"
-                           "%s" EditLineStringFormatSpec " ",
-            faint, PromptForIndex(index).c_str(), unfaint,
-            m_input_lines[index].c_str());
+    fprintf(m_output_file,
+            "%s"
+            "%s"
+            "%s" EditLineStringFormatSpec " ",
+            m_prompt_ansi_prefix.c_str(), PromptForIndex(index).c_str(),
+            m_prompt_ansi_suffix.c_str(), m_input_lines[index].c_str());
     if (index < line_count - 1)
       fprintf(m_output_file, "\n");
   }
@@ -440,7 +442,7 @@ void Editline::DisplayInput(int firstIndex) {
 int Editline::CountRowsForLine(const EditLineStringType &content) {
   std::string prompt =
       PromptForIndex(0); // Prompt width is constant during an edit session
-  int line_length = (int)(content.length() + prompt.length());
+  int line_length = (int)(content.length() + ColumnWidth(prompt));
   return (line_length / m_terminal_width) + 1;
 }
 
@@ -540,14 +542,16 @@ unsigned char Editline::RecallHistory(HistoryOperation op) {
 int Editline::GetCharacter(EditLineGetCharType *c) {
   const LineInfoW *info = el_wline(m_editline);
 
-  // Paint a faint version of the desired prompt over the version libedit draws
-  // (will only be requested if colors are supported)
+  // Paint a ANSI formatted version of the desired prompt over the version
+  // libedit draws. (will only be requested if colors are supported)
   if (m_needs_prompt_repaint) {
     MoveCursor(CursorLocation::EditingCursor, CursorLocation::EditingPrompt);
-    fprintf(m_output_file, "%s"
-                           "%s"
-                           "%s",
-            ANSI_FAINT, Prompt(), ANSI_UNFAINT);
+    fprintf(m_output_file,
+            "%s"
+            "%s"
+            "%s",
+            m_prompt_ansi_prefix.c_str(), Prompt(),
+            m_prompt_ansi_suffix.c_str());
     MoveCursor(CursorLocation::EditingPrompt, CursorLocation::EditingCursor);
     m_needs_prompt_repaint = false;
   }
@@ -582,12 +586,12 @@ int Editline::GetCharacter(EditLineGetCharType *c) {
     // interrupted.
     m_output_mutex.unlock();
     int read_count =
-        m_input_connection.Read(&ch, 1, llvm::None, status, nullptr);
+        m_input_connection.Read(&ch, 1, std::nullopt, status, nullptr);
     m_output_mutex.lock();
     if (m_editor_status == EditorStatus::Interrupted) {
       while (read_count > 0 && status == lldb::eConnectionStatusSuccess)
         read_count =
-            m_input_connection.Read(&ch, 1, llvm::None, status, nullptr);
+            m_input_connection.Read(&ch, 1, std::nullopt, status, nullptr);
       lldbassert(status == lldb::eConnectionStatusInterrupted);
       return 0;
     }
@@ -1070,7 +1074,7 @@ unsigned char Editline::ApplyAutosuggestCommand(int ch) {
   llvm::StringRef line(line_info->buffer,
                        line_info->lastchar - line_info->buffer);
 
-  if (llvm::Optional<std::string> to_add = m_suggestion_callback(line))
+  if (std::optional<std::string> to_add = m_suggestion_callback(line))
     el_insertstr(m_editline, to_add->c_str());
 
   return CC_REDISPLAY;
@@ -1093,7 +1097,7 @@ unsigned char Editline::TypedCharacter(int ch) {
   const char *ansi_suffix =
       m_color_prompts ? m_suggestion_ansi_suffix.c_str() : "";
 
-  if (llvm::Optional<std::string> to_add = m_suggestion_callback(line)) {
+  if (std::optional<std::string> to_add = m_suggestion_callback(line)) {
     std::string to_add_color = ansi_prefix + to_add.value() + ansi_suffix;
     fputs(typed.c_str(), m_output_file);
     fputs(to_add_color.c_str(), m_output_file);

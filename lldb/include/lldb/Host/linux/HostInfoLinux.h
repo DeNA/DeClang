@@ -14,6 +14,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/VersionTuple.h"
 
+#include <optional>
 #include <string>
 
 namespace lldb_private {
@@ -26,12 +27,13 @@ public:
   static void Terminate();
 
   static llvm::VersionTuple GetOSVersion();
-  static llvm::Optional<std::string> GetOSBuildString();
+  static std::optional<std::string> GetOSBuildString();
   static llvm::StringRef GetDistributionId();
   static FileSpec GetProgramFileSpec();
 
   static llvm::Expected<llvm::StringRef> GetSDKRoot(SDKOptions options) {
-    if (options.XcodeSDK && options.XcodeSDK->GetType() == XcodeSDK::Type::Linux)
+    if (options.XcodeSDKSelection &&
+        options.XcodeSDKSelection->GetType() == XcodeSDK::Type::Linux)
       return "/";
     return llvm::make_error<HostInfoError>("cannot determine SDK root");
   }

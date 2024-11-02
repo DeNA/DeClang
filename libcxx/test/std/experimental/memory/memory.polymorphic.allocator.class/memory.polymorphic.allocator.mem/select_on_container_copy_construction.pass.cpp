@@ -8,10 +8,7 @@
 
 // UNSUPPORTED: c++03
 
-// Aligned allocation is required by std::experimental::pmr, but it was not provided
-// before macosx10.13 and as a result we get linker errors when deploying to older than
-// macosx10.13.
-// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12}}
+// XFAIL: availability-aligned_allocation-missing
 
 // <experimental/memory_resource>
 
@@ -19,6 +16,8 @@
 
 // polymorphic_allocator
 // polymorphic_allocator<T>::select_on_container_copy_construction() const
+
+// ADDITIONAL_COMPILE_FLAGS: -D_LIBCPP_DISABLE_DEPRECATION_WARNINGS
 
 #include <experimental/memory_resource>
 #include <type_traits>

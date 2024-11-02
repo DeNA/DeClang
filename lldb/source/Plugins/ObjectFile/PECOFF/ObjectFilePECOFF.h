@@ -9,6 +9,7 @@
 #ifndef LLDB_SOURCE_PLUGINS_OBJECTFILE_PECOFF_OBJECTFILEPECOFF_H
 #define LLDB_SOURCE_PLUGINS_OBJECTFILE_PECOFF_OBJECTFILEPECOFF_H
 
+#include <optional>
 #include <vector>
 
 #include "lldb/Symbol/ObjectFile.h"
@@ -23,6 +24,7 @@ public:
     MachineArm = 0x1c0,
     MachineArmNt = 0x1c4,
     MachineArm64 = 0xaa64,
+    MachineArm64X = 0xa64e,
     MachineEbc = 0xebc,
     MachineX86 = 0x14c,
     MachineIA64 = 0x200,
@@ -123,7 +125,7 @@ public:
 
   /// Return the contents of the .gnu_debuglink section, if the object file
   /// contains it.
-  llvm::Optional<lldb_private::FileSpec> GetDebugLink();
+  std::optional<lldb_private::FileSpec> GetDebugLink();
 
   uint32_t GetDependentModules(lldb_private::FileSpecList &files) override;
 
@@ -263,14 +265,6 @@ protected:
                                           const section_header_t &sect);
   size_t GetSectionDataSize(lldb_private::Section *section) override;
 
-  llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section) override;
-
-#ifdef LLDB_ENABLE_SWIFT
-  bool
-  CanContainSwiftReflectionData(const lldb_private::Section &section) override;
-#endif // LLDB_ENABLE_SWIFT
-
   typedef std::vector<section_header_t> SectionHeaderColl;
   typedef SectionHeaderColl::iterator SectionHeaderCollIter;
   typedef SectionHeaderColl::const_iterator SectionHeaderCollConstIter;
@@ -290,7 +284,7 @@ private:
   SectionHeaderColl m_sect_headers;
   lldb::addr_t m_image_base;
   lldb_private::Address m_entry_point_address;
-  llvm::Optional<lldb_private::FileSpecList> m_deps_filespec;
+  std::optional<lldb_private::FileSpecList> m_deps_filespec;
   std::unique_ptr<llvm::object::COFFObjectFile> m_binary;
   lldb_private::UUID m_uuid;
 };

@@ -9,6 +9,7 @@
 #include "lldb/Host/MainLoop.h"
 #include "TestingSupport/SubsystemRAII.h"
 #include "lldb/Host/ConnectionFileDescriptor.h"
+#include "lldb/Host/FileSystem.h"
 #include "lldb/Host/PseudoTerminal.h"
 #include "lldb/Host/common/TCPSocket.h"
 #include "llvm/Testing/Support/Error.h"
@@ -20,7 +21,7 @@ using namespace lldb_private;
 namespace {
 class MainLoopTest : public testing::Test {
 public:
-  SubsystemRAII<Socket> subsystems;
+  SubsystemRAII<FileSystem, Socket> subsystems;
 
   void SetUp() override {
     bool child_processes_inherit = false;
@@ -169,6 +170,17 @@ TEST_F(MainLoopTest, PendingCallbackTrigger) {
   callback2_adder.join();
   ASSERT_TRUE(callback1_called);
   ASSERT_TRUE(callback2_called);
+}
+
+// Regression test for assertion failure if a lot of callbacks end up
+// being queued after loop exits.
+TEST_F(MainLoopTest, PendingCallbackAfterLoopExited) {
+  MainLoop loop;
+  Status error;
+  ASSERT_TRUE(loop.Run().Success());
+  // Try to fill the pipe buffer in.
+  for (int i = 0; i < 65536; ++i)
+    loop.AddPendingCallback([&](MainLoopBase &loop) {});
 }
 
 #ifdef LLVM_ON_UNIX

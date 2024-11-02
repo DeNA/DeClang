@@ -39,13 +39,14 @@ public:
 
   ~LoongArchMCCodeEmitter() override {}
 
-  void encodeInstruction(const MCInst &MI, raw_ostream &OS,
+  void encodeInstruction(const MCInst &MI, SmallVectorImpl<char> &CB,
                          SmallVectorImpl<MCFixup> &Fixups,
                          const MCSubtargetInfo &STI) const override;
 
-  void expandFunctionCall(const MCInst &MI, raw_ostream &OS,
-                          SmallVectorImpl<MCFixup> &Fixups,
-                          const MCSubtargetInfo &STI) const;
+  template <unsigned Opc>
+  void expandToVectorLDI(const MCInst &MI, SmallVectorImpl<char> &CB,
+                         SmallVectorImpl<MCFixup> &Fixups,
+                         const MCSubtargetInfo &STI) const;
 
   /// TableGen'erated function for getting the binary encoding for an
   /// instruction.
@@ -69,12 +70,21 @@ public:
 
   /// Return binary encoding of an immediate operand specified by OpNo.
   /// The value returned is the value of the immediate shifted right
-  //  arithmetically by 2.
+  //  arithmetically by N.
   /// Note that this function is dedicated to specific immediate types,
   /// e.g. simm14_lsl2, simm16_lsl2, simm21_lsl2 and simm26_lsl2.
-  unsigned getImmOpValueAsr2(const MCInst &MI, unsigned OpNo,
-                             SmallVectorImpl<MCFixup> &Fixups,
-                             const MCSubtargetInfo &STI) const;
+  template <unsigned N>
+  unsigned getImmOpValueAsr(const MCInst &MI, unsigned OpNo,
+                            SmallVectorImpl<MCFixup> &Fixups,
+                            const MCSubtargetInfo &STI) const {
+    const MCOperand &MO = MI.getOperand(OpNo);
+    if (MO.isImm()) {
+      unsigned Res = MI.getOperand(OpNo).getImm();
+      assert((Res & ((1U << N) - 1U)) == 0 && "lowest N bits are non-zero");
+      return Res >> N;
+    }
+    return getExprOpValue(MI, MO, Fixups, STI);
+  }
 
   unsigned getExprOpValue(const MCInst &MI, const MCOperand &MO,
                           SmallVectorImpl<MCFixup> &Fixups,
@@ -103,21 +113,6 @@ LoongArchMCCodeEmitter::getImmOpValueSub1(const MCInst &MI, unsigned OpNo,
                                           SmallVectorImpl<MCFixup> &Fixups,
                                           const MCSubtargetInfo &STI) const {
   return MI.getOperand(OpNo).getImm() - 1;
-}
-
-unsigned
-LoongArchMCCodeEmitter::getImmOpValueAsr2(const MCInst &MI, unsigned OpNo,
-                                          SmallVectorImpl<MCFixup> &Fixups,
-                                          const MCSubtargetInfo &STI) const {
-  const MCOperand &MO = MI.getOperand(OpNo);
-
-  if (MO.isImm()) {
-    unsigned Res = MI.getOperand(OpNo).getImm();
-    assert((Res & 3) == 0 && "lowest 2 bits are non-zero");
-    return Res >> 2;
-  }
-
-  return getExprOpValue(MI, MO, Fixups, STI);
 }
 
 unsigned
@@ -277,33 +272,61 @@ LoongArchMCCodeEmitter::getExprOpValue(const MCInst &MI, const MCOperand &MO,
   return 0;
 }
 
-void LoongArchMCCodeEmitter::expandFunctionCall(
-    const MCInst &MI, raw_ostream &OS, SmallVectorImpl<MCFixup> &Fixups,
-    const MCSubtargetInfo &STI) const {
-  MCOperand Func = MI.getOperand(0);
-  MCInst TmpInst = Func.isExpr()
-                       ? MCInstBuilder(LoongArch::BL).addExpr(Func.getExpr())
-                       : MCInstBuilder(LoongArch::BL).addImm(Func.getImm());
+template <unsigned Opc>
+void LoongArchMCCodeEmitter::expandToVectorLDI(
+    const MCInst &MI, SmallVectorImpl<char> &CB,
+    SmallVectorImpl<MCFixup> &Fixups, const MCSubtargetInfo &STI) const {
+  int64_t Imm = MI.getOperand(1).getImm() & 0x3FF;
+  switch (MI.getOpcode()) {
+  case LoongArch::PseudoVREPLI_B:
+  case LoongArch::PseudoXVREPLI_B:
+    break;
+  case LoongArch::PseudoVREPLI_H:
+  case LoongArch::PseudoXVREPLI_H:
+    Imm |= 0x400;
+    break;
+  case LoongArch::PseudoVREPLI_W:
+  case LoongArch::PseudoXVREPLI_W:
+    Imm |= 0x800;
+    break;
+  case LoongArch::PseudoVREPLI_D:
+  case LoongArch::PseudoXVREPLI_D:
+    Imm |= 0xC00;
+    break;
+  }
+  MCInst TmpInst = MCInstBuilder(Opc).addOperand(MI.getOperand(0)).addImm(Imm);
   uint32_t Binary = getBinaryCodeForInstr(TmpInst, Fixups, STI);
-  support::endian::write(OS, Binary, support::little);
+  support::endian::write(CB, Binary, support::little);
 }
 
 void LoongArchMCCodeEmitter::encodeInstruction(
-    const MCInst &MI, raw_ostream &OS, SmallVectorImpl<MCFixup> &Fixups,
-    const MCSubtargetInfo &STI) const {
+    const MCInst &MI, SmallVectorImpl<char> &CB,
+    SmallVectorImpl<MCFixup> &Fixups, const MCSubtargetInfo &STI) const {
   const MCInstrDesc &Desc = MCII.get(MI.getOpcode());
   // Get byte count of instruction.
   unsigned Size = Desc.getSize();
 
-  if (MI.getOpcode() == LoongArch::PseudoCALL)
-    return expandFunctionCall(MI, OS, Fixups, STI);
+  switch (MI.getOpcode()) {
+  default:
+    break;
+  case LoongArch::PseudoVREPLI_B:
+  case LoongArch::PseudoVREPLI_H:
+  case LoongArch::PseudoVREPLI_W:
+  case LoongArch::PseudoVREPLI_D:
+    return expandToVectorLDI<LoongArch::VLDI>(MI, CB, Fixups, STI);
+  case LoongArch::PseudoXVREPLI_B:
+  case LoongArch::PseudoXVREPLI_H:
+  case LoongArch::PseudoXVREPLI_W:
+  case LoongArch::PseudoXVREPLI_D:
+    return expandToVectorLDI<LoongArch::XVLDI>(MI, CB, Fixups, STI);
+  }
 
   switch (Size) {
   default:
     llvm_unreachable("Unhandled encodeInstruction length!");
   case 4: {
     uint32_t Bits = getBinaryCodeForInstr(MI, Fixups, STI);
-    support::endian::write(OS, Bits, support::little);
+    support::endian::write(CB, Bits, support::little);
     break;
   }
   }

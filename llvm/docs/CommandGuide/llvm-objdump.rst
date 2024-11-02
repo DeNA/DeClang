@@ -28,7 +28,7 @@ combined with other commands:
 .. option:: -d, --disassemble
 
   Disassemble all executable sections found in the input files. On some
-  architectures (AArch64, PPC64, x86), all known instructions are disassembled by
+  architectures (AArch64, PowerPC, x86), all known instructions are disassembled by
   default. On the others, :option:`--mcpu` or :option:`--mattr` is needed to
   enable some instruction sets. Disabled instructions are displayed as
   ``<unknown>``.
@@ -196,7 +196,7 @@ OPTIONS
 
 .. option:: --no-print-imm-hex
 
-  Do not use hex format for immediate values in disassembly output (default).
+  Do not use hex format for immediate values in disassembly output.
 
 .. option:: --no-show-raw-insn
 
@@ -219,12 +219,17 @@ OPTIONS
 
 .. option:: --print-imm-hex
 
-  Use hex format when printing immediate values in disassembly output.
+  Use hex format when printing immediate values in disassembly output (default).
 
 .. option:: -S, --source
 
   When disassembling, display source interleaved with the disassembly. Implies
   :option:`--disassemble`.
+
+.. option:: --show-all-symbols
+
+  Show all symbols during disassembly, even if multiple symbols are defined at
+  the same location.
 
 .. option:: --show-lma
 
@@ -356,9 +361,12 @@ MACH-O ONLY OPTIONS AND COMMANDS
 
   Display exported symbols.
 
-.. option:: --function-starts
+.. option:: --function-starts [=<addrs|names|both>]
 
-  Print the function starts table for Mach-O objects.
+  Print the function starts table for Mach-O objects. Either ``addrs``
+  (default) to print only the addresses of functions, ``names`` to print only
+  the names of the functions (when available), or ``both`` to print the
+  names beside the addresses.
 
 .. option:: -g
 
@@ -431,6 +439,10 @@ XCOFF ONLY OPTIONS AND COMMANDS
 .. option:: --symbol-description
 
   Add symbol description to disassembly output.
+
+.. option:: --traceback-table
+
+  Decode traceback table in disassembly output. Implies :option:`--disassemble`.
 
 BUGS
 ----

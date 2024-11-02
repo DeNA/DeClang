@@ -62,9 +62,8 @@ define void @concat_of_broadcast_v2f64_v4f64() {
 ; AVX2-NEXT:    movl $1091567616, 30256(%rax) # imm = 0x41100000
 ; AVX2-NEXT:    movabsq $4294967297, %rcx # imm = 0x100000001
 ; AVX2-NEXT:    movq %rcx, 46348(%rax)
-; AVX2-NEXT:    vbroadcastss {{.*#+}} xmm0 = [1.0E+0,1.0E+0,1.0E+0,1.0E+0]
-; AVX2-NEXT:    vbroadcastsd %xmm0, %ymm1
-; AVX2-NEXT:    vmovups %ymm1, 48296(%rax)
+; AVX2-NEXT:    vbroadcastss {{.*#+}} ymm0 = [1.0E+0,1.0E+0,1.0E+0,1.0E+0,1.0E+0,1.0E+0,1.0E+0,1.0E+0]
+; AVX2-NEXT:    vmovups %ymm0, 48296(%rax)
 ; AVX2-NEXT:    vmovlps %xmm0, 47372(%rax)
 ; AVX2-NEXT:    vzeroupper
 ; AVX2-NEXT:    retq
@@ -92,7 +91,7 @@ define <4 x float> @concat_of_broadcast_v4f32_v8f32(ptr %a0, ptr %a1, ptr %a2) {
 ; AVX1-NEXT:    vmovaps (%rdi), %ymm0
 ; AVX1-NEXT:    vmovaps (%rsi), %ymm1
 ; AVX1-NEXT:    vmovaps (%rdx), %ymm2
-; AVX1-NEXT:    vpermilps {{.*#+}} xmm1 = xmm1[0,0,0,0]
+; AVX1-NEXT:    vshufps {{.*#+}} xmm1 = xmm1[0,0,0,0]
 ; AVX1-NEXT:    vinsertf128 $1, %xmm1, %ymm1, %ymm1
 ; AVX1-NEXT:    vblendps {{.*#+}} ymm0 = ymm0[0,1,2,3,4,5],ymm1[6,7]
 ; AVX1-NEXT:    vblendps {{.*#+}} ymm0 = ymm2[0,1,2,3],ymm0[4],ymm2[5,6],ymm0[7]

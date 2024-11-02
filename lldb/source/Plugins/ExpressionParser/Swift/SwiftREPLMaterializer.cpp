@@ -224,7 +224,7 @@ public:
       demangle_ctx.clear();
     }
 
-    llvm::Optional<uint64_t> size =
+    std::optional<uint64_t> size =
         m_type.GetByteSize(execution_unit->GetBestExecutionContextScope());
     if (size && *size == 0) {
       MakeREPLResult(*execution_unit, err, nullptr);
@@ -477,11 +477,11 @@ public:
       if (!err.Success()) {
         dump_stream.Printf("  <could not be read>\n");
       } else {
-        DataBufferHeap data(
-            m_persistent_variable_sp->GetByteSize().getValueOr(0), 0);
+        DataBufferHeap data(m_persistent_variable_sp->GetByteSize().value_or(0),
+                            0);
 
         map.ReadMemory(data.GetBytes(), target_address,
-                       m_persistent_variable_sp->GetByteSize().getValueOr(0),
+                       m_persistent_variable_sp->GetByteSize().value_or(0),
                        err);
 
         if (!err.Success()) {

@@ -8,11 +8,15 @@ package(default_visibility = ["//visibility:public"])
     lit_test(
         name = "%s.test" % src,
         srcs = [src],
-        data = glob(["Parser/include/**"]) + glob(["CodeGen/MLIR/include/**"]) + [
-            "//mlir/test:lit_data",
-            "//mlir:mlir-pdll",
-            "//mlir:include/mlir/IR/OpBase.td",
+        data = glob([
+            "Parser/include/**",
+            "CodeGen/MLIR/include/**",
+            "CodeGen/CPP/include/**",
+        ]) + [
             "//mlir:include/mlir/IR/DialectBase.td",
+            "//mlir:include/mlir/IR/OpBase.td",
+            "//mlir:mlir-pdll",
+            "//mlir/test:lit_data",
         ],
     )
     for src in glob(

@@ -3,20 +3,19 @@ from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
 
-
 class TestCase(lldbtest.TestBase):
+
     mydir = lldbtest.TestBase.compute_mydir(__file__)
 
     @swiftTest
-    @skipIf(oslist=["windows", "linux"])
+    @skipIf(oslist=['windows', 'linux'])
     def test(self):
         """Test `frame variable` in async functions"""
         self.build()
 
         source_file = lldb.SBFileSpec("main.swift")
         target, process, _, _ = lldbutil.run_to_source_breakpoint(
-            self, "break one", source_file
-        )
+            self, "break one", source_file)
 
         # At "break one", only the `a` variable should have a value.
         frame = process.GetSelectedThread().frames[0]
@@ -26,7 +25,7 @@ class TestCase(lldbtest.TestBase):
         b = frame.FindVariable("b")
         self.assertFalse(b.IsValid())
         d = frame.FindVariable("d")
-        lldbutil.check_variable(self, d, False, value="23")
+        lldbutil.check_variable(self, d, False, value='23')
 
         # The first breakpoint resolves to multiple locations, but only the
         # first location is needed. Now that we've stopped, delete it to
@@ -47,4 +46,4 @@ class TestCase(lldbtest.TestBase):
         self.assertTrue(b.IsValid())
         self.assertGreater(b.unsigned, 0)
         d = frame.FindVariable("d")
-        lldbutil.check_variable(self, d, False, value="23")
+        lldbutil.check_variable(self, d, False, value='23')

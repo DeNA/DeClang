@@ -15,6 +15,7 @@
 #include "ClangModulesDeclVendor.h"
 
 #include "lldb/Expression/ExpressionVariable.h"
+#include <optional>
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -41,16 +42,16 @@ class TypeSystemClang;
 /// A list of variables that can be accessed and updated by any expression.  See
 /// ClangPersistentVariable for more discussion.  Also provides an increasing,
 /// 0-based counter for naming result variables.
-class ClangPersistentVariables : public PersistentExpressionState {
+class ClangPersistentVariables
+    : public llvm::RTTIExtends<ClangPersistentVariables,
+                               PersistentExpressionState> {
 public:
+  // LLVM RTTI support
+  static char ID;
+
   ClangPersistentVariables(std::shared_ptr<Target> target_sp);
 
   ~ClangPersistentVariables() override = default;
-
-  // llvm casting support
-  static bool classof(const PersistentExpressionState *pv) {
-    return pv->getKind() == PersistentExpressionState::eKindClang;
-  }
 
   std::shared_ptr<ClangASTImporter> GetClangASTImporter();
   std::shared_ptr<ClangModulesDeclVendor> GetClangModulesDeclVendor();
@@ -92,7 +93,7 @@ public:
     return name;
   }
 
-  llvm::Optional<CompilerType>
+  std::optional<CompilerType>
   GetCompilerTypeFromPersistentDecl(ConstString type_name) override;
 
   void RegisterPersistentDecl(ConstString name, clang::NamedDecl *decl,
@@ -119,8 +120,6 @@ private:
   uint32_t m_next_user_file_id = 0;
   // The counter used by GetNextPersistentVariableName
   uint32_t m_next_persistent_variable_id = 0;
-  /// The counter used by GetNextResultName when is_error is true.
-  uint32_t m_next_persistent_error_id;
 
   typedef llvm::DenseMap<const char *, clang::TypeDecl *>
       ClangPersistentTypeMap;

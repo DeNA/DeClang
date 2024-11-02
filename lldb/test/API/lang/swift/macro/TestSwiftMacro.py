@@ -8,6 +8,7 @@ import os
 class TestSwiftMacro(lldbtest.TestBase):
 
     NO_DEBUG_INFO_TESTCASE = True
+
     def setupPluginServerForTesting(self):
         # Find the path to the just-built swift-plugin-server.
         # FIXME: this is not very robust.
@@ -34,21 +35,16 @@ class TestSwiftMacro(lldbtest.TestBase):
         """Test Swift macros"""
         self.build(dictionary={'SWIFT_SOURCES': 'main.swift'})
         self.setupPluginServerForTesting()
-
         target, process, thread, bkpt = lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("main.swift")
-        )
+            self, 'break here', lldb.SBFileSpec('main.swift'))
 
         thread.StepOver()
         thread.StepInto()
         # This is the expanded macro source, we should be able to step into it.
-        self.expect(
-            "reg read pc",
-            substrs=[
-                "[inlined] freestanding macro expansion #1 of stringify",
-                "13testStringify",
-            ],
-        )
+        self.expect('reg read pc', substrs=[
+            '[inlined] freestanding macro expansion #1 of stringify in module a file main.swift line 5 column 11',
+            'stringify'
+        ])
 
         self.expect('expression -- #stringify(1)', substrs=['0 = 1', '1 = "1"'])
 
@@ -73,6 +69,8 @@ class TestSwiftMacro(lldbtest.TestBase):
         self.expect('expression -- #stringify(1)', substrs=['0 = 1', '1 = "1"'])
         self.filecheck('platform shell cat "%s"' % types_log, __file__)
 #       CHECK: CacheUserImports(){{.*}}: Macro.
-#       CHECK: SwiftASTContextForExpressions::LoadOneModule(){{.*}}Imported module Macro from {kind = Serialized Swift AST, filename = "{{.*}}Macro.swiftmodule";}
+#       CHECK: SwiftASTContextForExpressions{{.*}}::LoadOneModule(){{.*}}Imported module Macro from {kind = Serialized Swift AST, filename = "{{.*}}Macro.swiftmodule";}
 #       CHECK: CacheUserImports(){{.*}}Scanning for search paths in{{.*}}Macro.swiftmodule
-#       CHECK: SwiftASTContextForExpressions::LogConfiguration(){{.*}} -external-plugin-path {{.*}}/lang/swift/macro/{{.*}}#{{.*}}/swift-plugin-server
+#       The bots have too old an Xcode for this.
+#       DISABLED: SwiftASTContextForExpressions{{.*}}::LogConfiguration(){{.*}} -external-plugin-path {{.*}}/Developer/Platforms/{{.*}}.platform/Developer/usr/local/lib/swift/host/plugins{{.*}}#{{.*}}/swift-plugin-server
+#       CHECK: SwiftASTContextForExpressions{{.*}}::LogConfiguration(){{.*}} -external-plugin-path {{.*}}/lang/swift/macro/{{.*}}#{{.*}}/swift-plugin-server

@@ -1,5 +1,5 @@
 // RUN: %clang_cc1 -std=c++20 -verify %s
-// expected-no-diagnostics
+// RUN: %clang_cc1 -std=c++20 -verify %s -triple powerpc64-ibm-aix
 
 namespace GH57945 {
   template<typename T>
@@ -54,4 +54,65 @@ namespace GH57971 {
 
   using function_ptr = void(*)(int);
   function_ptr ptr = f<void>;
+}
+
+// GH58368: A lambda defined in a concept requires we store
+// the concept as a part of the lambda context.
+namespace LambdaInConcept {
+using size_t = unsigned long;
+
+template<size_t...Ts>
+struct IdxSeq{};
+
+template <class T, class... Ts>
+concept NotLike = true;
+
+template <size_t, class... Ts>
+struct AnyExcept {
+  template <NotLike<Ts...> T> operator T&() const;
+  template <NotLike<Ts...> T> operator T&&() const;
+};
+
+template <class T>
+  concept ConstructibleWithN = (requires {
+                                []<size_t I, size_t... Idxs>
+                                (IdxSeq<I, Idxs...>)
+                                requires requires { T{AnyExcept<I, T>{}}; }
+                                { }
+                                (IdxSeq<1,2,3>{});
+    });
+
+struct Foo {
+  int i;
+  double j;
+  char k;
+};
+
+static_assert(ConstructibleWithN<Foo>);
+
+}
+
+// GH60642 reported an assert being hit, make sure we don't assert.
+namespace GH60642 {
+template<auto Q> concept C = requires { Q.template operator()<float>(); };
+template<class> concept D = true;
+static_assert(C<[]<D>{}>);  // ok
+template<class> concept E = C<[]<D>{}>;
+static_assert(E<int>);  // previously Asserted.
+
+// ensure we properly diagnose when "D" is false.
+namespace DIsFalse {
+template<auto Q> concept C = requires { Q.template operator()<float>(); };
+template<class> concept D = false;
+static_assert(C<[]<D>{}>);
+// expected-error@-1{{static assertion failed}}
+// expected-note@-2{{does not satisfy 'C'}}
+// expected-note@-5{{because 'Q.template operator()<float>()' would be invalid: no matching member function for call to 'operator()'}}
+template<class> concept E = C<[]<D>{}>;
+static_assert(E<int>);
+// expected-error@-1{{static assertion failed}}
+// expected-note@-2{{because 'int' does not satisfy 'E'}}
+// expected-note@-4{{does not satisfy 'C'}}
+// expected-note@-11{{because 'Q.template operator()<float>()' would be invalid: no matching member function for call to 'operator()'}}
+}
 }

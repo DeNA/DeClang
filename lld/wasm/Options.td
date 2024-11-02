@@ -42,6 +42,11 @@ def Bdynamic: F<"Bdynamic">, HelpText<"Link against shared libraries (default)">
 
 def Bstatic: F<"Bstatic">, HelpText<"Do not link against shared libraries">;
 
+def build_id: F<"build-id">, HelpText<"Alias for --build-id=fast">;
+
+def build_id_eq: J<"build-id=">, HelpText<"Generate build ID note">,
+  MetaVarName<"[fast,sha1,uuid,0x<hexstring>]">;
+
 defm color_diagnostics: B<"color-diagnostics",
   "Alias for --color-diagnostics=always",
   "Alias for --color-diagnostics=never">;
@@ -189,7 +194,15 @@ def global_base: JJ<"global-base=">,
   HelpText<"Where to start to place global data">;
 
 def import_memory: FF<"import-memory">,
-  HelpText<"Import memory from the environment">;
+  HelpText<"Import the module's memory from the default module of \"env\" with the name \"memory\".">;
+def import_memory_with_name: JJ<"import-memory=">,
+  HelpText<"Import the module's memory from the passed module with the passed name.">,
+  MetaVarName<"<module>,<name>">;
+
+def export_memory: FF<"export-memory">,
+  HelpText<"Export the module's memory with the default name of \"memory\"">;
+def export_memory_with_name: JJ<"export-memory=">,
+  HelpText<"Export the module's memory with the passed name">;
 
 def shared_memory: FF<"shared-memory">,
   HelpText<"Use shared linear memory">;
@@ -213,12 +226,17 @@ defm whole_archive: B<"whole-archive",
     "Force load of all members in a static library",
     "Do not force load of all members in a static library (default)">;
 
+def why_extract: JJ<"why-extract=">, HelpText<"Print to a file about why archive members are extracted">;
+
 defm check_features: BB<"check-features",
     "Check feature compatibility of linked objects (default)",
     "Ignore feature compatibility of linked objects">;
 
 def features: CommaJoined<["--", "-"], "features=">,
   HelpText<"Comma-separated used features, inferred from input objects by default.">;
+
+def extra_features: CommaJoined<["--", "-"], "extra-features=">,
+  HelpText<"Comma-separated list of features to add to the default set of features inferred from input objects.">;
 
 // Aliases
 def: JoinedOrSeparate<["-"], "e">, Alias<entry>;
@@ -245,6 +263,8 @@ def: JoinedOrSeparate<["-"], "u">, Alias<undefined>;
 // LTO-related options.
 def lto_O: JJ<"lto-O">, MetaVarName<"<opt-level>">,
   HelpText<"Optimization level for LTO">;
+def lto_CGO: JJ<"lto-CGO">, MetaVarName<"<cgopt-level>">,
+  HelpText<"Codegen optimization level for LTO">;
 def lto_partitions: JJ<"lto-partitions=">,
   HelpText<"Number of LTO codegen partitions">;
 def disable_verify: F<"disable-verify">;
@@ -254,8 +274,6 @@ def thinlto_cache_dir: JJ<"thinlto-cache-dir=">,
 defm thinlto_cache_policy: EEq<"thinlto-cache-policy", "Pruning policy for the ThinLTO cache">;
 def thinlto_jobs: JJ<"thinlto-jobs=">,
   HelpText<"Number of ThinLTO jobs. Default to --threads=">;
-def no_lto_legacy_pass_manager: FF<"no-lto-legacy-pass-manager">,
-  HelpText<"Use new pass manager">;
 def lto_debug_pass_manager: FF<"lto-debug-pass-manager">,
   HelpText<"Debug new pass manager">;
 

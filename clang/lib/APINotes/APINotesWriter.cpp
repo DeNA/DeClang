@@ -641,7 +641,7 @@ namespace {
     void emitUnversionedInfo(raw_ostream &out, const ObjCPropertyInfo &info) {
       emitVariableInfo(out, info);
       uint8_t flags = 0;
-      if (Optional<bool> value = info.getSwiftImportAsAccessors()) {
+      if (std::optional<bool> value = info.getSwiftImportAsAccessors()) {
         flags |= 1 << 0;
         flags |= *value << 1;
       }
@@ -1129,7 +1129,7 @@ public:
       }
 
       payload <<= 2;
-      if (Optional<bool> value = info.isFlagEnum()) {
+      if (std::optional<bool> value = info.isFlagEnum()) {
         payload |= 1 << 0;
         payload |= *value << 1;
       }
@@ -1341,11 +1341,11 @@ void APINotesWriter::addObjCMethod(ContextID contextID,
   // If this method is a designated initializer, update the class to note that
   // it has designated initializers.
   if (info.DesignatedInit) {
-    assert(Impl.ParentContexts.count(contextID.Value));
+    assert(Impl.ParentContexts.contains(contextID.Value));
     uint32_t parentContextID = Impl.ParentContexts[contextID.Value];
     ContextTableKey ctxKey(parentContextID, (uint8_t)ContextKind::ObjCClass,
                            Impl.ObjCContextNames[contextID.Value]);
-    assert(Impl.ObjCContexts.count(ctxKey));
+    assert(Impl.ObjCContexts.contains(ctxKey));
     auto &versionedVec = Impl.ObjCContexts[ctxKey].second;
     bool found = false;
     for (auto &versioned : versionedVec) {

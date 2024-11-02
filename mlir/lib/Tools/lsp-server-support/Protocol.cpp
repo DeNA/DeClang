@@ -10,11 +10,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Protocol.h"
-#include "Logging.h"
+#include "mlir/Tools/lsp-server-support/Protocol.h"
 #include "mlir/Support/LogicalResult.h"
+#include "mlir/Tools/lsp-server-support/Logging.h"
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
@@ -246,7 +247,7 @@ void URIForFile::registerSupportedScheme(StringRef scheme) {
 
 bool mlir::lsp::fromJSON(const llvm::json::Value &value, URIForFile &result,
                          llvm::json::Path path) {
-  if (Optional<StringRef> str = value.getAsString()) {
+  if (std::optional<StringRef> str = value.getAsString()) {
     llvm::Expected<URIForFile> expectedURI = URIForFile::fromURI(*str);
     if (!expectedURI) {
       path.report("unresolvable URI");
@@ -281,7 +282,7 @@ bool mlir::lsp::fromJSON(const llvm::json::Value &value,
   if (const llvm::json::Object *textDocument = o->getObject("textDocument")) {
     if (const llvm::json::Object *documentSymbol =
             textDocument->getObject("documentSymbol")) {
-      if (Optional<bool> hierarchicalSupport =
+      if (std::optional<bool> hierarchicalSupport =
               documentSymbol->getBoolean("hierarchicalDocumentSymbolSupport"))
         result.hierarchicalDocumentSymbol = *hierarchicalSupport;
     }
@@ -294,12 +295,27 @@ bool mlir::lsp::fromJSON(const llvm::json::Value &value,
 }
 
 //===----------------------------------------------------------------------===//
+// ClientInfo
+//===----------------------------------------------------------------------===//
+
+bool mlir::lsp::fromJSON(const llvm::json::Value &value, ClientInfo &result,
+                         llvm::json::Path path) {
+  llvm::json::ObjectMapper o(value, path);
+  if (!o || !o.map("name", result.name))
+    return false;
+
+  // Don't fail if we can't parse version.
+  o.map("version", result.version);
+  return true;
+}
+
+//===----------------------------------------------------------------------===//
 // InitializeParams
 //===----------------------------------------------------------------------===//
 
 bool mlir::lsp::fromJSON(const llvm::json::Value &value, TraceLevel &result,
                          llvm::json::Path path) {
-  if (Optional<StringRef> str = value.getAsString()) {
+  if (std::optional<StringRef> str = value.getAsString()) {
     if (*str == "off") {
       result = TraceLevel::Off;
       return true;
@@ -324,6 +340,8 @@ bool mlir::lsp::fromJSON(const llvm::json::Value &value,
   // We deliberately don't fail if we can't parse individual fields.
   o.map("capabilities", result.capabilities);
   o.map("trace", result.trace);
+  mapOptOrNull(value, "clientInfo", result.clientInfo, path);
+
   return true;
 }
 
@@ -701,7 +719,7 @@ raw_ostream &mlir::lsp::operator<<(raw_ostream &os, const TextEdit &value) {
 
 bool mlir::lsp::fromJSON(const llvm::json::Value &value,
                          CompletionItemKind &result, llvm::json::Path path) {
-  if (Optional<int64_t> intValue = value.getAsInteger()) {
+  if (std::optional<int64_t> intValue = value.getAsInteger()) {
     if (*intValue < static_cast<int>(CompletionItemKind::Text) ||
         *intValue > static_cast<int>(CompletionItemKind::TypeParameter))
       return false;

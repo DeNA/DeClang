@@ -9,6 +9,9 @@
 #include "mlir/Dialect/Async/IR/Async.h"
 
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/FunctionImplementation.h"
+#include "mlir/IR/IRMapping.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
@@ -39,7 +42,7 @@ LogicalResult YieldOp::verify() {
   auto executeOp = (*this)->getParentOfType<ExecuteOp>();
   auto types =
       llvm::map_range(executeOp.getBodyResults(), [](const OpResult &result) {
-        return result.getType().cast<ValueType>().getValueType();
+        return llvm::cast<ValueType>(result.getType()).getValueType();
       });
 
   if (getOperandTypes() != types)
@@ -50,31 +53,32 @@ LogicalResult YieldOp::verify() {
 }
 
 MutableOperandRange
-YieldOp::getMutableSuccessorOperands(Optional<unsigned> index) {
-  return operandsMutable();
+YieldOp::getMutableSuccessorOperands(std::optional<unsigned> index) {
+  return getOperandsMutable();
 }
 
 //===----------------------------------------------------------------------===//
 /// ExecuteOp
 //===----------------------------------------------------------------------===//
 
-constexpr char kOperandSegmentSizesAttr[] = "operand_segment_sizes";
+constexpr char kOperandSegmentSizesAttr[] = "operandSegmentSizes";
 
-OperandRange ExecuteOp::getSuccessorEntryOperands(Optional<unsigned> index) {
+OperandRange
+ExecuteOp::getSuccessorEntryOperands(std::optional<unsigned> index) {
   assert(index && *index == 0 && "invalid region index");
   return getBodyOperands();
 }
 
 bool ExecuteOp::areTypesCompatible(Type lhs, Type rhs) {
   const auto getValueOrTokenType = [](Type type) {
-    if (auto value = type.dyn_cast<ValueType>())
+    if (auto value = llvm::dyn_cast<ValueType>(type))
       return value.getValueType();
     return type;
   };
   return getValueOrTokenType(lhs) == getValueOrTokenType(rhs);
 }
 
-void ExecuteOp::getSuccessorRegions(Optional<unsigned> index,
+void ExecuteOp::getSuccessorRegions(std::optional<unsigned> index,
                                     ArrayRef<Attribute>,
                                     SmallVectorImpl<RegionSuccessor> &regions) {
   // The `body` region branch back to the parent operation.
@@ -96,7 +100,7 @@ void ExecuteOp::build(OpBuilder &builder, OperationState &result,
   result.addOperands(dependencies);
   result.addOperands(operands);
 
-  // Add derived `operand_segment_sizes` attribute based on parsed operands.
+  // Add derived `operandSegmentSizes` attribute based on parsed operands.
   int32_t numDependencies = dependencies.size();
   int32_t numOperands = operands.size();
   auto operandSegmentSizes =
@@ -114,7 +118,7 @@ void ExecuteOp::build(OpBuilder &builder, OperationState &result,
   bodyRegion->push_back(new Block);
   Block &bodyBlock = bodyRegion->front();
   for (Value operand : operands) {
-    auto valueType = operand.getType().dyn_cast<ValueType>();
+    auto valueType = llvm::dyn_cast<ValueType>(operand.getType());
     bodyBlock.addArgument(valueType ? valueType.getValueType()
                                     : operand.getType(),
                           operand.getLoc());
@@ -191,7 +195,7 @@ ParseResult ExecuteOp::parse(OpAsmParser &parser, OperationState &result) {
         parser.parseColonType(valueTypes.emplace_back()))
       return failure();
 
-    auto valueTy = valueTypes.back().dyn_cast<ValueType>();
+    auto valueTy = llvm::dyn_cast<ValueType>(valueTypes.back());
     unwrappedArgs.back().type = valueTy ? valueTy.getValueType() : Type();
     return success();
   };
@@ -204,7 +208,7 @@ ParseResult ExecuteOp::parse(OpAsmParser &parser, OperationState &result) {
 
   int32_t numOperands = valueArgs.size();
 
-  // Add derived `operand_segment_sizes` attribute based on parsed operands.
+  // Add derived `operandSegmentSizes` attribute based on parsed operands.
   auto operandSegmentSizes =
       parser.getBuilder().getDenseI32ArrayAttr({numDependencies, numOperands});
   result.addAttribute(kOperandSegmentSizesAttr, operandSegmentSizes);
@@ -230,7 +234,7 @@ ParseResult ExecuteOp::parse(OpAsmParser &parser, OperationState &result) {
 LogicalResult ExecuteOp::verifyRegions() {
   // Unwrap async.execute value operands types.
   auto unwrappedTypes = llvm::map_range(getBodyOperands(), [](Value operand) {
-    return operand.getType().cast<ValueType>().getValueType();
+    return llvm::cast<ValueType>(operand.getType()).getValueType();
   });
 
   // Verify that unwrapped argument types matches the body region arguments.
@@ -281,7 +285,7 @@ void AwaitOp::build(OpBuilder &builder, OperationState &result, Value operand,
   result.attributes.append(attrs.begin(), attrs.end());
 
   // Add unwrapped async.value type to the returned values types.
-  if (auto valueType = operand.getType().dyn_cast<ValueType>())
+  if (auto valueType = llvm::dyn_cast<ValueType>(operand.getType()))
     result.addTypes(valueType.getValueType());
 }
 
@@ -291,7 +295,7 @@ static ParseResult parseAwaitResultType(OpAsmParser &parser, Type &operandType,
     return failure();
 
   // Add unwrapped async.value type to the returned values types.
-  if (auto valueType = operandType.dyn_cast<ValueType>())
+  if (auto valueType = llvm::dyn_cast<ValueType>(operandType))
     resultType = valueType.getValueType();
 
   return success();
@@ -306,16 +310,148 @@ LogicalResult AwaitOp::verify() {
   Type argType = getOperand().getType();
 
   // Awaiting on a token does not have any results.
-  if (argType.isa<TokenType>() && !getResultTypes().empty())
+  if (llvm::isa<TokenType>(argType) && !getResultTypes().empty())
     return emitOpError("awaiting on a token must have empty result");
 
   // Awaiting on a value unwraps the async value type.
-  if (auto value = argType.dyn_cast<ValueType>()) {
+  if (auto value = llvm::dyn_cast<ValueType>(argType)) {
     if (*getResultType() != value.getValueType())
       return emitOpError() << "result type " << *getResultType()
                            << " does not match async value type "
                            << value.getValueType();
   }
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// FuncOp
+//===----------------------------------------------------------------------===//
+
+void FuncOp::build(OpBuilder &builder, OperationState &state, StringRef name,
+                   FunctionType type, ArrayRef<NamedAttribute> attrs,
+                   ArrayRef<DictionaryAttr> argAttrs) {
+  state.addAttribute(SymbolTable::getSymbolAttrName(),
+                     builder.getStringAttr(name));
+  state.addAttribute(getFunctionTypeAttrName(state.name), TypeAttr::get(type));
+
+  state.attributes.append(attrs.begin(), attrs.end());
+  state.addRegion();
+
+  if (argAttrs.empty())
+    return;
+  assert(type.getNumInputs() == argAttrs.size());
+  function_interface_impl::addArgAndResultAttrs(
+      builder, state, argAttrs, /*resultAttrs=*/std::nullopt,
+      getArgAttrsAttrName(state.name), getResAttrsAttrName(state.name));
+}
+
+ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
+  auto buildFuncType =
+      [](Builder &builder, ArrayRef<Type> argTypes, ArrayRef<Type> results,
+         function_interface_impl::VariadicFlag,
+         std::string &) { return builder.getFunctionType(argTypes, results); };
+
+  return function_interface_impl::parseFunctionOp(
+      parser, result, /*allowVariadic=*/false,
+      getFunctionTypeAttrName(result.name), buildFuncType,
+      getArgAttrsAttrName(result.name), getResAttrsAttrName(result.name));
+}
+
+void FuncOp::print(OpAsmPrinter &p) {
+  function_interface_impl::printFunctionOp(
+      p, *this, /*isVariadic=*/false, getFunctionTypeAttrName(),
+      getArgAttrsAttrName(), getResAttrsAttrName());
+}
+
+/// Check that the result type of async.func is not void and must be
+/// some async token or async values.
+LogicalResult FuncOp::verify() {
+  auto resultTypes = getResultTypes();
+  if (resultTypes.empty())
+    return emitOpError()
+           << "result is expected to be at least of size 1, but got "
+           << resultTypes.size();
+
+  for (unsigned i = 0, e = resultTypes.size(); i != e; ++i) {
+    auto type = resultTypes[i];
+    if (!llvm::isa<TokenType>(type) && !llvm::isa<ValueType>(type))
+      return emitOpError() << "result type must be async value type or async "
+                              "token type, but got "
+                           << type;
+    // We only allow AsyncToken appear as the first return value
+    if (llvm::isa<TokenType>(type) && i != 0) {
+      return emitOpError()
+             << " results' (optional) async token type is expected "
+                "to appear as the 1st return value, but got "
+             << i + 1;
+    }
+  }
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+/// CallOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult CallOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
+  // Check that the callee attribute was specified.
+  auto fnAttr = (*this)->getAttrOfType<FlatSymbolRefAttr>("callee");
+  if (!fnAttr)
+    return emitOpError("requires a 'callee' symbol reference attribute");
+  FuncOp fn = symbolTable.lookupNearestSymbolFrom<FuncOp>(*this, fnAttr);
+  if (!fn)
+    return emitOpError() << "'" << fnAttr.getValue()
+                         << "' does not reference a valid async function";
+
+  // Verify that the operand and result types match the callee.
+  auto fnType = fn.getFunctionType();
+  if (fnType.getNumInputs() != getNumOperands())
+    return emitOpError("incorrect number of operands for callee");
+
+  for (unsigned i = 0, e = fnType.getNumInputs(); i != e; ++i)
+    if (getOperand(i).getType() != fnType.getInput(i))
+      return emitOpError("operand type mismatch: expected operand type ")
+             << fnType.getInput(i) << ", but provided "
+             << getOperand(i).getType() << " for operand number " << i;
+
+  if (fnType.getNumResults() != getNumResults())
+    return emitOpError("incorrect number of results for callee");
+
+  for (unsigned i = 0, e = fnType.getNumResults(); i != e; ++i)
+    if (getResult(i).getType() != fnType.getResult(i)) {
+      auto diag = emitOpError("result type mismatch at index ") << i;
+      diag.attachNote() << "      op result types: " << getResultTypes();
+      diag.attachNote() << "function result types: " << fnType.getResults();
+      return diag;
+    }
+
+  return success();
+}
+
+FunctionType CallOp::getCalleeType() {
+  return FunctionType::get(getContext(), getOperandTypes(), getResultTypes());
+}
+
+//===----------------------------------------------------------------------===//
+/// ReturnOp
+//===----------------------------------------------------------------------===//
+
+LogicalResult ReturnOp::verify() {
+  auto funcOp = (*this)->getParentOfType<FuncOp>();
+  ArrayRef<Type> resultTypes = funcOp.isStateful()
+                                   ? funcOp.getResultTypes().drop_front()
+                                   : funcOp.getResultTypes();
+  // Get the underlying value types from async types returned from the
+  // parent `async.func` operation.
+  auto types = llvm::map_range(resultTypes, [](const Type &result) {
+    return llvm::cast<ValueType>(result).getValueType();
+  });
+
+  if (getOperandTypes() != types)
+    return emitOpError("operand types do not match the types returned from "
+                       "the parent FuncOp");
 
   return success();
 }

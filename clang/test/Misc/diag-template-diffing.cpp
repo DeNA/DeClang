@@ -850,7 +850,7 @@ namespace rdar12931988 {
 
   void foo(A::X<int> &ax, B::X<int> bx) {
     // CHECK-ELIDE-NOTREE: no viable overloaded '='
-    // CHECK-ELIDE-NOTREE: no known conversion from 'B::X<int>' to 'const rdar12931988::A::X<int>'
+    // CHECK-ELIDE-NOTREE: no known conversion from 'B::X<int>' to 'const X<int>'
     ax = bx;
   }
 
@@ -1454,7 +1454,7 @@ void run() {
   D<X::X1>(VectorType<X::X2>());
 }
 // CHECK-ELIDE-NOTREE: error: no matching function for call to 'D'
-// CHECK-ELIDE-NOTREE: note: candidate function template not viable: no known conversion from 'VectorType<X::X2>' to 'const VectorType<(TypeAlias::X)0>' for 1st argument
+// CHECK-ELIDE-NOTREE: note: candidate function template not viable: no known conversion from 'VectorType<X::X2>' to 'const VectorType<(X)0>' for 1st argument
 }
 
 namespace TypeAlias2 {

@@ -24,6 +24,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Status.h"
+#include "lldb/lldb-enumerations.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -130,12 +131,12 @@ bool lldb_private::formatters::swift::IndexPath_SummaryProvider(
     stream.PutCString("2 indices");
   else if (value == g_array)
   {
-    if (underlying_enum_sp->GetNumChildren() != 1) 
+    if (underlying_enum_sp->GetNumChildrenIgnoringErrors() != 1)
       return false;
   
     underlying_enum_sp = underlying_enum_sp->GetChildAtIndex(0, true)
        ->GetQualifiedRepresentationIfAvailable(lldb::eDynamicDontRunTarget, true);
-    size_t num_children = underlying_enum_sp->GetNumChildren();
+    size_t num_children = underlying_enum_sp->GetNumChildrenIgnoringErrors();
     stream.Printf("%zu indices", num_children);
   }
   return true;
@@ -213,7 +214,7 @@ bool lldb_private::formatters::swift::UUID_SummaryProvider(
   if (!uuid_sp)
     return false;
 
-  if (uuid_sp->GetNumChildren() < 16)
+  if (uuid_sp->GetNumChildrenIgnoringErrors() < 16)
     return false;
 
   ValueObjectSP children[] = {
@@ -264,9 +265,9 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
   //       enum _Representation { ... }
   //       var _representation: _Representation
   //   }
-  static ConstString g__representation("_representation");
+  static constexpr llvm::StringLiteral g__representation("_representation");
   ValueObjectSP representation_enum_sp =
-      valobj.GetChildAtNamePath(g__representation);
+      valobj.GetChildAtNamePath({g__representation});
   if (!representation_enum_sp)
     return false;
 
@@ -299,7 +300,7 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     // Do nothing; count is already 0.
   } else if (representation_case == g_inline) {
     // Grab the associated value from `case inline(InlineData)`.
-    if (representation_enum_sp->GetNumChildren() != 1)
+    if (representation_enum_sp->GetNumChildrenIgnoringErrors() != 1)
       return false;
 
     ValueObjectSP inline_data_sp =
@@ -315,8 +316,8 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     //       var length: UInt8
     //       var buffer: (...)
     //   }
-    static ConstString g_length("length");
-    ValueObjectSP length_sp = inline_data_sp->GetChildAtNamePath(g_length)
+    static constexpr llvm::StringLiteral g_length("length");
+    ValueObjectSP length_sp = inline_data_sp->GetChildAtNamePath({g_length})
                                   ->GetQualifiedRepresentationIfAvailable(
                                       lldb::eDynamicDontRunTarget, true);
     if (!length_sp)
@@ -329,7 +330,7 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     }
   } else if (representation_case == g_slice) {
     // Grab the associated value from `case slice(InlineSlice)`.
-    if (representation_enum_sp->GetNumChildren() != 1)
+    if (representation_enum_sp->GetNumChildrenIgnoringErrors() != 1)
       return false;
 
     ValueObjectSP slice_data_sp =
@@ -345,8 +346,9 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     //       var slice: Range<HalfInt>
     //       var storage: __DataStorage
     //   }
-    static ConstString g_slice("slice");
-    ValueObjectSP slice_storage_sp = slice_data_sp->GetChildAtNamePath(g_slice);
+    static constexpr llvm::StringLiteral g_slice("slice");
+    ValueObjectSP slice_storage_sp =
+        slice_data_sp->GetChildAtNamePath({g_slice});
     if (!slice_storage_sp)
       return false;
 
@@ -356,9 +358,9 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
       return false;
 
     // We need to manually calculate slice.upperBound - slice.lowerBound.
-    static ConstString g_upperBound("upperBound");
+    static constexpr llvm::StringLiteral g_upperBound("upperBound");
     ValueObjectSP upper_bound_sp =
-        slice_storage_sp->GetChildAtNamePath(g_upperBound);
+        slice_storage_sp->GetChildAtNamePath({g_upperBound});
     if (!upper_bound_sp)
       return false;
 
@@ -367,9 +369,9 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     if (!upper_bound_sp)
       return false;
 
-    static ConstString g_lowerBound("lowerBound");
+    static constexpr llvm::StringLiteral g_lowerBound("lowerBound");
     ValueObjectSP lower_bound_sp =
-        slice_storage_sp->GetChildAtNamePath(g_lowerBound);
+        slice_storage_sp->GetChildAtNamePath({g_lowerBound});
     if (!lower_bound_sp)
       return false;
 
@@ -390,7 +392,7 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     count = upperBound - lowerBound;
   } else if (representation_case == g_large) {
     // Grab the associated value from `case large(LargeSlice)`.
-    if (representation_enum_sp->GetNumChildren() != 1)
+    if (representation_enum_sp->GetNumChildrenIgnoringErrors() != 1)
       return false;
 
     ValueObjectSP large_data_sp =
@@ -406,8 +408,8 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     //       var slice: RangeReference
     //       var storage: __DataStorage
     //   }
-    static ConstString g_slice("slice");
-    ValueObjectSP slice_ref_sp = large_data_sp->GetChildAtNamePath(g_slice);
+    static constexpr llvm::StringLiteral g_slice("slice");
+    ValueObjectSP slice_ref_sp = large_data_sp->GetChildAtNamePath({g_slice});
     if (!slice_ref_sp)
       return false;
 
@@ -421,8 +423,8 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     //   class RangeReference {
     //       var range: Range<Int>
     //   }
-    static ConstString g_range("range");
-    ValueObjectSP range_sp = slice_ref_sp->GetChildAtNamePath(g_range);
+    static constexpr llvm::StringLiteral g_range("range");
+    ValueObjectSP range_sp = slice_ref_sp->GetChildAtNamePath({g_range});
     if (!range_sp)
       return false;
 
@@ -432,8 +434,8 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
       return false;
 
     // We need to manually calculate range.upperBound - range.lowerBound.
-    static ConstString g_upperBound("upperBound");
-    ValueObjectSP upper_bound_sp = range_sp->GetChildAtNamePath(g_upperBound);
+    static constexpr llvm::StringLiteral g_upperBound("upperBound");
+    ValueObjectSP upper_bound_sp = range_sp->GetChildAtNamePath({g_upperBound});
     if (!upper_bound_sp)
       return false;
 
@@ -442,8 +444,8 @@ bool lldb_private::formatters::swift::Data_SummaryProvider(
     if (!upper_bound_sp)
       return false;
 
-    static ConstString g_lowerBound("lowerBound");
-    ValueObjectSP lower_bound_sp = range_sp->GetChildAtNamePath(g_lowerBound);
+    static constexpr llvm::StringLiteral g_lowerBound("lowerBound");
+    ValueObjectSP lower_bound_sp = range_sp->GetChildAtNamePath({g_lowerBound});
     if (!lower_bound_sp)
       return false;
 
@@ -503,8 +505,8 @@ bool lldb_private::formatters::swift::Decimal_SummaryProvider(
   uint8_t length = length_and_flags & 0xf;
   bool isNegative = length_and_flags & 0x10;
 
-  static ConstString g_mantissa("_mantissa");
-  ValueObjectSP mantissa_sp = valobj.GetChildAtNamePath(g_mantissa);
+  static constexpr llvm::StringLiteral g_mantissa("_mantissa");
+  ValueObjectSP mantissa_sp = valobj.GetChildAtNamePath({g_mantissa});
   if (!mantissa_sp)
     return false;
 
@@ -519,7 +521,7 @@ bool lldb_private::formatters::swift::Decimal_SummaryProvider(
 
   // Mantissa is represented as a tuple of 8 UInt16.
   const uint8_t num_children = 8;
-  if (mantissa_sp->GetNumChildren() != num_children)
+  if (mantissa_sp->GetNumChildrenIgnoringErrors() != num_children)
     return false;
 
   std::vector<double> mantissa_elements;
@@ -527,8 +529,8 @@ bool lldb_private::formatters::swift::Decimal_SummaryProvider(
     ValueObjectSP child_sp = mantissa_sp->GetChildAtIndex(i, true);
     if (!child_sp)
       return false;
-    static ConstString g_value("_value");
-    ValueObjectSP value_sp = child_sp->GetChildAtNamePath(g_value);
+    static constexpr llvm::StringLiteral g_value("_value");
+    ValueObjectSP value_sp = child_sp->GetChildAtNamePath({g_value});
     if (!value_sp)
       return false;
     auto val = value_sp->GetValueAsUnsigned(0) & 0xffff;
@@ -568,13 +570,13 @@ public:
 
   ~URLComponentsSyntheticChildrenFrontEnd() override = default;
 
-  size_t CalculateNumChildren() override {
+  llvm::Expected<uint32_t> CalculateNumChildren() override {
     if (IsValid())
       return 9;
     return 0;
   }
 
-  lldb::ValueObjectSP GetChildAtIndex(size_t idx) override {
+  lldb::ValueObjectSP GetChildAtIndex(uint32_t idx) override {
     if (IsValid()) {
       switch (idx) {
 #define COMPONENT(Name, PrettyName, ID)                                        \
@@ -589,7 +591,7 @@ public:
     return nullptr;
   }
 
-  bool Update() override {
+  lldb::ChildCacheState Update() override {
     static ConstString g__handle("_handle");
     static ConstString g__pointer("_pointer");
 
@@ -608,23 +610,23 @@ public:
     ValueObjectSP underlying_sp =
         m_backend.GetChildAtNamePath({g__handle, g__pointer});
     if (!underlying_sp)
-      return false;
+      return ChildCacheState::eRefetch;
 
     ObjCLanguageRuntime *objc_runtime =
         ObjCLanguageRuntime::Get(*m_backend.GetProcessSP());
     if (!objc_runtime)
-      return false;
+      return ChildCacheState::eRefetch;
 
     ObjCLanguageRuntime::ClassDescriptorSP class_descriptor_sp =
         objc_runtime->GetClassDescriptor(*underlying_sp);
     if (!class_descriptor_sp)
-      return false;
+      return ChildCacheState::eRefetch;
 
     m_synth_backend_up = std::make_unique<ObjCRuntimeSyntheticProvider>(
         SyntheticChildren::Flags(), class_descriptor_sp);
     m_synth_frontend_up = m_synth_backend_up->GetFrontEnd(*underlying_sp);
     if (!m_synth_frontend_up)
-      return false;
+      return ChildCacheState::eRefetch;
     else
       m_synth_frontend_up->Update();
 
@@ -639,7 +641,7 @@ public:
 
     SetValid(CheckValid());
 
-    return false;
+    return ChildCacheState::eRefetch;
   }
 
   bool MightHaveChildren() override { return true; }

@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Floating.h"
 #include "Function.h"
 #include "Opcode.h"
 #include "PrimType.h"
@@ -22,7 +23,7 @@ using namespace clang;
 using namespace clang::interp;
 
 template <typename T> inline T ReadArg(Program &P, CodePtr &OpPC) {
-  if constexpr (std::is_pointer<T>::value) {
+  if constexpr (std::is_pointer_v<T>) {
     uint32_t ID = OpPC.read<uint32_t>();
     return reinterpret_cast<T>(P.getNativePointer(ID));
   } else {
@@ -33,27 +34,17 @@ template <typename T> inline T ReadArg(Program &P, CodePtr &OpPC) {
 LLVM_DUMP_METHOD void Function::dump() const { dump(llvm::errs()); }
 
 LLVM_DUMP_METHOD void Function::dump(llvm::raw_ostream &OS) const {
-  if (F) {
-    if (auto *Cons = dyn_cast<CXXConstructorDecl>(F)) {
-      DeclarationName Name = Cons->getParent()->getDeclName();
-      OS << Name << "::" << Name;
-    } else {
-      OS << F->getDeclName();
-    }
-    OS << " " << (void*)this << ":\n";
-  } else {
-    OS << "<<expr>>\n";
-  }
-
+  OS << getName() << " " << (const void *)this << "\n";
   OS << "frame size: " << getFrameSize() << "\n";
   OS << "arg size:   " << getArgSize() << "\n";
   OS << "rvo:        " << hasRVO() << "\n";
+  OS << "this arg:   " << hasThisPointer() << "\n";
 
   auto PrintName = [&OS](const char *Name) {
     OS << Name;
-    for (long I = 0, N = strlen(Name); I < 30 - N; ++I) {
-      OS << ' ';
-    }
+    long N = 30 - strlen(Name);
+    if (N > 0)
+      OS.indent(N);
   };
 
   for (CodePtr Start = getCodeBegin(), PC = Start; PC != getCodeEnd();) {
@@ -71,6 +62,10 @@ LLVM_DUMP_METHOD void Function::dump(llvm::raw_ostream &OS) const {
 LLVM_DUMP_METHOD void Program::dump() const { dump(llvm::errs()); }
 
 LLVM_DUMP_METHOD void Program::dump(llvm::raw_ostream &OS) const {
+  OS << ":: Program\n";
+  OS << "Global Variables: " << Globals.size() << "\n";
+  OS << "Functions: " << Funcs.size() << "\n";
+  OS << "\n";
   for (auto &Func : Funcs) {
     Func.second->dump();
   }

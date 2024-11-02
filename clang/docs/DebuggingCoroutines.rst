@@ -384,7 +384,7 @@ Here is an example to print the asynchronous stack for the normal task implement
     struct promise_type {
       task get_return_object();
       std::suspend_always initial_suspend() { return {}; }
-      
+
       void unhandled_exception() noexcept {}
 
       struct FinalSuspend {
@@ -620,7 +620,7 @@ Then let's run:
 
   $ clang++ -std=c++20 -g debugging-example.cpp -o debugging-example
   $ gdb ./debugging-example
-  (gdb) # We've alreay set the breakpoint.
+  (gdb) # We've already set the breakpoint.
   (gdb) r
   Program received signal SIGTRAP, Trace/breakpoint trap.
   detail::chain_fn<0> () at debugging-example2.cpp:73

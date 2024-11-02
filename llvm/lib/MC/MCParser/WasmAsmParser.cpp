@@ -16,16 +16,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCParser/MCAsmParser.h"
 #include "llvm/MC/MCParser/MCAsmParserExtension.h"
-#include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCSectionWasm.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/Support/Casting.h"
+#include <optional>
 
 using namespace llvm;
 
@@ -113,6 +115,9 @@ public:
       case 'S':
         flags |= wasm::WASM_SEG_FLAG_STRINGS;
         break;
+      case 'R':
+        flags |= wasm::WASM_SEG_FLAG_RETAIN;
+        break;
       default:
         return -1U;
       }
@@ -152,7 +157,7 @@ public:
     if (Lexer->isNot(AsmToken::String))
       return error("expected string in directive, instead got: ", Lexer->getTok());
 
-    auto Kind = StringSwitch<Optional<SectionKind>>(Name)
+    auto Kind = StringSwitch<std::optional<SectionKind>>(Name)
                     .StartsWith(".data", SectionKind::getData())
                     .StartsWith(".tdata", SectionKind::getThreadData())
                     .StartsWith(".tbss", SectionKind::getThreadBSS())

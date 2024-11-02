@@ -93,7 +93,7 @@ DynamicBranch::DynamicBranch(llvm::json::Value* configJson, llvm::raw_fd_ostream
 
   llvm::json::Object *jsonObj = configJson->getAsObject();
 
-  overallObf = jsonObj->getInteger("overall_obfuscation").getValueOr(0);
+  overallObf = jsonObj->getInteger("overall_obfuscation").value_or(0);
   if (overallObf == 0) {
     this->doDynamicBranch = false;
   }

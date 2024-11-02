@@ -47,6 +47,26 @@ class UUID;
 class VariableList;
 struct ModuleFunctionSearchOptions;
 
+static constexpr OptionEnumValueElement g_auto_download_enum_values[] = {
+    {
+        lldb::eSymbolDownloadOff,
+        "off",
+        "Disable automatically downloading symbols.",
+    },
+    {
+        lldb::eSymbolDownloadBackground,
+        "background",
+        "Download symbols in the background for images as they appear in the "
+        "backtrace.",
+    },
+    {
+        lldb::eSymbolDownloadForeground,
+        "foreground",
+        "Download symbols in the foreground for images as they appear in the "
+        "backtrace.",
+    },
+};
+
 class ModuleListProperties : public Properties {
   mutable llvm::sys::RWMutex m_symlink_paths_mutex;
   PathMappingList m_symlink_paths;
@@ -66,18 +86,22 @@ public:
   SwiftModuleLoadingMode GetSwiftModuleLoadingMode() const;
   bool SetSwiftModuleLoadingMode(SwiftModuleLoadingMode);
 
+  bool GetUseSwiftPreciseCompilerInvocation() const;
   bool GetEnableSwiftMetadataCache() const;
   uint64_t GetSwiftMetadataCacheMaxByteSize();
   uint64_t GetSwiftMetadataCacheExpirationDays();
   FileSpec GetSwiftMetadataCachePath() const;
   bool SetSwiftMetadataCachePath(const FileSpec &path);
+
+  AutoBool GetSwiftEnableCxxInterop() const;
+  AutoBool GetSwiftEnableFullDwarfDebugging() const;
+  bool GetSwiftEnableASTContext() const;
   // END SWIFT
 
   FileSpec GetClangModulesCachePath() const;
   bool SetClangModulesCachePath(const FileSpec &path);
   bool GetEnableExternalLookup() const;
   bool SetEnableExternalLookup(bool new_value);
-  bool GetEnableBackgroundLookup() const;
   bool GetEnableLLDBIndexCache() const;
   bool SetEnableLLDBIndexCache(bool new_value);
   uint64_t GetLLDBIndexCacheMaxByteSize();
@@ -87,6 +111,8 @@ public:
   bool SetLLDBIndexCachePath(const FileSpec &path);
 
   bool GetLoadSymbolOnDemand();
+
+  lldb::SymbolDownload GetSymbolAutoDownload() const;
 
   PathMappingList GetSymlinkMappings() const;
 };
@@ -357,26 +383,22 @@ public:
                                        lldb::SymbolType symbol_type,
                                        SymbolContextList &sc_list) const;
 
-  /// Find types by name.
+  /// Find types using a type-matching object that contains all search
+  /// parameters.
   ///
   /// \param[in] search_first
   ///     If non-null, this module will be searched before any other
   ///     modules.
   ///
-  /// \param[in] name
-  ///     The name of the type we are looking for.
+  /// \param[in] query
+  ///     A type matching object that contains all of the details of the type
+  ///     search.
   ///
-  /// \param[in] max_matches
-  ///     Allow the number of matches to be limited to \a
-  ///     max_matches. Specify UINT32_MAX to get all possible matches.
-  ///
-  /// \param[out] types
-  ///     A type list gets populated with any matches.
-  ///
-  void FindTypes(Module *search_first, ConstString name,
-                 bool name_is_fully_qualified, size_t max_matches,
-                 llvm::DenseSet<SymbolFile *> &searched_symbol_files,
-                 TypeList &types) const;
+  /// \param[in] results
+  ///     Any matching types will be populated into the \a results object using
+  ///     TypeMap::InsertUnique(...).
+  void FindTypes(Module *search_first, const TypeQuery &query,
+                 lldb_private::TypeResults &results) const;
 
   bool FindSourceFile(const FileSpec &orig_spec, FileSpec &new_spec) const;
 
@@ -457,7 +479,7 @@ public:
   bool IsEmpty() const { return !GetSize(); }
 
   bool LoadScriptingResourcesInTarget(Target *target, std::list<Status> &errors,
-                                      Stream *feedback_stream = nullptr,
+                                      Stream &feedback_stream,
                                       bool continue_on_error = true);
 
   static ModuleListProperties &GetGlobalModuleListProperties();
@@ -489,7 +511,6 @@ public:
   /// This function is thread-safe.
   void ForEach(std::function<bool(const lldb::ModuleSP &module_sp)> const
                    &callback) const;
-
 
   void ClearModuleDependentCaches();
 

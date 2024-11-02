@@ -104,7 +104,7 @@ define amdgpu_kernel void @global_nontemporal_load_0(
 ; GFX940-NOTTGSPLIT-NEXT:    s_load_dword s0, s[0:1], 0x0
 ; GFX940-NOTTGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-NOTTGSPLIT-NEXT:    v_mov_b32_e32 v1, s0
-; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3]
+; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] sc0 sc1
 ; GFX940-NOTTGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX940-TGSPLIT-LABEL: global_nontemporal_load_0:
@@ -115,7 +115,7 @@ define amdgpu_kernel void @global_nontemporal_load_0(
 ; GFX940-TGSPLIT-NEXT:    s_load_dword s0, s[0:1], 0x0
 ; GFX940-TGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-TGSPLIT-NEXT:    v_mov_b32_e32 v1, s0
-; GFX940-TGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3]
+; GFX940-TGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] sc0 sc1
 ; GFX940-TGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX11-WGP-LABEL: global_nontemporal_load_0:
@@ -126,6 +126,7 @@ define amdgpu_kernel void @global_nontemporal_load_0(
 ; GFX11-WGP-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-WGP-NEXT:    v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, s0
 ; GFX11-WGP-NEXT:    global_store_b32 v0, v1, s[2:3]
+; GFX11-WGP-NEXT:    s_nop 0
 ; GFX11-WGP-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-WGP-NEXT:    s_endpgm
 ;
@@ -137,12 +138,13 @@ define amdgpu_kernel void @global_nontemporal_load_0(
 ; GFX11-CU-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-CU-NEXT:    v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, s0
 ; GFX11-CU-NEXT:    global_store_b32 v0, v1, s[2:3]
+; GFX11-CU-NEXT:    s_nop 0
 ; GFX11-CU-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-CU-NEXT:    s_endpgm
-    i32 addrspace(1)* %in, i32 addrspace(1)* %out) {
+    ptr addrspace(1) %in, ptr addrspace(1) %out) {
 entry:
-  %val = load i32, i32 addrspace(1)* %in, align 4, !nontemporal !0
-  store i32 %val, i32 addrspace(1)* %out
+  %val = load i32, ptr addrspace(1) %in, align 4, !nontemporal !0
+  store i32 %val, ptr addrspace(1) %out
   ret void
 }
 
@@ -248,7 +250,7 @@ define amdgpu_kernel void @global_nontemporal_load_1(
 ; GFX940-NOTTGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-NOTTGSPLIT-NEXT:    global_load_dword v0, v0, s[0:1] nt
 ; GFX940-NOTTGSPLIT-NEXT:    s_waitcnt vmcnt(0)
-; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v1, v0, s[2:3]
+; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v1, v0, s[2:3] sc0 sc1
 ; GFX940-NOTTGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX940-TGSPLIT-LABEL: global_nontemporal_load_1:
@@ -259,7 +261,7 @@ define amdgpu_kernel void @global_nontemporal_load_1(
 ; GFX940-TGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-TGSPLIT-NEXT:    global_load_dword v0, v0, s[0:1] nt
 ; GFX940-TGSPLIT-NEXT:    s_waitcnt vmcnt(0)
-; GFX940-TGSPLIT-NEXT:    global_store_dword v1, v0, s[2:3]
+; GFX940-TGSPLIT-NEXT:    global_store_dword v1, v0, s[2:3] sc0 sc1
 ; GFX940-TGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX11-WGP-LABEL: global_nontemporal_load_1:
@@ -270,6 +272,7 @@ define amdgpu_kernel void @global_nontemporal_load_1(
 ; GFX11-WGP-NEXT:    global_load_b32 v0, v0, s[0:1] slc dlc
 ; GFX11-WGP-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-WGP-NEXT:    global_store_b32 v1, v0, s[2:3]
+; GFX11-WGP-NEXT:    s_nop 0
 ; GFX11-WGP-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-WGP-NEXT:    s_endpgm
 ;
@@ -281,14 +284,15 @@ define amdgpu_kernel void @global_nontemporal_load_1(
 ; GFX11-CU-NEXT:    global_load_b32 v0, v0, s[0:1] slc dlc
 ; GFX11-CU-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-CU-NEXT:    global_store_b32 v1, v0, s[2:3]
+; GFX11-CU-NEXT:    s_nop 0
 ; GFX11-CU-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-CU-NEXT:    s_endpgm
-    i32 addrspace(1)* %in, i32 addrspace(1)* %out) {
+    ptr addrspace(1) %in, ptr addrspace(1) %out) {
 entry:
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
-  %val.gep = getelementptr inbounds i32, i32 addrspace(1)* %in, i32 %tid
-  %val = load i32, i32 addrspace(1)* %val.gep, align 4, !nontemporal !0
-  store i32 %val, i32 addrspace(1)* %out
+  %val.gep = getelementptr inbounds i32, ptr addrspace(1) %in, i32 %tid
+  %val = load i32, ptr addrspace(1) %val.gep, align 4, !nontemporal !0
+  store i32 %val, ptr addrspace(1) %out
   ret void
 }
 
@@ -385,7 +389,7 @@ define amdgpu_kernel void @global_nontemporal_store_0(
 ; GFX940-NOTTGSPLIT-NEXT:    s_load_dword s0, s[0:1], 0x0
 ; GFX940-NOTTGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-NOTTGSPLIT-NEXT:    v_mov_b32_e32 v1, s0
-; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] nt
+; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] sc0 nt sc1
 ; GFX940-NOTTGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX940-TGSPLIT-LABEL: global_nontemporal_store_0:
@@ -396,7 +400,7 @@ define amdgpu_kernel void @global_nontemporal_store_0(
 ; GFX940-TGSPLIT-NEXT:    s_load_dword s0, s[0:1], 0x0
 ; GFX940-TGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-TGSPLIT-NEXT:    v_mov_b32_e32 v1, s0
-; GFX940-TGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] nt
+; GFX940-TGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] sc0 nt sc1
 ; GFX940-TGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX11-WGP-LABEL: global_nontemporal_store_0:
@@ -407,6 +411,7 @@ define amdgpu_kernel void @global_nontemporal_store_0(
 ; GFX11-WGP-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-WGP-NEXT:    v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, s0
 ; GFX11-WGP-NEXT:    global_store_b32 v0, v1, s[2:3] glc slc dlc
+; GFX11-WGP-NEXT:    s_nop 0
 ; GFX11-WGP-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-WGP-NEXT:    s_endpgm
 ;
@@ -418,12 +423,13 @@ define amdgpu_kernel void @global_nontemporal_store_0(
 ; GFX11-CU-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-CU-NEXT:    v_dual_mov_b32 v0, 0 :: v_dual_mov_b32 v1, s0
 ; GFX11-CU-NEXT:    global_store_b32 v0, v1, s[2:3] glc slc dlc
+; GFX11-CU-NEXT:    s_nop 0
 ; GFX11-CU-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-CU-NEXT:    s_endpgm
-    i32 addrspace(1)* %in, i32 addrspace(1)* %out) {
+    ptr addrspace(1) %in, ptr addrspace(1) %out) {
 entry:
-  %val = load i32, i32 addrspace(1)* %in, align 4
-  store i32 %val, i32 addrspace(1)* %out, !nontemporal !0
+  %val = load i32, ptr addrspace(1) %in, align 4
+  store i32 %val, ptr addrspace(1) %out, !nontemporal !0
   ret void
 }
 
@@ -524,7 +530,7 @@ define amdgpu_kernel void @global_nontemporal_store_1(
 ; GFX940-NOTTGSPLIT-NEXT:    s_load_dword s0, s[0:1], 0x0
 ; GFX940-NOTTGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-NOTTGSPLIT-NEXT:    v_mov_b32_e32 v1, s0
-; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] nt
+; GFX940-NOTTGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] sc0 nt sc1
 ; GFX940-NOTTGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX940-TGSPLIT-LABEL: global_nontemporal_store_1:
@@ -535,7 +541,7 @@ define amdgpu_kernel void @global_nontemporal_store_1(
 ; GFX940-TGSPLIT-NEXT:    s_load_dword s0, s[0:1], 0x0
 ; GFX940-TGSPLIT-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX940-TGSPLIT-NEXT:    v_mov_b32_e32 v1, s0
-; GFX940-TGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] nt
+; GFX940-TGSPLIT-NEXT:    global_store_dword v0, v1, s[2:3] sc0 nt sc1
 ; GFX940-TGSPLIT-NEXT:    s_endpgm
 ;
 ; GFX11-WGP-LABEL: global_nontemporal_store_1:
@@ -546,6 +552,7 @@ define amdgpu_kernel void @global_nontemporal_store_1(
 ; GFX11-WGP-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-WGP-NEXT:    v_dual_mov_b32 v1, s0 :: v_dual_lshlrev_b32 v0, 2, v0
 ; GFX11-WGP-NEXT:    global_store_b32 v0, v1, s[2:3] glc slc dlc
+; GFX11-WGP-NEXT:    s_nop 0
 ; GFX11-WGP-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-WGP-NEXT:    s_endpgm
 ;
@@ -557,14 +564,15 @@ define amdgpu_kernel void @global_nontemporal_store_1(
 ; GFX11-CU-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-CU-NEXT:    v_dual_mov_b32 v1, s0 :: v_dual_lshlrev_b32 v0, 2, v0
 ; GFX11-CU-NEXT:    global_store_b32 v0, v1, s[2:3] glc slc dlc
+; GFX11-CU-NEXT:    s_nop 0
 ; GFX11-CU-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-CU-NEXT:    s_endpgm
-    i32 addrspace(1)* %in, i32 addrspace(1)* %out) {
+    ptr addrspace(1) %in, ptr addrspace(1) %out) {
 entry:
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
-  %val = load i32, i32 addrspace(1)* %in, align 4
-  %out.gep = getelementptr inbounds i32, i32 addrspace(1)* %out, i32 %tid
-  store i32 %val, i32 addrspace(1)* %out.gep, !nontemporal !0
+  %val = load i32, ptr addrspace(1) %in, align 4
+  %out.gep = getelementptr inbounds i32, ptr addrspace(1) %out, i32 %tid
+  store i32 %val, ptr addrspace(1) %out.gep, !nontemporal !0
   ret void
 }
 

@@ -9,12 +9,18 @@
 #include "src/stdio/fclose.h"
 #include "src/__support/File/file.h"
 
+#include "src/errno/libc_errno.h"
 #include <stdio.h>
 
 namespace __llvm_libc {
 
 LLVM_LIBC_FUNCTION(int, fclose, (::FILE * stream)) {
-  return reinterpret_cast<__llvm_libc::File *>(stream)->close();
+  int result = reinterpret_cast<__llvm_libc::File *>(stream)->close();
+  if (result != 0) {
+    libc_errno = result;
+    return EOF;
+  }
+  return 0;
 }
 
 } // namespace __llvm_libc

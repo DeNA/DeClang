@@ -133,9 +133,10 @@ void PPCallbacksTracker::FileSkipped(const FileEntryRef &SkippedFile,
 // of whether the inclusion will actually result in an inclusion.
 void PPCallbacksTracker::InclusionDirective(
     SourceLocation HashLoc, const Token &IncludeTok, llvm::StringRef FileName,
-    bool IsAngled, CharSourceRange FilenameRange, Optional<FileEntryRef> File,
+    bool IsAngled, CharSourceRange FilenameRange, OptionalFileEntryRef File,
     llvm::StringRef SearchPath, llvm::StringRef RelativePath,
-    const Module *Imported, SrcMgr::CharacteristicKind FileType) {
+    const Module *SuggestedModule, bool ModuleImported,
+    SrcMgr::CharacteristicKind FileType) {
   beginCallback("InclusionDirective");
   appendArgument("HashLoc", HashLoc);
   appendArgument("IncludeTok", IncludeTok);
@@ -145,7 +146,8 @@ void PPCallbacksTracker::InclusionDirective(
   appendArgument("File", File);
   appendFilePathArgument("SearchPath", SearchPath);
   appendFilePathArgument("RelativePath", RelativePath);
-  appendArgument("Imported", Imported);
+  appendArgument("SuggestedModule", SuggestedModule);
+  appendArgument("ModuleImported", ModuleImported);
 }
 
 // Callback invoked whenever there was an explicit module-import
@@ -486,7 +488,7 @@ void PPCallbacksTracker::appendArgument(const char *Name, FileID Value) {
 
 // Append a FileEntry argument to the top trace item.
 void PPCallbacksTracker::appendArgument(const char *Name,
-                                        Optional<FileEntryRef> Value) {
+                                        OptionalFileEntryRef Value) {
   if (!Value) {
     appendArgument(Name, "(null)");
     return;

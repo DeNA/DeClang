@@ -56,12 +56,12 @@ clang::tooling::initiateFillInMissingMethodStubsFromAbstractClassesOperation(
     ASTSlice &Slice, ASTContext &Context, SourceLocation Location,
     SourceRange SelectionRange, bool CreateOperation) {
   auto SelectedDecl = Slice.innermostSelectedDecl(
-      llvm::makeArrayRef(Decl::CXXRecord), ASTSlice::InnermostDeclOnly);
+      ArrayRef(Decl::CXXRecord), ASTSlice::InnermostDeclOnly);
   if (!SelectedDecl)
-    return None;
+    return std::nullopt;
   const auto *Class = cast<CXXRecordDecl>(SelectedDecl->getDecl());
   if (Class->isUnion() || !Class->isThisDeclarationADefinition())
-    return None;
+    return std::nullopt;
   if (!hasAbstractBases(Class))
     return RefactoringOperationResult("The class has no abstract bases");
   if (!Class->isDependentType() && !Class->isAbstract())

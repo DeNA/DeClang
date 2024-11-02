@@ -16,9 +16,9 @@
 #include "Targets/RuntimeDyldCOFFThumb.h"
 #include "Targets/RuntimeDyldCOFFX86_64.h"
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/TargetParser/Triple.h"
 
 using namespace llvm;
 using namespace llvm::object;
@@ -116,6 +116,16 @@ uint64_t RuntimeDyldCOFF::getDLLImportOffset(unsigned SectionID, StubMap &Stubs,
 
 bool RuntimeDyldCOFF::isCompatibleFile(const object::ObjectFile &Obj) const {
   return Obj.isCOFF();
+}
+
+bool RuntimeDyldCOFF::relocationNeedsDLLImportStub(
+    const RelocationRef &R) const {
+  object::symbol_iterator Symbol = R.getSymbol();
+  Expected<StringRef> TargetNameOrErr = Symbol->getName();
+  if (!TargetNameOrErr)
+    return false;
+
+  return TargetNameOrErr->startswith(getImportSymbolPrefix());
 }
 
 } // namespace llvm

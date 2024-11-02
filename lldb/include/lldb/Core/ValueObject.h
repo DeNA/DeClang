@@ -27,7 +27,6 @@
 #include "lldb/lldb-types.h"
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -35,6 +34,7 @@
 #include <initializer_list>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -358,7 +358,7 @@ public:
   virtual bool CanProvideValue();
 
   // Subclasses must implement the functions below.
-  virtual llvm::Optional<uint64_t> GetByteSize() = 0;
+  virtual std::optional<uint64_t> GetByteSize() = 0;
 
   virtual lldb::ValueType GetValueType() const = 0;
 
@@ -375,26 +375,26 @@ public:
     return GetCompilerType().GetTypeName();
   }
 
-  virtual lldb::LanguageType GetObjectRuntimeLanguage() {
+  lldb::LanguageType GetObjectRuntimeLanguage() {
     return GetCompilerType().GetMinimumLanguage();
   }
 
-  virtual uint32_t
+  uint32_t
   GetTypeInfo(CompilerType *pointee_or_element_compiler_type = nullptr) {
     return GetCompilerType().GetTypeInfo(pointee_or_element_compiler_type);
   }
 
-  virtual bool IsPointerType() { return GetCompilerType().IsPointerType(); }
+  bool IsPointerType() { return GetCompilerType().IsPointerType(); }
 
-  virtual bool IsArrayType() { return GetCompilerType().IsArrayType(); }
+  bool IsArrayType() { return GetCompilerType().IsArrayType(); }
 
-  virtual bool IsScalarType() { return GetCompilerType().IsScalarType(); }
+  bool IsScalarType() { return GetCompilerType().IsScalarType(); }
 
-  virtual bool IsPointerOrReferenceType() {
+  bool IsPointerOrReferenceType() {
     return GetCompilerType().IsPointerOrReferenceType();
   }
 
-  virtual bool IsPossibleDynamicType();
+  bool IsPossibleDynamicType();
 
   bool IsNilReference();
 
@@ -434,10 +434,6 @@ public:
     return (GetBitfieldBitSize() != 0) || (GetBitfieldBitOffset() != 0);
   }
 
-  virtual bool IsArrayItemForPointer() {
-    return m_flags.m_is_array_item_for_pointer;
-  }
-
   virtual const char *GetValueAsCString();
 
   virtual bool GetValueAsCString(const lldb_private::TypeFormatImpl &format,
@@ -474,30 +470,28 @@ public:
   /// Returns a unique id for this ValueObject.
   lldb::user_id_t GetID() const { return m_id.GetID(); }
 
-  virtual lldb::ValueObjectSP GetChildAtIndex(size_t idx, bool can_create);
+  virtual lldb::ValueObjectSP GetChildAtIndex(uint32_t idx,
+                                              bool can_create = true);
 
-  // this will always create the children if necessary
-  lldb::ValueObjectSP GetChildAtIndexPath(llvm::ArrayRef<size_t> idxs,
-                                          size_t *index_of_error = nullptr);
-
-  lldb::ValueObjectSP
-  GetChildAtIndexPath(llvm::ArrayRef<std::pair<size_t, bool>> idxs,
-                      size_t *index_of_error = nullptr);
-
-  // this will always create the children if necessary
-  lldb::ValueObjectSP GetChildAtNamePath(llvm::ArrayRef<ConstString> names,
-                                         ConstString *name_of_error = nullptr);
+  // The method always creates missing children in the path, if necessary.
+  lldb::ValueObjectSP GetChildAtNamePath(llvm::ArrayRef<llvm::StringRef> names);
 
   lldb::ValueObjectSP
   GetChildAtNamePath(llvm::ArrayRef<std::pair<ConstString, bool>> names,
                      ConstString *name_of_error = nullptr);
 
-  virtual lldb::ValueObjectSP GetChildMemberWithName(ConstString name,
-                                                     bool can_create);
+  virtual lldb::ValueObjectSP GetChildMemberWithName(llvm::StringRef name,
+                                                     bool can_create = true);
 
-  virtual size_t GetIndexOfChildWithName(ConstString name);
+  virtual size_t GetIndexOfChildWithName(llvm::StringRef name);
 
-  size_t GetNumChildren(uint32_t max = UINT32_MAX);
+  llvm::Expected<uint32_t> GetNumChildren(uint32_t max = UINT32_MAX);
+  /// Like \c GetNumChildren but returns 0 on error.  You probably
+  /// shouldn't be using this function. It exists primarily to ease the
+  /// transition to more pervasive error handling while not all APIs
+  /// have been updated.
+  uint32_t GetNumChildrenIgnoringErrors(uint32_t max = UINT32_MAX);
+  bool HasChildren() { return GetNumChildrenIgnoringErrors() > 0; }
 
   const Value &GetValue() const { return m_value; }
 
@@ -528,7 +522,7 @@ public:
                            std::string &destination,
                            const TypeSummaryOptions &options);
 
-  const char *GetObjectDescription();
+  llvm::Expected<std::string> GetObjectDescription();
 
   bool HasSpecialPrintableRepresentation(
       ValueObjectRepresentationStyle val_obj_display,
@@ -601,7 +595,7 @@ public:
   virtual bool HasSyntheticValue();
 
 #ifdef LLDB_ENABLE_SWIFT
-  llvm::Optional<SwiftScratchContextReader> GetSwiftScratchContext();
+  std::optional<SwiftScratchContextReader> GetSwiftScratchContext();
 #endif // LLDB_ENABLE_SWIFT
 
   virtual bool IsSynthetic() { return false; }
@@ -627,7 +621,9 @@ public:
   virtual void SetLiveAddress(lldb::addr_t addr = LLDB_INVALID_ADDRESS,
                               AddressType address_type = eAddressTypeLoad) {}
 
-  virtual lldb::ValueObjectSP Cast(const CompilerType &compiler_type);
+  lldb::ValueObjectSP Cast(const CompilerType &compiler_type);
+
+  virtual lldb::ValueObjectSP DoCast(const CompilerType &compiler_type);
 
   virtual lldb::ValueObjectSP CastPointerType(const char *name,
                                               CompilerType &ast_type);
@@ -635,9 +631,13 @@ public:
   virtual lldb::ValueObjectSP CastPointerType(const char *name,
                                               lldb::TypeSP &type_sp);
 
+  /// If this object represents a C++ class with a vtable, return an object
+  /// that represents the virtual function table. If the object isn't a class
+  /// with a vtable, return a valid ValueObject with the error set correctly.
+  lldb::ValueObjectSP GetVTable();
   // The backing bits of this value object were updated, clear any descriptive
   // string, so we know we have to refetch them.
-  virtual void ValueUpdated() {
+  void ValueUpdated() {
     ClearUserVisibleData(eClearUserVisibleDataItemsValue |
                          eClearUserVisibleDataItemsSummary |
                          eClearUserVisibleDataItemsDescription);
@@ -657,9 +657,9 @@ public:
 
   virtual SymbolContextScope *GetSymbolContextScope();
 
-  void Dump(Stream &s);
+  llvm::Error Dump(Stream &s);
 
-  void Dump(Stream &s, const DumpValueObjectOptions &options);
+  llvm::Error Dump(Stream &s, const DumpValueObjectOptions &options);
 
   static lldb::ValueObjectSP
   CreateValueObjectFromExpression(llvm::StringRef name,
@@ -811,7 +811,7 @@ protected:
       return (m_children.find(idx) != m_children.end());
     }
 
-    ValueObject *GetChildAtIndex(size_t idx) {
+    ValueObject *GetChildAtIndex(uint32_t idx) {
       std::lock_guard<std::recursive_mutex> guard(m_mutex);
       const auto iter = m_children.find(idx);
       return ((iter == m_children.end()) ? nullptr : iter->second);
@@ -978,9 +978,10 @@ protected:
                                           int32_t synthetic_index);
 
   /// Should only be called by ValueObject::GetNumChildren().
-  virtual size_t CalculateNumChildren(uint32_t max = UINT32_MAX) = 0;
+  virtual llvm::Expected<uint32_t>
+  CalculateNumChildren(uint32_t max = UINT32_MAX) = 0;
 
-  void SetNumChildren(size_t num_children);
+  void SetNumChildren(uint32_t num_children);
 
   void SetValueDidChange(bool value_changed) {
     m_flags.m_value_did_change = value_changed;

@@ -12,10 +12,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "DirectX.h"
-#include "PointerTypeAnalysis.h"
+#include "DirectXIRPasses/PointerTypeAnalysis.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/AttributeMask.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Module.h"
@@ -54,6 +55,7 @@ constexpr bool isValidForDXIL(Attribute::AttrKind Attr) {
                        Attribute::NonNull,
                        Attribute::Dereferenceable,
                        Attribute::DereferenceableOrNull,
+                       Attribute::Memory,
                        Attribute::NoRedZone,
                        Attribute::NoReturn,
                        Attribute::NoUnwind,
@@ -61,7 +63,6 @@ constexpr bool isValidForDXIL(Attribute::AttrKind Attr) {
                        Attribute::OptimizeNone,
                        Attribute::ReadNone,
                        Attribute::ReadOnly,
-                       Attribute::ArgMemOnly,
                        Attribute::Returned,
                        Attribute::ReturnsTwice,
                        Attribute::SExt,
@@ -126,9 +127,6 @@ public:
             I.eraseFromParent();
             continue;
           }
-          // Only insert bitcasts if the IR is using opaque pointers.
-          if (M.getContext().supportsTypedPointers())
-            continue;
 
           // Emtting NoOp bitcast instructions allows the ValueEnumerator to be
           // unmodified as it reserves instruction IDs during contruction.

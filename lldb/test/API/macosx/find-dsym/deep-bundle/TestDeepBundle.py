@@ -62,7 +62,7 @@ class DeepBundleTestCase(TestBase):
         )
 
         setup_complete = target.FindFirstGlobalVariable("setup_is_complete")
-        self.assertEquals(
+        self.assertEqual(
             setup_complete.GetValueAsUnsigned(),
             1,
             "Check that inferior process has completed setup",
@@ -76,8 +76,9 @@ class DeepBundleTestCase(TestBase):
             if mod.GetFileSpec().GetFilename() == "MyFramework":
                 found_module = True
                 dsym_name = mod.GetSymbolFileSpec().GetFilename()
-                self.assertTrue(
-                    dsym_name == "MyFramework",
+                self.assertEqual(
+                    dsym_name,
+                    "MyFramework",
                     "Check that we found the dSYM for the bundle that was loaded",
                 )
             i = i + 1

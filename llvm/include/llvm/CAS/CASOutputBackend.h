@@ -32,9 +32,13 @@ public:
 
   SmallVector<OutputFile> takeOutputs() { return std::move(Outputs); }
 
+  /// Add a CAS object to the path in the output backend.
+  void addObject(StringRef Path, ObjectRef Object);
+
 private:
   Expected<std::unique_ptr<vfs::OutputFileImpl>>
-  createFileImpl(StringRef Path, Optional<vfs::OutputConfig> Config) override;
+  createFileImpl(StringRef Path,
+                 std::optional<vfs::OutputConfig> Config) override;
 
   /// Backend is fully thread-safe (so far). Just return a pointer to itself.
   IntrusiveRefCntPtr<vfs::OutputBackend> cloneImpl() const override {

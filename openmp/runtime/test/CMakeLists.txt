@@ -24,9 +24,13 @@ macro(pythonize_bool var)
   endif()
 endmacro()
 
+list(APPEND OPENMP_TEST_COMPILER_FEATURE_LIST "${LIBOMP_ARCH}")
+update_test_compiler_features()
+
 pythonize_bool(LIBOMP_USE_HWLOC)
 pythonize_bool(LIBOMP_OMPT_SUPPORT)
 pythonize_bool(LIBOMP_OMPT_OPTIONAL)
+pythonize_bool(LIBOMP_OMPX_TASKGRAPH)
 pythonize_bool(LIBOMP_HAVE_LIBM)
 pythonize_bool(LIBOMP_HAVE_LIBATOMIC)
 pythonize_bool(OPENMP_STANDALONE_BUILD)

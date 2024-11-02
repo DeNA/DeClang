@@ -3,7 +3,7 @@
 ; RUN: llc -global-isel -march=amdgcn -mcpu=gfx1010 -amdgpu-dpp-combine=false -verify-machineinstrs < %s | FileCheck -check-prefix=GFX10 %s
 ; RUN: llc -global-isel -march=amdgcn -mcpu=gfx1100 -amdgpu-enable-delay-alu=0 -amdgpu-dpp-combine=false -verify-machineinstrs < %s | FileCheck -check-prefix=GFX11 %s
 
-define amdgpu_kernel void @dpp_test(i32 addrspace(1)* %out, i32 %in1, i32 %in2) {
+define amdgpu_kernel void @dpp_test(ptr addrspace(1) %out, i32 %in1, i32 %in2) {
 ; GFX8-LABEL: dpp_test:
 ; GFX8:       ; %bb.0:
 ; GFX8-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -36,13 +36,14 @@ define amdgpu_kernel void @dpp_test(i32 addrspace(1)* %out, i32 %in1, i32 %in2) 
 ; GFX11-NEXT:    v_mov_b32_dpp v0, v1 quad_perm:[1,0,0,0] row_mask:0x1 bank_mask:0x1
 ; GFX11-NEXT:    v_mov_b32_e32 v1, 0
 ; GFX11-NEXT:    global_store_b32 v1, v0, s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tmp0 = call i32 @llvm.amdgcn.update.dpp.i32(i32 %in1, i32 %in2, i32 1, i32 1, i32 1, i1 false)
-  store i32 %tmp0, i32 addrspace(1)* %out
+  store i32 %tmp0, ptr addrspace(1) %out
   ret void
 }
-define amdgpu_kernel void @update_dpp64_test(i64 addrspace(1)* %arg, i64 %in1, i64 %in2) {
+define amdgpu_kernel void @update_dpp64_test(ptr addrspace(1) %arg, i64 %in1, i64 %in2) {
 ; GFX8-LABEL: update_dpp64_test:
 ; GFX8:       ; %bb.0:
 ; GFX8-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -86,13 +87,14 @@ define amdgpu_kernel void @update_dpp64_test(i64 addrspace(1)* %arg, i64 %in1, i
 ; GFX11-NEXT:    v_mov_b32_dpp v2, v0 quad_perm:[1,0,0,0] row_mask:0x1 bank_mask:0x1
 ; GFX11-NEXT:    v_mov_b32_dpp v3, v1 quad_perm:[1,0,0,0] row_mask:0x1 bank_mask:0x1
 ; GFX11-NEXT:    global_store_b64 v4, v[2:3], s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %id = tail call i32 @llvm.amdgcn.workitem.id.x()
-  %gep = getelementptr inbounds i64, i64 addrspace(1)* %arg, i32 %id
-  %load = load i64, i64 addrspace(1)* %gep
+  %gep = getelementptr inbounds i64, ptr addrspace(1) %arg, i32 %id
+  %load = load i64, ptr addrspace(1) %gep
   %tmp0 = call i64 @llvm.amdgcn.update.dpp.i64(i64 %in1, i64 %load, i32 1, i32 1, i32 1, i1 false) #1
-  store i64 %tmp0, i64 addrspace(1)* %gep
+  store i64 %tmp0, ptr addrspace(1) %gep
   ret void
 }
 

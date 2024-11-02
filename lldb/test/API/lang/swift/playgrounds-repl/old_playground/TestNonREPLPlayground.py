@@ -21,12 +21,10 @@ import os.path
 import unittest2
 
 import sys
-
 if sys.version_info.major == 2:
     import commands as subprocess
 else:
     import subprocess
-
 
 def execute_command(command):
     (exit_status, output) = subprocess.getstatusoutput(command)
@@ -34,31 +32,23 @@ def execute_command(command):
 
 
 class TestNonREPLPlayground(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @skipUnlessDarwin
     @swiftTest
     @skipIf(
         debug_info=decorators.no_match("dsym"),
-        bugnumber="This test only builds one way",
-    )
+        bugnumber="This test only builds one way")
     def test_playgrounds(self):
         """Test that playgrounds work"""
         self.build()
         lldbutil.run_to_source_breakpoint(
-            self,
-            "Set breakpoint here",
-            lldb.SBFileSpec("PlaygroundStub.swift"),
-            exe_name="PlaygroundStub",
-            extra_images=["libPlaygroundsRuntime.dylib"],
-        )
+            self, 'Set breakpoint here',
+            lldb.SBFileSpec('PlaygroundStub.swift'),
+            exe_name = "PlaygroundStub",
+            extra_images=['libPlaygroundsRuntime.dylib'])
 
         contents = ""
 
-        with open("Contents.swift", "r") as contents_file:
+        with open('Contents.swift', 'r') as contents_file:
             contents = contents_file.read()
 
         options = lldb.SBExpressionOptions()

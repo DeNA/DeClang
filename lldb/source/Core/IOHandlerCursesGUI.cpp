@@ -75,6 +75,7 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <optional>
 #include <type_traits>
 
 using namespace lldb;
@@ -3178,13 +3179,13 @@ public:
         m_debugger.GetListener(), llvm::StringRef(), &core_file_spec, false));
 
     if (!process_sp) {
-      SetError("Unable to find process plug-in for core file!");
+      SetError("Unknown core file format!");
       return;
     }
 
     Status status = process_sp->LoadCore();
     if (status.Fail()) {
-      SetError("Can't find plug-in for core file!");
+      SetError("Unknown core file format!");
       return;
     }
   }
@@ -4519,9 +4520,9 @@ struct Row {
       calculated_children = true;
       ValueObjectSP valobj = value.GetSP();
       if (valobj) {
-        const size_t num_children = valobj->GetNumChildren();
+        const uint32_t num_children = valobj->GetNumChildrenIgnoringErrors();
         for (size_t i = 0; i < num_children; ++i) {
-          children.push_back(Row(valobj->GetChildAtIndex(i, true), this));
+          children.push_back(Row(valobj->GetChildAtIndex(i), this));
         }
       }
     }
@@ -7026,7 +7027,7 @@ public:
 
           StreamString lineStream;
 
-          llvm::Optional<size_t> column;
+          std::optional<size_t> column;
           if (is_pc_line && m_sc.line_entry.IsValid() && m_sc.line_entry.column)
             column = m_sc.line_entry.column - 1;
           m_file_sp->DisplaySourceLines(curr_line + 1, column, 0, 0,

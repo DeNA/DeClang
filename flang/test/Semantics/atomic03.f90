@@ -1,5 +1,4 @@
 ! RUN: %python %S/test_errors.py %s %flang_fc1
-! XFAIL: *
 ! This test checks for semantic errors in atomic_cas subroutine calls based on
 ! the interface defined in section 16.9.22 of the Fortran 2018 standard.
 
@@ -179,7 +178,8 @@ program test_atomic_cas
   !ERROR: 'stat' argument to 'atomic_cas' may not be a coindexed object
   call atomic_cas(int_scalar_coarray, old_int, compare_int, new_int, coindexed_status[1])
 
-  !ERROR: Actual argument associated with INTENT(OUT) dummy argument 'stat=' must be definable
+  !ERROR: Actual argument associated with INTENT(OUT) dummy argument 'stat=' is not definable
+  !BECAUSE: '1_4' is not a variable or pointer
   call atomic_cas(int_scalar_coarray, old_int, compare_int, new_int, 1)
 
 ! missing mandatory arguments

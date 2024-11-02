@@ -20,7 +20,7 @@
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/Utility/UUID.h"
 
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 
 namespace lldb_private {
 
@@ -55,6 +55,8 @@ public:
   virtual void DoInitialImageFetch() = 0;
 
   virtual bool NeedToDoInitialImageFetch() = 0;
+
+  std::optional<lldb_private::Address> GetStartAddress() override;
 
 protected:
   void PrivateInitialize(lldb_private::Process *process);

@@ -12,11 +12,8 @@
 // GCC does not support the -fexperimental-library flag
 // UNSUPPORTED: gcc
 
-// Clang does not support the -fexperimental-library flag before LLVM 15.0
-// UNSUPPORTED: clang-14
-
 // AppleClang does not support the -fexperimental-library flag yet
-// UNSUPPORTED: apple-clang-13, apple-clang-14.0
+// UNSUPPORTED: apple-clang-14.0
 
 // Clang on AIX currently pretends that it is Clang 15, even though it is not (as of writing
 // this, LLVM 15 hasn't even been branched yet).
@@ -26,6 +23,10 @@
 
 #include <version>
 
-#ifdef _LIBCPP_HAS_NO_INCOMPLETE_FORMAT
-#   error "-fexperimental-library should enable <format>"
+#ifdef _LIBCPP_HAS_NO_INCOMPLETE_PSTL
+#  error "-fexperimental-library should enable the PSTL"
+#endif
+
+#ifdef _LIBCPP_HAS_NO_EXPERIMENTAL_STOP_TOKEN
+#  error "-fexperimental-library should enable the PSTL"
 #endif

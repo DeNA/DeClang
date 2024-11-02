@@ -39,6 +39,7 @@
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/EHPersonalities.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
@@ -46,8 +47,6 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -138,10 +137,24 @@ static bool mayExtractBlock(const BasicBlock &BB) {
   //
   // Resumes that are not reachable from a cleanup landing pad are considered to
   // be unreachable. It’s not safe to split them out either.
+
   if (BB.hasAddressTaken() || BB.isEHPad())
     return false;
   auto Term = BB.getTerminator();
-  return !isa<InvokeInst>(Term) && !isa<ResumeInst>(Term);
+  if (isa<InvokeInst>(Term) || isa<ResumeInst>(Term))
+    return false;
+
+  // Do not outline basic blocks that have token type instructions. e.g.,
+  // exception:
+  // %0 = cleanuppad within none []
+  // call void @"?terminate@@YAXXZ"() [ "funclet"(token %0) ]
+  // br label %continue-exception
+  if (llvm::any_of(
+          BB, [](const Instruction &I) { return I.getType()->isTokenTy(); })) {
+    return false;
+  }
+
+  return true;
 }
 
 /// Mark \p F cold. Based on this assumption, also optimize it for minimum size.
@@ -168,23 +181,6 @@ static bool markFunctionCold(Function &F, bool UpdateEntryCount = false) {
 
   return Changed;
 }
-
-class HotColdSplittingLegacyPass : public ModulePass {
-public:
-  static char ID;
-  HotColdSplittingLegacyPass() : ModulePass(ID) {
-    initializeHotColdSplittingLegacyPassPass(*PassRegistry::getPassRegistry());
-  }
-
-  void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<BlockFrequencyInfoWrapperPass>();
-    AU.addRequired<ProfileSummaryInfoWrapperPass>();
-    AU.addRequired<TargetTransformInfoWrapperPass>();
-    AU.addUsedIfAvailable<AssumptionCacheTracker>();
-  }
-
-  bool runOnModule(Module &M) override;
-};
 
 } // end anonymous namespace
 
@@ -221,6 +217,11 @@ bool HotColdSplitting::shouldOutlineFrom(const Function &F) const {
       F.hasFnAttribute(Attribute::SanitizeThread) ||
       F.hasFnAttribute(Attribute::SanitizeMemory))
     return false;
+
+  // Do not outline scoped EH personality functions.
+  if (F.hasPersonalityFn())
+    if (isScopedEHPersonality(classifyEHPersonality(F.getPersonalityFn())))
+      return false;
 
   return true;
 }
@@ -713,32 +714,6 @@ bool HotColdSplitting::run(Module &M) {
   return Changed;
 }
 
-bool HotColdSplittingLegacyPass::runOnModule(Module &M) {
-  if (skipModule(M))
-    return false;
-  ProfileSummaryInfo *PSI =
-      &getAnalysis<ProfileSummaryInfoWrapperPass>().getPSI();
-  auto GTTI = [this](Function &F) -> TargetTransformInfo & {
-    return this->getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
-  };
-  auto GBFI = [this](Function &F) {
-    return &this->getAnalysis<BlockFrequencyInfoWrapperPass>(F).getBFI();
-  };
-  std::unique_ptr<OptimizationRemarkEmitter> ORE;
-  std::function<OptimizationRemarkEmitter &(Function &)> GetORE =
-      [&ORE](Function &F) -> OptimizationRemarkEmitter & {
-    ORE.reset(new OptimizationRemarkEmitter(&F));
-    return *ORE;
-  };
-  auto LookupAC = [this](Function &F) -> AssumptionCache * {
-    if (auto *ACT = getAnalysisIfAvailable<AssumptionCacheTracker>())
-      return ACT->lookupAssumptionCache(F);
-    return nullptr;
-  };
-
-  return HotColdSplitting(PSI, GBFI, GTTI, &GetORE, LookupAC).run(M);
-}
-
 PreservedAnalyses
 HotColdSplittingPass::run(Module &M, ModuleAnalysisManager &AM) {
   auto &FAM = AM.getResult<FunctionAnalysisManagerModuleProxy>(M).getManager();
@@ -768,16 +743,4 @@ HotColdSplittingPass::run(Module &M, ModuleAnalysisManager &AM) {
   if (HotColdSplitting(PSI, GBFI, GTTI, &GetORE, LookupAC).run(M))
     return PreservedAnalyses::none();
   return PreservedAnalyses::all();
-}
-
-char HotColdSplittingLegacyPass::ID = 0;
-INITIALIZE_PASS_BEGIN(HotColdSplittingLegacyPass, "hotcoldsplit",
-                      "Hot Cold Splitting", false, false)
-INITIALIZE_PASS_DEPENDENCY(ProfileSummaryInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(BlockFrequencyInfoWrapperPass)
-INITIALIZE_PASS_END(HotColdSplittingLegacyPass, "hotcoldsplit",
-                    "Hot Cold Splitting", false, false)
-
-ModulePass *llvm::createHotColdSplittingPass() {
-  return new HotColdSplittingLegacyPass();
 }

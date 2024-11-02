@@ -165,10 +165,11 @@ RewriteObjCAction::CreateASTConsumer(CompilerInstance &CI, StringRef InFile) {
   if (std::unique_ptr<raw_ostream> OS =
           CI.createDefaultOutputFile(false, InFile, "cpp")) {
     if (CI.getLangOpts().ObjCRuntime.isNonFragile())
-      return CreateModernObjCRewriter(
-          std::string(InFile), std::move(OS), CI.getDiagnostics(),
-          CI.getLangOpts(), CI.getDiagnosticOpts().NoRewriteMacros,
-          (CI.getCodeGenOpts().getDebugInfo() != codegenoptions::NoDebugInfo));
+      return CreateModernObjCRewriter(std::string(InFile), std::move(OS),
+                                      CI.getDiagnostics(), CI.getLangOpts(),
+                                      CI.getDiagnosticOpts().NoRewriteMacros,
+                                      (CI.getCodeGenOpts().getDebugInfo() !=
+                                       llvm::codegenoptions::NoDebugInfo));
     return CreateObjCRewriter(std::string(InFile), std::move(OS),
                               CI.getDiagnostics(), CI.getLangOpts(),
                               CI.getDiagnosticOpts().NoRewriteMacros);
@@ -212,8 +213,14 @@ public:
 
   void visitModuleFile(StringRef Filename,
                        serialization::ModuleKind Kind) override {
-    auto File = CI.getFileManager().getFile(Filename);
+    auto File = CI.getFileManager().getOptionalFileRef(Filename);
     assert(File && "missing file for loaded module?");
+
+#if !defined(__APPLE__)
+    // Workaround for ext4 file system.
+    if (auto Bypass = CI.getFileManager().getBypassFile(*File))
+      File = *Bypass;
+#endif
 
     // Only rewrite each module file once.
     if (!Rewritten.insert(*File).second)

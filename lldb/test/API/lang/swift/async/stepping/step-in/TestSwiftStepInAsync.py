@@ -4,23 +4,22 @@ import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
 import re
 
-
 class TestCase(lldbtest.TestBase):
+
     mydir = lldbtest.TestBase.compute_mydir(__file__)
 
     @swiftTest
-    @skipIf(oslist=["windows", "linux"])
+    @skipIf(oslist=['windows', 'linux'])
+    @skipIf(bugnumber="rdar://116529018")
     def test(self):
         """Test step-in to async functions"""
         self.build()
-        src = lldb.SBFileSpec("main.swift")
-        _, process, _, _ = lldbutil.run_to_source_breakpoint(self, "await", src)
+        src = lldb.SBFileSpec('main.swift')
+        _, process, _, _ = lldbutil.run_to_source_breakpoint(self, 'await', src)
 
         # When run with debug info enabled builds, this prevents stepping from
         # stopping in Swift Concurrency runtime functions.
-        self.runCmd(
-            "settings set target.process.thread.step-avoid-libraries libswift_Concurrency.dylib"
-        )
+        self.runCmd("settings set target.process.thread.step-avoid-libraries libswift_Concurrency.dylib")
 
         # All thread actions are done on the currently selected thread.
         thread = process.GetSelectedThread
@@ -57,10 +56,9 @@ class TestCase(lldbtest.TestBase):
                     continue
 
                 # The entry function is missing this prefix dedicating resume functions.
-                prefix = re.compile(r"^\([0-9]+\) await resume partial function for ")
-                self.assertEqual(
-                    prefix.sub("", caller_after), prefix.sub("", caller_before)
-                )
+                prefix = re.compile(r'^\([0-9]+\) await resume partial function for ')
+                self.assertEqual(prefix.sub('', caller_after),
+                                 prefix.sub('', caller_before))
                 num_async_steps += 1
 
         self.assertGreater(num_async_steps, 0)

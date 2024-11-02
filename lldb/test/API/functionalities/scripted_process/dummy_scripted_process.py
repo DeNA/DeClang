@@ -69,7 +69,7 @@ class DummyScriptedThread(ScriptedThread):
         return lldb.eStateStopped
 
     def get_stop_reason(self) -> Dict[str, Any]:
-        return { "type": lldb.eStopReasonTrace, "data": {} }
+        return {"type": lldb.eStopReasonTrace, "data": {}}
 
     def get_register_context(self) -> str:
         return struct.pack(

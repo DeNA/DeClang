@@ -57,6 +57,7 @@
 #include "clang/AST/DeclObjC.h"
 
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 
 using namespace lldb_private;
 
@@ -64,22 +65,21 @@ char ClangUserExpression::ID;
 
 ClangUserExpression::ClangUserExpression(
     ExecutionContextScope &exe_scope, llvm::StringRef expr,
-    llvm::StringRef prefix, lldb::LanguageType language,
-    ResultType desired_type, const EvaluateExpressionOptions &options,
-    ValueObject *ctx_obj)
+    llvm::StringRef prefix, SourceLanguage language, ResultType desired_type,
+    const EvaluateExpressionOptions &options, ValueObject *ctx_obj)
     : LLVMUserExpression(exe_scope, expr, prefix, language, desired_type,
                          options),
       m_type_system_helper(*m_target_wp.lock(), options.GetExecutionPolicy() ==
                                                     eExecutionPolicyTopLevel),
       m_result_delegate(exe_scope.CalculateTarget()), m_ctx_obj(ctx_obj) {
-  switch (m_language) {
-  case lldb::eLanguageTypeC_plus_plus:
+  switch (m_language.name) {
+  case llvm::dwarf::DW_LNAME_C_plus_plus:
     m_allow_cxx = true;
     break;
-  case lldb::eLanguageTypeObjC:
+  case llvm::dwarf::DW_LNAME_ObjC:
     m_allow_objc = true;
     break;
-  case lldb::eLanguageTypeObjC_plus_plus:
+  case llvm::dwarf::DW_LNAME_ObjC_plus_plus:
   default:
     m_allow_cxx = true;
     m_allow_objc = true;
@@ -332,12 +332,11 @@ bool ClangUserExpression::SetupPersistentState(DiagnosticManager &diagnostic_man
       m_result_delegate.RegisterPersistentState(persistent_state);
     } else {
       diagnostic_manager.PutString(
-          eDiagnosticSeverityError,
-          "couldn't start parsing (no persistent data)");
+          lldb::eSeverityError, "couldn't start parsing (no persistent data)");
       return false;
     }
   } else {
-    diagnostic_manager.PutString(eDiagnosticSeverityError,
+    diagnostic_manager.PutString(lldb::eSeverityError,
                                  "error: couldn't start parsing (no target)");
     return false;
   }
@@ -385,12 +384,11 @@ static void SetupDeclVendor(ExecutionContext &exe_ctx, Target *target,
     // The error stream already contains several Clang diagnostics that might
     // be either errors or warnings, so just print them all as one remark
     // diagnostic to prevent that the message starts with "error: error:".
-    diagnostic_manager.PutString(eDiagnosticSeverityRemark,
-                                 error_stream.GetString());
+    diagnostic_manager.PutString(lldb::eSeverityInfo, error_stream.GetString());
     return;
   }
 
-  diagnostic_manager.PutString(eDiagnosticSeverityError,
+  diagnostic_manager.PutString(lldb::eSeverityError,
                                "Unknown error while loading modules needed for "
                                "current compilation unit.");
 }
@@ -425,7 +423,7 @@ void ClangUserExpression::CreateSourceCode(
 
     if (!m_source_code->GetText(m_transformed_text, exe_ctx, !m_ctx_obj,
                                 for_completion, modules_to_import)) {
-      diagnostic_manager.PutString(eDiagnosticSeverityError,
+      diagnostic_manager.PutString(lldb::eSeverityError,
                                    "couldn't construct expression body");
       return;
     }
@@ -489,18 +487,18 @@ CppModuleConfiguration GetModuleConfig(lldb::LanguageType language,
 
   // Build a list of files we need to analyze to build the configuration.
   FileSpecList files;
-  for (const FileSpec &f : sc.comp_unit->GetSupportFiles())
-    files.AppendIfUnique(f);
+  for (auto &f : sc.comp_unit->GetSupportFiles())
+    files.AppendIfUnique(f->Materialize());
   // We also need to look at external modules in the case of -gmodules as they
   // contain the support files for libc++ and the C library.
   llvm::DenseSet<SymbolFile *> visited_symbol_files;
   sc.comp_unit->ForEachExternalModule(
       visited_symbol_files, [&files](Module &module) {
         for (std::size_t i = 0; i < module.GetNumCompileUnits(); ++i) {
-          const FileSpecList &support_files =
+          const SupportFileList &support_files =
               module.GetCompileUnitAtIndex(i)->GetSupportFiles();
-          for (const FileSpec &f : support_files) {
-            files.AppendIfUnique(f);
+          for (auto &f : support_files) {
+            files.AppendIfUnique(f->Materialize());
           }
         }
         return false;
@@ -509,7 +507,7 @@ CppModuleConfiguration GetModuleConfig(lldb::LanguageType language,
   LLDB_LOG(log, "[C++ module config] Found {0} support files to analyze",
            files.GetSize());
   if (log && log->GetVerbose()) {
-    for (const FileSpec &f : files)
+    for (auto &f : files)
       LLDB_LOGV(log, "[C++ module config] Analyzing support file: {0}",
                 f.GetPath());
   }
@@ -532,7 +530,7 @@ bool ClangUserExpression::PrepareForParsing(
   ScanContext(exe_ctx, err);
 
   if (!err.Success()) {
-    diagnostic_manager.PutString(eDiagnosticSeverityWarning, err.AsCString());
+    diagnostic_manager.PutString(lldb::eSeverityWarning, err.AsCString());
   }
 
   ////////////////////////////////////
@@ -565,7 +563,7 @@ bool ClangUserExpression::TryParse(
 
   if (!DeclMap()->WillParse(exe_ctx, GetMaterializer())) {
     diagnostic_manager.PutString(
-        eDiagnosticSeverityError,
+        lldb::eSeverityError,
         "current process state is unsuitable for expression parsing");
     return false;
   }
@@ -611,9 +609,9 @@ bool ClangUserExpression::TryParse(
     if (!jit_error.Success()) {
       const char *error_cstr = jit_error.AsCString();
       if (error_cstr && error_cstr[0])
-        diagnostic_manager.PutString(eDiagnosticSeverityError, error_cstr);
+        diagnostic_manager.PutString(lldb::eSeverityError, error_cstr);
       else
-        diagnostic_manager.PutString(eDiagnosticSeverityError,
+        diagnostic_manager.PutString(lldb::eSeverityError,
                                      "expression can't be interpreted or run");
       return false;
     }
@@ -624,7 +622,8 @@ bool ClangUserExpression::TryParse(
 void ClangUserExpression::SetupCppModuleImports(ExecutionContext &exe_ctx) {
   Log *log = GetLog(LLDBLog::Expressions);
 
-  CppModuleConfiguration module_config = GetModuleConfig(m_language, exe_ctx);
+  CppModuleConfiguration module_config =
+      GetModuleConfig(m_language.AsLanguageType(), exe_ctx);
   m_imported_cpp_modules = module_config.GetImportedModules();
   m_include_directories = module_config.GetIncludeDirs();
 
@@ -662,7 +661,7 @@ bool ClangUserExpression::Parse(DiagnosticManager &diagnostic_manager,
   Target *target = exe_ctx.GetTargetPtr();
 
   if (!target) {
-    diagnostic_manager.PutString(eDiagnosticSeverityError, "invalid target");
+    diagnostic_manager.PutString(lldb::eSeverityError, "invalid target");
     return false;
   }
 
@@ -714,11 +713,9 @@ bool ClangUserExpression::Parse(DiagnosticManager &diagnostic_manager,
     if (!static_init_error.Success()) {
       const char *error_cstr = static_init_error.AsCString();
       if (error_cstr && error_cstr[0])
-        diagnostic_manager.Printf(eDiagnosticSeverityError,
-                                  "%s\n",
-                                  error_cstr);
+        diagnostic_manager.Printf(lldb::eSeverityError, "%s\n", error_cstr);
       else
-        diagnostic_manager.PutString(eDiagnosticSeverityError,
+        diagnostic_manager.PutString(lldb::eSeverityError,
                                      "couldn't run static initializers\n");
       return false;
     }
@@ -742,7 +739,7 @@ bool ClangUserExpression::Parse(DiagnosticManager &diagnostic_manager,
     if (register_execution_unit) {
       if (auto *persistent_state =
               exe_ctx.GetTargetPtr()->GetPersistentExpressionStateForLanguage(
-                  m_language))
+                  m_language.AsLanguageType()))
         persistent_state->RegisterExecutionUnit(m_execution_unit_sp);
     }
   }
@@ -831,7 +828,7 @@ bool ClangUserExpression::Complete(ExecutionContext &exe_ctx,
 
   if (!DeclMap()->WillParse(exe_ctx, GetMaterializer())) {
     diagnostic_manager.PutString(
-        eDiagnosticSeverityError,
+        lldb::eSeverityError,
         "current process state is unsuitable for expression parsing");
 
     return false;
@@ -880,8 +877,7 @@ lldb::addr_t ClangUserExpression::GetCppObjectPointer(
   // We're inside a C++ class method. This could potentially be an unnamed
   // lambda structure. If the lambda captured a "this", that should be
   // the object pointer.
-  if (auto thisChildSP =
-          valobj_sp->GetChildMemberWithName(ConstString("this"), true)) {
+  if (auto thisChildSP = valobj_sp->GetChildMemberWithName("this")) {
     valobj_sp = thisChildSP;
   }
 
@@ -920,7 +916,7 @@ bool ClangUserExpression::AddArguments(ExecutionContext &exe_ctx,
       object_name.SetCString("self");
     } else {
       diagnostic_manager.PutString(
-          eDiagnosticSeverityError,
+          lldb::eSeverityError,
           "need object pointer but don't know the language");
       return false;
     }
@@ -957,7 +953,7 @@ bool ClangUserExpression::AddArguments(ExecutionContext &exe_ctx,
 
       if (!object_ptr_error.Success()) {
         diagnostic_manager.Printf(
-            eDiagnosticSeverityWarning,
+            lldb::eSeverityWarning,
             "couldn't get cmd pointer (substituting NULL): %s",
             object_ptr_error.AsCString());
         cmd_ptr = 0;
@@ -980,6 +976,8 @@ lldb::ExpressionVariableSP ClangUserExpression::GetResultAfterDematerialization(
     ExecutionContextScope *exe_scope) {
   return m_result_delegate.GetVariable();
 }
+
+char ClangUserExpression::ClangUserExpressionHelper::ID;
 
 void ClangUserExpression::ClangUserExpressionHelper::ResetDeclMap(
     ExecutionContext &exe_ctx,

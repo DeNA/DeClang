@@ -16,7 +16,11 @@
 
 #include "mlir/Target/LLVMIR/Dialect/AMX/AMXToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/ArmNeon/ArmNeonToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/ArmSME/ArmSMEToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/ArmSVE/ArmSVEToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/GPU/GPUToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMIRToLLVMTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/NVVM/NVVMToLLVMIRTranslation.h"
 #include "mlir/Target/LLVMIR/Dialect/OpenACC/OpenACCToLLVMIRTranslation.h"
@@ -32,13 +36,23 @@ class DialectRegistry;
 static inline void registerAllToLLVMIRTranslations(DialectRegistry &registry) {
   registerArmNeonDialectTranslation(registry);
   registerAMXDialectTranslation(registry);
+  registerArmSMEDialectTranslation(registry);
   registerArmSVEDialectTranslation(registry);
+  registerBuiltinDialectTranslation(registry);
+  registerGPUDialectTranslation(registry);
   registerLLVMDialectTranslation(registry);
   registerNVVMDialectTranslation(registry);
   registerOpenACCDialectTranslation(registry);
   registerOpenMPDialectTranslation(registry);
   registerROCDLDialectTranslation(registry);
   registerX86VectorDialectTranslation(registry);
+}
+
+/// Registers all dialects that can be translated from LLVM IR and the
+/// corresponding translation interfaces.
+static inline void
+registerAllFromLLVMIRTranslations(DialectRegistry &registry) {
+  registerLLVMDialectImport(registry);
 }
 } // namespace mlir
 

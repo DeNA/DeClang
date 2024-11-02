@@ -6,6 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "lldb/lldb-types.h"
+
 #include "ABIAArch64.h"
 #include "ABIMacOSX_arm64.h"
 #include "ABISysV_arm64.h"
@@ -14,6 +16,9 @@
 #include "lldb/Target/Process.h"
 
 #include <bitset>
+#include <optional>
+
+using namespace lldb;
 
 LLDB_PLUGIN_DEFINE(ABIAArch64)
 
@@ -28,14 +33,35 @@ void ABIAArch64::Terminate() {
 }
 
 lldb::addr_t ABIAArch64::FixCodeAddress(lldb::addr_t pc) {
-  if (lldb::ProcessSP process_sp = GetProcessSP())
-    return FixAddress(pc, process_sp->GetCodeAddressMask());
+  if (lldb::ProcessSP process_sp = GetProcessSP()) {
+    // b55 is the highest bit outside TBI (if it's enabled), use
+    // it to determine if the high bits are set to 0 or 1.
+    const addr_t pac_sign_extension = 0x0080000000000000ULL;
+    addr_t mask = process_sp->GetCodeAddressMask();
+    // Test if the high memory mask has been overriden separately
+    if (pc & pac_sign_extension &&
+        process_sp->GetHighmemCodeAddressMask() != LLDB_INVALID_ADDRESS_MASK)
+      mask = process_sp->GetHighmemCodeAddressMask();
+
+    if (mask != LLDB_INVALID_ADDRESS_MASK)
+      return FixAddress(pc, mask);
+  }
   return pc;
 }
 
 lldb::addr_t ABIAArch64::FixDataAddress(lldb::addr_t pc) {
-  if (lldb::ProcessSP process_sp = GetProcessSP())
-    return FixAddress(pc, process_sp->GetDataAddressMask());
+  if (lldb::ProcessSP process_sp = GetProcessSP()) {
+    // b55 is the highest bit outside TBI (if it's enabled), use
+    // it to determine if the high bits are set to 0 or 1.
+    const addr_t pac_sign_extension = 0x0080000000000000ULL;
+    addr_t mask = process_sp->GetDataAddressMask();
+    // Test if the high memory mask has been overriden separately
+    if (pc & pac_sign_extension &&
+        process_sp->GetHighmemDataAddressMask() != LLDB_INVALID_ADDRESS_MASK)
+      mask = process_sp->GetHighmemDataAddressMask();
+    if (mask != LLDB_INVALID_ADDRESS_MASK)
+      return FixAddress(pc, mask);
+  }
   return pc;
 }
 
@@ -75,11 +101,11 @@ uint32_t ABIAArch64::GetGenericNum(llvm::StringRef name) {
 
 static void addPartialRegisters(
     std::vector<lldb_private::DynamicRegisterInfo::Register> &regs,
-    llvm::ArrayRef<llvm::Optional<uint32_t>> full_reg_indices,
+    llvm::ArrayRef<std::optional<uint32_t>> full_reg_indices,
     uint32_t full_reg_size, const char *partial_reg_format,
     uint32_t partial_reg_size, lldb::Encoding encoding, lldb::Format format) {
   for (auto it : llvm::enumerate(full_reg_indices)) {
-    llvm::Optional<uint32_t> full_reg_index = it.value();
+    std::optional<uint32_t> full_reg_index = it.value();
     if (!full_reg_index || regs[*full_reg_index].byte_size != full_reg_size)
       return;
 
@@ -108,8 +134,8 @@ void ABIAArch64::AugmentRegisterInfo(
 
   lldb_private::ConstString sp_string{"sp"};
 
-  std::array<llvm::Optional<uint32_t>, 32> x_regs;
-  std::array<llvm::Optional<uint32_t>, 32> v_regs;
+  std::array<std::optional<uint32_t>, 32> x_regs;
+  std::array<std::optional<uint32_t>, 32> v_regs;
 
   for (auto it : llvm::enumerate(regs)) {
     lldb_private::DynamicRegisterInfo::Register &info = it.value();

@@ -1,8 +1,8 @@
-; RUN: opt -licm -verify-memoryssa -S < %s | FileCheck %s
+; RUN: opt -passes=licm -verify-memoryssa -S < %s | FileCheck %s
 ; REQUIRES: asserts
 
 target datalayout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
-target triple = "aarch64-unknown-none-eabi"
+target triple = "aarch64"
 
 ; CHECK-LABEL: @e()
 define void @e() {

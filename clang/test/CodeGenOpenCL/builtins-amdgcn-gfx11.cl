@@ -3,6 +3,8 @@
 // RUN: %clang_cc1 -triple amdgcn-unknown-unknown -target-cpu gfx1101 -S -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple amdgcn-unknown-unknown -target-cpu gfx1102 -S -emit-llvm -o - %s | FileCheck %s
 // RUN: %clang_cc1 -triple amdgcn-unknown-unknown -target-cpu gfx1103 -S -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -triple amdgcn-unknown-unknown -target-cpu gfx1150 -S -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -triple amdgcn-unknown-unknown -target-cpu gfx1151 -S -emit-llvm -o - %s | FileCheck %s
 
 typedef unsigned int uint;
 typedef unsigned long ulong;
@@ -30,4 +32,22 @@ void test_s_sendmsg_rtnl(global ulong* out) {
 void test_ds_bvh_stack_rtn(global uint2* out, uint addr, uint data, uint4 data1)
 {
   *out = __builtin_amdgcn_ds_bvh_stack_rtn(addr, data, data1, 128);
+}
+
+// CHECK-LABEL: @test_permlane64(
+// CHECK: call i32 @llvm.amdgcn.permlane64(i32 %a)
+void test_permlane64(global uint* out, uint a) {
+  *out = __builtin_amdgcn_permlane64(a);
+}
+
+// CHECK-LABEL: @test_s_wait_event_export_ready
+// CHECK: call void @llvm.amdgcn.s.wait.event.export.ready
+void test_s_wait_event_export_ready() {
+  __builtin_amdgcn_s_wait_event_export_ready();
+}
+
+// CHECK-LABEL: @test_global_add_f32
+// CHECK: call float @llvm.amdgcn.global.atomic.fadd.f32.p1.f32(ptr addrspace(1) %{{.*}}, float %{{.*}})
+void test_global_add_f32(float *rtn, global float *addr, float x) {
+  *rtn = __builtin_amdgcn_global_atomic_fadd_f32(addr, x);
 }

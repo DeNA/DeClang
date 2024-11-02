@@ -10,13 +10,14 @@
 #define LLDB_SOURCE_PLUGINS_OBJECTFILE_MACH_O_OBJECTFILEMACHO_H
 
 #include "lldb/Core/Address.h"
-#include "lldb/Core/FileSpecList.h"
 #include "lldb/Host/SafeMachO.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/FileSpecList.h"
 #include "lldb/Utility/RangeMap.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/UUID.h"
+#include <optional>
 
 // This class needs to be hidden as eventually belongs in a plugin that
 // will export the ObjectFile protocol
@@ -119,6 +120,9 @@ public:
 
   uint32_t GetNumThreadContexts() override;
 
+  std::vector<std::tuple<lldb::offset_t, lldb::offset_t>>
+  FindLC_NOTEByName(std::string name);
+
   std::string GetIdentifierString() override;
 
   lldb_private::AddressableBits GetAddressableBits() override;
@@ -126,6 +130,8 @@ public:
   bool GetCorefileMainBinaryInfo(lldb::addr_t &value, bool &value_is_offset,
                                  lldb_private::UUID &uuid,
                                  ObjectFile::BinaryType &type) override;
+
+  bool GetCorefileThreadExtraInfos(std::vector<lldb::tid_t> &tids) override;
 
   bool LoadCoreFileImages(lldb_private::Process &process) override;
 
@@ -143,6 +149,8 @@ public:
   llvm::VersionTuple GetSDKVersion() override;
 
   bool GetIsDynamicLinkEditor() override;
+
+  bool CanTrustAddressRanges() override;
 
   static bool ParseHeader(lldb_private::DataExtractor &data,
                           lldb::offset_t *data_offset_ptr,
@@ -220,14 +228,6 @@ protected:
 
   bool SectionIsLoadable(const lldb_private::Section *section);
 
-  llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section) override;
-
-#ifdef LLDB_ENABLE_SWIFT
-  bool
-  CanContainSwiftReflectionData(const lldb_private::Section &section) override;
-#endif // LLDB_ENABLE_SWIFT
-
   /// A corefile may include metadata about all of the binaries that were
   /// present in the process when the corefile was taken.  This is only
   /// implemented for Mach-O files for now; we'll generalize it when we
@@ -271,13 +271,13 @@ protected:
   static lldb_private::ConstString GetSegmentNameOBJC();
   static lldb_private::ConstString GetSegmentNameLINKEDIT();
   static lldb_private::ConstString GetSegmentNameDWARF();
+  static lldb_private::ConstString GetSegmentNameLLVM_COV();
   static lldb_private::ConstString GetSectionNameEHFrame();
 
   llvm::MachO::dysymtab_command m_dysymtab;
-  std::vector<llvm::MachO::segment_command_64> m_mach_segments;
   std::vector<llvm::MachO::section_64> m_mach_sections;
-  llvm::Optional<llvm::VersionTuple> m_min_os_version;
-  llvm::Optional<llvm::VersionTuple> m_sdk_versions;
+  std::optional<llvm::VersionTuple> m_min_os_version;
+  std::optional<llvm::VersionTuple> m_sdk_versions;
   typedef lldb_private::RangeVector<uint32_t, uint32_t> FileRangeArray;
   lldb_private::Address m_entry_point_address;
   FileRangeArray m_thread_context_offsets;

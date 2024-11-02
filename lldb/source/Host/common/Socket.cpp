@@ -17,6 +17,7 @@
 #include "lldb/Utility/Log.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Regex.h"
@@ -86,8 +87,7 @@ llvm::Error Socket::Initialize() {
   if (err == 0) {
     if (wsaData.wVersion < wVersion) {
       WSACleanup();
-      return llvm::make_error<llvm::StringError>(
-          "WSASock version is not expected.", llvm::inconvertibleErrorCode());
+      return llvm::createStringError("WSASock version is not expected.");
     }
   } else {
     return llvm::errorCodeToError(llvm::mapWindowsError(::WSAGetLastError()));

@@ -16,6 +16,7 @@
 include "mlir/Dialect/DLTI/DLTIBase.td"
 include "mlir/Dialect/GPU/IR/GPUBase.td"
 include "mlir/Dialect/GPU/IR/ParallelLoopMapperAttr.td"
+include "mlir/Dialect/GPU/TransformOps/GPUDeviceMappingAttr.td"
 include "mlir/IR/EnumAttr.td"
 include "mlir/IR/FunctionInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
@@ -179,7 +180,7 @@ def GPU_SubgroupSizeOp : GPU_Op<"subgroup_size", [
 
 def GPU_GPUFuncOp : GPU_Op<"func", [
     HasParent<"GPUModuleOp">, AutomaticAllocationScope, FunctionOpInterface,
-    IsolatedFromAbove, Symbol
+    IsolatedFromAbove
   ]> {
   let summary = "Function executable on a GPU";
 
@@ -203,6 +204,14 @@ def GPU_GPUFuncOp : GPU_Op<"func", [
     lock-step. Synchronization ops such as "gpu.barrier" should be used to
     coordinate work items. Declarations of GPU functions, i.e. not having the
     body region, are not supported.
+
+    A function may optionally be annotated with the block and/or grid sizes
+    that will be used when it is launched using the `gpu.known_block_size` and
+    `gpu.known_grid_size` attributes, respectively. If set, these attributes must
+    be arrays of three 32-bit integers giving the x, y, and z launch dimensions.
+    Launching a kernel that has these annotations, or that calls a function with
+    these annotations, using a block size or grid size other than what is specified
+    is undefined behavior.
 
     Syntax:
 
@@ -241,7 +250,11 @@ def GPU_GPUFuncOp : GPU_Op<"func", [
     attribution.
   }];
 
-  let arguments = (ins TypeAttrOf<FunctionType>:$function_type);
+  let arguments = (ins TypeAttrOf<FunctionType>:$function_type,
+                       OptionalAttr<DictArrayAttr>:$arg_attrs,
+                       OptionalAttr<DictArrayAttr>:$res_attrs,
+                       OptionalAttr<DictArrayAttr>:$workgroup_attrib_attrs,
+                       OptionalAttr<DictArrayAttr>:$private_attrib_attrs);
   let regions = (region AnyRegion:$body);
 
   let skipDefaultBuilders = 1;
@@ -268,11 +281,17 @@ def GPU_GPUFuncOp : GPU_Op<"func", [
       return attr ? attr.getInt() : 0;
     }
 
+    /// Return the index of the first workgroup attribution in the block argument
+    /// list.
+    unsigned getFirstWorkgroupAttributionIndex() {
+      return getFunctionType().getNumInputs();
+    }
+
     /// Returns a list of block arguments that correspond to buffers located in
     /// the workgroup memory
     ArrayRef<BlockArgument> getWorkgroupAttributions() {
       auto begin =
-          std::next(getBody().args_begin(), getFunctionType().getNumInputs());
+          std::next(getBody().args_begin(), getFirstWorkgroupAttributionIndex());
       auto end = std::next(begin, getNumWorkgroupAttributions());
       return {begin, end};
     }
@@ -281,20 +300,47 @@ def GPU_GPUFuncOp : GPU_Op<"func", [
     /// workgroup memory.
     BlockArgument addWorkgroupAttribution(Type type, Location loc);
 
+    /// Get the workgroup attribution attribute dictionary for the attribution
+    /// at index `index`, counted from the start of the workgroup attributions.
+    DictionaryAttr getworkgroupAttributionAttrs(unsigned index);
+
+    /// Set the workgroup attribution attribute dictionary for the attribution
+    /// at index `index`, counted from the start of the workgroup attributions.
+    void setworkgroupAttributionAttrs(unsigned index, DictionaryAttr value);
+
+    /// Get an attribute for a workgroup attribution. `index` is counted
+    /// from the start of the workgroup attributions, not the start of the block.
+    Attribute getWorkgroupAttributionAttr(unsigned index, StringAttr name);
+    Attribute getWorkgroupAttributionAttr(unsigned index, StringRef name) {
+      return getWorkgroupAttributionAttr(index, StringAttr::get((*this)->getContext(), name));
+    }
+
+    /// Set an attribute for a workgroup attribution. `index` is counted
+    /// from the start of the workgroup attributions, not the start of the block.
+    /// A null `value` removes an attributino attribute.
+    void setWorkgroupAttributionAttr(unsigned index, StringAttr name, Attribute value);
+    void setWorkgroupAttributionAttr(unsigned index, StringRef name, Attribute value) {
+      return setWorkgroupAttributionAttr(index, StringAttr::get((*this)->getContext(), name), value);
+    }
+
     /// Returns the number of buffers located in the private memory.
     unsigned getNumPrivateAttributions() {
       return getBody().getNumArguments() - getFunctionType().getNumInputs() -
           getNumWorkgroupAttributions();
     }
 
+    /// Returns the index of the first private buffer in the block argument list.
+    unsigned getFirstPrivateAttributionIndex() {
+      // Buffers on the private memory always come after buffers on the workgroup
+      // memory.
+      return getFunctionType().getNumInputs() + getNumWorkgroupAttributions();
+    }
+
     /// Returns a list of block arguments that correspond to buffers located in
     /// the private memory.
     ArrayRef<BlockArgument> getPrivateAttributions() {
-      // Buffers on the private memory always come after buffers on the workgroup
-      // memory.
       auto begin =
-          std::next(getBody().args_begin(),
-                    getFunctionType().getNumInputs() + getNumWorkgroupAttributions());
+          std::next(getBody().args_begin(), getFirstPrivateAttributionIndex());
       return {begin, getBody().args_end()};
     }
 
@@ -302,10 +348,63 @@ def GPU_GPUFuncOp : GPU_Op<"func", [
     /// private memory.
     BlockArgument addPrivateAttribution(Type type, Location loc);
 
+    /// Get the private attribution attribute dictionary for the attribution
+    /// at index `index`, counted from the start of the private attributions.
+    DictionaryAttr getPrivateAttributionAttrs(unsigned index);
+
+    /// Set the private attribution attribute dictionary for the attribution
+    /// at index `index`, counted from the start of the private attributions.
+    void setPrivateAttributionAttrs(unsigned index, DictionaryAttr value);
+
+    /// Get an attribute for a private attribution. `index` is counted
+    /// from the start of the private attributions, not the start of the block.
+    Attribute getPrivateAttributionAttr(unsigned index, StringAttr name);
+    Attribute getPrivateAttributionAttr(unsigned index, StringRef name) {
+      return getPrivateAttributionAttr(index, StringAttr::get((*this)->getContext(), name));
+    }
+
+    /// Set an attribute for a private attribution. `index` is counted
+    /// from the start of the private attributions, not the start of the block.
+    /// A null `value` removes an attribute.
+    void setPrivateAttributionAttr(unsigned index, StringAttr name, Attribute value);
+    void setPrivateAttributionAttr(unsigned index, StringRef name, Attribute value) {
+      return setPrivateAttributionAttr(index, StringAttr::get((*this)->getContext(), name), value);
+    }
+
     /// Returns the name of the attribute containing the number of buffers
     /// located in the workgroup memory.
     static StringRef getNumWorkgroupAttributionsAttrName() {
       return "workgroup_attributions";
+    }
+
+    static constexpr StringLiteral getKnownBlockSizeAttrName() {
+      return StringLiteral("gpu.known_block_size");
+    }
+
+    static constexpr StringLiteral getKnownGridSizeAttrName() {
+      return StringLiteral("gpu.known_grid_size");
+    }
+
+    /// Returns the block size this kernel will be launched with along
+    /// dimension `dim` if known. The value of gpu.thread_id dim will be strictly
+    /// less than this size.
+    std::optional<uint32_t> getKnownBlockSize(gpu::Dimension dim) {
+      if (auto array =
+        (*this)->getAttrOfType<DenseI32ArrayAttr>(getKnownBlockSizeAttrName())) {
+        return array[static_cast<uint32_t>(dim)];
+      }
+      return std::nullopt;
+    }
+
+    /// Returns the grid size this kernel will be launched with along
+    /// dimension `dim` if known. The value of gpu.block_id dim will be strictly
+    /// less than this size.
+    std::optional<uint32_t> getKnownGridSize(gpu::Dimension dim) {
+      if (auto array =
+        (*this)->getAttrOfType<DenseI32ArrayAttr>(getKnownGridSizeAttrName())) {
+        return array[static_cast<uint32_t>(dim)];
+      }
+      return std::nullopt;
     }
 
     /// Returns the argument types of this function.
@@ -326,6 +425,8 @@ def GPU_GPUFuncOp : GPU_Op<"func", [
     LogicalResult verifyBody();
   }];
   let hasCustomAssemblyFormat = 1;
+
+  let hasVerifier = 1;
 }
 
 def GPU_LaunchFuncOp : GPU_Op<"launch_func",
@@ -493,12 +594,14 @@ def GPU_LaunchOp : GPU_Op<"launch", [
     to the amount of dynamic shared memory a kernel's workgroup should be
     allocated; when this operand is not present, a zero size is assumed.
 
-    The body region has _twelve_ arguments, grouped as follows:
+    The body region has at least _twelve_ arguments, grouped as follows:
 
     -   three arguments that contain block identifiers along x,y,z dimensions;
     -   three arguments that contain thread identifiers along x,y,z dimensions;
     -   operands of the `gpu.launch` operation as is (i.e. the operands for
         grid and block sizes).
+    -   a variadic number of Workgroup memory attributions.
+    -   a variadic number of Private memory attributions.
 
     Syntax:
 
@@ -507,8 +610,11 @@ def GPU_LaunchOp : GPU_Op<"launch", [
                              `block` `(` ssa-id-list `)` `in` ssa-reassignment
                              `threads` `(` ssa-id-list `)` `in` ssa-reassignment
                              (dynamic_shared_memory_size ssa-use)?
+                             memory-attribution
                              region attr-dict?
     ssa-reassignment ::= `(` ssa-id `=` ssa-use (`,` ssa-id `=` ssa-use)* `)`
+    memory-attribution ::= (`workgroup` `(` ssa-id-and-type-list `)`)?
+                           (`private` `(` ssa-id-and-type-list `)`)?
     ```
 
     Example:
@@ -539,6 +645,18 @@ def GPU_LaunchOp : GPU_Op<"launch", [
       "some_op"(%bx, %tx) : (index, index) -> ()
       %3 = "memref.load"(%val1, %bx) : (memref<?xf32, 1>, index) -> f32
     }
+
+    // Launch with memory attributions.
+    gpu.launch blocks(%bx, %by, %bz) in (%sz_bx = %0, %sz_by = %1, %sz_bz = %2)
+               threads(%tx, %ty, %tz) in (%sz_tx = %3, %sz_ty = %4, %sz_tz = %5)
+               workgroup(%workgroup: memref<32xf32, 3>)
+               private(%private: memref<1xf32, 5>) {
+      // Block and thread identifiers, as well as block/grid sizes are
+      // immediately usable inside body region.
+      "some_op"(%bx, %tx) : (index, index) -> ()
+      // Assuming %val1 is defined outside the gpu.launch region.
+      %42 = load %workgroup[%bx] : memref<32xf32, 3>
+    }
     ```
 
     Rationale: using operation/block arguments gives analyses a clear way of
@@ -558,7 +676,9 @@ def GPU_LaunchOp : GPU_Op<"launch", [
       "Value":$blockSizeZ,
       CArg<"Value", "nullptr">:$dynamicSharedMemorySize,
       CArg<"Type", "nullptr">:$asyncTokenType,
-      CArg<"ValueRange", "{}">:$asyncDependencies)>
+      CArg<"ValueRange", "{}">:$asyncDependencies,
+      CArg<"TypeRange", "{}">:$workgroupAttributions,
+      CArg<"TypeRange", "{}">:$privateAttributions)>
   ];
 
   let extraClassDeclaration = [{
@@ -589,6 +709,57 @@ def GPU_LaunchOp : GPU_Op<"launch", [
     /// The number of region attributes containing the launch configuration,
     /// placed in the leading positions of the argument list.
     static constexpr unsigned kNumConfigRegionAttributes = 12;
+
+    /// Returns the keywords used in the custom syntax for this Op.
+    static StringRef getWorkgroupKeyword() { return "workgroup"; }
+    static StringRef getPrivateKeyword() { return "private"; }
+
+    /// Returns the number of buffers located in the workgroup memory.
+    unsigned getNumWorkgroupAttributions() {
+      auto attr = (*this)->getAttrOfType<IntegerAttr>(
+          getNumWorkgroupAttributionsAttrName());
+      return attr ? attr.getInt() : 0;
+    }
+
+    /// Returns a list of block arguments that correspond to buffers located in
+    /// the workgroup memory
+    ArrayRef<BlockArgument> getWorkgroupAttributions() {
+      auto begin =
+          std::next(getBody().args_begin(), kNumConfigRegionAttributes);
+      auto end = std::next(begin, getNumWorkgroupAttributions());
+      return {begin, end};
+    }
+
+    /// Adds a new block argument that corresponds to buffers located in
+    /// workgroup memory.
+    BlockArgument addWorkgroupAttribution(Type type, Location loc);
+
+    /// Returns the number of buffers located in the private memory.
+    unsigned getNumPrivateAttributions() {
+      return getBody().getNumArguments() - kNumConfigRegionAttributes -
+          getNumWorkgroupAttributions();
+    }
+
+    /// Returns a list of block arguments that correspond to buffers located in
+    /// the private memory.
+    ArrayRef<BlockArgument> getPrivateAttributions() {
+      // Buffers on the private memory always come after buffers on the workgroup
+      // memory.
+      auto begin =
+          std::next(getBody().args_begin(),
+                    kNumConfigRegionAttributes + getNumWorkgroupAttributions());
+      return {begin, getBody().args_end()};
+    }
+
+    /// Adds a new block argument that corresponds to buffers located in
+    /// private memory.
+    BlockArgument addPrivateAttribution(Type type, Location loc);
+
+    /// Returns the name of the attribute containing the number of buffers
+    /// located in the workgroup memory.
+    static StringRef getNumWorkgroupAttributionsAttrName() {
+      return "workgroup_attributions";
+    }
   }];
 
   let hasCanonicalizer = 1;
@@ -685,7 +856,8 @@ def GPU_AllReduceOperationAttr : EnumAttr<GPU_Dialect, GPU_AllReduceOperation,
 def GPU_AllReduceOp : GPU_Op<"all_reduce",
     [SameOperandsAndResultType, IsolatedFromAbove]>,
     Arguments<(ins AnyType:$value,
-               OptionalAttr<GPU_AllReduceOperationAttr>:$op)>,
+               OptionalAttr<GPU_AllReduceOperationAttr>:$op,
+               UnitAttr:$uniform)>,
     Results<(outs AnyType)> {
   let summary = "Reduce values among workgroup.";
   let description = [{
@@ -708,19 +880,23 @@ def GPU_AllReduceOp : GPU_Op<"all_reduce",
     accumulation as code region. The accumulation operation must be one of:
     `add`, `and`, `max`, `min`, `mul`, `or`, `xor`.
 
-    Either none or all work items of a workgroup need to execute this op
-    in convergence.
+    If `uniform` flag is set either none or all work items of a workgroup
+    need to execute this op in convergence.
   }];
   let regions = (region AnyRegion:$body);
-  let assemblyFormat = [{ custom<AllReduceOperation>($op) $value $body attr-dict
+  let assemblyFormat = [{ custom<AllReduceOperation>($op) $value
+                          (`uniform` $uniform^)? $body attr-dict
                           `:` functional-type(operands, results) }];
+
+  let hasFolder = 1;
   let hasRegionVerifier = 1;
 }
 
 def GPU_SubgroupReduceOp : GPU_Op<"subgroup_reduce",
     [SameOperandsAndResultType]>,
     Arguments<(ins AnyType:$value,
-               GPU_AllReduceOperationAttr:$op)>,
+               GPU_AllReduceOperationAttr:$op,
+               UnitAttr:$uniform)>,
     Results<(outs AnyType)> {
   let summary = "Reduce values among subgroup.";
   let description = [{
@@ -733,11 +909,14 @@ def GPU_SubgroupReduceOp : GPU_Op<"subgroup_reduce",
     %1 = gpu.subgroup_reduce add %0 : (f32) -> (f32)
     ```
 
-    Either none or all work items of a subgroup need to execute this op
-    in convergence.
+    If `uniform` flag is set either none or all work items of a subgroup
+    need to execute this op in convergence.
   }];
-  let assemblyFormat = [{ custom<AllReduceOperation>($op) $value attr-dict
+  let assemblyFormat = [{ custom<AllReduceOperation>($op) $value
+                          (`uniform` $uniform^)? attr-dict
                           `:` functional-type(operands, results) }];
+
+  let hasFolder = 1;
   let hasVerifier = 1;
 }
 
@@ -757,14 +936,17 @@ def GPU_ShuffleMode : I32EnumAttr<"ShuffleMode",
 def GPU_ShuffleModeAttr : EnumAttr<GPU_Dialect, GPU_ShuffleMode,
                                    "shuffle_mode">;
 
-def I32OrF32 : TypeConstraint<Or<[I32.predicate, F32.predicate]>,
-                                 "i32 or f32">;
+def I32I64F32OrF64 : TypeConstraint<Or<[I32.predicate,
+                                        I64.predicate,
+                                        F32.predicate,
+                                        F64.predicate]>,
+                                       "i32, i64, f32 or f64">;
 
 def GPU_ShuffleOp : GPU_Op<
     "shuffle", [Pure, AllTypesMatch<["value", "shuffleResult"]>]>,
-    Arguments<(ins I32OrF32:$value, I32:$offset, I32:$width,
+    Arguments<(ins I32I64F32OrF64:$value, I32:$offset, I32:$width,
                GPU_ShuffleModeAttr:$mode)>,
-    Results<(outs I32OrF32:$shuffleResult, I1:$valid)> {
+    Results<(outs I32I64F32OrF64:$shuffleResult, I1:$valid)> {
   let summary = "Shuffles values within a subgroup.";
   let description = [{
     The "shuffle" op moves values to a different invocation within the same
@@ -882,6 +1064,19 @@ def GPU_HostRegisterOp : GPU_Op<"host_register">,
   let assemblyFormat = "$value attr-dict `:` type($value)";
 }
 
+def GPU_HostUnregisterOp : GPU_Op<"host_unregister">,
+    Arguments<(ins AnyUnrankedMemRef:$value)> {
+  let summary = "Unregisters a memref for access from device.";
+  let description = [{
+      This op unmaps the provided host buffer from the device address space.
+
+      This operation may not be supported in every environment, there is not yet a
+          way to check at runtime whether this feature is supported.
+  }];
+
+  let assemblyFormat = "$value attr-dict `:` type($value)";
+}
+
 def GPU_WaitOp : GPU_Op<"wait", [GPU_AsyncOpInterface]> {
   let summary = "Wait for async gpu ops to complete.";
   let description = [{
@@ -960,7 +1155,7 @@ def GPU_AllocOp : GPU_Op<"alloc", [
                  Optional<GPU_AsyncToken>:$asyncToken);
 
   let extraClassDeclaration = [{
-    MemRefType getType() { return getMemref().getType().cast<MemRefType>(); }
+    MemRefType getType() { return ::llvm::cast<MemRefType>(getMemref().getType()); }
   }];
 
   let assemblyFormat = [{
@@ -1101,7 +1296,11 @@ def GPU_SubgroupMmaLoadMatrixOp : GPU_Op<"subgroup_mma_load_matrix",
     determined using `indices`. The matrix being loaded into is the result.  The
     `leadDimension` attribute specifies the leading dimension size of the source
     matrix which eventually allows the lowering to determine the size of each
-    row.
+    row.  If the `transpose` attribute is present then the op does a transposed load.
+
+    For integer types, the resulting `!gpu.mma_matrix` type needs to specify the
+    signedness of the data if the matrix type is an `A` or `B` operand for
+    `gpu.subgroup_mma_compute`.
 
     This op is often meant to be used along with `gpu.subgroup_mma_store_matrix` and
     `gpu.subgroup_mma_compute`.
@@ -1114,9 +1313,10 @@ def GPU_SubgroupMmaLoadMatrixOp : GPU_Op<"subgroup_mma_load_matrix",
     ```
   }];
 
-  let arguments = (ins Arg<MemRefOf<[F16, F32]>, "", [MemRead]>:$srcMemref,
+  let arguments = (ins Arg<GPU_MMAMemRef, "", [MemRead]>:$srcMemref,
                   Variadic<Index>:$indices,
-                  IndexAttr:$leadDimension);
+                  IndexAttr:$leadDimension,
+                  OptionalAttr<UnitAttr>:$transpose);
 
   let results = (outs GPU_MMAMatrix:$res);
 
@@ -1139,7 +1339,8 @@ def GPU_SubgroupMmaStoreMatrixOp : GPU_Op<"subgroup_mma_store_matrix",
     `!gpu.mma_matrix` is the source value containing the data to be stored into the
     destination memref which can be in global or shared memory.  The store address
     is determined using the indices provided. The `leadDimension` attribute
-    specifies the leading dimension of the destination matrix.
+    specifies the leading dimension of the destination matrix. If the
+    `transpose` attribute is present then the op does a transposed store.
 
     This op is often meant to be used along with `gpu.subgroup_mma_load_matrix` and
     `gpu.subgroup_mma_compute`.
@@ -1152,10 +1353,11 @@ def GPU_SubgroupMmaStoreMatrixOp : GPU_Op<"subgroup_mma_store_matrix",
     ```
   }];
 
-  let arguments = (ins Arg<MMAMatrixOf<[F16, F32]>>:$src,
-                  Arg<MemRefOf<[F16, F32]>, "",[MemWrite]>:$dstMemref,
+  let arguments = (ins Arg<MMAMatrixOf<[SI8, UI8, I32, F16, F32]>>:$src,
+                  Arg<GPU_MMAMemRef, "",[MemWrite]>:$dstMemref,
                   Variadic<Index>:$indices,
-                  IndexAttr:$leadDimension);
+                  IndexAttr:$leadDimension,
+                  OptionalAttr<UnitAttr>:$transpose);
 
   let assemblyFormat = [{
     $src`,` $dstMemref`[`$indices`]` attr-dict `:` type($src)`,` type($dstMemref)
@@ -1163,8 +1365,8 @@ def GPU_SubgroupMmaStoreMatrixOp : GPU_Op<"subgroup_mma_store_matrix",
   let hasVerifier = 1;
 }
 
-def GPU_SubgroupMmaComputeOp : GPU_Op<"subgroup_mma_compute",
-   [Pure, AllTypesMatch<["opC", "res"]>]>{
+def GPU_SubgroupMmaComputeOp
+    : GPU_Op<"subgroup_mma_compute", [Pure, AllTypesMatch<["opC", "res"]>]> {
 
   let summary = "GPU warp synchronous matrix multiply accumulate";
 
@@ -1173,9 +1375,18 @@ def GPU_SubgroupMmaComputeOp : GPU_Op<"subgroup_mma_compute",
     operation using all the threads in a subgroup.
 
     This operation takes three `!gpu.mma_matrix`s as arguments: these hold `A`,
-     `B` and `C`operands for the mma operation. The operation performed is represented
+    `B` and `C`operands for the mma operation. The operation performed is represented
     as `C += A * B`. The op returns a `!gpu.mma_matrix` which contains the result of
-    the operation held by all threads in a subgroup.
+    the operation held by all threads in a subgroup. `a_transpose` or
+    `b_transpose` if present, signify that the respective operand was loaded in a
+    transposed manner. The transpose operands are required to map to correct
+    underlying intrisics but they currently do not seem to affect correctness
+    even if they are absent given that the operands were loaded correctly using
+    the `transpose` attribute in `gpu.subgroup_mma_load_matrix` op.
+
+    For integer types, the `A` and `B` matrices carry their signedness with their
+    types. The accumulator type is expected to be signless and imply a signed integer
+    with a greater width than the other two operands.
 
     This op is meant to be used along with `gpu.subgroup_mma_store_matrix` and
     `gpu.subgroup_mma_load_matrix` ops.
@@ -1189,11 +1400,13 @@ def GPU_SubgroupMmaComputeOp : GPU_Op<"subgroup_mma_compute",
     ```
   }];
 
-  let arguments = (ins Arg<MMAMatrixOf<[F16, F32]>>:$opA,
-                  Arg<MMAMatrixOf<[F16, F32]>>:$opB,
-                  Arg<MMAMatrixOf<[F16, F32]>>:$opC);
+  let arguments = (ins Arg<MMAMatrixOf<[SI8, UI8, F16, F32]>>:$opA,
+                  Arg<MMAMatrixOf<[SI8, UI8, F16, F32]>>:$opB,
+                  Arg<MMAMatrixOf<[I32, F16, F32]>>:$opC,
+                  OptionalAttr<UnitAttr>:$a_transpose,
+                  OptionalAttr<UnitAttr>:$b_transpose);
 
-  let results = (outs GPU_MMAMatrix:$res);
+  let results = (outs GPU_MMAMatrix : $res);
 
   let assemblyFormat = [{
     $opA`,` $opB`,` $opC attr-dict `:` type($opA)`,` type($opB) `->` type($res)
@@ -1205,7 +1418,7 @@ def GPU_SubgroupMmaConstantMatrixOp : GPU_Op<"subgroup_mma_constant_matrix",
     [Pure,
      TypesMatchWith<"value type matches element type of mma_matrix",
                     "res", "value",
-                    "$_self.cast<gpu::MMAMatrixType>().getElementType()">]>{
+                    "::llvm::cast<gpu::MMAMatrixType>($_self).getElementType()">]>{
 
   let summary = "GPU warp synchronous constant matrix";
 
@@ -1213,11 +1426,11 @@ def GPU_SubgroupMmaConstantMatrixOp : GPU_Op<"subgroup_mma_constant_matrix",
     The `gpu.subgroup_mma_constant_matrix` creates a `!gpu.mma_matrix` with
     constant elements.
 
-    The operation takes a scalar input and return a `!gpu.mma_matrix` where each
-    element of is equal to the operand constant. The destination mma_matrix type
-    must have elememt type equal to the constant type. Since the layout of
-    `!gpu.mma_matrix` is opaque this only support setting all the elements to
-    the same value.
+    The operation takes a scalar input and return a `!gpu.mma_matrix` where
+    each element of is equal to the operand constant. The destination
+    mma_matrix type must have elememt type equal to the constant type. Since
+    the layout of `!gpu.mma_matrix` is opaque this only support setting all the
+    elements to the same value.
 
     This op is meant to be used along with `gpu.subgroup_mma_compute`.
 
@@ -1231,13 +1444,13 @@ def GPU_SubgroupMmaConstantMatrixOp : GPU_Op<"subgroup_mma_constant_matrix",
     ```
   }];
 
-  let arguments = (ins AnyTypeOf<[F16, F32]>:$value);
+  let arguments = (ins AnyTypeOf<[SI8, UI8, I32, F16, F32]>:$value);
 
   let results = (outs GPU_MMAMatrix:$res);
 
   let extraClassDeclaration = [{
     gpu::MMAMatrixType getType() {
-      return getRes().getType().cast<gpu::MMAMatrixType>();
+      return ::llvm::cast<gpu::MMAMatrixType>(getRes().getType());
     }
   }];
 
@@ -1246,19 +1459,35 @@ def GPU_SubgroupMmaConstantMatrixOp : GPU_Op<"subgroup_mma_constant_matrix",
   }];
 }
 
-def GPU_ElementwiseOpAdd  : I32EnumAttrCase<"ADDF", 0, "addf">;
-def GPU_ElementwiseOpMul  : I32EnumAttrCase<"MULF", 1, "mulf">;
-def GPU_ElementwiseOpMaxF : I32EnumAttrCase<"MAXF", 2, "maxf">;
-def GPU_ElementwiseOpMinF : I32EnumAttrCase<"MINF", 3, "minf">;
-def GPU_ElementwiseOpDivF : I32EnumAttrCase<"DIVF", 4, "divf">;
+def GPU_ElementwiseOpAddF  : I32EnumAttrCase<"ADDF", 0, "addf">;
+def GPU_ElementwiseOpMulF  : I32EnumAttrCase<"MULF", 1, "mulf">;
+def GPU_ElementwiseOpSUBF  : I32EnumAttrCase<"SUBF", 2, "subf">;
+def GPU_ElementwiseOpMaxF : I32EnumAttrCase<"MAXF", 3, "maxf">;
+def GPU_ElementwiseOpMinF : I32EnumAttrCase<"MINF", 4, "minf">;
+def GPU_ElementwiseOpDivF : I32EnumAttrCase<"DIVF", 5, "divf">;
+def GPU_ElementwiseOpAddI  : I32EnumAttrCase<"ADDI", 6, "addi">;
+def GPU_ElementwiseOpMulI  : I32EnumAttrCase<"MULI", 7, "muli">;
+def GPU_ElementwiseOpSUBI  : I32EnumAttrCase<"SUBI", 8, "subi">;
+def GPU_ElementwiseOpDivS : I32EnumAttrCase<"DIVS", 9, "divs">;
+def GPU_ElementwiseOpDivU : I32EnumAttrCase<"DIVU", 10, "divu">;
+def GPU_ElementwiseOpNEGF : I32EnumAttrCase<"NEGATEF", 11, "negatef">;
+def GPU_ElementwiseOpNEGS : I32EnumAttrCase<"NEGATES", 12, "negates">;
 
 def MMAElementWise : I32EnumAttr<"MMAElementwiseOp",
   "elementwise operation to apply to mma matrix", [
-    GPU_ElementwiseOpAdd,
-    GPU_ElementwiseOpMul,
+    GPU_ElementwiseOpAddF,
+    GPU_ElementwiseOpMulF,
+    GPU_ElementwiseOpSUBF,
     GPU_ElementwiseOpMaxF,
     GPU_ElementwiseOpMinF,
-    GPU_ElementwiseOpDivF
+    GPU_ElementwiseOpDivF,
+    GPU_ElementwiseOpAddI,
+    GPU_ElementwiseOpMulI,
+    GPU_ElementwiseOpSUBI,
+    GPU_ElementwiseOpDivS,
+    GPU_ElementwiseOpDivU,
+    GPU_ElementwiseOpNEGF,
+    GPU_ElementwiseOpNEGS
   ]> {
   let genSpecializedAttr = 0;
   let cppNamespace = "::mlir::gpu";
@@ -1298,12 +1527,587 @@ def GPU_SubgroupMmaElementwiseOp : GPU_Op<"subgroup_mma_elementwise",
 
   let extraClassDeclaration = [{
     gpu::MMAMatrixType getType() {
-      return getRes().getType().cast<gpu::MMAMatrixType>();
+      return ::llvm::cast<gpu::MMAMatrixType>(getRes().getType());
     }
   }];
 
   let assemblyFormat = [{
     $opType $args attr-dict `:` functional-type($args, $res)
+  }];
+}
+
+//
+// Operation on sparse matrices, called from the host
+// (currently lowers to cuSparse for CUDA only, no ROCM lowering).
+//
+def GPU_CreateDnTensorOp : GPU_Op<"create_dn_tensor", [GPU_AsyncOpInterface, AttrSizedOperandSegments]> {
+  let summary = "Create dense tensor operation";
+  let description = [{
+    The `gpu.create_dn_tensor` operation initializes a dense tensor from
+    the given values buffer and sizes. The buffer must already be copied
+    from the host to the device prior to using this operation. The
+    operation returns a handle to the dense tensor descriptor.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %dmat, %token = gpu.create_dn_tensor async [%dep] %mem, %dims : index, index into memref<?xf64>
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       AnyMemRef:$memref,
+                       Variadic<Index>:$dims);
+  let results = (outs Res<GPU_SparseDnTensorHandle>:$dnTensor, Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $memref `,` $dims attr-dict `:` type($dims) `into` type($memref)
+  }];
+}
+
+def GPU_DestroyDnTensorOp : GPU_Op<"destroy_dn_tensor", [GPU_AsyncOpInterface]> {
+  let summary = "Destroy dense tensor operation";
+  let description = [{
+    The `gpu.destroy_dn_tensor` operation releases all resources of a dense
+    tensor represented by a handle that was previously created by a
+    `gpu.create_dn_tensor` operation.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %token = gpu.destroy_dn_tensor async [%dep] %dnTensor
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       Arg<GPU_SparseDnTensorHandle>:$dnTensor);
+  let results = (outs Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $dnTensor attr-dict
+  }];
+}
+
+def GPU_CreateCooOp : GPU_Op<"create_coo", [GPU_AsyncOpInterface]> {
+  let summary = "Create sparse matrix in COO format operation";
+  let description = [{
+    The `gpu.create_coo` operation initializes a sparse matrix in COO format
+    with the given sizes from the given index and values buffers. The buffers
+    must already be copied from the host to the device prior to using this
+    operation. The operation returns a handle to the sparse matrix descriptor.
+    Note that this operation builds the COO in SoA format.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %spmat, %token = gpu.create_coo async [%dep] %rows, %cols, %nnz, %rowIdx,
+        %colIdx, %values : memref<?xindex>, memref<?xindex>, memref<?xf64>
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       Index:$rows,
+                       Index:$cols,
+                       Index:$nnz,
+                       AnyMemRef:$rowIdxs,
+                       AnyMemRef:$colIdxs,
+                       AnyMemRef:$values);
+  let results = (outs Res<GPU_SparseSpMatHandle>:$spmat,
+                      Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $rows `,` $cols `,` $nnz `,` $rowIdxs `,` $colIdxs `,` $values attr-dict
+    `:` type($rowIdxs) `,` type($colIdxs) `,` type($values)
+  }];
+}
+
+def GPU_CreateCooAoSOp : GPU_Op<"create_coo_aos", [GPU_AsyncOpInterface]> {
+  let summary = "Create sparse matrix in COO format operation (AoS)";
+  let description = [{
+    The `gpu.create_coo_aos` operation initializes a sparse matrix in COO format
+    with the given sizes from the given index and values buffers. The buffers
+    must already be copied from the host to the device prior to using this
+    operation. The operation returns a handle to the sparse matrix descriptor.
+    Unlike the default `gpu.create_coo` operation, this operation builds the
+    COO format from a single index buffer in AoS format (note that this
+    feature has been deprecated in cuSparse 11.2).
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %spmat, %token = gpu.create_coo_aos async [%dep] %rows, %cols, %nnz, %idxs,
+        %values : memref<?xindex>, memref<?xf64>
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                   Index:$rows,
+                   Index:$cols,
+                   Index:$nnz,
+                   AnyMemRef:$idxs,
+                   AnyMemRef:$values);
+  let results = (outs Res<GPU_SparseSpMatHandle>:$spmat,
+                      Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $rows `,` $cols `,` $nnz `,` $idxs `,` $values attr-dict
+    `:` type($idxs) `,` type($values)
+  }];
+}
+
+def GPU_CreateCsrOp : GPU_Op<"create_csr", [GPU_AsyncOpInterface]> {
+  let summary = "Create sparse matrix in CSR format operation";
+  let description = [{
+    The `gpu.create_csr` operation initializes a sparse matrix in CSR format
+    with the given sizes from the given position, index, and values buffers.
+    The buffers must already be copied from the host to the device prior to
+    using this operation. The operation returns a handle to the sparse
+    matrix descriptor.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %spmat, %token = gpu.create_csr async [%dep] %rows, %cols, %nnz, %rowPos,
+        %colIdx, %values : memref<?xindex>, memref<?xindex>, memref<?xf64>
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                   Index:$rows,
+                   Index:$cols,
+                   Index:$nnz,
+                   AnyMemRef:$rowPos,
+                   AnyMemRef:$colIdxs,
+                   AnyMemRef:$values);
+  let results = (outs Res<GPU_SparseSpMatHandle>:$spmat,
+                      Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $rows `,` $cols `,` $nnz `,` $rowPos `,` $colIdxs `,` $values attr-dict
+    `:` type($rowPos) `,` type($colIdxs) `,` type($values)
+  }];
+}
+
+
+def GPU_Create2To4SpMatOp : GPU_Op<"create_2to4_spmat", [GPU_AsyncOpInterface]> {
+  let summary = "Create sparse matrix with 2:4 sparsity operation";
+  let description = [{
+    The `gpu.create_2to4_spmat` operation initializes a sparse matrix in dense
+    format with 2:4 sparsity.
+    The buffers must already be copied from the host to the device prior to
+    using this operation. The operation returns a handle to the sparse
+    matrix descriptor.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %spmat, %token = gpu.create_2to4_spmat async [%dep] %rows, %cols, %mem : memref<?xf64>
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       Index:$rows,
+                       Index:$cols,
+                       AnyMemRef:$memref);
+  let results = (outs Res<GPU_SparseSpMatHandle>:$spMat, 
+                      Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $rows `,` $cols `,` $memref attr-dict `:` type($memref)
+  }];
+}
+
+def GPU_DestroySpMatOp : GPU_Op<"destroy_sp_mat", [GPU_AsyncOpInterface]> {
+  let summary = "Destroy sparse matrix operation";
+  let description = [{
+    The `gpu.destroy_sp_mat` operation releases all resources of a sparse
+    matrix represented by a handle that was previously created by a
+    one of the sparse matrix creation operations.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %token = gpu.destroy_sp_mat async [%dep] %spmat
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       Arg<GPU_SparseSpMatHandle>:$spmat);
+  let results = (outs Optional<GPU_AsyncToken>:$asyncToken);
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies) $spmat attr-dict
+  }];
+}
+
+// To avoid coupling this dialect with cusparse.h specifics, we hardcoded magic
+// literals in this enum. Note that this should be kept in sync with
+// cusparseOperation_t in cusparse.h:
+// typedef enum {
+// CUSPARSE_OPERATION_NON_TRANSPOSE       = 0,
+// CUSPARSE_OPERATION_TRANSPOSE           = 1,
+// CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE = 2
+// } cusparseOperation_t;
+// TODO: find a proper way to keep them in sync?
+def GPU_TransposeMode : I32EnumAttr<"TransposeMode",
+    "transpose mode of sparse matrix supported by sparse tensor ops",
+    [
+      I32EnumAttrCase<"NON_TRANSPOSE", 0>,
+      I32EnumAttrCase<"TRANSPOSE", 1>,
+      I32EnumAttrCase<"CONJUGATE_TRANSPOSE", 2>,
+    ]> {
+      let genSpecializedAttr = 0;
+      let cppNamespace = GPU_Dialect.cppNamespace;
+}
+
+def GPU_TransposeModeAttr : EnumAttr<GPU_Dialect, GPU_TransposeMode,
+                                   "mat_transpose_mode">{
+  let defaultValue = "TransposeMode::NON_TRANSPOSE";
+}
+
+def GPU_SpMVBufferSizeOp : GPU_Op<"spmv_buffer_size", [GPU_AsyncOpInterface]> {
+  let summary = "Precompute buffersize for SpMV operation";
+  let description = [{
+    The `gpu.spmv_buffer_size` operation returns the buffer size required
+    to perform the SpMV operation on the given sparse matrix and dense vectors.
+    The operation expects handles returned by previous sparse operations
+    to construct an environment and the operands for SpMV.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    The matrix arguments can also be associated with one of the following
+    operators: NON_TRANSPOSE, TRANSPOSE, CONJUGATE_TRANSPOSE. The default value
+    is NON_TRANSPOSE.
+
+    Example:
+
+    ```mlir
+    %buffersz, %token = gpu.spmv_buffer_size async [%dep] %spmatA{TRANSPOSE}, %dnX, %dnY into f32
+    ```
+  }];
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       GPU_TransposeModeAttr:$modeA,
+                       GPU_SparseSpMatHandle:$spmatA,
+                       GPU_SparseDnTensorHandle:$dnX,
+                       GPU_SparseDnTensorHandle:$dnY,
+                       TypeAttr:$computeType);
+  let results = (outs Res<Index>:$bufferSz,
+                      Optional<GPU_AsyncToken>:$asyncToken);
+
+  let builders = [OpBuilder<(ins
+      "Type":$bufferSz,
+      "Type":$asyncToken,
+      "ValueRange":$asyncDependencies,
+      "Value":$spmatA,
+      "Value":$dnX,
+      "Value":$dnY,
+      "Type":$computeType)
+      , [{
+    auto modeA = gpu::TransposeMode::NON_TRANSPOSE;
+    return build($_builder, $_state, bufferSz, asyncToken, asyncDependencies,
+                 modeA, spmatA, dnX, dnY, computeType);}]>
+  ];
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $spmatA (`{` $modeA^ `}`)? `,` $dnX `,` $dnY attr-dict  `into` $computeType
+  }];
+}
+
+def GPU_SpMVOp : GPU_Op<"spmv", [GPU_AsyncOpInterface]> {
+  let summary = "SpMV operation";
+  let description = [{
+    The `gpu.spmv` operation performs the SpMV operation on the given sparse matrix,
+    dense vectors, and buffer.  The operation expects handles returned by previous
+    sparse operations to construct an environment and the operands for SpMV. The
+    buffer must have been allocated on the device.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    The matrix arguments can also be associated with one of the following
+    operators: NON_TRANSPOSE, TRANSPOSE, CONJUGATE_TRANSPOSE. The default value
+    is NON_TRANSPOSE.
+
+    Example:
+
+    ```mlir
+    %token = gpu.spmv async [%dep] %spmatA{TRANSPOSE}, %dnX, %dnY : memref<?xf64> into bf16
+    ```
+  }];
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       GPU_TransposeModeAttr:$modeA,
+                       GPU_SparseSpMatHandle:$spmatA,
+                       GPU_SparseDnTensorHandle:$dnX,
+                       GPU_SparseDnTensorHandle:$dnY,
+                       TypeAttr:$computeType,
+                       AnyMemRef:$buffer);
+  let results = (outs Optional<GPU_AsyncToken>:$asyncToken);
+
+  let builders = [OpBuilder<(ins
+      "Type":$asyncToken,
+      "ValueRange":$asyncDependencies,
+      "Value":$spmatA,
+      "Value":$dnX,
+      "Value":$dnY,
+      "Type":$computeType,
+      "Value":$buffer), [{
+    auto modeA = gpu::TransposeMode::NON_TRANSPOSE;
+    return build($_builder, $_state, asyncToken, asyncDependencies, modeA,
+                 spmatA, dnX, dnY, computeType, buffer);}]>
+  ];
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $spmatA (`{` $modeA^ `}`)? `,` $dnX `,` $dnY `,` $buffer attr-dict `:` type($buffer) `into` $computeType
+  }];
+}
+
+def GPU_SpMMBufferSizeOp : GPU_Op<"spmm_buffer_size", [GPU_AsyncOpInterface, AttrSizedResultSegments]> {
+  let summary = "Precompute buffersize for SpMM operation";
+  let description = [{
+    The `gpu.spmm_buffer_size` operation returns the buffer size required
+    to perform the SpMM operation on the given sparse and dense matrix.
+    The operation expects handles returned by previous sparse operations
+    to construct an environment and the operands for SpMM.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    The matrix arguments can also be associated with one of the following
+    operators: NON_TRANSPOSE, TRANSPOSE, CONJUGATE_TRANSPOSE. The default value
+    is NON_TRANSPOSE.
+
+    Example:
+
+    ```mlir
+    %bufferszs, %token = gpu.spmm_buffer_size async [%dep] %spmatA{TRANSPOSE}, %dnmatB{TRANSPOSE}, %dnmatC : i64 into f32
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       GPU_TransposeModeAttr:$modeA,
+                       GPU_TransposeModeAttr:$modeB,
+                       GPU_SparseSpMatHandle:$spmatA,
+                       GPU_SparseDnTensorHandle:$dnmatB,
+                       GPU_SparseDnTensorHandle:$dnmatC,
+                       TypeAttr:$computeType);
+  let results = (outs Variadic<Index>:$bufferSzs,
+                      Optional<GPU_AsyncToken>:$asyncToken);
+
+  let builders = [OpBuilder<(ins
+      "Type":$bufferSzs,
+      "Type":$asyncToken,
+      "ValueRange":$asyncDependencies,
+      "Value":$spmatA,
+      "Value":$dnmatB,
+      "Value":$dnmatC,
+      "Type":$computeType), [{
+    auto modeA = gpu::TransposeMode::NON_TRANSPOSE;
+    auto modeB = gpu::TransposeMode::NON_TRANSPOSE;
+    return build($_builder, $_state, bufferSzs, asyncToken, asyncDependencies,
+                 modeA, modeB, spmatA, dnmatB, dnmatC, computeType);}]>
+  ];
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $spmatA (`{` $modeA^ `}`)? `,` $dnmatB (`{` $modeB^ `}`)? `,` $dnmatC attr-dict `:` type($bufferSzs) `into` $computeType
+  }];
+}
+
+def GPU_SpMMOp : GPU_Op<"spmm", [GPU_AsyncOpInterface, AttrSizedOperandSegments]> {
+  let summary = "SpMM operation";
+  let description = [{
+    The `gpu.spmm` operation performs the SpMM operation on the given sparse and
+    dense matrix, and buffer.  The operation expects handles returned by previous
+    sparse operations to construct an environment and the operands for SpMM. The
+    buffer must have been allocated on the device.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    The matrix arguments can also be associated with one of the following
+    operators: NON_TRANSPOSE, TRANSPOSE, CONJUGATE_TRANSPOSE. The default value
+    is NON_TRANSPOSE.
+
+    Example:
+
+    ```mlir
+    %token = gpu.spmm async [%dep] %spmatA{TRANSPOSE}, %dnmatB{TRANSPOSE}, %dnmatC, %buffers : type($buffers) into f32
+    ```
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                       GPU_TransposeModeAttr:$modeA,
+                       GPU_TransposeModeAttr:$modeB,
+                       GPU_SparseSpMatHandle:$spmatA,
+                       GPU_SparseDnTensorHandle:$dnmatB,
+                       GPU_SparseDnTensorHandle:$dnmatC,
+                       TypeAttr:$computeType,
+                       Variadic<AnyMemRef>:$buffers);
+  let results = (outs Optional<GPU_AsyncToken>:$asyncToken);
+
+  let builders = [OpBuilder<(ins
+      "Type":$asyncToken,
+      "ValueRange":$asyncDependencies,
+      "Value":$spmatA,
+      "Value":$dnmatB,
+      "Value":$dnmatC,
+      "Type":$computeType,
+      "ValueRange":$buffers), [{
+    auto modeA = gpu::TransposeMode::NON_TRANSPOSE;
+    auto modeB = gpu::TransposeMode::NON_TRANSPOSE;
+    return build($_builder, $_state, asyncToken, asyncDependencies, modeA,
+                 modeB, spmatA, dnmatB, dnmatC, computeType, buffers);}]>
+  ];
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $spmatA (`{` $modeA^ `}`)? `,` $dnmatB (`{` $modeB^ `}`)? `,` $dnmatC `,` $buffers attr-dict `:` type($buffers) `into` $computeType
+  }];
+}
+
+def GPU_SDDMMBufferSizeOp : GPU_Op<"sddmm_buffer_size", [GPU_AsyncOpInterface]> {
+  let summary = "Precompute buffersize for SDDMM operation";
+  let description = [{
+    The `gpu.sddmm_buffer_size` operation returns the buffer size required
+    to perform the SDDMM operation on the given sparse and dense matrices.
+    The operation expects handles returned by previous sparse operations
+    to construct an environment and the operands for SDDMM.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %buffersz, %token = gpu.sddmm_buffer_size async [%dep] %dnmatA{TRANSPOSE}, %dnmatB{TRANSPOSE}, %spmatC into f32
+    ```
+
+    The matrix arguments can also be associated with one of the following
+    operators: NON_TRANSPOSE, TRANSPOSE, CONJUGATE_TRANSPOSE. The default value
+    is NON_TRANSPOSE.
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                   GPU_TransposeModeAttr:$modeA,
+                   GPU_TransposeModeAttr:$modeB,
+                   GPU_SparseDnTensorHandle:$dnmatA,
+                   GPU_SparseDnTensorHandle:$dnmatB,
+                   GPU_SparseSpMatHandle:$spmatC,
+                   TypeAttr:$computeType);
+  let results = (outs Res<Index>:$bufferSz, Optional<GPU_AsyncToken>:$asyncToken);
+
+  let builders = [OpBuilder<(ins
+      "Type":$bufferSz,
+      "Type":$asyncToken,
+      "ValueRange":$asyncDependencies,
+      "Value":$dnmatA,
+      "Value":$dnmatB,
+      "Value":$spmatC,
+      "Type":$computeType), [{
+    auto modeA = gpu::TransposeMode::NON_TRANSPOSE;
+    auto modeB = gpu::TransposeMode::NON_TRANSPOSE;
+    return build($_builder, $_state, bufferSz, asyncToken, asyncDependencies,
+                 modeA, modeB, dnmatA, dnmatB, spmatC, computeType);}]>
+  ];
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $dnmatA (`{` $modeA^ `}`)? `,` $dnmatB (`{` $modeB^ `}`)? `,` $spmatC attr-dict `into` $computeType
+  }];
+}
+
+def GPU_SDDMMOp : GPU_Op<"sddmm", [GPU_AsyncOpInterface]> {
+  let summary = "SDDMM operation";
+  let description = [{
+    The `gpu.sddmm` operation performs the SDDMM operation on the given sparse and
+    dense matrices, and buffer.  The operation expects handles returned by previous
+    sparse operations to construct an environment and the operands for SDDMM. The
+    buffer must have been allocated on the device.
+
+    If the `async` keyword is present, the op is executed asynchronously (i.e.
+    it does not block until the execution has finished on the device). In
+    that case, it returns a !gpu.async.token in addition to the environment.
+
+    Example:
+
+    ```mlir
+    %token = gpu.sddmm async [%dep] %dnmatA{TRANSPOSE}, %dnmatB{TRANSPOSE}, %spmatC, %buffer into f32
+    ```
+
+    The matrix arguments can also be associated with one of the following
+    operators: NON_TRANSPOSE, TRANSPOSE, CONJUGATE_TRANSPOSE. The default value
+    is NON_TRANSPOSE.
+  }];
+
+  let arguments = (ins Variadic<GPU_AsyncToken>:$asyncDependencies,
+                   GPU_TransposeModeAttr:$modeA,
+                   GPU_TransposeModeAttr:$modeB,
+                   GPU_SparseDnTensorHandle:$dnmatA,
+                   GPU_SparseDnTensorHandle:$dnmatB,
+                   GPU_SparseSpMatHandle:$spmatC,
+                   TypeAttr:$computeType,
+                   AnyMemRef:$buffer);
+  let results = (outs Optional<GPU_AsyncToken>:$asyncToken);
+
+  let builders = [OpBuilder<(ins
+    "Type":$asyncToken,
+    "ValueRange":$asyncDependencies,
+    "Value":$dnmatA,
+    "Value":$dnmatB,
+    "Value":$spmatC,
+    "Type":$computeType,
+    "Value":$buffer), [{
+  auto modeA = gpu::TransposeMode::NON_TRANSPOSE;
+  auto modeB = gpu::TransposeMode::NON_TRANSPOSE;
+  return build($_builder, $_state, asyncToken, asyncDependencies, modeA,
+                modeB, dnmatA, dnmatB, spmatC, computeType, buffer);}]>
+  ];
+
+  let assemblyFormat = [{
+    custom<AsyncDependencies>(type($asyncToken), $asyncDependencies)
+    $dnmatA (`{` $modeA^ `}`)? `,` $dnmatB (`{` $modeB^ `}`)? `,` $spmatC `,` $buffer attr-dict `:` type($buffer) `into` $computeType
   }];
 }
 

@@ -17,7 +17,6 @@
 
 #include "llvm-c/lto.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/RemoteCachingService/Client.h"
@@ -27,6 +26,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Target/TargetOptions.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include <memory>
 #include <string>
@@ -41,7 +41,7 @@ struct TargetMachineBuilder {
   std::string MCpu;
   std::string MAttr;
   TargetOptions Options;
-  Optional<Reloc::Model> RelocModel;
+  std::optional<Reloc::Model> RelocModel;
   CodeGenOpt::Level CGOptLevel = CodeGenOpt::Aggressive;
 
   std::unique_ptr<TargetMachine> create() const;
@@ -57,13 +57,13 @@ public:
   virtual void write(const MemoryBuffer &OutputBuffer) = 0;
   virtual Error writeObject(const MemoryBuffer &OutputBuffer,
                             StringRef OutputPath);
-  virtual Optional<std::unique_ptr<MemoryBuffer>> getMappedBuffer() {
-    return None;
+  virtual std::optional<std::unique_ptr<MemoryBuffer>> getMappedBuffer() {
+    return std::nullopt;
   }
 
   virtual ~ModuleCacheEntry() {}
-protected:
-  Optional<std::string> computeCacheKey(
+
+  static std::optional<std::string> computeCacheKey(
       const ModuleSummaryIndex &Index, StringRef ModuleID,
       const FunctionImporter::ImportMapTy &ImportList,
       const FunctionImporter::ExportSetTy &ExportList,
@@ -161,7 +161,7 @@ public:
     } Type;
     std::unique_ptr<cas::ObjectStore> CAS;
     std::unique_ptr<cas::ActionCache> Cache;
-    Optional<cas::remote::ClientServices> Service;
+    std::optional<cas::remote::ClientServices> Service;
   };
 
   /// Provide a path to a directory where to store the cached files for
@@ -259,7 +259,7 @@ public:
   void setFreestanding(bool Enabled) { Freestanding = Enabled; }
 
   /// CodeModel
-  void setCodePICModel(Optional<Reloc::Model> Model) {
+  void setCodePICModel(std::optional<Reloc::Model> Model) {
     TMBuilder.RelocModel = Model;
   }
 

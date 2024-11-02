@@ -26,6 +26,7 @@
 #include "ReplaceRandomShuffleCheck.h"
 #include "ReturnBracedInitListCheck.h"
 #include "ShrinkToFitCheck.h"
+#include "TypeTraitsCheck.h"
 #include "UnaryStaticAssertCheck.h"
 #include "UseAutoCheck.h"
 #include "UseBoolLiteralsCheck.h"
@@ -37,6 +38,7 @@
 #include "UseNoexceptCheck.h"
 #include "UseNullptrCheck.h"
 #include "UseOverrideCheck.h"
+#include "UseStdPrintCheck.h"
 #include "UseTrailingReturnTypeCheck.h"
 #include "UseTransparentFunctorsCheck.h"
 #include "UseUncaughtExceptionsCheck.h"
@@ -44,8 +46,7 @@
 
 using namespace clang::ast_matchers;
 
-namespace clang {
-namespace tidy {
+namespace clang::tidy {
 namespace modernize {
 
 class ModernizeModule : public ClangTidyModule {
@@ -64,6 +65,7 @@ public:
     CheckFactories.registerCheck<MakeSharedCheck>("modernize-make-shared");
     CheckFactories.registerCheck<MakeUniqueCheck>("modernize-make-unique");
     CheckFactories.registerCheck<PassByValueCheck>("modernize-pass-by-value");
+    CheckFactories.registerCheck<UseStdPrintCheck>("modernize-use-std-print");
     CheckFactories.registerCheck<RawStringLiteralCheck>(
         "modernize-raw-string-literal");
     CheckFactories.registerCheck<RedundantVoidArgCheck>(
@@ -77,6 +79,7 @@ public:
     CheckFactories.registerCheck<ReturnBracedInitListCheck>(
         "modernize-return-braced-init-list");
     CheckFactories.registerCheck<ShrinkToFitCheck>("modernize-shrink-to-fit");
+    CheckFactories.registerCheck<TypeTraitsCheck>("modernize-type-traits");
     CheckFactories.registerCheck<UnaryStaticAssertCheck>(
         "modernize-unary-static-assert");
     CheckFactories.registerCheck<UseAutoCheck>("modernize-use-auto");
@@ -101,23 +104,6 @@ public:
         "modernize-use-uncaught-exceptions");
     CheckFactories.registerCheck<UseUsingCheck>("modernize-use-using");
   }
-
-  ClangTidyOptions getModuleOptions() override {
-    ClangTidyOptions Options;
-    auto &Opts = Options.CheckOptions;
-    // For types whose size in bytes is above this threshold, we prefer taking a
-    // const-reference than making a copy.
-    Opts["modernize-loop-convert.MaxCopySize"] = "16";
-
-    Opts["modernize-loop-convert.MinConfidence"] = "reasonable";
-    Opts["modernize-loop-convert.NamingStyle"] = "CamelCase";
-    Opts["modernize-pass-by-value.IncludeStyle"] = "llvm";    // Also: "google".
-    Opts["modernize-replace-auto-ptr.IncludeStyle"] = "llvm"; // Also: "google".
-
-    // Comma-separated list of macros that behave like NULL.
-    Opts["modernize-use-nullptr.NullMacros"] = "NULL";
-    return Options;
-  }
 };
 
 // Register the ModernizeTidyModule using this statically initialized variable.
@@ -130,5 +116,4 @@ static ClangTidyModuleRegistry::Add<ModernizeModule> X("modernize-module",
 // and thus register the ModernizeModule.
 volatile int ModernizeModuleAnchorSource = 0;
 
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy

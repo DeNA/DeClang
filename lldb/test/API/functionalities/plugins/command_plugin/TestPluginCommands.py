@@ -11,7 +11,6 @@ from lldbsuite.test import lldbutil
 class PluginCommandTestCase(TestBase):
     def setUp(self):
         TestBase.setUp(self)
-        self.generateSource("plugin.cpp")
 
     @skipIfNoSBHeaders
     # Requires a compatible arch and platform to link against the host's built
@@ -21,6 +20,7 @@ class PluginCommandTestCase(TestBase):
     @no_debug_info_test
     def test_load_plugin(self):
         """Test that plugins that load commands work correctly."""
+        self.generateSource("plugin.cpp")
 
         plugin_name = "plugin"
         if sys.platform.startswith("darwin"):

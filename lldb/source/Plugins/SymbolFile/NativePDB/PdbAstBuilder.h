@@ -11,11 +11,13 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Threading.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangASTImporter.h"
 
 #include "PdbIndex.h"
 #include "PdbSymUid.h"
+#include <optional>
 
 namespace clang {
 class TagDecl;
@@ -55,7 +57,7 @@ public:
 
   lldb_private::CompilerDeclContext GetTranslationUnitDecl();
 
-  llvm::Optional<lldb_private::CompilerDecl>
+  std::optional<lldb_private::CompilerDecl>
   GetOrCreateDeclForUid(PdbSymUid uid);
   clang::DeclContext *GetOrCreateDeclContextForUid(PdbSymUid uid);
   clang::DeclContext *GetParentDeclContext(PdbSymUid uid);
@@ -122,7 +124,9 @@ private:
                      TypeIndex func_ti, CompilerType func_ct,
                      uint32_t param_count, clang::StorageClass func_storage,
                      bool is_inline, clang::DeclContext *parent);
-  void ParseAllNamespacesPlusChildrenOf(llvm::Optional<llvm::StringRef> parent);
+  void ParseNamespace(clang::DeclContext &parent);
+  void ParseAllTypes();
+  void ParseAllFunctionsAndNonLocalVars();
   void ParseDeclsForSimpleContext(clang::DeclContext &context);
   void ParseBlockChildren(PdbCompilandSymId block_id);
 
@@ -135,7 +139,8 @@ private:
   TypeSystemClang &m_clang;
 
   ClangASTImporter m_importer;
-
+  llvm::once_flag m_parse_functions_and_non_local_vars;
+  llvm::once_flag m_parse_all_types;
   llvm::DenseMap<clang::Decl *, DeclStatus> m_decl_to_status;
   llvm::DenseMap<lldb::user_id_t, clang::Decl *> m_uid_to_decl;
   llvm::DenseMap<lldb::user_id_t, clang::QualType> m_uid_to_type;
@@ -145,6 +150,7 @@ private:
   llvm::DenseMap<lldb::opaque_compiler_type_t,
                  llvm::SmallSet<std::pair<llvm::StringRef, CompilerType>, 8>>
       m_cxx_record_map;
+  llvm::DenseSet<clang::NamespaceDecl *> m_parsed_namespaces;
 };
 
 } // namespace npdb

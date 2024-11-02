@@ -14,6 +14,7 @@
 #ifndef MLIR_DIALECT_GPU_IR_GPUDIALECT_H
 #define MLIR_DIALECT_GPU_IR_GPUDIALECT_H
 
+#include "mlir/Bytecode/BytecodeOpInterface.h"
 #include "mlir/Dialect/DLTI/Traits.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -25,6 +26,7 @@
 #include "mlir/Interfaces/InferIntRangeInterface.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "llvm/ADT/STLExtras.h"
 
 namespace mlir {
 namespace gpu {
@@ -162,6 +164,21 @@ public:
 // Adds a `gpu.async.token` to the front of the argument list.
 void addAsyncDependency(Operation *op, Value token);
 
+// Handle types for sparse.
+enum class SparseHandleKind { SpMat, DnTensor };
+
+template <SparseHandleKind K>
+class SparseHandleType
+    : public Type::TypeBase<SparseHandleType<K>, Type, TypeStorage> {
+public:
+  using Base =
+      typename Type::TypeBase<SparseHandleType<K>, Type, TypeStorage>::Base;
+  using Base::Base;
+};
+
+using SparseDnTensorHandleType = SparseHandleType<SparseHandleKind::DnTensor>;
+using SparseSpMatHandleType = SparseHandleType<SparseHandleKind::SpMat>;
+
 } // namespace gpu
 } // namespace mlir
 
@@ -170,6 +187,8 @@ void addAsyncDependency(Operation *op, Value token);
 #include "mlir/Dialect/GPU/IR/GPUOpsDialect.h.inc"
 
 #include "mlir/Dialect/GPU/IR/GPUOpInterfaces.h.inc"
+
+#include "mlir/Dialect/SCF/IR/DeviceMappingInterface.h"
 
 #define GET_ATTRDEF_CLASSES
 #include "mlir/Dialect/GPU/IR/GPUOpsAttributes.h.inc"

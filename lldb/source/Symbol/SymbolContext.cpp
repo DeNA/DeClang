@@ -71,7 +71,8 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
                                     const Address &addr, bool show_fullpaths,
                                     bool show_module, bool show_inlined_frames,
                                     bool show_function_arguments,
-                                    bool show_function_name) const {
+                                    bool show_function_name,
+                                    bool show_function_display_name) const {
   bool dumped_something = false;
   if (show_module && module_sp) {
     if (show_fullpaths)
@@ -92,6 +93,8 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
       ConstString name;
       if (!show_function_arguments)
         name = function->GetNameNoArguments(this);
+      if (!name && show_function_display_name)
+        name = function->GetDisplayName(this);
       if (!name)
         name = function->GetName(this);
       if (name)
@@ -145,7 +148,8 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
         const bool show_function_name = true;
         return inline_parent_sc.DumpStopContext(
             s, exe_scope, inline_parent_addr, show_fullpaths, show_module,
-            show_inlined_frames, show_function_arguments, show_function_name);
+            show_inlined_frames, show_function_arguments, show_function_name,
+            show_function_display_name);
       }
     } else {
       if (line_entry.IsValid()) {
@@ -163,7 +167,12 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
       dumped_something = true;
       if (symbol->GetType() == eSymbolTypeTrampoline)
         s->PutCString("symbol stub for: ");
-      symbol->GetName().Dump(s);
+      ConstString name;
+      if (show_function_display_name)
+        name = symbol->GetDisplayName(this);
+      if (!name)
+        name = symbol->GetName();
+      name.Dump(s);
     }
 
     if (addr.IsValid() && symbol->ValueIsAddress()) {
@@ -541,7 +550,7 @@ Block *SymbolContext::GetFunctionBlock() {
   return nullptr;
 }
 
-ConstString SymbolContext::GetInstanceVariableName() {
+llvm::StringRef SymbolContext::GetInstanceVariableName() {
   LanguageType lang_type = eLanguageTypeUnknown;
 
   if (Block *function_block = GetFunctionBlock())
@@ -771,14 +780,11 @@ const Symbol *SymbolContext::FindBestGlobalDataSymbol(ConstString name,
   Module *module = module_sp.get();
 
   auto ProcessMatches = [this, &name, &target,
-                         module](SymbolContextList &sc_list,
+                         module](const SymbolContextList &sc_list,
                                  Status &error) -> const Symbol * {
     llvm::SmallVector<const Symbol *, 1> external_symbols;
     llvm::SmallVector<const Symbol *, 1> internal_symbols;
-    const uint32_t matches = sc_list.GetSize();
-    for (uint32_t i = 0; i < matches; ++i) {
-      SymbolContext sym_ctx;
-      sc_list.GetContextAtIndex(i, sym_ctx);
+    for (const SymbolContext &sym_ctx : sc_list) {
       if (sym_ctx.symbol) {
         const Symbol *symbol = sym_ctx.symbol;
         const Address sym_address = symbol->GetAddress();

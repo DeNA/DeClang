@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <cassert>
 #include <map>
+#include <optional>
 
 using namespace llvm;
 
@@ -92,7 +93,7 @@ HexagonSubtarget::HexagonSubtarget(const Triple &TT, StringRef CPU,
 
 HexagonSubtarget &
 HexagonSubtarget::initializeSubtargetDependencies(StringRef CPU, StringRef FS) {
-  Optional<Hexagon::ArchEnum> ArchVer = Hexagon::getCpu(CPUString);
+  std::optional<Hexagon::ArchEnum> ArchVer = Hexagon::getCpu(CPUString);
   if (ArchVer)
     HexagonArchVersion = *ArchVer;
   else
@@ -222,7 +223,7 @@ bool HexagonSubtarget::isTypeForHVX(Type *VecTy, bool IncludeBool) const {
   // The given type may be something like <17 x i32>, which is not MVT,
   // but can be represented as (non-simple) EVT.
   EVT Ty = EVT::getEVT(VecTy, /*HandleUnknown*/false);
-  if (Ty.getSizeInBits() <= 64 || !Ty.getVectorElementType().isSimple())
+  if (!Ty.getVectorElementType().isSimple())
     return false;
 
   auto isHvxTy = [this, IncludeBool](MVT SimpleTy) {
@@ -236,7 +237,7 @@ bool HexagonSubtarget::isTypeForHVX(Type *VecTy, bool IncludeBool) const {
   // qualifies for HVX, dividing it in half after each step.
   MVT ElemTy = Ty.getVectorElementType().getSimpleVT();
   unsigned VecLen = PowerOf2Ceil(Ty.getVectorNumElements());
-  while (ElemTy.getSizeInBits() * VecLen > 64) {
+  while (VecLen > 1) {
     MVT SimpleTy = MVT::getVectorVT(ElemTy, VecLen);
     if (SimpleTy.isValid() && isHvxTy(SimpleTy))
       return true;
@@ -350,8 +351,7 @@ void HexagonSubtarget::CallMutation::apply(ScheduleDAGInstrs *DAGInstrs) {
     // The code below checks for all the physical registers, not just R0/D0/V0.
     else if (SchedRetvalOptimization) {
       const MachineInstr *MI = DAG->SUnits[su].getInstr();
-      if (MI->isCopy() &&
-          Register::isPhysicalRegister(MI->getOperand(1).getReg())) {
+      if (MI->isCopy() && MI->getOperand(1).getReg().isPhysical()) {
         // %vregX = COPY %r0
         VRegHoldingReg[MI->getOperand(0).getReg()] = MI->getOperand(1).getReg();
         LastVRegUse.erase(MI->getOperand(1).getReg());
@@ -363,7 +363,7 @@ void HexagonSubtarget::CallMutation::apply(ScheduleDAGInstrs *DAGInstrs) {
               VRegHoldingReg.count(MO.getReg())) {
             // <use of %vregX>
             LastVRegUse[VRegHoldingReg[MO.getReg()]] = &DAG->SUnits[su];
-          } else if (MO.isDef() && Register::isPhysicalRegister(MO.getReg())) {
+          } else if (MO.isDef() && MO.getReg().isPhysical()) {
             for (MCRegAliasIterator AI(MO.getReg(), &TRI, true); AI.isValid();
                  ++AI) {
               if (LastVRegUse.count(*AI) &&

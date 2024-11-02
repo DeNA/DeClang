@@ -126,7 +126,7 @@ public:
 
 private:
   llvm::cas::CachingOnDiskFileSystem &FS;
-  Optional<std::string> CASFileSystemRootID;
+  std::optional<std::string> CASFileSystemRootID;
 };
 
 /// Returns an IncludeTree containing the dependencies.
@@ -207,6 +207,61 @@ DependencyScanningTool::getIncludeTreeFromCompilerInvocation(
       std::move(Invocation), CWD, Consumer, *Controller, DiagsConsumer,
       VerboseOS, DiagGenerationAsCompilation);
   return Consumer.getIncludeTree();
+}
+
+llvm::Expected<P1689Rule> DependencyScanningTool::getP1689ModuleDependencyFile(
+    const CompileCommand &Command, StringRef CWD, std::string &MakeformatOutput,
+    std::string &MakeformatOutputPath) {
+  class P1689ModuleDependencyPrinterConsumer
+      : public MakeDependencyPrinterConsumer {
+  public:
+    P1689ModuleDependencyPrinterConsumer(P1689Rule &Rule,
+                                         const CompileCommand &Command)
+        : Filename(Command.Filename), Rule(Rule) {
+      Rule.PrimaryOutput = Command.Output;
+    }
+
+    void handleProvidedAndRequiredStdCXXModules(
+        std::optional<P1689ModuleInfo> Provided,
+        std::vector<P1689ModuleInfo> Requires) override {
+      Rule.Provides = Provided;
+      if (Rule.Provides)
+        Rule.Provides->SourcePath = Filename.str();
+      Rule.Requires = Requires;
+    }
+
+    StringRef getMakeFormatDependencyOutputPath() {
+      if (Opts->OutputFormat != DependencyOutputFormat::Make)
+        return {};
+      return Opts->OutputFile;
+    }
+
+  private:
+    StringRef Filename;
+    P1689Rule &Rule;
+  };
+
+  class P1689ActionController : public DependencyActionController {
+  public:
+    // The lookupModuleOutput is for clang modules. P1689 format don't need it.
+    std::string lookupModuleOutput(const ModuleID &,
+                                   ModuleOutputKind Kind) override {
+      return "";
+    }
+  };
+
+  P1689Rule Rule;
+  P1689ModuleDependencyPrinterConsumer Consumer(Rule, Command);
+  P1689ActionController Controller;
+  auto Result = Worker.computeDependencies(CWD, Command.CommandLine, Consumer,
+                                           Controller);
+  if (Result)
+    return std::move(Result);
+
+  MakeformatOutputPath = Consumer.getMakeFormatDependencyOutputPath();
+  if (!MakeformatOutputPath.empty())
+    Consumer.printDependencies(MakeformatOutput);
+  return Rule;
 }
 
 llvm::Expected<TranslationUnitDeps>

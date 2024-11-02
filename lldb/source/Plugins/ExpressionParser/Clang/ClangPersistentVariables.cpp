@@ -21,15 +21,17 @@
 #include "clang/AST/Decl.h"
 
 #include "llvm/ADT/StringMap.h"
+#include <optional>
 #include <memory>
 
 using namespace lldb;
 using namespace lldb_private;
 
+char ClangPersistentVariables::ID;
+
 ClangPersistentVariables::ClangPersistentVariables(
     std::shared_ptr<Target> target_sp)
-    : lldb_private::PersistentExpressionState(LLVMCastKind::eKindClang),
-      m_target_sp(target_sp) {}
+    : m_target_sp(target_sp) {}
 
 ExpressionVariableSP ClangPersistentVariables::CreatePersistentVariable(
     const lldb::ValueObjectSP &valobj_sp) {
@@ -51,52 +53,42 @@ void ClangPersistentVariables::RemovePersistentVariable(
 
   RemoveVariable(variable);
 
-  const char *name = variable->GetName().AsCString();
+  // Check if the removed variable was the last one that was created. If yes,
+  // reuse the variable id for the next variable.
 
-  if (*name != '$')
+  // Nothing to do if we have not assigned a variable id so far.
+  if (m_next_persistent_variable_id == 0)
     return;
-  name++;
 
-  bool is_error = false;
+  llvm::StringRef name = variable->GetName().GetStringRef();
+  // Remove the prefix from the variable that only the indes is left.
+  if (!name.consume_front(GetPersistentVariablePrefix(false)))
+    return;
 
-  if (variable->GetCompilerType().GetTypeSystem()->SupportsLanguage(
-          lldb::eLanguageTypeSwift)) {
-    switch (*name) {
-    case 'R':
-      break;
-    case 'E':
-      is_error = true;
-      break;
-    default:
-      return;
-    }
-    name++;
-  }
-
-  uint32_t value = strtoul(name, nullptr, 0);
-  if (is_error) {
-    if (value == m_next_persistent_error_id - 1)
-      m_next_persistent_error_id--;
-  } else {
-    if (value == m_next_persistent_variable_id - 1)
-      m_next_persistent_variable_id--;
-  }
+  // Check if the variable contained a variable id.
+  uint32_t variable_id;
+  if (name.getAsInteger(10, variable_id))
+    return;
+  // If it's the most recent variable id that was assigned, make sure that this
+  // variable id will be used for the next persistent variable.
+  if (variable_id == m_next_persistent_variable_id - 1)
+    m_next_persistent_variable_id--;
 }
 
-llvm::Optional<CompilerType>
+std::optional<CompilerType>
 ClangPersistentVariables::GetCompilerTypeFromPersistentDecl(
     ConstString type_name) {
   PersistentDecl p = m_persistent_decls.lookup(type_name.GetCString());
 
   if (p.m_decl == nullptr)
-    return llvm::None;
+    return std::nullopt;
 
   if (clang::TypeDecl *tdecl = llvm::dyn_cast<clang::TypeDecl>(p.m_decl)) {
     opaque_compiler_type_t t = static_cast<opaque_compiler_type_t>(
         const_cast<clang::Type *>(tdecl->getTypeForDecl()));
     return CompilerType(p.m_context, t);
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 void ClangPersistentVariables::RegisterPersistentDecl(
@@ -131,7 +123,7 @@ std::shared_ptr<ClangModulesDeclVendor>
 ClangPersistentVariables::GetClangModulesDeclVendor() {
   if (!m_modules_decl_vendor_sp) {
     m_modules_decl_vendor_sp.reset(
-        ClangModulesDeclVendor::Create(*m_target_sp.get()));
+        ClangModulesDeclVendor::Create(*m_target_sp));
   }
   return m_modules_decl_vendor_sp;
 }

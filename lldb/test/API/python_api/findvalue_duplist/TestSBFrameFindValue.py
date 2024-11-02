@@ -35,13 +35,14 @@ class SBFrameFindValueTestCase(TestBase):
         # Frame #0 should be at our breakpoint.
         threads = lldbutil.get_threads_stopped_at_breakpoint(process, breakpoint)
 
-        self.assertEquals(len(threads), 1)
+        self.assertEqual(len(threads), 1)
         self.thread = threads[0]
         self.frame = self.thread.frames[0]
         self.assertTrue(self.frame, "Frame 0 is valid.")
 
-        self.assertTrue(
-            self.frame.GetVariables(True, True, False, True).GetSize() == 2,
+        self.assertEqual(
+            self.frame.GetVariables(True, True, False, True).GetSize(),
+            2,
             "variable count is off",
         )
         self.assertFalse(
@@ -52,8 +53,9 @@ class SBFrameFindValueTestCase(TestBase):
             ).IsValid(),
             "found something that should not be here",
         )
-        self.assertTrue(
-            self.frame.GetVariables(True, True, False, True).GetSize() == 2,
+        self.assertEqual(
+            self.frame.GetVariables(True, True, False, True).GetSize(),
+            2,
             "variable count is off after failed FindValue()",
         )
         self.assertTrue(
@@ -62,7 +64,8 @@ class SBFrameFindValueTestCase(TestBase):
             ).IsValid(),
             "FindValue() didn't find an argument",
         )
-        self.assertTrue(
-            self.frame.GetVariables(True, True, False, True).GetSize() == 2,
+        self.assertEqual(
+            self.frame.GetVariables(True, True, False, True).GetSize(),
+            2,
             "variable count is off after successful FindValue()",
         )

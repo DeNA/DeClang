@@ -23,6 +23,7 @@ class StepAvoidsRegexTestCase(TestBase):
         )
 
     @skipIfWindows
+    @skipIf(compiler="clang", compiler_version=["<", "11.0"])
     def test_step_avoid_regex(self):
         """Tests stepping into a function which matches the avoid regex"""
         self.build()

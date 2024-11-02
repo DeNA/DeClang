@@ -30,8 +30,9 @@ class ExprCommandThatRestartsTestCase(TestBase):
 
     def check_after_call(self, num_sigchld):
         after_call = self.sigchld_no.GetValueAsSigned(-1)
-        self.assertTrue(
-            after_call - self.start_sigchld_no == num_sigchld,
+        self.assertEqual(
+            after_call - self.start_sigchld_no,
+            num_sigchld,
             "Really got %d SIGCHLD signals through the call." % (num_sigchld),
         )
         self.start_sigchld_no = after_call
@@ -55,8 +56,8 @@ class ExprCommandThatRestartsTestCase(TestBase):
         self.assertTrue(self.sigchld_no.IsValid(), "Got a value for sigchld_no")
 
         self.start_sigchld_no = self.sigchld_no.GetValueAsSigned(-1)
-        self.assertTrue(
-            self.start_sigchld_no != -1, "Got an actual value for sigchld_no"
+        self.assertNotEqual(
+            self.start_sigchld_no, -1, "Got an actual value for sigchld_no"
         )
 
         options = lldb.SBExpressionOptions()
@@ -74,7 +75,7 @@ class ExprCommandThatRestartsTestCase(TestBase):
         value = frame.EvaluateExpression("call_me (%d)" % (num_sigchld), options)
         self.assertTrue(value.IsValid())
         self.assertSuccess(value.GetError())
-        self.assertEquals(value.GetValueAsSigned(-1), num_sigchld)
+        self.assertEqual(value.GetValueAsSigned(-1), num_sigchld)
 
         self.check_after_call(num_sigchld)
 
@@ -91,7 +92,7 @@ class ExprCommandThatRestartsTestCase(TestBase):
 
         self.assertTrue(value.IsValid())
         self.assertSuccess(value.GetError())
-        self.assertEquals(value.GetValueAsSigned(-1), num_sigchld)
+        self.assertEqual(value.GetValueAsSigned(-1), num_sigchld)
         self.check_after_call(num_sigchld)
 
         # Now set the signal to print but not stop and make sure that calling
@@ -102,7 +103,7 @@ class ExprCommandThatRestartsTestCase(TestBase):
 
         self.assertTrue(value.IsValid())
         self.assertSuccess(value.GetError())
-        self.assertEquals(value.GetValueAsSigned(-1), num_sigchld)
+        self.assertEqual(value.GetValueAsSigned(-1), num_sigchld)
         self.check_after_call(num_sigchld)
 
         # Now set this unwind on error to false, and make sure that we still
@@ -112,7 +113,7 @@ class ExprCommandThatRestartsTestCase(TestBase):
 
         self.assertTrue(value.IsValid())
         self.assertSuccess(value.GetError())
-        self.assertEquals(value.GetValueAsSigned(-1), num_sigchld)
+        self.assertEqual(value.GetValueAsSigned(-1), num_sigchld)
         self.check_after_call(num_sigchld)
 
         # Okay, now set UnwindOnError to true, and then make the signal behavior to stop

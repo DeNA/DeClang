@@ -171,10 +171,17 @@ bool ThreadPlan::IsUsuallyUnexplainedStopReason(lldb::StopReason reason) {
   case eStopReasonExec:
   case eStopReasonThreadExiting:
   case eStopReasonInstrumentation:
+  case eStopReasonFork:
+  case eStopReasonVFork:
+  case eStopReasonVForkDone:
     return true;
   default:
     return false;
   }
+}
+
+bool ThreadPlan::IsYounger(const StackID &lhs, const StackID &rhs) const {
+  return StackID::IsYounger(lhs, rhs, m_process);
 }
 
 // ThreadPlanNull

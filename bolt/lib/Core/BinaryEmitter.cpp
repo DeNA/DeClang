@@ -189,13 +189,16 @@ void BinaryEmitter::emitAll(StringRef OrgSecPrefix) {
 
   if (opts::UpdateDebugSections && BC.isELF()) {
     // Force the emission of debug line info into allocatable section to ensure
-    // RuntimeDyld will process it without ProcessAllSections flag.
+    // JITLink will process it.
     //
     // NB: on MachO all sections are required for execution, hence no need
     //     to change flags/attributes.
     MCSectionELF *ELFDwarfLineSection =
         static_cast<MCSectionELF *>(BC.MOFI->getDwarfLineSection());
     ELFDwarfLineSection->setFlags(ELF::SHF_ALLOC);
+    MCSectionELF *ELFDwarfLineStrSection =
+        static_cast<MCSectionELF *>(BC.MOFI->getDwarfLineStrSection());
+    ELFDwarfLineStrSection->setFlags(ELF::SHF_ALLOC);
   }
 
   if (RuntimeLibrary *RtLibrary = BC.getRuntimeLibrary())
@@ -300,18 +303,16 @@ bool BinaryEmitter::emitFunction(BinaryFunction &Function,
     // Set section alignment to at least maximum possible object alignment.
     // We need this to support LongJmp and other passes that calculates
     // tentative layout.
-    if (Section->getAlignment() < opts::AlignFunctions)
-      Section->setAlignment(Align(opts::AlignFunctions));
+    Section->ensureMinAlignment(Align(opts::AlignFunctions));
 
-    Streamer.emitCodeAlignment(BinaryFunction::MinAlign, &*BC.STI);
+    Streamer.emitCodeAlignment(Align(BinaryFunction::MinAlign), &*BC.STI);
     uint16_t MaxAlignBytes = FF.isSplitFragment()
                                  ? Function.getMaxColdAlignmentBytes()
                                  : Function.getMaxAlignmentBytes();
     if (MaxAlignBytes > 0)
-      Streamer.emitCodeAlignment(Function.getAlignment(), &*BC.STI,
-                                 MaxAlignBytes);
+      Streamer.emitCodeAlignment(Function.getAlign(), &*BC.STI, MaxAlignBytes);
   } else {
-    Streamer.emitCodeAlignment(Function.getAlignment(), &*BC.STI);
+    Streamer.emitCodeAlignment(Function.getAlign(), &*BC.STI);
   }
 
   MCContext &Context = Streamer.getContext();
@@ -427,7 +428,7 @@ void BinaryEmitter::emitFunctionBody(BinaryFunction &BF, FunctionFragment &FF,
   for (BinaryBasicBlock *const BB : FF) {
     if ((opts::AlignBlocks || opts::PreserveBlocksAlignment) &&
         BB->getAlignment() > 1)
-      Streamer.emitCodeAlignment(BB->getAlignment(), &*BC.STI,
+      Streamer.emitCodeAlignment(BB->getAlign(), &*BC.STI,
                                  BB->getAlignmentMaxBytes());
     Streamer.emitLabel(BB->getLabel());
     if (!EmitCodeOnly) {
@@ -516,7 +517,7 @@ void BinaryEmitter::emitConstantIslands(BinaryFunction &BF, bool EmitColdPart,
   const uint16_t Alignment = OnBehalfOf
                                  ? OnBehalfOf->getConstantIslandAlignment()
                                  : BF.getConstantIslandAlignment();
-  Streamer.emitCodeAlignment(Alignment, &*BC.STI);
+  Streamer.emitCodeAlignment(Align(Alignment), &*BC.STI);
 
   if (!OnBehalfOf) {
     if (!EmitColdPart)
@@ -740,10 +741,12 @@ void BinaryEmitter::emitJumpTables(const BinaryFunction &BF) {
 
   for (auto &JTI : BF.jumpTables()) {
     JumpTable &JT = *JTI.second;
+    // Only emit shared jump tables once, when processing the first parent
+    if (JT.Parents.size() > 1 && JT.Parents[0] != &BF)
+      continue;
     if (opts::PrintJumpTables)
       JT.print(outs());
-    if ((opts::JumpTables == JTS_BASIC || !BF.isSimple()) &&
-        BC.HasRelocations) {
+    if (opts::JumpTables == JTS_BASIC && BC.HasRelocations) {
       JT.updateOriginal();
     } else {
       MCSection *HotSection, *ColdSection;
@@ -794,18 +797,19 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
     LabelCounts[CurrentLabel] = CurrentLabelCount;
   } else {
     Streamer.switchSection(JT.Count > 0 ? HotSection : ColdSection);
-    Streamer.emitValueToAlignment(JT.EntrySize);
+    Streamer.emitValueToAlignment(Align(JT.EntrySize));
   }
   MCSymbol *LastLabel = nullptr;
   uint64_t Offset = 0;
   for (MCSymbol *Entry : JT.Entries) {
     auto LI = JT.Labels.find(Offset);
     if (LI != JT.Labels.end()) {
-      LLVM_DEBUG(dbgs() << "BOLT-DEBUG: emitting jump table "
-                        << LI->second->getName()
-                        << " (originally was at address 0x"
-                        << Twine::utohexstr(JT.getAddress() + Offset)
-                        << (Offset ? "as part of larger jump table\n" : "\n"));
+      LLVM_DEBUG({
+        dbgs() << "BOLT-DEBUG: emitting jump table " << LI->second->getName()
+               << " (originally was at address 0x"
+               << Twine::utohexstr(JT.getAddress() + Offset)
+               << (Offset ? ") as part of larger jump table\n" : ")\n");
+      });
       if (!LabelCounts.empty()) {
         LLVM_DEBUG(dbgs() << "BOLT-DEBUG: jump table count: "
                           << LabelCounts[LI->second] << '\n');
@@ -813,7 +817,7 @@ void BinaryEmitter::emitJumpTable(const JumpTable &JT, MCSection *HotSection,
           Streamer.switchSection(HotSection);
         else
           Streamer.switchSection(ColdSection);
-        Streamer.emitValueToAlignment(JT.EntrySize);
+        Streamer.emitValueToAlignment(Align(JT.EntrySize));
       }
       // Emit all labels registered at the address of this jump table
       // to sync with our global symbol table.  We may have two labels
@@ -923,7 +927,7 @@ void BinaryEmitter::emitLSDA(BinaryFunction &BF, const FunctionFragment &FF) {
   const uint16_t TTypeAlignment = 4;
 
   // Type tables have to be aligned at 4 bytes.
-  Streamer.emitValueToAlignment(TTypeAlignment);
+  Streamer.emitValueToAlignment(Align(TTypeAlignment));
 
   // Emit the LSDA label.
   MCSymbol *LSDASymbol = BF.getLSDASymbol(FF.getFragmentNum());
@@ -1156,14 +1160,11 @@ void BinaryEmitter::emitDebugLineInfoForUnprocessedCUs() {
 
 void BinaryEmitter::emitDataSections(StringRef OrgSecPrefix) {
   for (BinarySection &Section : BC.sections()) {
-    if (!Section.hasRelocations() || !Section.hasSectionRef())
+    if (!Section.hasRelocations())
       continue;
 
-    StringRef SectionName = Section.getName();
-    std::string EmitName = Section.isReordered()
-                               ? std::string(Section.getOutputName())
-                               : OrgSecPrefix.str() + std::string(SectionName);
-    Section.emitAsData(Streamer, EmitName);
+    StringRef Prefix = Section.hasSectionRef() ? OrgSecPrefix : "";
+    Section.emitAsData(Streamer, Prefix + Section.getName());
     Section.clearRelocations();
   }
 }

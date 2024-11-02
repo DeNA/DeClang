@@ -64,9 +64,8 @@ public:
   //------------------------------------------------------------------
   // llvm casting support
   //------------------------------------------------------------------
-  static bool classof(const PersistentExpressionState *pv) {
-    return pv->getKind() == PersistentExpressionState::eKindSwift;
-  }
+  // LLVM RTTI Support
+  static char ID;
 
   lldb::ExpressionVariableSP
   CreatePersistentVariable(const lldb::ValueObjectSP &valobj_sp) override;
@@ -85,7 +84,7 @@ public:
 
   ConstString GetNextPersistentVariableName(bool is_error = false) override;
 
-  llvm::Optional<CompilerType>
+  std::optional<CompilerType>
   GetCompilerTypeFromPersistentDecl(ConstString type_name) override;
 
   void RegisterSwiftPersistentDecl(CompilerDecl value_decl);

@@ -250,4 +250,17 @@ program openacc_loop_validity
   end do
   !$acc end parallel
 
+  !$acc loop collapse(2)
+  do i = 1, N
+    !ERROR: Loop control is not present in the DO LOOP
+    do
+      a(i) = 3.14
+    end do
+  end do
+
+  !ERROR: The num argument is not allowed when dim is specified
+  !$acc loop gang(1, dim: 2)
+  do i = 1, N
+  end do
+
 end program openacc_loop_validity

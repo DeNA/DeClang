@@ -43,11 +43,12 @@ public:
 class LLDB_API SBDebugger {
 public:
   FLAGS_ANONYMOUS_ENUM(){
-      eBroadcastBitProgress = (1 << 0),
-      eBroadcastBitWarning = (1 << 1),
-      eBroadcastBitError = (1 << 2),
+      eBroadcastBitProgress = lldb::DebuggerBroadcastBit::eBroadcastBitProgress,
+      eBroadcastBitWarning = lldb::DebuggerBroadcastBit::eBroadcastBitWarning,
+      eBroadcastBitError = lldb::DebuggerBroadcastBit::eBroadcastBitError,
+      eBroadcastBitProgressCategory =
+          lldb::DebuggerBroadcastBit::eBroadcastBitProgressCategory,
   };
-
   SBDebugger();
 
   SBDebugger(const lldb::SBDebugger &rhs);
@@ -110,6 +111,8 @@ public:
   static lldb::SBError InitializeWithErrorHandling();
 
   static void PrintStackTraceOnError();
+
+  static void PrintDiagnosticsOnError();
 
   static void Terminate();
 
@@ -483,7 +486,6 @@ private:
   friend class SBProcess;
   friend class SBSourceManager;
   friend class SBStructuredData;
-  friend class SBPlatform;
   friend class SBTarget;
   friend class SBTrace;
 

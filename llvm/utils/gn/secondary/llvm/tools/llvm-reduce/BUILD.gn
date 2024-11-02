@@ -7,6 +7,7 @@ executable("llvm-reduce") {
     "//llvm/lib/Support",
     "//llvm/lib/Target",
     "//llvm/lib/Target:TargetsToBuild",
+    "//llvm/lib/TargetParser",
     "//llvm/lib/Transforms/IPO",
     "//llvm/lib/Transforms/Utils",
   ]
@@ -28,9 +29,12 @@ executable("llvm-reduce") {
     "deltas/ReduceGlobalVarInitializers.cpp",
     "deltas/ReduceGlobalVars.cpp",
     "deltas/ReduceIRReferences.cpp",
+    "deltas/ReduceInstructionFlags.cpp",
     "deltas/ReduceInstructionFlagsMIR.cpp",
     "deltas/ReduceInstructions.cpp",
     "deltas/ReduceInstructionsMIR.cpp",
+    "deltas/ReduceInvokes.cpp",
+    "deltas/ReduceMemoryOperations.cpp",
     "deltas/ReduceMetadata.cpp",
     "deltas/ReduceModuleData.cpp",
     "deltas/ReduceOpcodes.cpp",
@@ -46,6 +50,7 @@ executable("llvm-reduce") {
     "deltas/ReduceVirtualRegisters.cpp",
     "deltas/RunIRPasses.cpp",
     "deltas/SimplifyInstructions.cpp",
+    "deltas/StripDebugInfo.cpp",
     "deltas/Utils.cpp",
     "llvm-reduce.cpp",
   ]

@@ -28,7 +28,6 @@ def isUbuntu18_04():
 class TestRerunExprDylib(TestBase):
     @skipTestIfFn(isUbuntu18_04, bugnumber="rdar://103831050")
     @skipIfWindows
-    @expectedFailureAll(oslist=["linux"], bugnumber="rdar://104671730")
     def test(self):
         """
         Tests whether re-launching a process without destroying
@@ -71,9 +70,8 @@ class TestRerunExprDylib(TestBase):
 
         exe = self.getBuildArtifact("a.out")
         target = self.dbg.CreateTarget(exe)
-        breakpoint = target.BreakpointCreateBySourceRegex(
-            "return", lldb.SBFileSpec("main.cpp")
-        )
+        target.BreakpointCreateBySourceRegex("dlclose", lldb.SBFileSpec("main.cpp"))
+        target.BreakpointCreateBySourceRegex("return", lldb.SBFileSpec("main.cpp"))
         process = target.LaunchSimple(None, None, self.get_process_working_directory())
 
         self.expect_expr(
@@ -97,6 +95,7 @@ class TestRerunExprDylib(TestBase):
         )
 
         # Rerun program within the same target
+        process.Continue()
         process.Destroy()
         process = target.LaunchSimple(None, None, self.get_process_working_directory())
 

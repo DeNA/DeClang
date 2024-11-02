@@ -19,9 +19,9 @@ program p
   ! CHECK: fir.insert_value
   ! CHECK: fir.embox [[ccc]]
   ! CHECK: fir.insert_value
-  ! CHECK: fir.alloca tuple<!fir.ref<i8>, i64, !fir.ref<!fir.array<2xtuple<!fir.ref<i8>, !fir.ref<!fir.box<none>>>>>>
+  ! CHECK: fir.alloca tuple<!fir.ref<i8>, i64, !fir.ref<!fir.array<2xtuple<!fir.ref<i8>, !fir.ref<!fir.box<none>>>>>, !fir.ref<none>>
   ! CHECK: fir.address_of
-  ! CHECK-COUNT-3: fir.insert_value
+  ! CHECK-COUNT-4: fir.insert_value
   ! CHECK: fir.call @_FortranAioOutputNamelist([[cookie]]
   ! CHECK: fir.call @_FortranAioEndIoStatement([[cookie]]
   write(*, nnn)
@@ -39,9 +39,9 @@ program p
   ! CHECK: fir.insert_value
   ! CHECK: fir.embox [[ccc]]
   ! CHECK: fir.insert_value
-  ! CHECK: fir.alloca tuple<!fir.ref<i8>, i64, !fir.ref<!fir.array<2xtuple<!fir.ref<i8>, !fir.ref<!fir.box<none>>>>>>
+  ! CHECK: fir.alloca tuple<!fir.ref<i8>, i64, !fir.ref<!fir.array<2xtuple<!fir.ref<i8>, !fir.ref<!fir.box<none>>>>>, !fir.ref<none>>
   ! CHECK: fir.address_of
-  ! CHECK-COUNT-3: fir.insert_value
+  ! CHECK-COUNT-4: fir.insert_value
   ! CHECK: fir.call @_FortranAioOutputNamelist([[cookie]]
   ! CHECK: fir.call @_FortranAioEndIoStatement([[cookie]]
   write(*, nnn)
@@ -75,7 +75,7 @@ subroutine global_pointer
   ! CHECK: %[[a0:.*]] = fir.address_of
   namelist/mygroup/ptrarray
   ! CHECK: %[[a1:.*]] = fir.convert %[[a0]]
-  ! CHECK: %[[a2:.*]] = fir.call @_FortranAioBeginExternalListOutput({{.*}}, %[[a1]], {{.*}}) : (i32, !fir.ref<i8>, i32) -> !fir.ref<i8>
+  ! CHECK: %[[a2:.*]] = fir.call @_FortranAioBeginExternalListOutput({{.*}}, %[[a1]], {{.*}}) {{.*}}: (i32, !fir.ref<i8>, i32) -> !fir.ref<i8>
   ! CHECK: %[[a3:.*]] = fir.address_of
   ! CHECK: %[[a4:.*]] = fir.convert %[[a3]]
   ! CHECK: %[[a5:.*]] = fir.call @_FortranAioOutputNamelist(%[[a2]], %[[a4]])

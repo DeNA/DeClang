@@ -10,6 +10,7 @@
 // We need to use -Wno-macro-redefined because the test suite defines
 // _LIBCPP_ENABLE_ASSERTIONS=1 under some configurations.
 
+// XFAIL: libcpp-has-hardened-mode, libcpp-has-debug-mode
 // ADDITIONAL_COMPILE_FLAGS: -Wno-macro-redefined -D_LIBCPP_ENABLE_ASSERTIONS=0
 
 #include <cassert>
@@ -18,7 +19,7 @@ bool executed_condition = false;
 bool f() { executed_condition = true; return false; }
 
 int main(int, char**) {
-  _LIBCPP_ASSERT(f(), "message"); // should not execute anything
+  _LIBCPP_ASSERT_VALID_ELEMENT_ACCESS(f(), "message"); // should not execute anything
   assert(!executed_condition); // really make sure we did not execute anything at all
   return 0;
 }

@@ -22,11 +22,11 @@
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Timer.h"
+#include "lldb/lldb-enumerations.h"
 #include "swift/AST/Types.h"
 #include "swift/Demangling/ManglingMacros.h"
-#include "llvm/ADT/None.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
+#include <optional>
 
 // FIXME: we should not need this
 #include "Plugins/Language/CPlusPlus/CxxStringTypes.h"
@@ -79,7 +79,7 @@ struct StringSlice {
 
 template <typename AddrT>
 static void applySlice(AddrT &address, uint64_t &length,
-                       Optional<StringSlice> slice) {
+                       std::optional<StringSlice> slice) {
   if (!slice)
     return;
 
@@ -128,27 +128,32 @@ static bool makeStringGutsSummary(
     ValueObject &valobj, Stream &stream,
     const TypeSummaryOptions &summary_options,
     StringPrinter::ReadStringAndDumpToStreamOptions read_options,
-    Optional<StringSlice> slice = None) {
+    std::optional<StringSlice> slice = std::nullopt) {
   LLDB_SCOPED_TIMER();
 
   static ConstString g__object("_object");
   static ConstString g__storage("_storage");
   static ConstString g__value("_value");
 
+  auto error = [&](std::string message) {
+    stream << "<cannot decode string: " << message << ">";
+    return true;
+  };
+
   ProcessSP process(valobj.GetProcessSP());
   if (!process)
-    return false;
+    return error("no live process");
 
   auto ptrSize = process->GetAddressByteSize();
 
   auto object_sp = valobj.GetChildMemberWithName(g__object, true);
   if (!object_sp)
-    return false;
+    return error("unexpected layout");
 
   // We retrieve String contents by first extracting the
   // platform-independent 128-bit raw value representation from
   // _StringObject, then interpreting that.
-  Status error;
+  Status status;
   uint64_t raw0;
   uint64_t raw1;
 
@@ -160,12 +165,12 @@ static bool makeStringGutsSummary(
     auto countAndFlagsBits = object_sp->GetChildAtNamePath(
       {g__countAndFlagsBits, g__value});
     if (!countAndFlagsBits)
-      return false;
+      return error("unexpected layout");
     raw0 = countAndFlagsBits->GetValueAsUnsigned(0);
 
     auto object = object_sp->GetChildMemberWithName(g__object, true);
     if (!object)
-      return false;
+      return error("unexpected layout (object)");
     raw1 = object->GetValueAsUnsigned(0);
   } else if (ptrSize == 4) {
     // On 32-bit platforms, we emulate what `_StringObject.rawBits`
@@ -179,23 +184,23 @@ static bool makeStringGutsSummary(
 
     auto count_sp = object_sp->GetChildAtNamePath({g__count, g__value});
     if (!count_sp)
-      return false;
+      return error("unexpected layout (count)");
     uint64_t count = count_sp->GetValueAsUnsigned(0);
 
     auto discriminator_sp =
         object_sp->GetChildAtNamePath({g__discriminator, g__value});
     if (!discriminator_sp)
-      return false;
+      return error("unexpected layout (discriminator)");
     uint64_t discriminator = discriminator_sp->GetValueAsUnsigned(0) & 0xff;
 
     auto flags_sp = object_sp->GetChildAtNamePath({g__flags, g__value});
     if (!flags_sp)
-      return false;
+      return error("unexpected layout (flags)");
     uint64_t flags = flags_sp->GetValueAsUnsigned(0) & 0xffff;
 
     auto variant_sp = object_sp->GetChildMemberWithName(g__variant, true);
     if (!variant_sp)
-      return false;
+      return error("unexpected layout (variant)");
 
     llvm::StringRef variantCase = variant_sp->GetValueAsCString();
 
@@ -208,18 +213,18 @@ static bool makeStringGutsSummary(
       static ConstString g_bridged("bridged");
       auto anyobject_sp = variant_sp->GetChildMemberWithName(g_bridged, true);
       if (!anyobject_sp)
-        return false;
+        return error("unexpected layout (bridged)");
       payload_sp = anyobject_sp->GetChildAtIndex(0, true); // "instance"
     } else {
-      // Unknown variant.
-      return false;
+      return error("unknown variant");
     }
     if (!payload_sp)
-      return false;
+      return error("no payload");
+
     uint64_t pointerBits = payload_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
 
     if (pointerBits == LLDB_INVALID_ADDRESS)
-      return false;
+      return error("invalid payload");
 
     if ((discriminator & 0xB0) == 0xA0) {
       raw0 = count | (pointerBits << 32);
@@ -229,8 +234,7 @@ static bool makeStringGutsSummary(
       raw1 = pointerBits | (discriminator << 56);
     }
   } else {
-    lldbassert(false && "Unsupported pointer bit-width");
-    return false;
+    return error("unsupported pointer size");
   }
 
   // Copied from StringObject.swift
@@ -306,7 +310,7 @@ static bool makeStringGutsSummary(
     uint64_t count = (raw1 >> 56) & 0b1111;
     uint64_t maxCount = (ptrSize == 8 ? 15 : 10);
     if (count > maxCount)
-      return false;
+      return error("count > maxCount");
 
     uint64_t rawBuffer[2] = {raw0, raw1};
     auto *buffer = (uint8_t *)&rawBuffer;
@@ -326,10 +330,16 @@ static bool makeStringGutsSummary(
   uint64_t count = raw0 & 0x0000FFFFFFFFFFFF;
   uint16_t flags = raw0 >> 48;
   lldb::addr_t objectAddress = (raw1 & 0x0FFFFFFFFFFFFFFF);
+  // Catch a zero-initialized string.
+  if (!objectAddress) {
+    stream << "<uninitialized>";
+    return true;
+  }
+
   if ((flags & 0x1000) != 0) { // Tail-allocated / biased address
     // Tail-allocation is only for natively stored or literals.
     if ((discriminator & 0b0111'0000) != 0)
-      return false;
+      return error("unexpected discriminator");
     uint64_t bias = (ptrSize == 8 ? 32 : 20);
     auto address = objectAddress + bias;
     applySlice(address, count, slice);
@@ -344,9 +354,9 @@ static bool makeStringGutsSummary(
       return false;
     uint64_t startOffset = (ptrSize == 8 ? 24 : 12);
     auto address = objectAddress + startOffset;
-    lldb::addr_t start = process->ReadPointerFromMemory(address, error);
-    if (error.Fail())
-      return false;
+    lldb::addr_t start = process->ReadPointerFromMemory(address, status);
+    if (status.Fail())
+      return error(status.AsCString());
 
     applySlice(address, count, slice);
     return readStringFromAddress(
@@ -355,13 +365,13 @@ static bool makeStringGutsSummary(
 
   // Native/shared strings should already have been handled.
   if ((discriminator & 0b0111'0000) == 0)
-    return false;
+    return error("unexpected discriminator");
 
   if ((discriminator & 0b1110'0000) == 0b0100'0000) { // 010xxxxx: Bridged
     TypeSystemClangSP clang_ts_sp =
         ScratchTypeSystemClang::GetForTarget(process->GetTarget());
     if (!clang_ts_sp)
-      return false;
+      return error("no Clang type system");
 
     CompilerType id_type = clang_ts_sp->GetBasicType(lldb::eBasicTypeObjCID);
 
@@ -371,7 +381,7 @@ static bool makeStringGutsSummary(
     auto nsstring = ValueObject::CreateValueObjectFromData(
         "nsstring", DE, valobj.GetExecutionContextRef(), id_type);
     if (!nsstring || nsstring->GetError().Fail())
-      return false;
+      return error("could not create NSString value object");
 
     return NSStringSummaryProvider(*nsstring.get(), stream, summary_options);
   }
@@ -379,11 +389,11 @@ static bool makeStringGutsSummary(
   if ((discriminator & 0b1111'1000) == 0b0001'1000) { // 0001xxxx: Foreign
     // Not currently generated: Foreign non-bridged strings are not currently
     // used in Swift.
-    return false;
+    return error("unexpected discriminator");
   }
 
   // Invalid discriminator.
-  return false;
+  return error("invalid discriminator");
 }
 
 bool lldb_private::formatters::swift::StringGuts_SummaryProvider(
@@ -428,20 +438,20 @@ bool lldb_private::formatters::swift::Substring_SummaryProvider(
     return false;
 
   auto get_index =
-      [&slice_sp](ConstString index_name) -> Optional<StringIndex> {
+      [&slice_sp](ConstString index_name) -> std::optional<StringIndex> {
     auto raw_bits_sp = slice_sp->GetChildAtNamePath({index_name, g__rawBits});
     if (!raw_bits_sp)
-      return None;
+      return std::nullopt;
     bool success = false;
     StringIndex index =
         raw_bits_sp->GetSyntheticValue()->GetValueAsUnsigned(0, &success);
     if (!success)
-      return None;
+      return std::nullopt;
     return index;
   };
 
-  Optional<StringIndex> start_index = get_index(g__startIndex);
-  Optional<StringIndex> end_index = get_index(g__endIndex);
+  std::optional<StringIndex> start_index = get_index(g__startIndex);
+  std::optional<StringIndex> end_index = get_index(g__endIndex);
   if (!start_index || !end_index)
     return false;
 
@@ -700,7 +710,11 @@ bool lldb_private::formatters::swift::CountableClosedRange_SummaryProvider(
 bool lldb_private::formatters::swift::BuiltinObjC_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
   stream.Printf("0x%" PRIx64 " ", valobj.GetValueAsUnsigned(0));
-  stream.Printf("%s", valobj.GetObjectDescription());
+  llvm::Expected<std::string> desc = valobj.GetObjectDescription();
+  if (desc)
+    stream << toString(desc.takeError());
+  else
+    stream << *desc;
   return true;
 }
 
@@ -711,9 +725,9 @@ class EnumSyntheticFrontEnd : public SyntheticChildrenFrontEnd {
 public:
   EnumSyntheticFrontEnd(lldb::ValueObjectSP valobj_sp);
 
-  size_t CalculateNumChildren() override;
-  lldb::ValueObjectSP GetChildAtIndex(size_t idx) override;
-  bool Update() override;
+  llvm::Expected<uint32_t> CalculateNumChildren() override;
+  lldb::ValueObjectSP GetChildAtIndex(uint32_t idx) override;
+  lldb::ChildCacheState Update() override;
   bool MightHaveChildren() override;
   size_t GetIndexOfChildWithName(ConstString name) override;
 
@@ -734,14 +748,14 @@ lldb_private::formatters::swift::EnumSyntheticFrontEnd::EnumSyntheticFrontEnd(
     Update();
 }
 
-size_t
+llvm::Expected<uint32_t>
 lldb_private::formatters::swift::EnumSyntheticFrontEnd::CalculateNumChildren() {
   return m_child_index != UINT32_MAX ? 1 : 0;
 }
 
 lldb::ValueObjectSP
 lldb_private::formatters::swift::EnumSyntheticFrontEnd::GetChildAtIndex(
-    size_t idx) {
+    uint32_t idx) {
   if (idx)
     return ValueObjectSP();
   if (m_child_index == UINT32_MAX)
@@ -749,13 +763,14 @@ lldb_private::formatters::swift::EnumSyntheticFrontEnd::GetChildAtIndex(
   return m_backend.GetChildAtIndex(m_child_index, true);
 }
 
-bool lldb_private::formatters::swift::EnumSyntheticFrontEnd::Update() {
+lldb::ChildCacheState
+lldb_private::formatters::swift::EnumSyntheticFrontEnd::Update() {
   m_element_name.Clear();
   m_child_index = UINT32_MAX;
   m_exe_ctx_ref = m_backend.GetExecutionContextRef();
   m_element_name.SetCString(m_backend.GetValueAsCString());
   m_child_index = m_backend.GetIndexOfChildWithName(m_element_name);
-  return false;
+  return ChildCacheState::eRefetch;
 }
 
 bool lldb_private::formatters::swift::EnumSyntheticFrontEnd::
@@ -1041,12 +1056,12 @@ public:
 };
 
 /// Read a vector from a buffer target.
-llvm::Optional<std::vector<std::string>>
+std::optional<std::vector<std::string>>
 ReadVector(const SIMDElementFormatter &formatter, const uint8_t *buffer,
            unsigned len, unsigned offset, unsigned num_elements) {
   unsigned elt_size = formatter.getElementSize();
   if ((offset + num_elements * elt_size) > len)
-    return llvm::None;
+    return std::nullopt;
   std::vector<std::string> elements;
   for (unsigned I = 0; I < num_elements; ++I)
     elements.emplace_back(formatter.Format(buffer + offset + (I * elt_size)));
@@ -1054,7 +1069,7 @@ ReadVector(const SIMDElementFormatter &formatter, const uint8_t *buffer,
 }
 
 /// Read a SIMD vector from the target.
-llvm::Optional<std::vector<std::string>>
+std::optional<std::vector<std::string>>
 ReadVector(Process &process, ValueObject &valobj,
            const SIMDElementFormatter &formatter, unsigned num_elements) {
   Status error;
@@ -1062,21 +1077,21 @@ ReadVector(Process &process, ValueObject &valobj,
   static ConstString g_value("_value");
   ValueObjectSP value_sp = valobj.GetChildAtNamePath({g_storage, g_value});
   if (!value_sp)
-    return llvm::None;
+    return std::nullopt;
 
   // The layout of the vector is the same as what you'd expect for a C-style
   // array. It's a contiguous bag of bytes with no padding.
   lldb_private::DataExtractor data;
   uint64_t len = value_sp->GetData(data, error);
   if (error.Fail())
-    return llvm::None;
+    return std::nullopt;
 
   const uint8_t *buffer = data.GetDataStart();
   return ReadVector(formatter, buffer, len, 0, num_elements);
 }
 
 /// Print a vector of elements as a row, if possible.
-bool PrintRow(Stream &stream, llvm::Optional<std::vector<std::string>> vec) {
+bool PrintRow(Stream &stream, std::optional<std::vector<std::string>> vec) {
   if (!vec)
     return false;
 
@@ -1126,7 +1141,7 @@ bool lldb_private::formatters::swift::SIMDVector_SummaryProvider(
     return false;
 
   ExecutionContext exe_ctx = valobj.GetExecutionContextRef().Lock(true);
-  llvm::Optional<uint64_t> opt_type_size =
+  std::optional<uint64_t> opt_type_size =
     simd_type.GetByteSize(exe_ctx.GetBestExecutionContextScope());
   if (!opt_type_size)
     return false;
@@ -1141,7 +1156,7 @@ bool lldb_private::formatters::swift::SIMDVector_SummaryProvider(
   if (!arg_type)
     return false;
 
-  llvm::Optional<uint64_t> opt_arg_size =
+  std::optional<uint64_t> opt_arg_size =
       arg_type.GetByteSize(exe_ctx.GetBestExecutionContextScope());
   if (!opt_arg_size)
     return false;
@@ -1177,6 +1192,8 @@ bool lldb_private::formatters::swift::SIMDVector_SummaryProvider(
       return false;
 
     auto synthetic = simd_elem->GetSyntheticValue();
+    if (!synthetic)
+      return false;
     const char *value_string = synthetic->GetValueAsCString();
     elem_vector.push_back(value_string);
   }
@@ -1209,7 +1226,7 @@ bool lldb_private::formatters::swift::LegacySIMD_SummaryProvider(
   bool is_vector = !is_matrix && !is_quaternion;
 
   // Get the kind of SIMD element inside of this object.
-  llvm::Optional<SIMDElementKind> kind = llvm::None;
+  std::optional<SIMDElementKind> kind = std::nullopt;
   if (type_name.startswith("int"))
     kind = SIMDElementKind::Int32;
   else if (type_name.startswith("uint"))

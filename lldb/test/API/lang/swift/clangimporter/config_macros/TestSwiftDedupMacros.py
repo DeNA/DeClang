@@ -17,15 +17,10 @@ import lldbsuite.test.lldbutil as lldbutil
 import os
 import unittest2
 
-
 class TestSwiftDedupMacros(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     # Don't run ClangImporter tests if Clangimporter is disabled.
-    @skipIf(setting=("symbols.use-swift-clangimporter", "false"))
+    @skipIf(setting=('symbols.use-swift-clangimporter', 'false'))
+    @skipIf(setting=('symbols.swift-precise-compiler-invocation', 'true'))
     # NOTE: rdar://44201206 - This test may sporadically segfault. It's likely
     # that the underlying memory corruption issue has been addressed, but due
     # to the difficulty of reproducing the crash, we are not sure. If a crash
@@ -40,14 +35,14 @@ class TestSwiftDedupMacros(TestBase):
 
         """
         self.build()
-
-        target, _, _, _ = lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("dylib.swift"), extra_images=["Dylib"]
-        )
+            
+        target,  _, _, _ = lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec('dylib.swift'),
+            extra_images=['Dylib'])
 
         # Turn on logging.
         log = self.getBuildArtifact("types.log")
-        self.expect('log enable lldb types -f ""%s"' % log)
+        self.expect('log enable lldb types -f "%s"' % log)
 
         self.expect("expression foo", DATA_TYPES_DISPLAYED_CORRECTLY, substrs=["42"])
         self.filecheck('platform shell cat "%s"' % log, __file__)

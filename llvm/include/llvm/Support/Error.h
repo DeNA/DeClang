@@ -14,8 +14,6 @@
 #define LLVM_SUPPORT_ERROR_H
 
 #include "llvm-c/Error.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/abi-breaking.h"
 #include "llvm/Support/AlignOf.h"
@@ -31,6 +29,7 @@
 #include <functional>
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <type_traits>
@@ -470,7 +469,7 @@ template <class T> class [[nodiscard]] Expected {
   template <class T1> friend class ExpectedAsOutParameter;
   template <class OtherT> friend class Expected;
 
-  static constexpr bool isRef = std::is_reference<T>::value;
+  static constexpr bool isRef = std::is_reference_v<T>;
 
   using wrap = std::reference_wrapper<std::remove_reference_t<T>>;
 
@@ -508,7 +507,7 @@ public:
   /// must be convertible to T.
   template <typename OtherT>
   Expected(OtherT &&Val,
-           std::enable_if_t<std::is_convertible<OtherT, T>::value> * = nullptr)
+           std::enable_if_t<std::is_convertible_v<OtherT, T>> * = nullptr)
       : HasError(false)
 #if LLVM_ENABLE_ABI_BREAKING_CHECKS
         // Expected is unchecked upon construction in Debug builds.
@@ -525,9 +524,8 @@ public:
   /// Move construct an Expected<T> value from an Expected<OtherT>, where OtherT
   /// must be convertible to T.
   template <class OtherT>
-  Expected(
-      Expected<OtherT> &&Other,
-      std::enable_if_t<std::is_convertible<OtherT, T>::value> * = nullptr) {
+  Expected(Expected<OtherT> &&Other,
+           std::enable_if_t<std::is_convertible_v<OtherT, T>> * = nullptr) {
     moveConstruct(std::move(Other));
   }
 
@@ -536,7 +534,7 @@ public:
   template <class OtherT>
   explicit Expected(
       Expected<OtherT> &&Other,
-      std::enable_if_t<!std::is_convertible<OtherT, T>::value> * = nullptr) {
+      std::enable_if_t<!std::is_convertible_v<OtherT, T>> * = nullptr) {
     moveConstruct(std::move(Other));
   }
 
@@ -577,9 +575,9 @@ public:
 
   /// Returns \a takeError() after moving the held T (if any) into \p V.
   template <class OtherT>
-  Error moveInto(OtherT &Value,
-                 std::enable_if_t<std::is_assignable<OtherT &, T &&>::value> * =
-                     nullptr) && {
+  Error moveInto(
+      OtherT &Value,
+      std::enable_if_t<std::is_assignable_v<OtherT &, T &&>> * = nullptr) && {
     if (*this)
       Value = std::move(get());
     return takeError();
@@ -1025,13 +1023,7 @@ void logAllUnhandledErrors(Error E, raw_ostream &OS, Twine ErrorBanner = {});
 
 /// Write all error messages (if any) in E to a string. The newline character
 /// is used to separate error messages.
-inline std::string toString(Error E) {
-  SmallVector<std::string, 2> Errors;
-  handleAllErrors(std::move(E), [&Errors](const ErrorInfoBase &EI) {
-    Errors.push_back(EI.message());
-  });
-  return join(Errors.begin(), Errors.end(), "\n");
-}
+std::string toString(Error E);
 
 /// Consume a Error without doing anything. This method should be used
 /// only where an error can be considered a reasonable and expected return
@@ -1039,7 +1031,7 @@ inline std::string toString(Error E) {
 ///
 /// Uses of this method are potentially indicative of design problems: If it's
 /// legitimate to do nothing while processing an "error", the error-producer
-/// might be more clearly refactored to return an Optional<T>.
+/// might be more clearly refactored to return an std::optional<T>.
 inline void consumeError(Error Err) {
   handleAllErrors(std::move(Err), [](const ErrorInfoBase &) {});
 }
@@ -1051,11 +1043,18 @@ inline void consumeError(Error Err) {
 /// Uses of this method are potentially indicative of problems: perhaps the
 /// error should be propagated further, or the error-producer should just
 /// return an Optional in the first place.
-template <typename T> Optional<T> expectedToOptional(Expected<T> &&E) {
+template <typename T> std::optional<T> expectedToOptional(Expected<T> &&E) {
   if (E)
     return std::move(*E);
   consumeError(E.takeError());
-  return None;
+  return std::nullopt;
+}
+
+template <typename T> std::optional<T> expectedToStdOptional(Expected<T> &&E) {
+  if (E)
+    return std::move(*E);
+  consumeError(E.takeError());
+  return std::nullopt;
 }
 
 /// Helper for converting an Error to a bool.
@@ -1217,10 +1216,10 @@ class StringError : public ErrorInfo<StringError> {
 public:
   static char ID;
 
-  // Prints EC + S and converts to EC
+  StringError(std::string &&S, std::error_code EC, bool PrintMsgOnly);
+  /// Prints EC + S and converts to EC.
   StringError(std::error_code EC, const Twine &S = Twine());
-
-  // Prints S and converts to EC
+  /// Prints S and converts to EC.
   StringError(const Twine &S, std::error_code EC);
 
   void log(raw_ostream &OS) const override;
@@ -1239,15 +1238,23 @@ template <typename... Ts>
 inline Error createStringError(std::error_code EC, char const *Fmt,
                                const Ts &... Vals) {
   std::string Buffer;
-  raw_string_ostream Stream(Buffer);
-  Stream << format(Fmt, Vals...);
-  return make_error<StringError>(Stream.str(), EC);
+  raw_string_ostream(Buffer) << format(Fmt, Vals...);
+  return make_error<StringError>(Buffer, EC);
 }
 
-Error createStringError(std::error_code EC, char const *Msg);
+Error createStringError(std::string &&Msg, std::error_code EC);
+
+inline Error createStringError(std::error_code EC, const char *S) {
+  return createStringError(std::string(S), EC);
+}
 
 inline Error createStringError(std::error_code EC, const Twine &S) {
-  return createStringError(EC, S.str().c_str());
+  return createStringError(S.str(), EC);
+}
+
+/// Create a StringError with an inconvertible error code.
+inline Error createStringError(const Twine &S) {
+  return createStringError(llvm::inconvertibleErrorCode(), S);
 }
 
 template <typename... Ts>
@@ -1270,7 +1277,7 @@ public:
     assert(Err && "Trying to log after takeError().");
     OS << "'" << FileName << "': ";
     if (Line)
-      OS << "line " << Line.value() << ": ";
+      OS << "line " << *Line << ": ";
     Err->log(OS);
   }
 
@@ -1291,7 +1298,7 @@ public:
   static char ID;
 
 private:
-  FileError(const Twine &F, Optional<size_t> LineNum,
+  FileError(const Twine &F, std::optional<size_t> LineNum,
             std::unique_ptr<ErrorInfoBase> E) {
     assert(E && "Cannot create FileError from Error success value.");
     FileName = F.str();
@@ -1299,7 +1306,7 @@ private:
     Line = std::move(LineNum);
   }
 
-  static Error build(const Twine &F, Optional<size_t> Line, Error E) {
+  static Error build(const Twine &F, std::optional<size_t> Line, Error E) {
     std::unique_ptr<ErrorInfoBase> Payload;
     handleAllErrors(std::move(E),
                     [&](std::unique_ptr<ErrorInfoBase> EIB) -> Error {
@@ -1311,20 +1318,20 @@ private:
   }
 
   std::string FileName;
-  Optional<size_t> Line;
+  std::optional<size_t> Line;
   std::unique_ptr<ErrorInfoBase> Err;
 };
 
 /// Concatenate a source file path and/or name with an Error. The resulting
 /// Error is unchecked.
 inline Error createFileError(const Twine &F, Error E) {
-  return FileError::build(F, Optional<size_t>(), std::move(E));
+  return FileError::build(F, std::optional<size_t>(), std::move(E));
 }
 
 /// Concatenate a source file path and/or name with line number and an Error.
 /// The resulting Error is unchecked.
 inline Error createFileError(const Twine &F, size_t Line, Error E) {
-  return FileError::build(F, Optional<size_t>(Line), std::move(E));
+  return FileError::build(F, std::optional<size_t>(Line), std::move(E));
 }
 
 /// Concatenate a source file path and/or name with a std::error_code 

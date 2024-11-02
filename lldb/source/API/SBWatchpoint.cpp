@@ -148,9 +148,9 @@ void SBWatchpoint::SetEnabled(bool enabled) {
     const bool notify = true;
     if (process_sp) {
       if (enabled)
-        process_sp->EnableWatchpoint(watchpoint_sp.get(), notify);
+        process_sp->EnableWatchpoint(watchpoint_sp, notify);
       else
-        process_sp->DisableWatchpoint(watchpoint_sp.get(), notify);
+        process_sp->DisableWatchpoint(watchpoint_sp, notify);
     } else {
       watchpoint_sp->SetEnabled(enabled, notify);
     }
@@ -210,12 +210,12 @@ const char *SBWatchpoint::GetCondition() {
   LLDB_INSTRUMENT_VA(this);
 
   lldb::WatchpointSP watchpoint_sp(GetSP());
-  if (watchpoint_sp) {
-    std::lock_guard<std::recursive_mutex> guard(
-        watchpoint_sp->GetTarget().GetAPIMutex());
-    return watchpoint_sp->GetConditionText();
-  }
-  return nullptr;
+  if (!watchpoint_sp)
+    return nullptr;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      watchpoint_sp->GetTarget().GetAPIMutex());
+  return ConstString(watchpoint_sp->GetConditionText()).GetCString();
 }
 
 void SBWatchpoint::SetCondition(const char *condition) {
@@ -323,16 +323,16 @@ const char *SBWatchpoint::GetWatchSpec() {
   LLDB_INSTRUMENT_VA(this);
 
   lldb::WatchpointSP watchpoint_sp(GetSP());
-  if (watchpoint_sp) {
-    std::lock_guard<std::recursive_mutex> guard(
-        watchpoint_sp->GetTarget().GetAPIMutex());
-    // Store the result of `GetWatchSpec()` as a ConstString
-    // so that the C string we return has a sufficiently long
-    // lifetime. Note this a memory leak but should be fairly
-    // low impact.
-    return ConstString(watchpoint_sp->GetWatchSpec()).AsCString();
-  }
-  return nullptr;
+  if (!watchpoint_sp)
+    return nullptr;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      watchpoint_sp->GetTarget().GetAPIMutex());
+  // Store the result of `GetWatchSpec()` as a ConstString
+  // so that the C string we return has a sufficiently long
+  // lifetime. Note this a memory leak but should be fairly
+  // low impact.
+  return ConstString(watchpoint_sp->GetWatchSpec()).AsCString();
 }
 
 bool SBWatchpoint::IsWatchingReads() {
@@ -355,7 +355,8 @@ bool SBWatchpoint::IsWatchingWrites() {
     std::lock_guard<std::recursive_mutex> guard(
         watchpoint_sp->GetTarget().GetAPIMutex());
 
-    return watchpoint_sp->WatchpointWrite();
+    return watchpoint_sp->WatchpointWrite() ||
+           watchpoint_sp->WatchpointModify();
   }
 
   return false;

@@ -10,7 +10,6 @@
 #include "PECallFrameInfo.h"
 #include "WindowsMiniDump.h"
 
-#include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
@@ -25,6 +24,7 @@
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/FileSpecList.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/StreamString.h"
@@ -36,12 +36,9 @@
 #include "llvm/Support/CRC.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatAdapters.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
-
-#ifdef LLDB_ENABLE_SWIFT
-#include "swift/ABI/ObjectFile.h"
-#endif //LLDB_ENABLE_SWIFT
+#include "llvm/TargetParser/Host.h"
+#include <optional>
 
 #define IMAGE_DOS_SIGNATURE 0x5A4D    // MZ
 #define IMAGE_NT_SIGNATURE 0x00004550 // PE00
@@ -93,23 +90,22 @@ public:
   }
 
   llvm::Triple::EnvironmentType ABI() const {
-    return (llvm::Triple::EnvironmentType)
-        m_collection_sp->GetPropertyAtIndexAsEnumeration(
-            nullptr, ePropertyABI, llvm::Triple::UnknownEnvironment);
+    return GetPropertyAtIndexAs<llvm::Triple::EnvironmentType>(
+        ePropertyABI, llvm::Triple::UnknownEnvironment);
   }
 
   OptionValueDictionary *ModuleABIMap() const {
     return m_collection_sp->GetPropertyAtIndexAsOptionValueDictionary(
-        nullptr, ePropertyModuleABIMap);
+        ePropertyModuleABIMap);
   }
 };
+
+} // namespace
 
 static PluginProperties &GetGlobalPluginProperties() {
   static PluginProperties g_settings;
   return g_settings;
 }
-
-} // namespace
 
 static bool GetDebugLinkContents(const llvm::object::COFFObjectFile &coff_obj,
                                  std::string &gnu_debuglink_file,
@@ -169,7 +165,7 @@ static UUID GetCoffUUID(llvm::object::COFFObjectFile &coff_obj) {
     auto raw_data = coff_obj.getData();
     LLDB_SCOPED_TIMERF(
         "Calculating module crc32 %s with size %" PRIu64 " KiB",
-        FileSpec(coff_obj.getFileName()).GetLastPathComponent().AsCString(),
+        FileSpec(coff_obj.getFileName()).GetFilename().AsCString(),
         static_cast<lldb::offset_t>(raw_data.size()) / 1024);
     gnu_debuglink_crc = llvm::crc32(0, llvm::arrayRefFromStringRef(raw_data));
   }
@@ -193,8 +189,7 @@ void ObjectFilePECOFF::DebuggerInitialize(Debugger &debugger) {
     const bool is_global_setting = true;
     PluginManager::CreateSettingForObjectFilePlugin(
         debugger, GetGlobalPluginProperties().GetValueProperties(),
-        ConstString("Properties for the PE/COFF object-file plug-in."),
-        is_global_setting);
+        "Properties for the PE/COFF object-file plug-in.", is_global_setting);
   }
 }
 
@@ -299,25 +294,23 @@ size_t ObjectFilePECOFF::GetModuleSpecifications(
   const auto *map = GetGlobalPluginProperties().ModuleABIMap();
   if (map->GetNumValues() > 0) {
     // Step 1: Try with the exact file name.
-    auto name = file.GetLastPathComponent();
+    auto name = file.GetFilename();
     module_env_option = map->GetValueForKey(name);
     if (!module_env_option) {
       // Step 2: Try with the file name in lowercase.
       auto name_lower = name.GetStringRef().lower();
-      module_env_option =
-          map->GetValueForKey(ConstString(llvm::StringRef(name_lower)));
+      module_env_option = map->GetValueForKey(llvm::StringRef(name_lower));
     }
     if (!module_env_option) {
       // Step 3: Try with the file name with ".debug" suffix stripped.
       auto name_stripped = name.GetStringRef();
       if (name_stripped.consume_back_insensitive(".debug")) {
-        module_env_option = map->GetValueForKey(ConstString(name_stripped));
+        module_env_option = map->GetValueForKey(name_stripped);
         if (!module_env_option) {
           // Step 4: Try with the file name in lowercase with ".debug" suffix
           // stripped.
           auto name_lower = name_stripped.lower();
-          module_env_option =
-              map->GetValueForKey(ConstString(llvm::StringRef(name_lower)));
+          module_env_option = map->GetValueForKey(llvm::StringRef(name_lower));
         }
       }
     }
@@ -325,7 +318,8 @@ size_t ObjectFilePECOFF::GetModuleSpecifications(
   llvm::Triple::EnvironmentType env;
   if (module_env_option)
     env =
-        (llvm::Triple::EnvironmentType)module_env_option->GetEnumerationValue();
+        module_env_option->GetValueAs<llvm::Triple::EnvironmentType>().value_or(
+            static_cast<llvm::Triple::EnvironmentType>(0));
   else
     env = GetGlobalPluginProperties().ABI();
 
@@ -349,6 +343,7 @@ size_t ObjectFilePECOFF::GetModuleSpecifications(
     specs.Append(module_spec);
     break;
   case MachineArm64:
+  case MachineArm64X:
     spec.SetTriple("aarch64-pc-windows");
     spec.GetTriple().setEnvironment(env);
     specs.Append(module_spec);
@@ -1016,6 +1011,7 @@ SectionType ObjectFilePECOFF::GetSectionType(llvm::StringRef sect_name,
           .Cases(".eh_frame", ".eh_fram", eSectionTypeEHFrame)
           .Case(".gosymtab", eSectionTypeGoSymtab)
           .Case("swiftast", eSectionTypeSwiftModules) // downstream change
+          .Case(".lldbsummaries", lldb::eSectionTypeLLDBTypeSummaries)
           .Default(eSectionTypeInvalid);
   if (section_type != eSectionTypeInvalid)
     return section_type;
@@ -1063,7 +1059,6 @@ void ObjectFilePECOFF::CreateSections(SectionList &unified_section_list) {
     unified_section_list.AddSection(header_sp);
 
     const uint32_t nsects = m_sect_headers.size();
-    ModuleSP module_sp(GetModule());
     for (uint32_t idx = 0; idx < nsects; ++idx) {
       llvm::StringRef sect_name = GetSectionName(m_sect_headers[idx]);
       ConstString const_sect_name(sect_name);
@@ -1112,12 +1107,12 @@ UUID ObjectFilePECOFF::GetUUID() {
   return m_uuid;
 }
 
-llvm::Optional<FileSpec> ObjectFilePECOFF::GetDebugLink() {
+std::optional<FileSpec> ObjectFilePECOFF::GetDebugLink() {
   std::string gnu_debuglink_file;
   uint32_t gnu_debuglink_crc;
   if (GetDebugLinkContents(*m_binary, gnu_debuglink_file, gnu_debuglink_crc))
     return FileSpec(gnu_debuglink_file);
-  return llvm::None;
+  return std::nullopt;
 }
 
 uint32_t ObjectFilePECOFF::ParseDependentModules() {
@@ -1436,21 +1431,3 @@ ObjectFile::Type ObjectFilePECOFF::CalculateType() {
 }
 
 ObjectFile::Strata ObjectFilePECOFF::CalculateStrata() { return eStrataUser; }
-
-llvm::StringRef ObjectFilePECOFF::GetReflectionSectionIdentifier(
-    swift::ReflectionSectionKind section) {
-#ifdef LLDB_ENABLE_SWIFT
-  swift::SwiftObjectFileFormatCOFF file_format_coff;
-  return file_format_coff.getSectionName(section);
-#else
-  llvm_unreachable("Swift support disabled");
-#endif //LLDB_ENABLE_SWIFT
-}
-
-#ifdef LLDB_ENABLE_SWIFT
-bool ObjectFilePECOFF::CanContainSwiftReflectionData(const Section &section) {
-  swift::SwiftObjectFileFormatCOFF file_format;
-  return file_format.sectionContainsReflectionData(
-      section.GetName().GetStringRef());
-}
-#endif // LLDB_ENABLE_SWIFT

@@ -14,6 +14,7 @@
 #include <set>
 #include <vector>
 
+#include "clang/AST/ASTContext.h"
 #include "clang/AST/ASTImporter.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/Decl.h"
@@ -118,9 +119,32 @@ public:
   /// \param layout The layout for the record.
   void SetRecordLayout(clang::RecordDecl *decl, const LayoutInfo &layout);
 
+  bool HasRecordLayout(const clang::RecordDecl *decl) const;
+
   bool LayoutRecordType(
       const clang::RecordDecl *record_decl, uint64_t &bit_size,
       uint64_t &alignment,
+      llvm::DenseMap<const clang::FieldDecl *, uint64_t> &field_offsets,
+      llvm::DenseMap<const clang::CXXRecordDecl *, clang::CharUnits>
+          &base_offsets,
+      llvm::DenseMap<const clang::CXXRecordDecl *, clang::CharUnits>
+          &vbase_offsets);
+
+  /// If \ref record has a valid origin, this function copies that
+  /// origin's layout into this ClangASTImporter instance.
+  ///
+  /// \param[in] record The decl whose layout we're calculating.
+  /// \param[out] size Size of \ref record in bytes.
+  /// \param[out] alignment Alignment of \ref record in bytes.
+  /// \param[out] field_offsets Offsets of fields of \ref record.
+  /// \param[out] base_offsets Offsets of base classes of \ref record.
+  /// \param[out] vbase_offsets Offsets of virtual base classes of \ref record.
+  ///
+  /// \returns Returns 'false' if no valid origin was found for \ref record or
+  /// this function failed to import the layout from the origin. Otherwise,
+  /// returns 'true' and the offsets/size/alignment are valid for use.
+  bool importRecordLayoutFromOrigin(
+      const clang::RecordDecl *record, uint64_t &size, uint64_t &alignment,
       llvm::DenseMap<const clang::FieldDecl *, uint64_t> &field_offsets,
       llvm::DenseMap<const clang::CXXRecordDecl *, clang::CharUnits>
           &base_offsets,
@@ -134,6 +158,8 @@ public:
   ///
   /// \see ClangASTImporter::Import
   bool CanImport(const CompilerType &type);
+
+  bool CanImport(const clang::Decl *d);
 
   /// If the given type was copied from another TypeSystemClang then copy over
   /// all missing information (e.g., the definition of a 'class' type).
@@ -149,6 +175,8 @@ public:
 
   bool CompleteTagDecl(clang::TagDecl *decl);
 
+  /// This function assumes origin has been completed (i.e., has a valid
+  /// definition).
   bool CompleteTagDeclWithOrigin(clang::TagDecl *decl, clang::TagDecl *origin);
 
   bool CompleteObjCInterfaceDecl(clang::ObjCInterfaceDecl *interface_decl);
@@ -260,22 +288,7 @@ public:
   /// their counterpart from a C++ module.
   struct ASTImporterDelegate : public clang::ASTImporter {
     ASTImporterDelegate(ClangASTImporter &main, clang::ASTContext *target_ctx,
-                        clang::ASTContext *source_ctx)
-        : clang::ASTImporter(*target_ctx, main.m_file_manager, *source_ctx,
-                             main.m_file_manager, true /*minimal*/),
-          m_main(main), m_source_ctx(source_ctx) {
-      // Target and source ASTContext shouldn't be identical. Importing AST
-      // nodes within the same AST doesn't make any sense as the whole idea
-      // is to import them to a different AST.
-      lldbassert(target_ctx != source_ctx && "Can't import into itself");
-      // This is always doing a minimal import of any declarations. This means
-      // that there has to be an ExternalASTSource in the target ASTContext
-      // (that should implement the callbacks that complete any declarations
-      // on demand). Without an ExternalASTSource, this ASTImporter will just
-      // do a minimal import and the imported declarations won't be completed.
-      assert(target_ctx->getExternalSource() && "Missing ExternalSource");
-      setODRHandling(clang::ASTImporter::ODRHandlingType::Liberal);
-    }
+                        clang::ASTContext *source_ctx);
 
     /// Scope guard that attaches a CxxModuleHandler to an ASTImporterDelegate
     /// and deattaches it at the end of the scope. Supports being used multiple
@@ -324,6 +337,8 @@ public:
     llvm::Expected<clang::Decl *> ImportImpl(clang::Decl *From) override;
 
   private:
+    void MarkDeclImported(clang::Decl *from, clang::Decl *to);
+
     /// Decls we should ignore when mapping decls back to their original
     /// ASTContext. Used by the CxxModuleHandler to mark declarations that
     /// were created from the 'std' C++ module to prevent that the Importer
@@ -455,6 +470,58 @@ public:
 
   RecordDeclToLayoutMap m_record_decl_to_layout_map;
 };
+
+template <class D> class TaggedASTDecl {
+public:
+  TaggedASTDecl() : decl(nullptr) {}
+  TaggedASTDecl(D *_decl) : decl(_decl) {}
+  bool IsValid() const { return (decl != nullptr); }
+  bool IsInvalid() const { return !IsValid(); }
+  D *operator->() const { return decl; }
+  D *decl;
+};
+
+template <class D2, template <class D> class TD, class D1>
+TD<D2> DynCast(TD<D1> source) {
+  return TD<D2>(llvm::dyn_cast<D2>(source.decl));
+}
+
+template <class D = clang::Decl> class DeclFromParser;
+template <class D = clang::Decl> class DeclFromUser;
+
+template <class D> class DeclFromParser : public TaggedASTDecl<D> {
+public:
+  DeclFromParser() : TaggedASTDecl<D>() {}
+  DeclFromParser(D *_decl) : TaggedASTDecl<D>(_decl) {}
+
+  DeclFromUser<D> GetOrigin(ClangASTImporter &importer);
+};
+
+template <class D> class DeclFromUser : public TaggedASTDecl<D> {
+public:
+  DeclFromUser() : TaggedASTDecl<D>() {}
+  DeclFromUser(D *_decl) : TaggedASTDecl<D>(_decl) {}
+
+  DeclFromParser<D> Import(clang::ASTContext *dest_ctx,
+                           ClangASTImporter &importer);
+};
+
+template <class D>
+DeclFromUser<D> DeclFromParser<D>::GetOrigin(ClangASTImporter &importer) {
+  ClangASTImporter::DeclOrigin origin = importer.GetDeclOrigin(this->decl);
+  if (!origin.Valid())
+    return DeclFromUser<D>();
+  return DeclFromUser<D>(llvm::dyn_cast<D>(origin.decl));
+}
+
+template <class D>
+DeclFromParser<D> DeclFromUser<D>::Import(clang::ASTContext *dest_ctx,
+                                          ClangASTImporter &importer) {
+  DeclFromParser<> parser_generic_decl(importer.CopyDecl(dest_ctx, this->decl));
+  if (parser_generic_decl.IsInvalid())
+    return DeclFromParser<D>();
+  return DeclFromParser<D>(llvm::dyn_cast<D>(parser_generic_decl.decl));
+}
 
 } // namespace lldb_private
 

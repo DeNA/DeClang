@@ -18,6 +18,7 @@
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include <optional>
 #include <string>
 
 namespace clang {
@@ -46,6 +47,10 @@ struct Command {
 class DependencyConsumer {
 public:
   virtual ~DependencyConsumer() {}
+
+  virtual void handleProvidedAndRequiredStdCXXModules(
+      std::optional<P1689ModuleInfo> Provided,
+      std::vector<P1689ModuleInfo> Requires) {}
 
   virtual void handleBuildCommand(Command Cmd) {}
 
@@ -96,7 +101,7 @@ public:
     return llvm::Error::success();
   }
 
-  virtual llvm::Error finalizeModuleInvocation(CompilerInvocation &CI,
+  virtual llvm::Error finalizeModuleInvocation(CowCompilerInvocation &CI,
                                                const ModuleDeps &MD) {
     return llvm::Error::success();
   }
@@ -125,13 +130,13 @@ public:
                            DependencyConsumer &DepConsumer,
                            DependencyActionController &Controller,
                            DiagnosticConsumer &DiagConsumer,
-                           llvm::Optional<StringRef> ModuleName = None);
+                           std::optional<StringRef> ModuleName = std::nullopt);
   /// \returns A \c StringError with the diagnostic output if clang errors
   /// occurred, success otherwise.
   llvm::Error computeDependencies(
       StringRef WorkingDirectory, const std::vector<std::string> &CommandLine,
       DependencyConsumer &Consumer, DependencyActionController &Controller,
-      llvm::Optional<StringRef> ModuleName = None);
+      std::optional<StringRef> ModuleName = std::nullopt);
 
   /// Scan from a compiler invocation.
   /// If \p DiagGenerationAsCompilation is true it will generate error
@@ -169,7 +174,7 @@ private:
   llvm::IntrusiveRefCntPtr<DependencyScanningWorkerFilesystem> DepFS;
   ScanningOutputFormat Format;
   /// Whether to optimize the modules' command-line arguments.
-  bool OptimizeArgs;
+  ScanningOptimizations OptimizeArgs;
   /// Whether to set up command-lines to load PCM files eagerly.
   bool EagerLoadModules;
 

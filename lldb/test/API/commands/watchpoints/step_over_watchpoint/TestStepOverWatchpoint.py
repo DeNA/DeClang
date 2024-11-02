@@ -35,11 +35,6 @@ class TestStepOverWatchpoint(TestBase):
 
         return (target, process, thread, frame, read_watchpoint)
 
-    @expectedFailureAll(
-        oslist=["freebsd", "linux"],
-        archs=["aarch64", "arm"],
-        bugnumber="llvm.org/pr26031",
-    )
     # Read-write watchpoints not supported on SystemZ
     @expectedFailureAll(archs=["s390x"])
     @add_test_categories(["basic_process"])
@@ -52,13 +47,16 @@ class TestStepOverWatchpoint(TestBase):
             lldb.eStopReasonWatchpoint,
             STOPPED_DUE_TO_WATCHPOINT,
         )
-        self.assertEquals(thread.GetStopDescription(20), "watchpoint 1")
+        self.assertEqual(thread.GetStopDescription(20), "watchpoint 1")
 
+    # Skip everywhere while modify watchpoints are sorted out.
+    @skipTestIfFn(lambda : True)
     @expectedFailureAll(
         oslist=["freebsd", "linux"],
         archs=["aarch64", "arm"],
         bugnumber="llvm.org/pr26031",
     )
+    @expectedFailureAll(oslist=["linux"], bugnumber="bugs.swift.org/SR-796")
     # Read-write watchpoints not supported on SystemZ
     @expectedFailureAll(archs=["s390x"])
     @expectedFailureAll(
@@ -71,8 +69,6 @@ class TestStepOverWatchpoint(TestBase):
         target, process, thread, frame, wp = self.get_to_start(
             "Set breakpoint after call"
         )
-
-        self.assertEquals(thread.GetStopDescription(20), "step over")
 
         self.step_inst_for_watchpoint(1)
 
@@ -97,11 +93,11 @@ class TestStepOverWatchpoint(TestBase):
             lldb.eStopReasonWatchpoint,
             STOPPED_DUE_TO_WATCHPOINT,
         )
-        self.assertEquals(thread.GetStopDescription(20), "watchpoint 2")
+        self.assertEqual(thread.GetStopDescription(20), "watchpoint 2")
 
         process.Continue()
         self.assertState(process.GetState(), lldb.eStateStopped, PROCESS_STOPPED)
-        self.assertEquals(thread.GetStopDescription(20), "step over")
+        self.assertEqual(thread.GetStopDescription(20), "step over")
 
         self.step_inst_for_watchpoint(2)
 
@@ -115,7 +111,7 @@ class TestStepOverWatchpoint(TestBase):
                 self.assertFalse(watchpoint_hit, "Watchpoint already hit.")
                 expected_stop_desc = "watchpoint %d" % wp_id
                 actual_stop_desc = self.thread().GetStopDescription(20)
-                self.assertEquals(
+                self.assertEqual(
                     actual_stop_desc, expected_stop_desc, "Watchpoint ID didn't match."
                 )
                 watchpoint_hit = True

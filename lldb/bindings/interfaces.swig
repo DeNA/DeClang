@@ -34,6 +34,7 @@
 %include "./interface/SBFileDocstrings.i"
 %include "./interface/SBFileSpecDocstrings.i"
 %include "./interface/SBFileSpecListDocstrings.i"
+%include "./interface/SBFormatDocstrings.i"
 %include "./interface/SBFrameDocstrings.i"
 %include "./interface/SBFunctionDocstrings.i"
 %include "./interface/SBHostOSDocstrings.i"
@@ -80,6 +81,7 @@
 %include "./interface/SBValueListDocstrings.i"
 %include "./interface/SBVariablesOptionsDocstrings.i"
 %include "./interface/SBWatchpointDocstrings.i"
+%include "./interface/SBWatchpointOptionsDocstrings.i"
 
 /* API headers */
 %include "lldb/API/SBAddress.h"
@@ -105,11 +107,13 @@
 %include "lldb/API/SBFile.h"
 %include "lldb/API/SBFileSpec.h"
 %include "lldb/API/SBFileSpecList.h"
+%include "lldb/API/SBFormat.h"
 %include "lldb/API/SBFrame.h"
 %include "lldb/API/SBFunction.h"
 %include "lldb/API/SBHostOS.h"
 %include "lldb/API/SBInstruction.h"
 %include "lldb/API/SBInstructionList.h"
+%include "lldb/API/SBLanguages.h"
 %include "lldb/API/SBLanguageRuntime.h"
 %include "lldb/API/SBLaunchInfo.h"
 %include "lldb/API/SBLineEntry.h"
@@ -121,7 +125,6 @@
 %include "lldb/API/SBPlatform.h"
 %include "lldb/API/SBProcess.h"
 %include "lldb/API/SBProcessInfo.h"
-%include "lldb/API/SBProcessInfoList.h"
 %include "lldb/API/SBQueue.h"
 %include "lldb/API/SBQueueItem.h"
 %include "lldb/API/SBReproducer.h"
@@ -153,6 +156,7 @@
 %include "lldb/API/SBValueList.h"
 %include "lldb/API/SBVariablesOptions.h"
 %include "lldb/API/SBWatchpoint.h"
+%include "lldb/API/SBWatchpointOptions.h"
 
 /* Extensions for SB classes */
 %include "./interface/SBAddressExtensions.i"
@@ -178,7 +182,6 @@
 %include "./interface/SBModuleExtensions.i"
 %include "./interface/SBModuleSpecExtensions.i"
 %include "./interface/SBProcessExtensions.i"
-%include "./interface/SBProcessInfoListExtensions.i"
 %include "./interface/SBScriptObjectExtensions.i"
 %include "./interface/SBSectionExtensions.i"
 %include "./interface/SBStreamExtensions.i"

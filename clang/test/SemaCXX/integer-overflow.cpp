@@ -167,7 +167,7 @@ uint64_t check_integer_overflows(int i) { //expected-note 0+{{declared here}}
   uint64_t a[10];
   a[4608 * 1024 * 1024] = 1;
 #if __cplusplus < 201103L
-// expected-warning@-2 {{array index 536870912 is past the end of the array (which contains 10 elements)}}
+// expected-warning@-2 {{array index 536870912 is past the end of the array (that has type 'uint64_t[10]' (aka 'unsigned long long[10]'))}}
 // expected-note@-4 {{array 'a' declared here}}
 #endif
 
@@ -208,3 +208,38 @@ namespace EvaluationCrashes {
     }
   }
 }
+
+namespace GH31643 {
+void f() {
+  int a = -(1<<31); // expected-warning {{overflow in expression; result is -2147483648 with type 'int'}}
+}
+}
+
+#if __cplusplus >= 201103L
+namespace GH63629 {
+typedef long long int64_t;
+
+template<typename T>
+class u_ptr {
+  T *ptr;
+public:
+  u_ptr(const u_ptr&) = delete;
+  u_ptr &operator=(const u_ptr&) = delete;
+  u_ptr(u_ptr &&other) : ptr(other.ptr) { other.ptr = 0; }
+  u_ptr(T *ptr) : ptr(ptr) { }
+  ~u_ptr() { delete ptr; }
+};
+
+u_ptr<bool> Wrap(int64_t x) {
+    return nullptr;
+}
+
+int64_t Pass(int64_t x) { return x; }
+
+int m() {
+    int64_t x = Pass(30 * 24 * 60 * 59 * 1000);  // expected-warning {{overflow in expression; result is -1746167296 with type 'int'}}
+    auto r = Wrap(Pass(30 * 24 * 60 * 59 * 1000));  // expected-warning {{overflow in expression; result is -1746167296 with type 'int'}}
+    return 0;
+}
+}
+#endif

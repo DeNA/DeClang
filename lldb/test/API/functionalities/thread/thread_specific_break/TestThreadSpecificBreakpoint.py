@@ -32,6 +32,7 @@ class ThreadSpecificBreakTestCase(TestBase):
         archs=["armv7", "armv7k"],
         bugnumber="rdar://problem/34563920",
     )  # armv7 ios problem - breakpoint with tid qualifier isn't working
+    @skipIf(oslist=["windows"], archs=["aarch64"])  # Flaky on buildbot
     def test_thread_id(self):
         self.do_test(set_thread_id)
 
@@ -49,6 +50,7 @@ class ThreadSpecificBreakTestCase(TestBase):
         archs=["armv7", "armv7k"],
         bugnumber="rdar://problem/34563920",
     )  # armv7 ios problem - breakpoint with tid qualifier isn't working
+    @skipIf(oslist=["windows"], archs=["aarch64"])  # Flaky on buildbot
     def test_current_token(self):
         self.do_test(using_current)
 

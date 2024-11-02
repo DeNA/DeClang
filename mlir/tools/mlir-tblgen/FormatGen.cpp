@@ -177,6 +177,7 @@ FormatToken FormatLexer::lexIdentifier(const char *tokStart) {
       StringSwitch<FormatToken::Kind>(str)
           .Case("attr-dict", FormatToken::kw_attr_dict)
           .Case("attr-dict-with-keyword", FormatToken::kw_attr_dict_w_keyword)
+          .Case("prop-dict", FormatToken::kw_prop_dict)
           .Case("custom", FormatToken::kw_custom)
           .Case("functional-type", FormatToken::kw_functional_type)
           .Case("oilist", FormatToken::kw_oilist)
@@ -444,6 +445,11 @@ bool mlir::tblgen::shouldEmitSpaceBefore(StringRef value,
 
 bool mlir::tblgen::canFormatStringAsKeyword(
     StringRef value, function_ref<void(Twine)> emitError) {
+  if (value.empty()) {
+    if (emitError)
+      emitError("keywords cannot be empty");
+    return false;
+  }
   if (!isalpha(value.front()) && value.front() != '_') {
     if (emitError)
       emitError("valid keyword starts with a letter or '_'");

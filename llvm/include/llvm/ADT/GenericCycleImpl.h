@@ -15,8 +15,8 @@
 ///
 /// This file should only be included by files that implement a
 /// specialization of the relevant templates. Currently these are:
-/// - CycleAnalysis.cpp
-/// - MachineCycleAnalysis.cpp
+/// - llvm/lib/IR/CycleInfo.cpp
+/// - llvm/lib/CodeGen/MachineCycleAnalysis.cpp
 ///
 //===----------------------------------------------------------------------===//
 
@@ -177,8 +177,7 @@ void GenericCycleInfo<ContextT>::moveTopLevelCycleToNewParent(CycleT *NewParent,
   CurrentContainer.pop_back();
   Child->ParentCycle = NewParent;
 
-  NewParent->Blocks.insert(NewParent->Blocks.end(), Child->block_begin(),
-                           Child->block_end());
+  NewParent->Blocks.insert(Child->block_begin(), Child->block_end());
 
   for (auto &It : BlockMapTopLevel)
     if (It.second == Child)
@@ -266,7 +265,7 @@ void GenericCycleInfoCompute<ContextT>::run(BlockT *EntryBlock) {
       } else {
         Info.BlockMap.try_emplace(Block, NewCycle.get());
         assert(!is_contained(NewCycle->Blocks, Block));
-        NewCycle->Blocks.push_back(Block);
+        NewCycle->Blocks.insert(Block);
         ProcessPredecessors(Block);
         Info.BlockMapTopLevel.try_emplace(Block, NewCycle.get());
       }
@@ -371,10 +370,7 @@ void GenericCycleInfo<ContextT>::compute(FunctionT &F) {
 template <typename ContextT>
 auto GenericCycleInfo<ContextT>::getCycle(const BlockT *Block) const
     -> CycleT * {
-  auto MapIt = BlockMap.find(Block);
-  if (MapIt != BlockMap.end())
-    return MapIt->second;
-  return nullptr;
+  return BlockMap.lookup(Block);
 }
 
 /// \brief get the depth for the cycle which containing a given block.

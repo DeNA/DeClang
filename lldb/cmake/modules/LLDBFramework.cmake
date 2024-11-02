@@ -71,6 +71,7 @@ endif()
 # At configuration time, collect headers for the framework bundle and copy them
 # into a staging directory. Later we can copy over the entire folder.
 file(GLOB public_headers ${LLDB_SOURCE_DIR}/include/lldb/API/*.h)
+set(generated_public_headers ${LLDB_OBJ_DIR}/include/lldb/API/SBLanguages.h)
 file(GLOB root_public_headers ${LLDB_SOURCE_DIR}/include/lldb/lldb-*.h)
 file(GLOB root_private_headers ${LLDB_SOURCE_DIR}/include/lldb/lldb-private*.h)
 list(REMOVE_ITEM root_public_headers ${root_private_headers})
@@ -80,6 +81,7 @@ find_program(unifdef_EXECUTABLE unifdef)
 set(lldb_header_staging ${CMAKE_CURRENT_BINARY_DIR}/FrameworkHeaders)
 foreach(header
     ${public_headers}
+    ${generated_public_headers}
     ${root_public_headers})
 
   get_filename_component(basename ${header} NAME)
@@ -103,7 +105,7 @@ foreach(header
 endforeach()
 
 # Wrap output in a target, so lldb-framework can depend on it.
-add_custom_target(liblldb-resource-headers DEPENDS ${lldb_staged_headers})
+add_custom_target(liblldb-resource-headers DEPENDS lldb-sbapi-dwarf-enums ${lldb_staged_headers})
 set_target_properties(liblldb-resource-headers PROPERTIES FOLDER "lldb misc")
 add_dependencies(liblldb liblldb-resource-headers)
 
@@ -135,11 +137,32 @@ if(NOT APPLE_EMBEDDED)
   )
 
   if(LLDB_FRAMEWORK_COPY_SWIFT_RESOURCES)
+    # To run the LLDB test suite, we need to be able to find some of the Swift
+    # compiler resources. When part of a toolchain, LLDB knows where to find
+    # those. For at-desk builds, it copies over the resources from the Swift
+    # build directory into LLDB.framework.
+    set(RESOURCE_DIRS
+      FrameworkABIBaseline
+      apinotes
+      clang
+      embedded
+      macosx
+      shims
+      swiftToCxx
+    )
+    foreach(DIR ${RESOURCE_DIRS})
+      add_custom_command(TARGET liblldb POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${SWIFT_BINARY_DIR}/lib/swift/${DIR}/
+                $<TARGET_FILE_DIR:liblldb>/Resources/Swift/${DIR}
+        COMMENT "LLDB.framework: copy Swift compiler resource: ${DIR}"
+      )
+    endforeach()
     add_custom_command(TARGET liblldb POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_directory
-              ${SWIFT_BINARY_DIR}/lib/swift
-              $<TARGET_FILE_DIR:liblldb>/Resources/Swift
-      COMMENT "LLDB.framework: copy Swift vendor-specific headers"
+      COMMAND ${CMAKE_COMMAND} -E copy
+              ${SWIFT_BINARY_DIR}/lib/swift/module.modulemap
+              $<TARGET_FILE_DIR:liblldb>/Resources/Swift/
+      COMMENT "LLDB.framework: copy Swift compiler resource: module.modulemap"
     )
   endif()
 endif()

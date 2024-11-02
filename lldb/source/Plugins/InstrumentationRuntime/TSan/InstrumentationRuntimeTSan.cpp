@@ -27,6 +27,8 @@
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Utility/LLDBLog.h"
+#include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/Stream.h"
 
@@ -217,10 +219,10 @@ CreateStackTrace(ValueObjectSP o,
   auto trace_sp = std::make_shared<StructuredData::Array>();
   ValueObjectSP trace_value_object =
       o->GetValueForExpressionPath(trace_item_name.c_str());
-  size_t count = trace_value_object->GetNumChildren();
+  size_t count = trace_value_object->GetNumChildrenIgnoringErrors();
   for (size_t j = 0; j < count; j++) {
     addr_t trace_addr =
-        trace_value_object->GetChildAtIndex(j, true)->GetValueAsUnsigned(0);
+        trace_value_object->GetChildAtIndex(j)->GetValueAsUnsigned(0);
     if (trace_addr == 0)
       break;
     trace_sp->AddIntegerItem(trace_addr);
@@ -241,7 +243,7 @@ static StructuredData::ArraySP ConvertToStructuredArray(
   ValueObjectSP objects =
       return_value_sp->GetValueForExpressionPath(items_name.c_str());
   for (unsigned int i = 0; i < count; i++) {
-    ValueObjectSP o = objects->GetChildAtIndex(i, true);
+    ValueObjectSP o = objects->GetChildAtIndex(i);
     auto dict_sp = std::make_shared<StructuredData::Dictionary>();
 
     callback(o, dict_sp);

@@ -56,8 +56,8 @@
 #include "lldb/lldb-forward.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include <cctype>
 #include <cinttypes>
@@ -284,13 +284,6 @@ void FormatEntity::Entry::AppendText(const llvm::StringRef &s) {
 
 void FormatEntity::Entry::AppendText(const char *cstr) {
   return AppendText(llvm::StringRef(cstr));
-}
-
-Status FormatEntity::Parse(const llvm::StringRef &format_str, Entry &entry) {
-  entry.Clear();
-  entry.type = Entry::Type::Root;
-  llvm::StringRef modifiable_format(format_str);
-  return ParseInternal(modifiable_format, entry, 0);
 }
 
 #define ENUM_TO_CSTR(eee)                                                      \
@@ -605,7 +598,7 @@ static bool DumpRegister(Stream &s, StackFrame *frame, RegisterKind reg_kind,
         if (reg_info) {
           RegisterValue reg_value;
           if (reg_ctx->ReadRegister(reg_info, reg_value)) {
-            DumpRegisterValue(reg_value, &s, reg_info, false, false, format);
+            DumpRegisterValue(reg_value, s, *reg_info, false, false, format);
             return true;
           }
         }
@@ -618,11 +611,8 @@ static bool DumpRegister(Stream &s, StackFrame *frame, RegisterKind reg_kind,
 static ValueObjectSP ExpandIndexedExpression(ValueObject *valobj, size_t index,
                                              bool deref_pointer) {
   Log *log = GetLog(LLDBLog::DataFormatters);
-  const char *ptr_deref_format = "[%d]";
-  std::string ptr_deref_buffer(10, 0);
-  ::sprintf(&ptr_deref_buffer[0], ptr_deref_format, index);
-  LLDB_LOGF(log, "[ExpandIndexedExpression] name to deref: %s",
-            ptr_deref_buffer.c_str());
+  std::string name_to_deref = llvm::formatv("[{0}]", index);
+  LLDB_LOG(log, "[ExpandIndexedExpression] name to deref: {0}", name_to_deref);
   ValueObject::GetValueForExpressionPathOptions options;
   ValueObject::ExpressionPathEndResultType final_value_type;
   ValueObject::ExpressionPathScanEndReason reason_to_stop;
@@ -630,8 +620,7 @@ static ValueObjectSP ExpandIndexedExpression(ValueObject *valobj, size_t index,
       (deref_pointer ? ValueObject::eExpressionPathAftermathDereference
                      : ValueObject::eExpressionPathAftermathNothing);
   ValueObjectSP item = valobj->GetValueForExpressionPath(
-      ptr_deref_buffer.c_str(), &reason_to_stop, &final_value_type, options,
-      &what_next);
+      name_to_deref, &reason_to_stop, &final_value_type, options, &what_next);
   if (!item) {
     LLDB_LOGF(log,
               "[ExpandIndexedExpression] ERROR: why stopping = %d,"
@@ -937,7 +926,7 @@ static bool DumpValue(Stream &s, const SymbolContext *sc,
     s.PutChar('[');
 
     if (index_higher < 0)
-      index_higher = valobj->GetNumChildren() - 1;
+      index_higher = valobj->GetNumChildrenIgnoringErrors() - 1;
 
     uint32_t max_num_children =
         target->GetTargetSP()->GetMaximumNumberOfChildrenToDisplay();
@@ -989,7 +978,7 @@ static bool DumpRegister(Stream &s, StackFrame *frame, const char *reg_name,
       if (reg_info) {
         RegisterValue reg_value;
         if (reg_ctx->ReadRegister(reg_info, reg_value)) {
-          DumpRegisterValue(reg_value, &s, reg_info, false, false, format);
+          DumpRegisterValue(reg_value, s, *reg_info, false, false, format);
           return true;
         }
       }
@@ -1357,17 +1346,17 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
           bool is_swift_error_return = false;
           ValueObjectSP return_valobj_sp = StopInfo::GetReturnValueObject(
               stop_info_sp, is_swift_error_return);
+          // END SWIFT
           if (return_valobj_sp) {
             DumpValueObjectOptions options;
             if (return_valobj_sp->IsDynamic())
               options.SetUseDynamicType(eDynamicCanRunTarget);
             if (return_valobj_sp->DoesProvideSyntheticValue())
               options.SetUseSyntheticValue(true);
-            return_valobj_sp->Dump(s, options);
-            return true;
-          }
-          // END SWIFT
-          if (return_valobj_sp) {
+            if (llvm::Error error = return_valobj_sp->Dump(s)) {
+              s << "error: " << toString(std::move(error));
+              return false;
+            }
             return true;
           }
         }
@@ -1384,7 +1373,11 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
           ExpressionVariableSP expression_var_sp =
               StopInfo::GetExpressionVariable(stop_info_sp);
           if (expression_var_sp && expression_var_sp->GetValueObject()) {
-            expression_var_sp->GetValueObject()->Dump(s);
+            if (llvm::Error error =
+                    expression_var_sp->GetValueObject()->Dump(s)) {
+              s << "error: " << toString(std::move(error));
+              return false;
+            }
             return true;
           }
         }
@@ -2006,8 +1999,8 @@ static const Definition *FindEntry(const llvm::StringRef &format_str,
   return parent;
 }
 
-Status FormatEntity::ParseInternal(llvm::StringRef &format, Entry &parent_entry,
-                                   uint32_t depth) {
+static Status ParseInternal(llvm::StringRef &format, Entry &parent_entry,
+                            uint32_t depth) {
   Status error;
   while (!format.empty() && error.Success()) {
     const size_t non_special_chars = format.find_first_of("${}\\");
@@ -2032,7 +2025,7 @@ Status FormatEntity::ParseInternal(llvm::StringRef &format, Entry &parent_entry,
     case '{': {
       format = format.drop_front(); // Skip the '{'
       Entry scope_entry(Entry::Type::Scope);
-      error = FormatEntity::ParseInternal(format, scope_entry, depth + 1);
+      error = ParseInternal(format, scope_entry, depth + 1);
       if (error.Fail())
         return error;
       parent_entry.AppendEntry(std::move(scope_entry));
@@ -2146,148 +2139,142 @@ Status FormatEntity::ParseInternal(llvm::StringRef &format, Entry &parent_entry,
     } break;
 
     case '$':
-      if (format.size() == 1) {
-        // '$' at the end of a format string, just print the '$'
+      format = format.drop_front(); // Skip the '$'
+      if (format.empty() || format.front() != '{') {
+        // Print '$' when not followed by '{'.
         parent_entry.AppendText("$");
       } else {
-        format = format.drop_front(); // Skip the '$'
+        format = format.drop_front(); // Skip the '{'
 
-        if (format[0] == '{') {
-          format = format.drop_front(); // Skip the '{'
+        llvm::StringRef variable, variable_format;
+        error = FormatEntity::ExtractVariableInfo(format, variable,
+                                                  variable_format);
+        if (error.Fail())
+          return error;
+        bool verify_is_thread_id = false;
+        Entry entry;
+        if (!variable_format.empty()) {
+          entry.printf_format = variable_format.str();
 
-          llvm::StringRef variable, variable_format;
-          error = FormatEntity::ExtractVariableInfo(format, variable,
-                                                    variable_format);
-          if (error.Fail())
-            return error;
-          bool verify_is_thread_id = false;
-          Entry entry;
-          if (!variable_format.empty()) {
-            entry.printf_format = variable_format.str();
+          // If the format contains a '%' we are going to assume this is a
+          // printf style format. So if you want to format your thread ID
+          // using "0x%llx" you can use: ${thread.id%0x%llx}
+          //
+          // If there is no '%' in the format, then it is assumed to be a
+          // LLDB format name, or one of the extended formats specified in
+          // the switch statement below.
 
-            // If the format contains a '%' we are going to assume this is a
-            // printf style format. So if you want to format your thread ID
-            // using "0x%llx" you can use: ${thread.id%0x%llx}
-            //
-            // If there is no '%' in the format, then it is assumed to be a
-            // LLDB format name, or one of the extended formats specified in
-            // the switch statement below.
+          if (entry.printf_format.find('%') == std::string::npos) {
+            bool clear_printf = false;
 
-            if (entry.printf_format.find('%') == std::string::npos) {
-              bool clear_printf = false;
-
-              if (FormatManager::GetFormatFromCString(
-                      entry.printf_format.c_str(), false, entry.fmt)) {
-                // We have an LLDB format, so clear the printf format
+            if (FormatManager::GetFormatFromCString(entry.printf_format.c_str(),
+                                                    false, entry.fmt)) {
+              // We have an LLDB format, so clear the printf format
+              clear_printf = true;
+            } else if (entry.printf_format.size() == 1) {
+              switch (entry.printf_format[0]) {
+              case '@': // if this is an @ sign, print ObjC description
+                entry.number = ValueObject::
+                    eValueObjectRepresentationStyleLanguageSpecific;
                 clear_printf = true;
-              } else if (entry.printf_format.size() == 1) {
-                switch (entry.printf_format[0]) {
-                case '@': // if this is an @ sign, print ObjC description
-                  entry.number = ValueObject::
-                      eValueObjectRepresentationStyleLanguageSpecific;
-                  clear_printf = true;
-                  break;
-                case 'V': // if this is a V, print the value using the default
-                          // format
-                  entry.number =
-                      ValueObject::eValueObjectRepresentationStyleValue;
-                  clear_printf = true;
-                  break;
-                case 'L': // if this is an L, print the location of the value
-                  entry.number =
-                      ValueObject::eValueObjectRepresentationStyleLocation;
-                  clear_printf = true;
-                  break;
-                case 'S': // if this is an S, print the summary after all
-                  entry.number =
-                      ValueObject::eValueObjectRepresentationStyleSummary;
-                  clear_printf = true;
-                  break;
-                case '#': // if this is a '#', print the number of children
-                  entry.number =
-                      ValueObject::eValueObjectRepresentationStyleChildrenCount;
-                  clear_printf = true;
-                  break;
-                case 'T': // if this is a 'T', print the type
-                  entry.number =
-                      ValueObject::eValueObjectRepresentationStyleType;
-                  clear_printf = true;
-                  break;
-                case 'N': // if this is a 'N', print the name
-                  entry.number =
-                      ValueObject::eValueObjectRepresentationStyleName;
-                  clear_printf = true;
-                  break;
-                case '>': // if this is a '>', print the expression path
-                  entry.number = ValueObject::
-                      eValueObjectRepresentationStyleExpressionPath;
-                  clear_printf = true;
-                  break;
-                default:
-                  error.SetErrorStringWithFormat("invalid format: '%s'",
-                                                 entry.printf_format.c_str());
-                  return error;
-                }
-              } else if (FormatManager::GetFormatFromCString(
-                             entry.printf_format.c_str(), true, entry.fmt)) {
+                break;
+              case 'V': // if this is a V, print the value using the default
+                        // format
+                entry.number =
+                    ValueObject::eValueObjectRepresentationStyleValue;
                 clear_printf = true;
-              } else if (entry.printf_format == "tid") {
-                verify_is_thread_id = true;
-              } else {
+                break;
+              case 'L': // if this is an L, print the location of the value
+                entry.number =
+                    ValueObject::eValueObjectRepresentationStyleLocation;
+                clear_printf = true;
+                break;
+              case 'S': // if this is an S, print the summary after all
+                entry.number =
+                    ValueObject::eValueObjectRepresentationStyleSummary;
+                clear_printf = true;
+                break;
+              case '#': // if this is a '#', print the number of children
+                entry.number =
+                    ValueObject::eValueObjectRepresentationStyleChildrenCount;
+                clear_printf = true;
+                break;
+              case 'T': // if this is a 'T', print the type
+                entry.number = ValueObject::eValueObjectRepresentationStyleType;
+                clear_printf = true;
+                break;
+              case 'N': // if this is a 'N', print the name
+                entry.number = ValueObject::eValueObjectRepresentationStyleName;
+                clear_printf = true;
+                break;
+              case '>': // if this is a '>', print the expression path
+                entry.number =
+                    ValueObject::eValueObjectRepresentationStyleExpressionPath;
+                clear_printf = true;
+                break;
+              default:
                 error.SetErrorStringWithFormat("invalid format: '%s'",
                                                entry.printf_format.c_str());
                 return error;
               }
-
-              // Our format string turned out to not be a printf style format
-              // so lets clear the string
-              if (clear_printf)
-                entry.printf_format.clear();
-            }
-          }
-
-          // Check for dereferences
-          if (variable[0] == '*') {
-            entry.deref = true;
-            variable = variable.drop_front();
-          }
-
-          error = ParseEntry(variable, &g_root, entry);
-          if (error.Fail())
-            return error;
-
-          if (verify_is_thread_id) {
-            if (entry.type != Entry::Type::ThreadID &&
-                entry.type != Entry::Type::ThreadProtocolID) {
-              error.SetErrorString("the 'tid' format can only be used on "
-                                   "${thread.id} and ${thread.protocol_id}");
-            }
-          }
-
-          switch (entry.type) {
-          case Entry::Type::Variable:
-          case Entry::Type::VariableSynthetic:
-            if (entry.number == 0) {
-              if (entry.string.empty())
-                entry.number =
-                    ValueObject::eValueObjectRepresentationStyleValue;
-              else
-                entry.number =
-                    ValueObject::eValueObjectRepresentationStyleSummary;
-            }
-            break;
-          default:
-            // Make sure someone didn't try to dereference anything but ${var}
-            // or ${svar}
-            if (entry.deref) {
-              error.SetErrorStringWithFormat(
-                  "${%s} can't be dereferenced, only ${var} and ${svar} can.",
-                  variable.str().c_str());
+            } else if (FormatManager::GetFormatFromCString(
+                           entry.printf_format.c_str(), true, entry.fmt)) {
+              clear_printf = true;
+            } else if (entry.printf_format == "tid") {
+              verify_is_thread_id = true;
+            } else {
+              error.SetErrorStringWithFormat("invalid format: '%s'",
+                                             entry.printf_format.c_str());
               return error;
             }
+
+            // Our format string turned out to not be a printf style format
+            // so lets clear the string
+            if (clear_printf)
+              entry.printf_format.clear();
           }
-          parent_entry.AppendEntry(std::move(entry));
         }
+
+        // Check for dereferences
+        if (variable[0] == '*') {
+          entry.deref = true;
+          variable = variable.drop_front();
+        }
+
+        error = ParseEntry(variable, &g_root, entry);
+        if (error.Fail())
+          return error;
+
+        if (verify_is_thread_id) {
+          if (entry.type != Entry::Type::ThreadID &&
+              entry.type != Entry::Type::ThreadProtocolID) {
+            error.SetErrorString("the 'tid' format can only be used on "
+                                 "${thread.id} and ${thread.protocol_id}");
+          }
+        }
+
+        switch (entry.type) {
+        case Entry::Type::Variable:
+        case Entry::Type::VariableSynthetic:
+          if (entry.number == 0) {
+            if (entry.string.empty())
+              entry.number = ValueObject::eValueObjectRepresentationStyleValue;
+            else
+              entry.number =
+                  ValueObject::eValueObjectRepresentationStyleSummary;
+          }
+          break;
+        default:
+          // Make sure someone didn't try to dereference anything but ${var}
+          // or ${svar}
+          if (entry.deref) {
+            error.SetErrorStringWithFormat(
+                "${%s} can't be dereferenced, only ${var} and ${svar} can.",
+                variable.str().c_str());
+            return error;
+          }
+        }
+        parent_entry.AppendEntry(std::move(entry));
       }
       break;
     }
@@ -2481,4 +2468,11 @@ void FormatEntity::PrettyPrintFunctionArguments(
     } else
       out_stream.Printf("%s=<unavailable>", var_name);
   }
+}
+
+Status FormatEntity::Parse(const llvm::StringRef &format_str, Entry &entry) {
+  entry.Clear();
+  entry.type = Entry::Type::Root;
+  llvm::StringRef modifiable_format(format_str);
+  return ParseInternal(modifiable_format, entry, 0);
 }

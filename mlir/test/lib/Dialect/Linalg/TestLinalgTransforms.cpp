@@ -17,7 +17,6 @@
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Passes.h"
-#include "mlir/Dialect/Linalg/Transforms/HoistPadding.h"
 #include "mlir/Dialect/Linalg/Transforms/Hoisting.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
@@ -40,7 +39,7 @@ struct TestLinalgTransforms
 
   void getDependentDialects(DialectRegistry &registry) const override {
     // clang-format off
-    registry.insert<AffineDialect,
+    registry.insert<affine::AffineDialect,
                     bufferization::BufferizationDialect,
                     memref::MemRefDialect,
                     scf::SCFDialect,
@@ -71,13 +70,20 @@ struct TestLinalgTransforms
       llvm::cl::desc("Test a set of patterns that rewrite a linalg contraction "
                      "in vector.contract form"),
       llvm::cl::init(false)};
-  Option<bool> testTransformPadTensor{
-      *this, "test-transform-pad-tensor",
-      llvm::cl::desc("Test transform pad tensor by copying with generic ops"),
-      llvm::cl::init(false)};
   Option<bool> testGeneralizePadTensor{
       *this, "test-generalize-pad-tensor",
       llvm::cl::desc("Test transform pad tensor by copying with generic ops"),
+      llvm::cl::init(false)};
+  Option<bool> testGeneralizeTensorPackOp{
+      *this, "test-generalize-tensor-pack",
+      llvm::cl::desc("Test transform that generalizes pack ops into a sequence "
+                     "of tensor and Linalg ops"),
+      llvm::cl::init(false)};
+  Option<bool> testGeneralizeTensorUnPackOp{
+      *this, "test-generalize-tensor-unpack",
+      llvm::cl::desc(
+          "Test transform that generalizes unpack ops into a sequence "
+          "of tensor and Linalg ops"),
       llvm::cl::init(false)};
   Option<bool> testSwapSubTensorPadTensor{
       *this, "test-swap-subtensor-padtensor",
@@ -108,6 +114,14 @@ struct TestLinalgTransforms
       *this, "test-swap-extract-slice-with-fill-pattern",
       llvm::cl::desc(
           "Test patterns to swap tensor.extract_slice(linalg.fill())"),
+      llvm::cl::init(false)};
+  Option<bool> testEraseUnusedOperandsAndResults{
+      *this, "test-erase-unused-operands-and-results",
+      llvm::cl::desc("Test patterns to erase unused operands and results"),
+      llvm::cl::init(false)};
+  Option<bool> testEraseUnnecessaryInputs{
+      *this, "test-erase-unnecessary-inputs",
+      llvm::cl::desc("Test patterns to erase unnecessary inputs"),
       llvm::cl::init(false)};
 };
 } // namespace
@@ -145,15 +159,21 @@ static void applyLinalgToVectorPatterns(func::FuncOp funcOp) {
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
-static void applyPadTensorToGenericPatterns(func::FuncOp funcOp) {
-  RewritePatternSet patterns(funcOp.getContext());
-  patterns.add<PadOpTransformationPattern>(funcOp.getContext());
-  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
-}
-
 static void applyGeneralizePadTensorPatterns(func::FuncOp funcOp) {
   RewritePatternSet patterns(funcOp.getContext());
   patterns.add<GeneralizePadOpPattern>(funcOp.getContext());
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
+static void applyGeneralizeTensorPackPatterns(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  patterns.add<GeneralizeOuterUnitDimsPackOpPattern>(funcOp.getContext());
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
+static void applyGeneralizeTensorUnPackPatterns(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  patterns.add<GeneralizeOuterUnitDimsUnPackOpPattern>(funcOp.getContext());
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
@@ -175,6 +195,18 @@ static void applySwapExtractSliceWithFillPattern(func::FuncOp funcOp) {
   (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
 }
 
+static void applyEraseUnusedOperandsAndResultsPatterns(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  populateEraseUnusedOperandsAndResultsPatterns(patterns);
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
+static void applyEraseUnnecessaryInputs(func::FuncOp funcOp) {
+  RewritePatternSet patterns(funcOp.getContext());
+  populateEraseUnnecessaryInputsPatterns(patterns);
+  (void)applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
+}
+
 /// Apply transformations specified as patterns.
 void TestLinalgTransforms::runOnOperation() {
   if (testPatterns)
@@ -183,16 +215,22 @@ void TestLinalgTransforms::runOnOperation() {
     return applyVectorTransferForwardingPatterns(getOperation());
   if (testGenericToVectorPattern)
     return applyLinalgToVectorPatterns(getOperation());
-  if (testTransformPadTensor)
-    return applyPadTensorToGenericPatterns(getOperation());
   if (testGeneralizePadTensor)
     return applyGeneralizePadTensorPatterns(getOperation());
+  if (testGeneralizeTensorPackOp)
+    return applyGeneralizeTensorPackPatterns(getOperation());
+  if (testGeneralizeTensorUnPackOp)
+    return applyGeneralizeTensorUnPackPatterns(getOperation());
   if (testSwapSubTensorPadTensor)
     return applyExtractSliceOfPadTensorSwapPattern(getOperation());
   if (testBubbleUpExtractSliceOpPattern)
     return applyBubbleUpExtractSliceOpPattern(getOperation());
   if (testSwapExtractSliceWithFill)
     return applySwapExtractSliceWithFillPattern(getOperation());
+  if (testEraseUnusedOperandsAndResults)
+    return applyEraseUnusedOperandsAndResultsPatterns(getOperation());
+  if (testEraseUnnecessaryInputs)
+    return applyEraseUnnecessaryInputs(getOperation());
 }
 
 namespace mlir {

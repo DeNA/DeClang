@@ -19,9 +19,7 @@
 
 using IncludeMarker =
     clang::tidy::modernize::DeprecatedHeadersCheck::IncludeMarker;
-namespace clang {
-namespace tidy {
-namespace modernize {
+namespace clang::tidy::modernize {
 namespace {
 
 class IncludeModernizePPCallbacks : public PPCallbacks {
@@ -33,8 +31,9 @@ public:
   void InclusionDirective(SourceLocation HashLoc, const Token &IncludeTok,
                           StringRef FileName, bool IsAngled,
                           CharSourceRange FilenameRange,
-                          Optional<FileEntryRef> File, StringRef SearchPath,
-                          StringRef RelativePath, const Module *Imported,
+                          OptionalFileEntryRef File, StringRef SearchPath,
+                          StringRef RelativePath, const Module *SuggestedModule,
+                          bool ModuleImported,
                           SrcMgr::CharacteristicKind FileType) override;
 
 private:
@@ -179,9 +178,9 @@ IncludeModernizePPCallbacks::IncludeModernizePPCallbacks(
 
 void IncludeModernizePPCallbacks::InclusionDirective(
     SourceLocation HashLoc, const Token &IncludeTok, StringRef FileName,
-    bool IsAngled, CharSourceRange FilenameRange, Optional<FileEntryRef> File,
-    StringRef SearchPath, StringRef RelativePath, const Module *Imported,
-    SrcMgr::CharacteristicKind FileType) {
+    bool IsAngled, CharSourceRange FilenameRange, OptionalFileEntryRef File,
+    StringRef SearchPath, StringRef RelativePath, const Module *SuggestedModule,
+    bool ModuleImported, SrcMgr::CharacteristicKind FileType) {
 
   // If we don't want to warn for non-main file reports and this is one, skip
   // it.
@@ -211,6 +210,4 @@ void IncludeModernizePPCallbacks::InclusionDirective(
   }
 }
 
-} // namespace modernize
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::modernize

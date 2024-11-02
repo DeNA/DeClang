@@ -8,15 +8,14 @@
 
 #include "src/string/memcpy.h"
 #include "src/__support/common.h"
-#include "src/string/memory_utils/memcpy_implementations.h"
+#include "src/string/memory_utils/inline_memcpy.h"
 
 namespace __llvm_libc {
 
 LLVM_LIBC_FUNCTION(void *, memcpy,
                    (void *__restrict dst, const void *__restrict src,
                     size_t size)) {
-  inline_memcpy(reinterpret_cast<char *>(dst),
-                reinterpret_cast<const char *>(src), size);
+  inline_memcpy(dst, src, size);
   return dst;
 }
 

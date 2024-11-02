@@ -106,10 +106,10 @@ define void @test(<16 x i32> %a0, <16 x i32> %b0, <16 x i32> %a1, <16 x i32> %b1
 ; X64-NEXT:    kmovw %k1, %r8d
 ; X64-NEXT:    addl %edi, %eax
 ; X64-NEXT:    addl %ecx, %edx
-; X64-NEXT:    addl %r8d, %eax
-; X64-NEXT:    addl %esi, %eax
-; X64-NEXT:    addl %edx, %eax
-; X64-NEXT:    movw %ax, (%rbx)
+; X64-NEXT:    addl %eax, %edx
+; X64-NEXT:    addl %r8d, %edx
+; X64-NEXT:    addl %esi, %edx
+; X64-NEXT:    movw %dx, (%rbx)
 ; X64-NEXT:    leaq -8(%rbp), %rsp
 ; X64-NEXT:    popq %rbx
 ; X64-NEXT:    popq %rbp

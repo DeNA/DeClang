@@ -288,7 +288,7 @@ public:
         for (const DesignatedInitExpr::Designator &D :
              llvm::reverse(DIE->designators()))
           if (D.isFieldDesignator()) {
-            Outer.add(D.getField(), Flags);
+            Outer.add(D.getFieldDecl(), Flags);
             // We don't know which designator was intended, we assume the outer.
             break;
           }
@@ -346,6 +346,10 @@ public:
       }
       void VisitCXXDeleteExpr(const CXXDeleteExpr *CDE) {
         Outer.add(CDE->getOperatorDelete(), Flags);
+      }
+      void
+      VisitCXXRewrittenBinaryOperator(const CXXRewrittenBinaryOperator *RBO) {
+        Outer.add(RBO->getDecomposedForm().InnerBinOp, Flags);
       }
     };
     Visitor(*this, Flags).Visit(S);
@@ -704,8 +708,23 @@ llvm::SmallVector<ReferenceLoc> refInDecl(const Decl *D,
                                   {OCID->getClassInterface()}});
       Refs.push_back(ReferenceLoc{NestedNameSpecifierLoc(),
                                   OCID->getCategoryNameLoc(),
-                                  /*IsDecl=*/true,
+                                  /*IsDecl=*/false,
                                   {OCID->getCategoryDecl()}});
+      Refs.push_back(ReferenceLoc{NestedNameSpecifierLoc(),
+                                  OCID->getCategoryNameLoc(),
+                                  /*IsDecl=*/true,
+                                  {OCID}});
+    }
+
+    void VisitObjCImplementationDecl(const ObjCImplementationDecl *OIMD) {
+      Refs.push_back(ReferenceLoc{NestedNameSpecifierLoc(),
+                                  OIMD->getLocation(),
+                                  /*IsDecl=*/false,
+                                  {OIMD->getClassInterface()}});
+      Refs.push_back(ReferenceLoc{NestedNameSpecifierLoc(),
+                                  OIMD->getLocation(),
+                                  /*IsDecl=*/true,
+                                  {OIMD}});
     }
   };
 
@@ -808,7 +827,7 @@ llvm::SmallVector<ReferenceLoc> refInStmt(const Stmt *S,
         Refs.push_back(ReferenceLoc{NestedNameSpecifierLoc(),
                                     D.getFieldLoc(),
                                     /*IsDecl=*/false,
-                                    {D.getField()}});
+                                    {D.getFieldDecl()}});
       }
     }
 
@@ -1042,6 +1061,17 @@ public:
   bool TraverseConstructorInitializer(CXXCtorInitializer *Init) {
     visitNode(DynTypedNode::create(*Init));
     return RecursiveASTVisitor::TraverseConstructorInitializer(Init);
+  }
+
+  bool TraverseTypeConstraint(const TypeConstraint *TC) {
+    // We want to handle all ConceptReferences but RAV is missing a
+    // polymorphic Visit or Traverse method for it, so we handle
+    // TypeConstraints specially here.
+    Out(ReferenceLoc{TC->getNestedNameSpecifierLoc(),
+                     TC->getConceptNameLoc(),
+                     /*IsDecl=*/false,
+                     {TC->getNamedConcept()}});
+    return RecursiveASTVisitor::TraverseTypeConstraint(TC);
   }
 
 private:

@@ -2,7 +2,6 @@
 Test SBTarget APIs.
 """
 
-import unittest2
 import os
 import lldb
 from lldbsuite.test.decorators import *
@@ -29,7 +28,6 @@ class TargetAPITestCase(TestBase):
     #
     # It does not segfaults now.  But for dwarf, the variable value is None if
     # the inferior process does not exist yet.  The radar has been updated.
-    # @unittest232.skip("segmentation fault -- skipping")
     def test_find_global_variables(self):
         """Exercise SBTarget.FindGlobalVariables() API."""
         d = {"EXE": "b.out"}
@@ -187,6 +185,14 @@ class TargetAPITestCase(TestBase):
         output = process.GetSTDOUT(9999)
         self.assertIn("arg: foo", output)
         self.assertIn("env: bar=baz", output)
+
+        # Clear all the run args set above.
+        self.runCmd("setting clear target.run-args")
+        process = target.LaunchSimple(None, None, self.get_process_working_directory())
+        process.Continue()
+        self.assertEqual(process.GetState(), lldb.eStateExited)
+        output = process.GetSTDOUT(9999)
+        self.assertNotIn("arg: foo", output)
 
         self.runCmd("settings set target.disable-stdio true")
         process = target.LaunchSimple(None, None, self.get_process_working_directory())

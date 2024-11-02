@@ -13,6 +13,7 @@
 #ifndef liblldb_SwiftASTContext_h_
 #define liblldb_SwiftASTContext_h_
 
+#include "Plugins/LanguageRuntime/Swift/LockGuarded.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 
@@ -45,6 +46,7 @@ struct TBDGenOptions;
 class VarDecl;
 class ModuleDecl;
 class SourceFile;
+class CASOptions;
 struct PrintOptions;
 class MemoryBufferSerializedModuleLoader;
 namespace Demangle {
@@ -84,7 +86,6 @@ namespace lldb_private {
 struct SourceModule;
 class SwiftASTContext;
 class ClangExternalASTSourceCallbacks;
-
 CompilerType ToCompilerType(swift::Type qual_type);
 
 namespace detail {
@@ -120,6 +121,8 @@ template <> struct hash<lldb_private::detail::SwiftLibraryLookupRequest> {
 } // end namespace std
 
 namespace lldb_private {
+
+using ThreadSafeASTContext = LockGuarded<swift::ASTContext>;
 
 /// This "middle" class between TypeSystemSwiftTypeRef and
 /// SwiftASTContextForExpressions will eventually go away, as more and
@@ -202,14 +205,26 @@ public:
                  TypeSystemSwiftTypeRefForExpressions &typeref_typesystem,
                  const char *extra_options);
 
+  /// Create a SwiftASTContextForExpressions taylored to a specific symbol
+  /// context.
+  static lldb::TypeSystemSP
+  CreateInstance(const SymbolContext &sc,
+                 TypeSystemSwiftTypeRefForExpressions &typeref_typesystem);
+
+  /// Returns true if Swift C++ interop is enabled for the given compiler unit.
+  static bool ShouldEnableCXXInterop(CompileUnit *cu);
+
   static void EnumerateSupportedLanguages(
       std::set<lldb::LanguageType> &languages_for_types,
       std::set<lldb::LanguageType> &languages_for_expressions);
 
+  /// Set LangOpt overrides LLDB needs.
+  void SetCompilerInvocationLLDBOverrides();
+  
   bool SupportsLanguage(lldb::LanguageType language) override;
 
-  SwiftASTContext *GetSwiftASTContext() const override {
-    return const_cast<SwiftASTContext *>(this);
+  SwiftASTContext *GetSwiftASTContext(const SymbolContext *sc) const override {
+    return GetTypeSystemSwiftTypeRef().GetSwiftASTContext(sc);
   }
 
   TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() override {
@@ -230,6 +245,8 @@ public:
 
   swift::symbolgraphgen::SymbolGraphOptions &GetSymbolGraphOptions();
 
+  swift::CASOptions &GetCASOptions();
+
   swift::TypeCheckerOptions &GetTypeCheckerOptions();
 
   swift::DiagnosticEngine &GetDiagnosticEngine();
@@ -246,7 +263,7 @@ public:
 
   swift::SILOptions &GetSILOptions();
 
-  swift::ASTContext *GetASTContext();
+  ThreadSafeASTContext GetASTContext();
 
   swift::IRGenDebugInfoLevel GetGenerateDebugInfo();
 
@@ -259,7 +276,10 @@ public:
 
   /// Add a list of Clang arguments to the ClangImporter options and
   /// apply the working directory to any relative paths.
-  void AddExtraClangArgs(const std::vector<std::string> &ExtraArgs);
+  void AddExtraClangArgs(const std::vector<std::string> &ExtraArgs,
+                         llvm::StringRef overrideOpts = "");
+  void AddExtraClangCC1Args(const std::vector<std::string>& source,
+                                std::vector<std::string>& dest);
   static void AddExtraClangArgs(const std::vector<std::string>& source,
                                 std::vector<std::string>& dest);
   static std::string GetPluginServer(llvm::StringRef plugin_library_path);
@@ -293,9 +313,6 @@ public:
   swift::ModuleDecl *CreateModule(const SourceModule &module, Status &error,
                                   swift::ImplicitImportInfo importInfo);
 
-  static bool ReportModuleLoadingProgress(llvm::StringRef module_name,
-                                          bool is_overlay);
-
   // This function should only be called when all search paths
   // for all items in a swift::ASTContext have been setup to
   // allow for imports to happen correctly. Use with caution,
@@ -320,9 +337,9 @@ public:
   /// Collect Swift modules in the .swift_ast section of \p module.
   void RegisterSectionModules(Module &module,
                               std::vector<std::string> &module_names);
-
-  void ValidateSectionModules(Module &module, // this is used to print errors
-                              const std::vector<std::string> &module_names);
+  /// Import Swift modules in the .swift_ast section of \p module.
+  void ImportSectionModules(Module &module,
+                            const std::vector<std::string> &module_names);
 
   // Swift modules that are backed by dylibs (libFoo.dylib) rather than
   // frameworks don't actually record the library dependencies in the module.
@@ -337,7 +354,7 @@ public:
 
   CompilerType FindType(const char *name, swift::ModuleDecl *swift_module);
 
-  llvm::Optional<SwiftASTContext::TypeOrDecl>
+  std::optional<SwiftASTContext::TypeOrDecl>
   FindTypeOrDecl(const char *name, swift::ModuleDecl *swift_module);
 
   size_t FindTypes(const char *name, swift::ModuleDecl *swift_module,
@@ -354,9 +371,14 @@ public:
                   bool append = true);
 
   /// Reconstruct a Swift AST type from a mangled name by looking its
+  /// components up in Swift modules. Diagnose a warning on error.
+  swift::TypeBase *ReconstructTypeOrWarn(ConstString mangled_typename);
+  /// Reconstruct a Swift AST type from a mangled name by looking its
   /// components up in Swift modules.
-  swift::TypeBase *ReconstructType(ConstString mangled_typename);
-  swift::TypeBase *ReconstructType(ConstString mangled_typename, Status &error);
+  llvm::Expected<swift::TypeBase *>
+  ReconstructType(ConstString mangled_typename);
+  /// Reconstruct a Swift AST type from a mangled name by looking its
+  /// components up in Swift modules.
   CompilerType
   GetTypeFromMangledTypename(ConstString mangled_typename) override;
 
@@ -406,10 +428,23 @@ public:
 
   CompilerType GetCompilerType(swift::TypeBase *swift_type);
   CompilerType GetCompilerType(ConstString mangled_name);
-  swift::Type GetSwiftType(CompilerType compiler_type);
+  /// Import compiler_type into this context and return the swift::Type.
+  llvm::Expected<swift::Type> GetSwiftType(CompilerType compiler_type);
+  /// Import compiler_type into this context and return the swift::CanType.
+  swift::CanType GetCanonicalSwiftType(CompilerType compiler_type);
+private:
+  /// Reconstruct a Swift AST type from a mangled name by looking its
+  /// components up in Swift modules.
+  llvm::Expected<swift::TypeBase *>
+  ReconstructTypeImpl(ConstString mangled_typename);
+
+protected:
   swift::Type GetSwiftType(lldb::opaque_compiler_type_t opaque_type);
+  swift::Type GetSwiftTypeIgnoringErrors(CompilerType compiler_type);
   swift::CanType
   GetCanonicalSwiftType(lldb::opaque_compiler_type_t opaque_type);
+
+public:
 
   /// Imports the type from the passed in type into this SwiftASTContext. The
   /// type must be a Swift type. If the type can be imported, returns the
@@ -423,7 +458,7 @@ public:
   CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) override;
   bool IsTupleType(lldb::opaque_compiler_type_t type) override;
-  llvm::Optional<NonTriviallyManagedReferenceKind>
+  std::optional<NonTriviallyManagedReferenceKind>
   GetNonTriviallyManagedReferenceKind(
       lldb::opaque_compiler_type_t type) override;
 
@@ -438,7 +473,7 @@ public:
   bool HasDiagnostics() const;
   bool HasClangImporterErrors() const;
 
-  void AddDiagnostic(DiagnosticSeverity severity, llvm::StringRef message);
+  void AddDiagnostic(lldb::Severity severity, llvm::StringRef message);
   void RaiseFatalError(std::string msg) const {
     m_fatal_errors.SetErrorString(msg);
   }
@@ -522,7 +557,7 @@ public:
 
   bool IsFixedSize(CompilerType compiler_type);
 
-  DWARFASTParser *GetDWARFParser() override;
+  plugin::dwarf::DWARFASTParser *GetDWARFParser() override;
 
   // CompilerDecl functions
   ConstString DeclGetName(void *opaque_decl) override {
@@ -580,7 +615,7 @@ public:
   static bool IsGenericType(const CompilerType &compiler_type);
 
   /// Whether this is the Swift error type.
-  bool IsErrorType(lldb::opaque_compiler_type_t type);
+  bool IsErrorType(lldb::opaque_compiler_type_t type) override;
 
   struct ProtocolInfo {
     uint32_t m_num_protocols;
@@ -603,8 +638,8 @@ public:
     uint32_t GetInstanceTypeIndex() const { return m_num_payload_words; }
   };
 
-  static bool GetProtocolTypeInfo(const CompilerType &type,
-                                  ProtocolInfo &protocol_info);
+  bool GetProtocolTypeInfo(const CompilerType &type,
+                           ProtocolInfo &protocol_info);
 
   static void ApplyWorkingDir(llvm::SmallVectorImpl<char> &clang_argument,
                               llvm::StringRef cur_working_dir);
@@ -615,7 +650,8 @@ public:
 
   // Accessors
 
-  ConstString GetTypeName(lldb::opaque_compiler_type_t type) override;
+  ConstString GetTypeName(lldb::opaque_compiler_type_t type,
+                          bool BaseOnly) override;
 
   ConstString GetDisplayTypeName(lldb::opaque_compiler_type_t type,
                                  const SymbolContext *sc) override;
@@ -637,7 +673,8 @@ public:
 
   CompilerType GetCanonicalType(lldb::opaque_compiler_type_t type) override;
 
-  CompilerType GetInstanceType(lldb::opaque_compiler_type_t type) override;
+  CompilerType GetInstanceType(lldb::opaque_compiler_type_t type,
+                               ExecutionContextScope *exe_scope) override;
 
   // Returns -1 if this isn't a function of if the function doesn't have a
   // prototype. Returns a value >override if there is a prototype.
@@ -661,20 +698,21 @@ public:
 
   // Exploring the type
 
-  llvm::Optional<uint64_t>
+  std::optional<uint64_t>
   GetBitSize(lldb::opaque_compiler_type_t type,
              ExecutionContextScope *exe_scope) override;
 
-  llvm::Optional<uint64_t>
+  std::optional<uint64_t>
   GetByteStride(lldb::opaque_compiler_type_t type,
                 ExecutionContextScope *exe_scope) override;
 
   lldb::Encoding GetEncoding(lldb::opaque_compiler_type_t type,
                              uint64_t &count) override;
 
-  uint32_t GetNumChildren(lldb::opaque_compiler_type_t type,
-                          bool omit_empty_base_classes,
-                          const ExecutionContext *exe_ctx) override;
+  llvm::Expected<uint32_t>
+  GetNumChildren(lldb::opaque_compiler_type_t type,
+                 bool omit_empty_base_classes,
+                 const ExecutionContext *exe_ctx) override;
 
   uint32_t GetNumFields(lldb::opaque_compiler_type_t type,
                         ExecutionContext *exe_ctx = nullptr) override;
@@ -684,7 +722,7 @@ public:
                                uint32_t *bitfield_bit_size_ptr,
                                bool *is_bitfield_ptr) override;
 
-  CompilerType GetChildCompilerTypeAtIndex(
+  llvm::Expected<CompilerType> GetChildCompilerTypeAtIndex(
       lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx, size_t idx,
       bool transparent_pointers, bool omit_empty_base_classes,
       bool ignore_array_bounds, std::string &child_name,
@@ -701,7 +739,7 @@ public:
   // name, not just the first.
   size_t
   GetIndexOfChildMemberWithName(lldb::opaque_compiler_type_t type,
-                                const char *name, ExecutionContext *exe_ctx,
+                                llvm::StringRef name, ExecutionContext *exe_ctx,
                                 bool omit_empty_base_classes,
                                 std::vector<uint32_t> &child_indexes) override;
 
@@ -714,7 +752,7 @@ public:
                                      size_t idx);
   CompilerType GetBoundGenericType(lldb::opaque_compiler_type_t type,
                                    size_t idx);
-  static CompilerType GetGenericArgumentType(CompilerType ct, size_t idx);
+  CompilerType GetGenericArgumentType(CompilerType ct, size_t idx);
   CompilerType GetGenericArgumentType(lldb::opaque_compiler_type_t type,
                                       size_t idx) override;
 
@@ -726,10 +764,9 @@ public:
   bool IsMeaninglessWithoutDynamicResolution(
       lldb::opaque_compiler_type_t type) override;
 
-  static bool GetSelectedEnumCase(const CompilerType &type,
-                                  const DataExtractor &data, ConstString *name,
-                                  bool *has_payload, CompilerType *payload,
-                                  bool *is_indirect);
+  bool GetSelectedEnumCase(const CompilerType &type, const DataExtractor &data,
+                           ConstString *name, bool *has_payload,
+                           CompilerType *payload, bool *is_indirect);
 
   // Dumping types
 #ifndef NDEBUG
@@ -738,7 +775,7 @@ public:
   dump(lldb::opaque_compiler_type_t type) const override;
 #endif
 
-  bool DumpTypeValue(lldb::opaque_compiler_type_t type, Stream *s,
+  bool DumpTypeValue(lldb::opaque_compiler_type_t type, Stream &s,
                      lldb::Format format, const DataExtractor &data,
                      lldb::offset_t data_offset, size_t data_byte_size,
                      uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
@@ -751,7 +788,7 @@ public:
       ExecutionContextScope *exe_scope = nullptr) override; // Dump to stdout
 
   void DumpTypeDescription(
-      lldb::opaque_compiler_type_t type, Stream *s,
+      lldb::opaque_compiler_type_t type, Stream &s,
       lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
       ExecutionContextScope *exe_scope = nullptr) override;
 
@@ -772,7 +809,7 @@ public:
   bool IsPointerOrReferenceType(lldb::opaque_compiler_type_t type,
                                 CompilerType *pointee_type) override;
 
-  llvm::Optional<size_t>
+  std::optional<size_t>
   GetTypeBitAlign(lldb::opaque_compiler_type_t type,
                   ExecutionContextScope *exe_scope) override;
 
@@ -809,18 +846,18 @@ public:
   /// Retrieve/import the modules imported by the compilation
   /// unit. Early-exists with false if there was an import failure.
   bool GetCompileUnitImports(
-      SymbolContext &sc, lldb::ProcessSP process_sp,
+      const SymbolContext &sc, lldb::ProcessSP process_sp,
       llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
           &modules,
       Status &error);
 
   /// Perform all the implicit imports for the current frame.
-  void PerformCompileUnitImports(SymbolContext &sc, lldb::ProcessSP process_sp,
+  void PerformCompileUnitImports(const SymbolContext &sc, lldb::ProcessSP process_sp,
                                  Status &error);
 
 protected:
   bool GetCompileUnitImportsImpl(
-      SymbolContext &sc, lldb::ProcessSP process_sp,
+      const SymbolContext &sc, lldb::ProcessSP process_sp,
       llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
           *modules,
       Status &error);
@@ -839,7 +876,7 @@ protected:
   void LogFatalErrors() const;
   Status GetAllDiagnostics() const;
   /// Stream all diagnostics to the Debugger and clear them.
-  void StreamAllDiagnostics(llvm::Optional<lldb::user_id_t> debugger_id) const;
+  void StreamAllDiagnostics(std::optional<lldb::user_id_t> debugger_id) const;
 
   llvm::TargetOptions *getTargetOptions();
 
@@ -870,6 +907,10 @@ protected:
 
   CompilerType GetAsClangType(ConstString mangled_name);
 
+  /// Inserts the mapping from the module's ABI name to it's regular name into
+  /// m_module_abi_to_regular_name if they're different.
+  void RegisterModuleABINameToRealName(swift::ModuleDecl *module);
+
   /// Data members.
   /// @{
   // Always non-null outside of unit tests.
@@ -880,6 +921,7 @@ protected:
   // CompilerInvocation, SourceMgr, and DiagEngine must come before
   // the ASTContext, so they get deallocated *after* the ASTContext.
   std::unique_ptr<swift::ASTContext> m_ast_context_ap;
+  std::recursive_mutex m_ast_context_mutex;
   std::unique_ptr<llvm::TargetOptions> m_target_options_ap;
   std::unique_ptr<swift::irgen::IRGenerator> m_ir_generator_ap;
   std::unique_ptr<swift::irgen::IRGenModule> m_ir_gen_module_ap;
@@ -898,6 +940,7 @@ protected:
   swift::ClangImporter *m_clangimporter = nullptr;
   /// Wraps the clang::ASTContext owned by ClangImporter.
   std::shared_ptr<TypeSystemClang> m_clangimporter_typesystem;
+  std::unique_ptr<swift::DWARFImporterDelegate> m_dwarfimporter_delegate_up;
   SwiftModuleMap m_swift_module_cache;
   SwiftTypeFromMangledNameMap m_mangled_name_to_type_map;
   SwiftMangledNameFromTypeMap m_type_to_mangled_name_map;
@@ -927,9 +970,13 @@ protected:
   bool m_initialized_language_options = false;
   bool m_initialized_search_path_options = false;
   bool m_initialized_clang_importer_options = false;
+  bool m_has_explicit_modules = false;
   mutable bool m_reported_fatal_error = false;
   mutable bool m_logged_fatal_error = false;
 
+  /// Holds the source module name (value) for all modules with a custom ABI
+  /// name (key).
+  llvm::StringMap<llvm::StringRef> m_module_abi_to_regular_name;
   /// Whether this is a scratch or a module AST context.
   bool m_is_scratch_context = false;
 
@@ -1004,10 +1051,13 @@ public:
 
   UserExpression *GetUserExpression(llvm::StringRef expr,
                                     llvm::StringRef prefix,
-                                    lldb::LanguageType language,
+                                    SourceLanguage language,
                                     Expression::ResultType desired_type,
                                     const EvaluateExpressionOptions &options,
-                                    ValueObject *ctx_obj) override;
+                                    ValueObject *ctx_obj) override {
+    return m_typeref_typesystem->GetUserExpression(
+        expr, prefix, language, desired_type, options, ctx_obj);
+  }
 
   PersistentExpressionState *GetPersistentExpressionState() override;
 

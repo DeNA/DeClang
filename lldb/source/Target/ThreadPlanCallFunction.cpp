@@ -30,7 +30,8 @@
 #ifdef LLDB_ENABLE_SWIFT
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
-#endif //LLDB_ENABLE_SWIFT
+#include "llvm/BinaryFormat/Dwarf.h"
+#endif // LLDB_ENABLE_SWIFT
 
 using namespace lldb;
 using namespace lldb_private;
@@ -170,7 +171,7 @@ void ThreadPlanCallFunction::ReportRegisterState(const char *message) {
          reg_idx < num_registers; ++reg_idx) {
       const RegisterInfo *reg_info = reg_ctx->GetRegisterInfoAtIndex(reg_idx);
       if (reg_ctx->ReadRegister(reg_info, reg_value)) {
-        DumpRegisterValue(reg_value, &strm, reg_info, true, false,
+        DumpRegisterValue(reg_value, strm, *reg_info, true, false,
                           eFormatDefault);
         strm.EOL();
       }
@@ -298,10 +299,10 @@ bool ThreadPlanCallFunction::DoPlanExplainsStop(Event *event_ptr) {
     BreakpointSiteSP bp_site_sp;
     bp_site_sp = m_process.GetBreakpointSiteList().FindByID(break_site_id);
     if (bp_site_sp) {
-      uint32_t num_owners = bp_site_sp->GetNumberOfOwners();
+      uint32_t num_owners = bp_site_sp->GetNumberOfConstituents();
       bool is_internal = true;
       for (uint32_t i = 0; i < num_owners; i++) {
-        Breakpoint &bp = bp_site_sp->GetOwnerAtIndex(i)->GetBreakpoint();
+        Breakpoint &bp = bp_site_sp->GetConstituentAtIndex(i)->GetBreakpoint();
         LLDB_LOGF(log,
                   "ThreadPlanCallFunction::PlanExplainsStop: hit "
                   "breakpoint %d while calling function",
@@ -427,7 +428,7 @@ void ThreadPlanCallFunction::SetBreakpoints() {
     }
   }
 #ifdef LLDB_ENABLE_SWIFT
-  if (GetExpressionLanguage() == eLanguageTypeSwift) {
+  if (GetExpressionLanguage().name == llvm::dwarf::DW_LNAME_Swift) {
     auto *swift_runtime 
         = SwiftLanguageRuntime::Get(m_process.shared_from_this());
     if (swift_runtime) {
@@ -489,7 +490,7 @@ bool ThreadPlanCallFunction::BreakpointsExplainStop() {
   }
   if (m_error_backstop_bp_sp) {
     uint64_t break_site_id = stop_info_sp->GetValue();
-    if (m_process.GetBreakpointSiteList().BreakpointSiteContainsBreakpoint(
+    if (m_process.GetBreakpointSiteList().StopPointSiteContainsBreakpoint(
             break_site_id, m_error_backstop_bp_sp->GetID())) {
       // Our expression threw an uncaught exception.  That will happen in REPL
       // & Playground, though not in

@@ -1,31 +1,59 @@
-cmake_minimum_required(VERSION 3.13.4)
+cmake_minimum_required(VERSION 3.20.0)
+
+# Include LLVM's cmake policies.
+if(NOT DEFINED LLVM_COMMON_CMAKE_UTILS)
+  set(LLVM_COMMON_CMAKE_UTILS ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
+endif()
+include(${LLVM_COMMON_CMAKE_UTILS}/Modules/CMakePolicy.cmake
+  NO_POLICY_SCOPE)
 
 # Default to C++17
 set(CMAKE_CXX_STANDARD 17)
 
-# Use old version of target_sources command which converts the source
-# file paths to full paths.
-cmake_policy(SET CMP0076 OLD)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
-# The top-level sourse and binary directories.
+# The top-level source directory.
 set(LIBC_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-set(LIBC_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 # The top-level directory in which libc is being built.
 set(LIBC_BUILD_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
+set(LIBC_ENABLE_USE_BY_CLANG OFF CACHE BOOL "Whether or not to place libc in a build directory findable by a just built clang")
+
+if(LLVM_LIBC_FULL_BUILD OR LIBC_GPU_BUILD OR LIBC_GPU_ARCHITECTURES)
+  if(NOT LIBC_HDRGEN_EXE)
+    # We need to set up hdrgen first since other targets depend on it.
+    add_subdirectory(utils/LibcTableGenUtil)
+    add_subdirectory(utils/HdrGen)
+  else()
+    message(STATUS "Will use ${LIBC_HDRGEN_EXE} for libc header generation.")
+  endif()
+endif()
+
+option(LIBC_HDRGEN_ONLY "Only build the 'libc-hdrgen' executable" OFF)
+if(("libc" IN_LIST LLVM_ENABLE_RUNTIMES AND NOT LLVM_RUNTIMES_BUILD) OR 
+   LIBC_HDRGEN_ONLY)
+  # When libc is build as part of the runtimes/bootstrap build's CMake run, we
+  # only need to build the host tools to build the libc. So, we just do enough
+  # to build libc-hdrgen and return.
+
+  # Always make the RPC server availible to other projects for GPU mode.
+  if(LIBC_GPU_BUILD OR LIBC_GPU_ARCHITECTURES)
+    add_subdirectory(utils/gpu/server)
+  endif()
+  return()
+endif()
+
+option(LIBC_CMAKE_VERBOSE_LOGGING
+       "Log details warnings and notifications during CMake configuration." OFF)
 # Path libc/scripts directory.
 set(LIBC_BUILD_SCRIPTS_DIR "${LIBC_SOURCE_DIR}/utils/build_scripts")
 
-set(LIBC_TARGET_OS ${CMAKE_SYSTEM_NAME})
-string(TOLOWER ${LIBC_TARGET_OS} LIBC_TARGET_OS)
-
-# Defines LIBC_TARGET_ARCHITECTURE and associated macros.
-include(LLVMLibCArchitectures)
-include(LLVMLibCCheckMPFR)
-
 # Flags to pass down to the compiler while building the libc functions.
 set(LIBC_COMPILE_OPTIONS_DEFAULT "" CACHE STRING "Architecture to tell clang to optimize for (e.g. -march=... or -mcpu=...)")
+
+include(common_libc_tuners.cmake)
+
+list(APPEND LIBC_COMPILE_OPTIONS_DEFAULT ${LIBC_COMMON_TUNE_OPTIONS})
 
 # Check --print-resource-dir to find the compiler resource dir if this flag
 # is supported by the compiler.
@@ -51,6 +79,44 @@ endif()
 option(LLVM_LIBC_FULL_BUILD "Build and test LLVM libc as if it is the full libc" OFF)
 option(LLVM_LIBC_IMPLEMENTATION_DEFINED_TEST_BEHAVIOR "Build LLVM libc tests assuming our implementation-defined behavior" ON)
 option(LLVM_LIBC_ENABLE_LINTING "Enables linting of libc source files" OFF)
+
+option(LIBC_GPU_BUILD "Build libc for the GPU. All CPU build options will be ignored." OFF)
+set(LIBC_TARGET_TRIPLE "" CACHE STRING "The target triple for the libc build.")
+
+set(LIBC_ENABLE_UNITTESTS ON)
+set(LIBC_ENABLE_HERMETIC_TESTS ${LLVM_LIBC_FULL_BUILD})
+
+# Defines LIBC_TARGET_ARCHITECTURE and associated macros.
+include(LLVMLibCArchitectures)
+
+if(LIBC_TARGET_ARCHITECTURE_IS_GPU)
+  set(LIBC_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
+  set(LIBC_INSTALL_INCLUDE_DIR ${CMAKE_INSTALL_INCLUDEDIR}/gpu-none-llvm)
+  set(LIBC_LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR})
+elseif(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR AND LIBC_ENABLE_USE_BY_CLANG)
+  set(LIBC_INCLUDE_DIR ${LLVM_BINARY_DIR}/include/${LLVM_DEFAULT_TARGET_TRIPLE})
+  set(LIBC_INSTALL_INCLUDE_DIR ${CMAKE_INSTALL_INCLUDEDIR}/${LLVM_DEFAULT_TARGET_TRIPLE})
+  set(LIBC_LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR}/${LLVM_DEFAULT_TARGET_TRIPLE})
+else()
+  if(NOT LIBC_ENABLE_USE_BY_CLANG)
+    set(LIBC_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/include)
+    set(LIBC_LIBRARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/lib)
+  elseif(LLVM_LIBRARY_OUTPUT_INTDIR)
+    set(LIBC_INCLUDE_DIR ${LLVM_BINARY_DIR}/include)
+    set(LIBC_LIBRARY_DIR ${LLVM_LIBRARY_OUTPUT_INTDIR})
+  else()
+    set(LIBC_INCLUDE_DIR ${CMAKE_BINARY_DIR}/include)
+    set(LIBC_LIBRARY_DIR ${CMAKE_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX})
+  endif()
+  set(LIBC_INSTALL_INCLUDE_DIR ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
+
+if(LIBC_TARGET_ARCHITECTURE_IS_GPU)
+  include(prepare_libc_gpu_build)
+  set(LIBC_ENABLE_UNITTESTS OFF)
+endif()
+
+include(LLVMLibCCheckMPFR)
 
 if(LLVM_LIBC_CLANG_TIDY)
   set(LLVM_LIBC_ENABLE_LINTING ON)
@@ -82,6 +148,7 @@ if(LLVM_LIBC_ENABLE_LINTING)
           The path to the clang-tidy binary can be set manually by passing
           -DLLVM_LIBC_CLANG_TIDY=<path/to/clang-tidy> to CMake.")
       endif()
+      add_custom_target(libc-lint)
     else()
       message(FATAL_ERROR "
         Linting is enabled but 'clang-tidy' is not found!
@@ -135,28 +202,17 @@ foreach(entrypoint IN LISTS TARGET_LLVMLIBC_ENTRYPOINTS)
   list(APPEND TARGET_ENTRYPOINT_NAME_LIST ${entrypoint_name})
 endforeach()
 
-if(LLVM_LIBC_FULL_BUILD)
-  # We need to set up hdrgen first since other targets depend on it.
-  add_subdirectory(utils/LibcTableGenUtil)
-  add_subdirectory(utils/HdrGen)
-endif()
-
-set(LIBC_TARGET)
-set(LIBC_COMPONENT)
 set(LIBC_INSTALL_DEPENDS)
-set(LIBC_INSTALL_TARGET)
 if(LLVM_LIBC_FULL_BUILD)
-  set(LIBC_TARGET libc)
-  set(LIBC_COMPONENT libc)
-  set(LIBC_INSTALL_DEPENDS "libc;install-libc-headers;libc-startup")
-  set(LIBC_INSTALL_TARGET install-libc)
-  set(LIBC_ARCHIVE_NAME c)
+  set(LIBC_INSTALL_DEPENDS "install-libc-static-archives;install-libc-headers")
+  if(NOT LIBC_TARGET_OS_IS_BAREMETAL)
+    # For now we will disable libc-startup installation for baremetal. The
+    # correct way to do it would be to make a hookable startup for baremetal
+    # and install it as part of the libc installation.
+    list(APPEND LIBC_INSTALL_DEPENDS "libc-startup")
+  endif()
 else()
-  set(LIBC_TARGET llvmlibc)
-  set(LIBC_COMPONENT llvmlibc)
-  set(LIBC_INSTALL_DEPENDS llvmlibc)
-  set(LIBC_INSTALL_TARGET install-llvmlibc)
-  set(LIBC_ARCHIVE_NAME llvmlibc)
+  set(LIBC_INSTALL_DEPENDS install-libc-static-archives)
 endif()
 
 add_subdirectory(include)
@@ -165,14 +221,15 @@ add_subdirectory(src)
 add_subdirectory(utils)
 
 if(LLVM_LIBC_FULL_BUILD)
-  # The loader can potentially depend on the library components so add it
-  # after the library implementation directories.
-  add_subdirectory(loader)
+  # The startup system can potentially depend on the library components so add
+  # it after the library implementation directories.
+  add_subdirectory(startup)
 endif()
 
 # The lib and test directories are added at the very end as tests
 # and libraries potentially draw from the components present in all
 # of the other directories.
+# TODO: Add testing support for the libc GPU target.
 add_subdirectory(lib)
 if(LLVM_INCLUDE_TESTS)
   add_subdirectory(test)
@@ -197,7 +254,7 @@ if(LLVM_LIBC_FULL_BUILD)
 endif()
 
 add_llvm_install_targets(
-  ${LIBC_INSTALL_TARGET}
+  install-libc
   DEPENDS ${LIBC_INSTALL_DEPENDS}
-  COMPONENT ${LIBC_COMPONENT}
+  COMPONENT libc
 )

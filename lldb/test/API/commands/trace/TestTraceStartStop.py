@@ -246,7 +246,7 @@ class TestTraceStartStop(TraceIntelPTTestCaseBase):
             patterns=[
                 f"""thread #1: tid = .*
   a.out`main \+ 4 at main.cpp:2
-    1: {ADDRESS_REGEX}    movl"""
+    2: {ADDRESS_REGEX}    movl"""
             ],
         )
 
@@ -257,12 +257,12 @@ class TestTraceStartStop(TraceIntelPTTestCaseBase):
             patterns=[
                 f"""thread #1: tid = .*
   a.out`main \+ 4 at main.cpp:2
-    1: {ADDRESS_REGEX}    movl .*
+    2: {ADDRESS_REGEX}    movl .*
   a.out`main \+ 11 at main.cpp:4
-    3: {ADDRESS_REGEX}    movl .*
-    5: {ADDRESS_REGEX}    jmp  .* ; <\+28> at main.cpp:4
-    7: {ADDRESS_REGEX}    cmpl .*
-    9: {ADDRESS_REGEX}    jle  .* ; <\+20> at main.cpp:5"""
+    4: {ADDRESS_REGEX}    movl .*
+    6: {ADDRESS_REGEX}    jmp  .* ; <\+28> at main.cpp:4
+    8: {ADDRESS_REGEX}    cmpl .*
+    10: {ADDRESS_REGEX}    jle  .* ; <\+20> at main.cpp:5"""
             ],
         )
 
@@ -271,12 +271,12 @@ class TestTraceStartStop(TraceIntelPTTestCaseBase):
             patterns=[
                 f"""thread #1: tid = .*
   a.out`main \+ 32 at main.cpp:4
-    9: {ADDRESS_REGEX}    jle  .* ; <\+20> at main.cpp:5
-    7: {ADDRESS_REGEX}    cmpl .*
-    5: {ADDRESS_REGEX}    jmp  .* ; <\+28> at main.cpp:4
-    3: {ADDRESS_REGEX}    movl .*
+    10: {ADDRESS_REGEX}    jle  .* ; <\+20> at main.cpp:5
+    8: {ADDRESS_REGEX}    cmpl .*
+    6: {ADDRESS_REGEX}    jmp  .* ; <\+28> at main.cpp:4
+    4: {ADDRESS_REGEX}    movl .*
   a.out`main \+ 4 at main.cpp:2
-    1: {ADDRESS_REGEX}    movl .* """
+    2: {ADDRESS_REGEX}    movl .* """
             ],
         )
 
@@ -299,7 +299,7 @@ class TestTraceStartStop(TraceIntelPTTestCaseBase):
             patterns=[
                 f"""thread #1: tid = .*
   a.out`main \+ 20 at main.cpp:5
-    1: {ADDRESS_REGEX}    xorl"""
+    2: {ADDRESS_REGEX}    xorl"""
             ],
         )
 
@@ -308,7 +308,7 @@ class TestTraceStartStop(TraceIntelPTTestCaseBase):
             patterns=[
                 f"""thread #1: tid = .*
   a.out`main \+ 20 at main.cpp:5
-    1: {ADDRESS_REGEX}    xorl"""
+    2: {ADDRESS_REGEX}    xorl"""
             ],
         )
 

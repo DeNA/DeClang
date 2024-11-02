@@ -18,10 +18,7 @@ from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
 import unittest2
 
-
 class TestResilientObjectInOptional(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @skipUnlessDarwin
     @swiftTest
     def test_optional_of_resilient(self):
@@ -29,16 +26,13 @@ class TestResilientObjectInOptional(TestBase):
         self.build()
         self.doTest()
 
-    def setUp(self):
-        TestBase.setUp(self)
-
     def doTest(self):
         target, process, thread, breakpoint = lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("main.swift"), extra_images=["mod"]
-        )
+            self, "break here", lldb.SBFileSpec("main.swift"),
+            extra_images=['mod'])
 
         frame = thread.frames[0]
-
+        
         # First try getting a non-resilient optional, to make sure that
         # part isn't broken:
         t_opt_var = frame.FindVariable("t_opt")
@@ -46,7 +40,7 @@ class TestResilientObjectInOptional(TestBase):
         t_a_var = t_opt_var.GetChildMemberWithName("a")
         self.assertSuccess(t_a_var.GetError(), "The child was a")
         lldbutil.check_variable(self, t_a_var, False, value="2")
-
+        
         # Make sure we can print an optional of a resilient type...
         # If we got the value out of the optional correctly, then
         # it's child will be "a".

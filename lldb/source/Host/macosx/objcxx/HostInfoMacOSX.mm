@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Host/macosx/HostInfoMacOSX.h"
-#include "Utility/UuidCompatibility.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
@@ -24,6 +23,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 // C++ Includes
+#include <optional>
 #include <string>
 
 // C inclues
@@ -31,20 +31,24 @@
 #include <sys/sysctl.h>
 #include <sys/syslimits.h>
 #include <sys/types.h>
+#include <uuid/uuid.h>
 
 // Objective-C/C++ includes
+#include <AvailabilityMacros.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <Foundation/Foundation.h>
 #include <mach-o/dyld.h>
+#if defined(MAC_OS_X_VERSION_MIN_REQUIRED) && \
+  MAC_OS_X_VERSION_MIN_REQUIRED >= MAC_OS_VERSION_12_0
 #if __has_include(<mach-o/dyld_introspection.h>)
 #include <mach-o/dyld_introspection.h>
 #define SDK_HAS_NEW_DYLD_INTROSPECTION_SPIS
+#endif
 #endif
 #include <objc/objc-auto.h>
 
 // These are needed when compiling on systems
 // that do not yet have these definitions
-#include <AvailabilityMacros.h>
 #ifndef CPU_SUBTYPE_X86_64_H
 #define CPU_SUBTYPE_X86_64_H ((cpu_subtype_t)8)
 #endif
@@ -61,14 +65,14 @@
 
 using namespace lldb_private;
 
-llvm::Optional<std::string> HostInfoMacOSX::GetOSBuildString() {
+std::optional<std::string> HostInfoMacOSX::GetOSBuildString() {
   int mib[2] = {CTL_KERN, KERN_OSVERSION};
   char cstr[PATH_MAX];
   size_t cstr_len = sizeof(cstr);
   if (::sysctl(mib, 2, cstr, &cstr_len, NULL, 0) == 0)
     return std::string(cstr, cstr_len - 1);
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 static void ParseOSVersion(llvm::VersionTuple &version, NSString *Key) {
@@ -151,8 +155,7 @@ bool HostInfoMacOSX::ComputeSupportExeDirectory(FileSpec &file_spec) {
     FileSystem::Instance().Resolve(support_dir_spec);
     if (!FileSystem::Instance().IsDirectory(support_dir_spec)) {
       Log *log = GetLog(LLDBLog::Host);
-      LLDB_LOGF(log, "HostInfoMacOSX::%s(): failed to find support directory",
-                __FUNCTION__);
+      LLDB_LOG(log, "failed to find support directory");
       return false;
     }
 
@@ -273,6 +276,9 @@ void HostInfoMacOSX::ComputeHostArchitectureSupport(ArchSpec &arch_32,
 #elif defined(TARGET_OS_WATCHOS) && TARGET_OS_WATCHOS == 1
         arch_32.GetTriple().setOS(llvm::Triple::WatchOS);
         arch_64.GetTriple().setOS(llvm::Triple::WatchOS);
+#elif defined(TARGET_OS_XR) && TARGET_OS_XR == 1
+        arch_32.GetTriple().setOS(llvm::Triple::XROS);
+        arch_64.GetTriple().setOS(llvm::Triple::XROS);
 #elif defined(TARGET_OS_OSX) && TARGET_OS_OSX == 1
         arch_32.GetTriple().setOS(llvm::Triple::MacOSX);
         arch_64.GetTriple().setOS(llvm::Triple::MacOSX);
@@ -341,8 +347,8 @@ FileSpec HostInfoMacOSX::GetXcodeContentsDirectory() {
         HostInfo::GetSDKRoot(SDKOptions{XcodeSDK::GetAnyMacOS()});
     if (!sdk_path_or_err) {
       Log *log = GetLog(LLDBLog::Host);
-      LLDB_LOGF(log, "Error while searching for Xcode SDK: %s",
-                toString(sdk_path_or_err.takeError()).c_str());
+      LLDB_LOG_ERROR(log, sdk_path_or_err.takeError(),
+                     "Error while searching for Xcode SDK: {0}");
       return;
     }
     FileSpec fspec(*sdk_path_or_err);
@@ -495,7 +501,7 @@ static llvm::Expected<std::string> GetXcodeSDK(XcodeSDK sdk) {
       if (!path.empty())
         break;
     }
-    LLDB_LOGF(log, "Couldn't find SDK %s on host", sdk_name.c_str());
+    LLDB_LOG(log, "Couldn't find SDK {0} on host", sdk_name);
 
     // Try without the version.
     if (!info.version.empty()) {
@@ -509,13 +515,13 @@ static llvm::Expected<std::string> GetXcodeSDK(XcodeSDK sdk) {
         break;
     }
 
-    LLDB_LOGF(log, "Couldn't find any matching SDK on host");
+    LLDB_LOG(log, "Couldn't find any matching SDK on host");
     return "";
   }
 
   // Whatever is left in output should be a valid path.
   if (!FileSystem::Instance().Exists(path)) {
-    LLDB_LOGF(log, "SDK returned by xcrun doesn't exist");
+    LLDB_LOG(log, "SDK returned by xcrun doesn't exist");
     return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                    "SDK returned by xcrun doesn't exist");
   }
@@ -556,10 +562,10 @@ find_cached_path(llvm::StringMap<ErrorOrPath> &cache, std::mutex &mutex,
 llvm::Expected<llvm::StringRef> HostInfoMacOSX::GetSDKRoot(SDKOptions options) {
   static llvm::StringMap<ErrorOrPath> g_sdk_path;
   static std::mutex g_sdk_path_mutex;
-  if (!options.XcodeSDK)
+  if (!options.XcodeSDKSelection)
     return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                   "XCodeSDK not specified");
-  XcodeSDK sdk = *options.XcodeSDK;
+                                   "XcodeSDK not specified");
+  XcodeSDK sdk = *options.XcodeSDKSelection;
   auto key = sdk.GetString();
   return find_cached_path(g_sdk_path, g_sdk_path_mutex, key, [&](){
     return GetXcodeSDK(sdk);
@@ -626,48 +632,43 @@ private:
 
 bool SharedCacheInfo::CreateSharedCacheInfoWithInstrospectionSPIs() {
 #if defined(SDK_HAS_NEW_DYLD_INTROSPECTION_SPIS)
-  if (__builtin_available(macOS 12, *)) {
-    if (dyld_process_create_for_current_task) {
-      dyld_process_t dyld_process = dyld_process_create_for_current_task();
-      if (!dyld_process)
-        return false;
+  dyld_process_t dyld_process = dyld_process_create_for_current_task();
+  if (!dyld_process)
+    return false;
 
-      dyld_process_snapshot_t snapshot =
-          dyld_process_snapshot_create_for_process(dyld_process, nullptr);
-      if (!snapshot)
-        return false;
+  dyld_process_snapshot_t snapshot =
+      dyld_process_snapshot_create_for_process(dyld_process, nullptr);
+  if (!snapshot)
+    return false;
 
-      auto on_exit = llvm::make_scope_exit(
-          [&]() { dyld_process_snapshot_dispose(snapshot); });
+  auto on_exit =
+      llvm::make_scope_exit([&]() { dyld_process_snapshot_dispose(snapshot); });
 
-      dyld_shared_cache_t shared_cache =
-          dyld_process_snapshot_get_shared_cache(snapshot);
-      if (!shared_cache)
-        return false;
+  dyld_shared_cache_t shared_cache =
+      dyld_process_snapshot_get_shared_cache(snapshot);
+  if (!shared_cache)
+    return false;
 
-      dyld_shared_cache_for_each_image(shared_cache, ^(dyld_image_t image) {
-        __block uint64_t minVmAddr = UINT64_MAX;
-        __block uint64_t maxVmAddr = 0;
-        uuid_t uuidStore;
-        __block uuid_t *uuid = &uuidStore;
+  dyld_shared_cache_for_each_image(shared_cache, ^(dyld_image_t image) {
+    __block uint64_t minVmAddr = UINT64_MAX;
+    __block uint64_t maxVmAddr = 0;
+    uuid_t uuidStore;
+    __block uuid_t *uuid = &uuidStore;
 
-        dyld_image_for_each_segment_info(image, ^(const char *segmentName,
-                                                  uint64_t vmAddr,
-                                                  uint64_t vmSize, int perm) {
+    dyld_image_for_each_segment_info(
+        image,
+        ^(const char *segmentName, uint64_t vmAddr, uint64_t vmSize, int perm) {
           minVmAddr = std::min(minVmAddr, vmAddr);
           maxVmAddr = std::max(maxVmAddr, vmAddr + vmSize);
           dyld_image_copy_uuid(image, uuid);
         });
-        assert(minVmAddr != UINT_MAX);
-        assert(maxVmAddr != 0);
-        m_images[dyld_image_get_installname(image)] = SharedCacheImageInfo{
-            UUID(uuid, 16),
-            std::make_shared<DataBufferUnowned>((uint8_t *)minVmAddr,
-                                                maxVmAddr - minVmAddr)};
-      });
-      return true;
-    }
-  }
+    assert(minVmAddr != UINT_MAX);
+    assert(maxVmAddr != 0);
+    m_images[dyld_image_get_installname(image)] = SharedCacheImageInfo{
+        UUID(uuid, 16), std::make_shared<DataBufferUnowned>(
+                            (uint8_t *)minVmAddr, maxVmAddr - minVmAddr)};
+  });
+  return true;
 #endif
   return false;
 }

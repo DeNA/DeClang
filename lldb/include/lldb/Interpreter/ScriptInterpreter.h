@@ -28,6 +28,7 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/lldb-private.h"
+#include <optional>
 
 namespace lldb_private {
 
@@ -435,6 +436,14 @@ public:
     return false;
   }
 
+  // Calls the specified formatter matching Python function and returns its
+  // result (true if it's a match, false if we should keep looking for a
+  // matching formatter).
+  virtual bool FormatterCallbackFunction(const char *function_name,
+                                         lldb::TypeImplSP type_impl_sp) {
+    return true;
+  }
+
   virtual void Clear() {
     // Clean up any ref counts to SBObjects that might be in global variables
   }
@@ -493,6 +502,14 @@ public:
     return false;
   }
 
+  virtual bool RunScriptBasedParsedCommand(
+      StructuredData::GenericSP impl_obj_sp, Args& args,
+      ScriptedCommandSynchronicity synchronicity,
+      lldb_private::CommandReturnObject &cmd_retobj, Status &error,
+      const lldb_private::ExecutionContext &exe_ctx) {
+    return false;
+  }
+
   virtual bool RunScriptFormatKeyword(const char *impl_function,
                                       Process *process, std::string &output,
                                       Status &error) {
@@ -536,6 +553,27 @@ public:
                                std::string &dest) {
     dest.clear();
     return false;
+  }
+  
+  virtual StructuredData::ObjectSP
+  GetOptionsForCommandObject(StructuredData::GenericSP cmd_obj_sp) {
+    return {};
+  }
+
+  virtual StructuredData::ObjectSP
+  GetArgumentsForCommandObject(StructuredData::GenericSP cmd_obj_sp) {
+    return {};
+  }
+  
+  virtual bool SetOptionValueForCommandObject(
+      StructuredData::GenericSP cmd_obj_sp, ExecutionContext *exe_ctx, 
+      llvm::StringRef long_option, llvm::StringRef value) {
+    return false;
+  }
+
+  virtual void OptionParsingStartedForCommandObject(
+      StructuredData::GenericSP cmd_obj_sp) {
+    return;
   }
 
   virtual uint32_t
@@ -602,7 +640,7 @@ public:
   lldb::ProcessLaunchInfoSP
   GetOpaqueTypeFromSBLaunchInfo(const lldb::SBLaunchInfo &launch_info) const;
 
-  llvm::Optional<MemoryRegionInfo> GetOpaqueTypeFromSBMemoryRegionInfo(
+  std::optional<MemoryRegionInfo> GetOpaqueTypeFromSBMemoryRegionInfo(
       const lldb::SBMemoryRegionInfo &mem_region) const;
 
 protected:

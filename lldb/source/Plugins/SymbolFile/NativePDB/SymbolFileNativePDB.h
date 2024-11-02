@@ -20,6 +20,7 @@
 #include "CompileUnitIndex.h"
 #include "PdbIndex.h"
 #include "PdbAstBuilder.h"
+#include <optional>
 
 namespace clang {
 class TagDecl;
@@ -93,7 +94,7 @@ public:
   bool ParseDebugMacros(lldb_private::CompileUnit &comp_unit) override;
 
   bool ParseSupportFiles(lldb_private::CompileUnit &comp_unit,
-                         FileSpecList &support_files) override;
+                         SupportFileList &support_files) override;
   size_t ParseTypes(lldb_private::CompileUnit &comp_unit) override;
 
   bool ParseImportedModules(
@@ -115,7 +116,7 @@ public:
   CompilerDeclContext GetDeclContextForUID(lldb::user_id_t uid) override;
   CompilerDeclContext GetDeclContextContainingUID(lldb::user_id_t uid) override;
   Type *ResolveTypeUID(lldb::user_id_t type_uid) override;
-  llvm::Optional<ArrayInfo> GetDynamicArrayInfoForUID(
+  std::optional<ArrayInfo> GetDynamicArrayInfoForUID(
       lldb::user_id_t type_uid,
       const lldb_private::ExecutionContext *exe_ctx) override;
 
@@ -137,16 +138,10 @@ public:
   void FindFunctions(const RegularExpression &regex, bool include_inlines,
                      SymbolContextList &sc_list) override;
 
-  llvm::Optional<PdbCompilandSymId> FindSymbolScope(PdbCompilandSymId id);
+  std::optional<PdbCompilandSymId> FindSymbolScope(PdbCompilandSymId id);
 
-  void FindTypes(ConstString name, const CompilerDeclContext &parent_decl_ctx,
-                 uint32_t max_matches,
-                 llvm::DenseSet<SymbolFile *> &searched_symbol_files,
-                 TypeMap &types) override;
-
-  void FindTypes(llvm::ArrayRef<CompilerContext> pattern, LanguageSet languages,
-                 llvm::DenseSet<SymbolFile *> &searched_symbol_files,
-                 TypeMap &types) override;
+  void FindTypes(const lldb_private::TypeQuery &match,
+                 lldb_private::TypeResults &results) override;
 
   llvm::Expected<lldb::TypeSystemSP>
   GetTypeSystemForLanguage(lldb::LanguageType language) override;
@@ -164,7 +159,7 @@ public:
 
   void DumpClangAST(Stream &s) override;
 
-  llvm::Optional<llvm::codeview::TypeIndex>
+  std::optional<llvm::codeview::TypeIndex>
   GetParentType(llvm::codeview::TypeIndex ti);
 
 private:
@@ -267,6 +262,9 @@ private:
 
   lldb::addr_t m_obj_load_address = 0;
   bool m_done_full_type_scan = false;
+  // UID for anonymous union and anonymous struct as they don't have entities in
+  // pdb debug info.
+  lldb::user_id_t anonymous_id = LLDB_INVALID_UID - 1;
 
   std::unique_ptr<llvm::pdb::PDBFile> m_file_up;
   std::unique_ptr<PdbIndex> m_index;

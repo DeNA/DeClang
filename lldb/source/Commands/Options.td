@@ -349,6 +349,11 @@ let Command = "disassemble" in {
     Desc<"Force disassembly of large functions.">;
 }
 
+let Command = "diagnostics dump" in {
+  def diagnostics_dump_directory : Option<"directory", "d">, Group<1>,
+    Arg<"Path">, Desc<"Dump the diagnostics to the given directory.">;
+}
+
 let Command = "expression" in {
   def expression_options_all_threads : Option<"all-threads", "a">,
     Groups<[1,2]>, Arg<"Boolean">, Desc<"Should we run all threads if the "
@@ -372,7 +377,7 @@ let Command = "expression" in {
     Arg<"Language">, Desc<"Specifies the Language to use when parsing the "
     "expression.  If not set the target.language setting is used.">;
   def expression_options_apply_fixits : Option<"apply-fixits", "X">,
-    Groups<[1,2]>, Arg<"Language">, Desc<"If true, simple fix-it hints will be "
+    Groups<[1,2]>, Arg<"Boolean">, Desc<"If true, simple fix-it hints will be "
     "automatically applied to the expression.">;
   def expression_options_description_verbosity :
     Option<"description-verbosity", "v">, Group<1>,
@@ -801,19 +806,25 @@ let Command = "script add" in {
   def script_add_function : Option<"function", "f">, Group<1>,
     Arg<"PythonFunction">,
     Desc<"Name of the Python function to bind to this command name.">;
-  def script_add_class : Option<"class", "c">, Group<2>, Arg<"PythonClass">,
-  Desc<"Name of the Python class to bind to this command name.">;
+  def script_add_class : Option<"class", "c">, Groups<[2,3]>,
+    Arg<"PythonClass">,
+    Desc<"Name of the Python class to bind to this command name.">;
   def script_add_help : Option<"help", "h">, Group<1>, Arg<"HelpText">,
-  Desc<"The help text to display for this command.">;
-  def script_add_overwrite : Option<"overwrite", "o">, Groups<[1,2]>,
-  Desc<"Overwrite an existing command at this node.">;
+    Desc<"The help text to display for this command.">;
+    def script_add_overwrite : Option<"overwrite", "o">,
+    Desc<"Overwrite an existing command at this node.">;
   def script_add_synchronicity : Option<"synchronicity", "s">,
     EnumArg<"ScriptedCommandSynchronicity">,
     Desc<"Set the synchronicity of this command's executions with regard to "
     "LLDB event system.">;
-  def completion_type : Option<"completion-type", "C">,
-  EnumArg<"CompletionType">,
-  Desc<"Specify which completion type the command should use - if none is specified, the command won't use auto-completion.">;
+  def script_add_completion_type : Option<"completion-type", "C">,
+    Groups<[1,2]>, EnumArg<"CompletionType">,
+    Desc<"Specify which completion type the command should use - if none is "
+    "specified, the command won't use auto-completion.">;
+  def script_add_parsed_command : Option<"parsed", "p">, Group<3>,
+    Desc<"Make a parsed command. The command class will provide the command "
+    "definition by implementing get_options and get_arguments.">;
+
 }
 
 let Command = "container add" in {
@@ -1027,7 +1038,7 @@ let Command = "target stop hook add" in {
 
 let Command = "thread backtrace" in {
   def thread_backtrace_count : Option<"count", "c">, Group<1>, Arg<"Count">,
-  Desc<"How many frames to display (-1 for all)">;
+  Desc<"How many frames to display (0 for all)">;
   def thread_backtrace_start : Option<"start", "s">, Group<1>,
   Arg<"FrameIndex">, Desc<"Frame in which to start the backtrace">;
   def thread_backtrace_extended : Option<"extended", "e">, Group<1>,
@@ -1113,6 +1124,19 @@ let Command = "thread plan list" in {
     Desc<"Display thread plans for unreported threads">;
 }
 
+let Command = "thread trace dump function calls" in {
+  def thread_trace_dump_function_calls_file : Option<"file", "F">, Group<1>,
+    Arg<"Filename">,
+    Desc<"Dump the function calls to a file instead of the standard output.">;
+  def thread_trace_dump_function_calls_json: Option<"json", "j">,
+    Group<1>,
+    Desc<"Dump in simple JSON format.">;
+  def thread_trace_dump_function_calls_pretty_json: Option<"pretty-json", "J">,
+    Group<1>,
+    Desc<"Dump in JSON format but pretty printing the output for easier "
+    "readability.">;
+}
+
 let Command = "thread trace dump instructions" in {
   def thread_trace_dump_instructions_forwards: Option<"forwards", "f">,
     Group<1>,
@@ -1191,6 +1215,11 @@ let Command = "type summary add" in {
     Desc<"Don't use this format for references-to-type objects.">;
   def type_summary_add_regex : Option<"regex", "x">,
     Desc<"Type names are actually regular expressions.">;
+  def type_summary_add_recognizer_function :
+    Option<"recognizer-function", "\\x01">,
+    Desc<"The names in the argument list are actually the names of python "
+    "functions that decide whether to use this summary for any given type. "
+    "Cannot be specified at the same time as --regex (-x).">;
   def type_summary_add_inline_children : Option<"inline-children", "c">,
     Group<1>, Required,
     Desc<"If true, inline all child values into summary string.">;
@@ -1232,6 +1261,11 @@ let Command = "type synth add" in {
     "children.">;
   def type_synth_add_regex : Option<"regex", "x">,
     Desc<"Type names are actually regular expressions.">;
+  def type_synth_add_recognizer_function :
+    Option<"recognizer-function", "\\x01">,
+    Desc<"The names in the argument list are actually the names of python "
+    "functions that decide whether to use this summary for any given type. "
+    "Cannot be specified at the same time as --regex (-x).">;
 }
 
 let Command = "type format add" in {

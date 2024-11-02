@@ -16,6 +16,8 @@
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Symbol/CompilerType.h"
+#include "lldb/Utility/LLDBLog.h"
+#include "lldb/Utility/Log.h"
 #include "lldb/Utility/StreamString.h"
 
 #include "clang/AST/Decl.h"
@@ -50,8 +52,8 @@ GetAsEnumDecl(CompilerType swift_type) {
   if (!clang_ts)
     return {nullptr, nullptr};
 
-  auto qual_type =
-      clang::QualType::getFromOpaquePtr(clang_type.GetOpaqueQualType());
+  auto qual_type = clang::QualType::getFromOpaquePtr(
+      clang_type.GetCanonicalType().GetOpaqueQualType());
   if (qual_type->getTypeClass() != clang::Type::TypeClass::Enum)
     return {nullptr, nullptr};
 
@@ -72,7 +74,7 @@ lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::
       m_type(clang_type), m_cases() {}
 
 void lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::
-    FillCasesIfNeeded() {
+    FillCasesIfNeeded(const ExecutionContext *exe_ctx) {
   if (m_cases.has_value())
     return;
 
@@ -87,18 +89,34 @@ void lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::
   // standalone and provided with a callback to read the APINote
   // information.
   auto ts = m_type.GetTypeSystem();
+  TypeSystemSwift *tss = nullptr;
+  std::shared_ptr<SwiftASTContext> swift_ast_ctx;
   if (auto trts =
           ts.dyn_cast_or_null<TypeSystemSwiftTypeRef>()) {
-    m_type = trts->ReconstructType(m_type);
-    ts = m_type.GetTypeSystem();
-    decl_ts = GetAsEnumDecl(m_type);
-    enum_decl = decl_ts.first;
-    if (!enum_decl)
-      return;
+    tss = trts.get();
+    CompilerType ast_type = trts->ReconstructType(m_type, exe_ctx);
+    swift_ast_ctx =
+        ast_type.GetTypeSystem().dyn_cast_or_null<SwiftASTContext>();
+    if (swift_ast_ctx) {
+      auto ast_decl_ts = GetAsEnumDecl(ast_type);
+      if (ast_decl_ts.first) {
+        tss = swift_ast_ctx.get();
+        enum_decl = ast_decl_ts.first;
+        m_type = ast_type;
+      } else {
+        LLDB_LOG(GetLog(LLDBLog::DataFormatters),
+                 "Cannot get Clang type for {0}",
+                 m_type.GetMangledTypeName());
+      }
+    } else {
+      LLDB_LOG(GetLog(LLDBLog::DataFormatters), "Cannot reconstruct {0}",
+               m_type.GetMangledTypeName());
+    }
   }
-  auto swift_ts = ts.dyn_cast_or_null<SwiftASTContext>();
-  if (!swift_ts)
+  if (!tss) {
+    LLDB_LOG(GetLog(LLDBLog::DataFormatters), "No typesystem");
     return;
+  }
 
   auto iter = enum_decl->enumerator_begin(), end = enum_decl->enumerator_end();
   for (; iter != end; ++iter) {
@@ -112,7 +130,7 @@ void lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::
         case_init_val = case_init_val.zext(64);
       if (case_init_val.getBitWidth() > 64)
         continue;
-      ConstString case_name(swift_ts->GetSwiftName(case_decl, *decl_ts.second));
+      ConstString case_name(tss->GetSwiftName(case_decl, *decl_ts.second));
       m_cases->push_back({case_init_val, case_name});
     }
   }
@@ -162,13 +180,16 @@ bool lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::
   if (!ReadValueIfAny(*rawValue_sp, value))
     return false;
 
-  FillCasesIfNeeded();
+  {
+    ExecutionContext exe_ctx = valobj->GetExecutionContextRef().Lock(false);
+    FillCasesIfNeeded(&exe_ctx);
+  }
 
   StreamString ss;
   bool first_match = true;
   bool any_match = false;
 
-  llvm::APInt matched_value(llvm::APInt::getNullValue(64));
+  llvm::APInt matched_value(llvm::APInt::getZero(64));
 
   // Look for an exact case match first.
   for (auto val_name : *m_cases) {

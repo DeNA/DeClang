@@ -16,6 +16,13 @@
 // RUN: cat %t/tu.rsp | sed -E 's|.*"-fcas-include-tree" "(llvmcas://[[:xdigit:]]+)".*|\1|' > %t/tu.casid
 // RUN: clang-cas-test -cas %t/cas -print-include-tree @%t/tu.casid | FileCheck %s -DPREFIX=%/t
 // RUN: %clang @%t/tu.rsp
+//
+// RUN: FileCheck %s -input-file=%t/tu.d -check-prefix DEPS
+
+// DEPS: dependencies:
+// DEPS-DAG: tu.m
+// DEPS-DAG: Mod.h
+// DEPS-DAG: Priv.h
 
 // CHECK: [[PREFIX]]/tu.m llvmcas://
 // CHECK: 1:1 <built-in> llvmcas://
@@ -27,7 +34,9 @@
 // CHECK: 5:1 (Module for visibility only) Mod_Private
 // CHECK: Module Map:
 // CHECK: Mod (framework)
+// CHECK:   link Mod (framework)
 // CHECK: Mod_Private (framework)
+// CHECK:   link Mod (framework)
 
 // CHECK: Files:
 // CHECK: [[PREFIX]]/tu.m llvmcas://
@@ -41,7 +50,7 @@
 [{
   "file": "DIR/tu.m",
   "directory": "DIR",
-  "command": "clang -fsyntax-only DIR/tu.m -F DIR -fmodule-name=Mod -fmodules -fimplicit-modules -fimplicit-module-maps -fmodules-cache-path=DIR/module-cache"
+  "command": "clang -fsyntax-only DIR/tu.m -F DIR -fmodule-name=Mod -fmodules -fimplicit-modules -fimplicit-module-maps -fmodules-cache-path=DIR/module-cache -MMD -MT dependencies -MF DIR/tu.d"
 }]
 
 //--- Mod.framework/Modules/module.modulemap

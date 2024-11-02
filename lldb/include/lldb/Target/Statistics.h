@@ -12,9 +12,11 @@
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/lldb-forward.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/Support/JSON.h"
 #include <atomic>
 #include <chrono>
+#include <optional>
 #include <ratio>
 #include <string>
 #include <vector>
@@ -107,6 +109,7 @@ struct ModuleStats {
   // identifiers of these modules in the global module list. This allows us to
   // track down all of the stats that contribute to this module.
   std::vector<intptr_t> symfile_modules;
+  llvm::StringMap<llvm::json::Value> type_system_stats;
   double symtab_parse_time = 0.0;
   double symtab_index_time = 0.0;
   double debug_parse_time = 0.0;
@@ -119,6 +122,7 @@ struct ModuleStats {
   bool debug_info_enabled = true;
   bool symtab_stripped = false;
   bool debug_info_had_variable_errors = false;
+  bool debug_info_had_incomplete_types = false;
 };
 
 struct ConstStringStats {
@@ -142,9 +146,9 @@ public:
 
 protected:
   StatsDuration m_create_time;
-  llvm::Optional<StatsTimepoint> m_launch_or_attach_time;
-  llvm::Optional<StatsTimepoint> m_first_private_stop_time;
-  llvm::Optional<StatsTimepoint> m_first_public_stop_time;
+  std::optional<StatsTimepoint> m_launch_or_attach_time;
+  std::optional<StatsTimepoint> m_first_private_stop_time;
+  std::optional<StatsTimepoint> m_first_public_stop_time;
   StatsSuccessFail m_expr_eval{"expressionEvaluation"};
   StatsSuccessFail m_frame_var{"frameVariable"};
   std::vector<intptr_t> m_module_identifiers;

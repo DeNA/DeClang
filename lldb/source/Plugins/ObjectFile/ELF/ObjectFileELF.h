@@ -11,6 +11,7 @@
 
 #include <cstdint>
 
+#include <optional>
 #include <vector>
 
 #include "lldb/Symbol/ObjectFile.h"
@@ -124,7 +125,7 @@ public:
 
   /// Return the contents of the .gnu_debuglink section, if the object file
   /// contains it.
-  llvm::Optional<lldb_private::FileSpec> GetDebugLink();
+  std::optional<lldb_private::FileSpec> GetDebugLink();
 
   uint32_t GetDependentModules(lldb_private::FileSpecList &files) override;
 
@@ -397,14 +398,6 @@ private:
   /// .gnu_debugdata section or \c nullptr if an error occured or if there's no
   /// section with that name.
   std::shared_ptr<ObjectFileELF> GetGnuDebugDataObjectFile();
-
-  llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section) override;
-
-#ifdef LLDB_ENABLE_SWIFT
-  bool
-  CanContainSwiftReflectionData(const lldb_private::Section &section) override;
-#endif // LLDB_ENABLE_SWIFT
 };
 
 #endif // LLDB_SOURCE_PLUGINS_OBJECTFILE_ELF_OBJECTFILEELF_H

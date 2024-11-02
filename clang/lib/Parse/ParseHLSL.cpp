@@ -188,6 +188,7 @@ void Parser::ParseHLSLSemantics(ParsedAttributes &Attrs,
     Diag(Loc, diag::err_unknown_hlsl_semantic) << II;
     return;
   case ParsedAttr::AT_HLSLSV_GroupIndex:
+  case ParsedAttr::AT_HLSLSV_DispatchThreadID:
     break;
   default:
     llvm_unreachable("invalid HLSL Semantic");
@@ -195,5 +196,5 @@ void Parser::ParseHLSLSemantics(ParsedAttributes &Attrs,
   }
 
   Attrs.addNew(II, Loc, nullptr, SourceLocation(), ArgExprs.data(),
-               ArgExprs.size(), ParsedAttr::AS_HLSLSemantic);
+               ArgExprs.size(), ParsedAttr::Form::HLSLSemantic());
 }

@@ -1,6 +1,6 @@
 // RUN: llvm-mc -triple aarch64-windows -filetype obj -o %t.obj %s
 // RUN: llvm-readobj -r %t.obj | FileCheck %s
-// RUN: llvm-objdump -d %t.obj | FileCheck %s --check-prefix=DISASM
+// RUN: llvm-objdump --no-print-imm-hex -d %t.obj | FileCheck %s --check-prefix=DISASM
 // RUN: llvm-objdump -s %t.obj | FileCheck %s --check-prefix=DATA
 
 // IMAGE_REL_ARM64_ADDR32
@@ -111,7 +111,7 @@ tbz x0, #0, target
 // DISASM: 40:       91000000     add     x0, x0, #0
 // DISASM: 44:       91400000     add     x0, x0, #0, lsl #12
 // DISASM: 48:       f9400000     ldr     x0, [x0]
-// DISASM: 4c:       30091a20     adr     x0, #74565
+// DISASM: 4c:       30091a20     adr     x0, 0x12391
 
 // DATA: Contents of section .rdata:
 // DATA-NEXT:  0000 30000000 08000000

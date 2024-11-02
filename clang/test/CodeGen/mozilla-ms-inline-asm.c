@@ -1,5 +1,5 @@
 // REQUIRES: x86-registered-target
-// RUN: %clang_cc1 %s -triple i386-apple-darwin10 -fasm-blocks -emit-llvm -o - | opt -strip -S | FileCheck %s
+// RUN: %clang_cc1 %s -triple i386-apple-darwin10 -fasm-blocks -emit-llvm -o - | opt -passes=strip -S | FileCheck %s
 
 // Some test cases for MS inline asm support from Mozilla code base.
 
@@ -27,7 +27,7 @@ void invoke(void* that, unsigned methodIndex,
 // CHECK-SAME: sub esp,eax
 // CHECK-SAME: mov ecx,esp
 // CHECK-SAME: push $0
-// CHECK-SAME: call dword ptr ${2:P}
+// CHECK-SAME: call ${2:P}
 // CHECK-SAME: {{.*}}__MSASMLABEL_.${:uid}__noparams:
 // CHECK-SAME: mov ecx,$3
 // CHECK-SAME: push ecx

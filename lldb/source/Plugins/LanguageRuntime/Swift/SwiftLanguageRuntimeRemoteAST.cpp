@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "ReflectionContextInterface.h"
 #include "SwiftLanguageRuntimeImpl.h"
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Utility/LLDBLog.h"
@@ -58,17 +59,18 @@ swift::remoteAST::RemoteASTContext &
 SwiftLanguageRuntimeImpl::GetRemoteASTContext(SwiftASTContext &swift_ast_ctx) {
   // If we already have a remote AST context for this AST context,
   // return it.
-  auto known = m_remote_ast_contexts.find(swift_ast_ctx.GetASTContext());
+  ThreadSafeASTContext ast_ctx = swift_ast_ctx.GetASTContext();
+  auto known = m_remote_ast_contexts.find(*ast_ctx);
   if (known != m_remote_ast_contexts.end())
     return *known->second;
 
   // Initialize a new remote AST context.
   (void)GetReflectionContext();
   auto remote_ast_up = std::make_unique<swift::remoteAST::RemoteASTContext>(
-      *swift_ast_ctx.GetASTContext(), GetMemoryReader());
+      **ast_ctx, GetMemoryReader());
   auto &remote_ast = *remote_ast_up;
   m_remote_ast_contexts.insert(
-      {swift_ast_ctx.GetASTContext(), std::move(remote_ast_up)});
+      {*ast_ctx, std::move(remote_ast_up)});
   return remote_ast;
 }
 
@@ -77,7 +79,7 @@ void SwiftLanguageRuntimeImpl::ReleaseAssociatedRemoteASTContext(
   m_remote_ast_contexts.erase(ctx);
 }
 
-llvm::Optional<uint64_t>
+std::optional<uint64_t>
 SwiftLanguageRuntimeImpl::GetMemberVariableOffsetRemoteAST(
     CompilerType instance_type, ValueObject *instance,
     llvm::StringRef member_name) {
@@ -89,7 +91,7 @@ SwiftLanguageRuntimeImpl::GetMemberVariableOffsetRemoteAST(
   auto *remote_ast = &GetRemoteASTContext(*scratch_ctx);
   // Check whether we've already cached this offset.
   swift::TypeBase *swift_type =
-      GetCanonicalSwiftType(instance_type).getPointer();
+      scratch_ctx->GetCanonicalSwiftType(instance_type).getPointer();
   if (!swift_type)
     return {};
 
@@ -134,7 +136,7 @@ SwiftLanguageRuntimeImpl::GetMemberVariableOffsetRemoteAST(
               "[MemberVariableOffsetResolver] resolved non-class type = %s",
               bound.GetTypeName().AsCString());
 
-          swift_type = GetCanonicalSwiftType(bound).getPointer();
+          swift_type = scratch_ctx->GetCanonicalSwiftType(bound).getPointer();
           MemberID key{swift_type, ConstString(member_name).GetCString()};
           auto it = m_member_offsets.find(key);
           if (it != m_member_offsets.end())
@@ -181,14 +183,18 @@ ConstString SwiftLanguageRuntimeImpl::GetDynamicTypeName_ClassRemoteAST(
   // Dynamic type resolution in RemoteAST might pull in other Swift modules, so
   // use the scratch context where such operations are legal and safe.
 
-  llvm::Optional<SwiftScratchContextReader> maybe_scratch_ctx =
+  std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
       in_value.GetSwiftScratchContext();
   if (!maybe_scratch_ctx)
     return {};
   auto scratch_ctx = maybe_scratch_ctx->get();
   if (!scratch_ctx)
     return {};
-  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext();
+  const SymbolContext *sc = nullptr;
+  auto stack_frame_sp = in_value.GetExecutionContextRef().GetFrameSP();
+  if (stack_frame_sp)
+    sc = &stack_frame_sp->GetSymbolContext(eSymbolContextFunction);
+  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext(sc);
   if (!swift_ast_ctx)
     return {};
 
@@ -211,27 +217,34 @@ ConstString SwiftLanguageRuntimeImpl::GetDynamicTypeName_ClassRemoteAST(
   return {};
 }
 
-llvm::Optional<std::pair<CompilerType, Address>>
+std::optional<std::pair<CompilerType, Address>>
 SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ProtocolRemoteAST(
     ValueObject &in_value, CompilerType protocol_type, bool use_local_buffer,
     lldb::addr_t existential_address) {
   // Dynamic type resolution in RemoteAST might pull in other Swift
   // modules, so use the scratch context where such operations are
   // legal and safe.
-  llvm::Optional<SwiftScratchContextReader> maybe_scratch_ctx =
+  std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
       in_value.GetSwiftScratchContext();
   if (!maybe_scratch_ctx)
     return {};
   auto scratch_ctx = maybe_scratch_ctx->get();
   if (!scratch_ctx)
     return {};
-  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext();
+
+  const SymbolContext *sc = nullptr;
+  auto stack_frame_sp = in_value.GetExecutionContextRef().GetFrameSP();
+  if (stack_frame_sp)
+    sc = &stack_frame_sp->GetSymbolContext(eSymbolContextFunction);
+  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext(sc);
   if (!swift_ast_ctx)
     return {};
 
   swift::remote::RemoteAddress remote_existential(existential_address);
   auto &remote_ast = GetRemoteASTContext(*swift_ast_ctx);
-  auto swift_type = GetSwiftType(protocol_type);
+  auto swift_type =
+      llvm::expectedToStdOptional(swift_ast_ctx->GetSwiftType(protocol_type))
+          .value_or(swift::Type());
   if (!swift_type)
     return {};
   if (use_local_buffer)
@@ -274,20 +287,23 @@ CompilerType SwiftLanguageRuntimeImpl::BindGenericTypeParametersRemoteAST(
   // that module context.  Binding archetypes can trigger an import of
   // another module, so switch to a scratch context where such an
   // operation is safe.
-  llvm::Optional<SwiftScratchContextReader> maybe_scratch_ctx =
+  std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
       target.GetSwiftScratchContext(error, stack_frame);
   if (!maybe_scratch_ctx)
     return base_type;
   auto scratch_ctx = maybe_scratch_ctx->get();
   if (!scratch_ctx)
     return base_type;
-  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext();
+
+  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext(&sc);
   if (!swift_ast_ctx)
     return base_type;
   base_type = swift_ast_ctx->ImportType(base_type, error);
 
   if (base_type.GetTypeInfo() & lldb::eTypeIsSwift) {
-    swift::Type target_swift_type(GetSwiftType(base_type));
+    swift::Type target_swift_type(
+        llvm::expectedToStdOptional(swift_ast_ctx->GetSwiftType(base_type))
+            .value_or(swift::Type()));
     if (target_swift_type->hasArchetype())
       target_swift_type = target_swift_type->mapTypeOutOfContext().getPointer();
 
@@ -412,10 +428,11 @@ CompilerType SwiftLanguageRuntimeImpl::BindGenericTypeParametersRemoteAST(
           CompilerType target_concrete_type =
               swift_ast_ctx->ImportType(concrete_type, import_error);
 
-          if (target_concrete_type.IsValid())
-            return swift::Type(GetSwiftType(target_concrete_type));
-
-          return type;
+          if (!target_concrete_type.IsValid())
+            return type;
+          return llvm::expectedToStdOptional(
+                     swift_ast_ctx->GetSwiftType(target_concrete_type))
+              .value_or(swift::Type());
         },
         swift::LookUpConformanceInModule(module_decl),
         swift::SubstFlags::DesugarMemberTypes);
@@ -432,8 +449,8 @@ SwiftLanguageRuntimeImpl::MetadataPromise::MetadataPromise(
     : m_for_object_sp(for_object.GetSP()), m_swift_runtime(runtime),
       m_metadata_location(location) {}
 
-CompilerType
-SwiftLanguageRuntimeImpl::MetadataPromise::FulfillTypePromise(Status *error) {
+CompilerType SwiftLanguageRuntimeImpl::MetadataPromise::FulfillTypePromise(
+    const SymbolContext *sc, Status *error) {
   if (error)
     error->Clear();
 
@@ -447,7 +464,7 @@ SwiftLanguageRuntimeImpl::MetadataPromise::FulfillTypePromise(Status *error) {
   if (m_compiler_type.has_value())
     return m_compiler_type.value();
 
-  llvm::Optional<SwiftScratchContextReader> maybe_swift_scratch_ctx =
+  std::optional<SwiftScratchContextReader> maybe_swift_scratch_ctx =
       m_for_object_sp->GetSwiftScratchContext();
   if (!maybe_swift_scratch_ctx) {
     error->SetErrorString("couldn't get Swift scratch context");
@@ -458,7 +475,7 @@ SwiftLanguageRuntimeImpl::MetadataPromise::FulfillTypePromise(Status *error) {
     error->SetErrorString("couldn't get Swift scratch context");
     return CompilerType();
   }
-  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext();
+  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext(sc);
   if (!swift_ast_ctx) {
     error->SetErrorString("couldn't get Swift scratch context");
     return CompilerType();
@@ -487,16 +504,17 @@ SwiftLanguageRuntimeImpl::MetadataPromise::FulfillTypePromise(Status *error) {
 }
 
 SwiftLanguageRuntimeImpl::MetadataPromiseSP
-SwiftLanguageRuntimeImpl::GetMetadataPromise(lldb::addr_t addr,
+SwiftLanguageRuntimeImpl::GetMetadataPromise(const SymbolContext *sc,
+                                             lldb::addr_t addr,
                                              ValueObject &for_object) {
-  llvm::Optional<SwiftScratchContextReader> maybe_swift_scratch_ctx =
+  std::optional<SwiftScratchContextReader> maybe_swift_scratch_ctx =
       for_object.GetSwiftScratchContext();
   if (!maybe_swift_scratch_ctx)
     return nullptr;
   auto scratch_ctx = maybe_swift_scratch_ctx->get();
   if (!scratch_ctx)
     return nullptr;
-  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext();
+  SwiftASTContext *swift_ast_ctx = scratch_ctx->GetSwiftASTContext(sc);
   if (!swift_ast_ctx)
     return nullptr;
   if (swift_ast_ctx->HasFatalErrors())
@@ -504,7 +522,8 @@ SwiftLanguageRuntimeImpl::GetMetadataPromise(lldb::addr_t addr,
   if (addr == 0 || addr == LLDB_INVALID_ADDRESS)
     return nullptr;
 
-  auto key = std::make_pair(swift_ast_ctx->GetASTContext(), addr);
+  ThreadSafeASTContext ast_ctx = swift_ast_ctx->GetASTContext();
+  auto key = std::make_pair(*ast_ctx, addr);
   auto iter = m_promises_map.find(key);
   if (iter != m_promises_map.end())
     return iter->second;
@@ -541,7 +560,8 @@ SwiftLanguageRuntimeImpl::GetPromiseForTypeNameAndFrame(const char *type_name,
   lldb::addr_t metadata_location(metadata_ptr_var_sp->GetValueAsUnsigned(0));
   if (metadata_location == 0 || metadata_location == LLDB_INVALID_ADDRESS)
     return nullptr;
-  return GetMetadataPromise(metadata_location, *metadata_ptr_var_sp);
+  const SymbolContext *sc = &frame->GetSymbolContext(eSymbolContextFunction);
+  return GetMetadataPromise(sc, metadata_location, *metadata_ptr_var_sp);
 }
 
 } // namespace lldb_private

@@ -45,6 +45,7 @@ void MappingTraits<WasmYAML::Object>::mapping(IO &IO,
 static void commonSectionMapping(IO &IO, WasmYAML::Section &Section) {
   IO.mapRequired("Type", Section.Type);
   IO.mapOptional("Relocations", Section.Relocations);
+  IO.mapOptional("HeaderSecSizeEncodingLen", Section.HeaderSecSizeEncodingLen);
 }
 
 static void sectionMapping(IO &IO, WasmYAML::DylinkSection &Section) {
@@ -555,6 +556,7 @@ void ScalarBitSetTraits<WasmYAML::SegmentFlags>::bitset(
 #define BCase(X) IO.bitSetCase(Value, #X, wasm::WASM_SEG_FLAG_##X)
   BCase(STRINGS);
   BCase(TLS);
+  BCase(RETAIN);
 #undef BCase
 }
 

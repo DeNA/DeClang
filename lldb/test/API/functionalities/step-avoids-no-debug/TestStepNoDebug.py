@@ -72,7 +72,7 @@ class StepAvoidsNoDebugTestCase(TestBase):
 
     def hit_correct_line(self, pattern):
         target_line = line_number(self.main_source, pattern)
-        self.assertTrue(target_line != 0, "Could not find source pattern " + pattern)
+        self.assertNotEqual(target_line, 0, "Could not find source pattern " + pattern)
         cur_line = self.thread.frames[0].GetLineEntry().GetLine()
         self.assertEqual(
             cur_line,
@@ -109,7 +109,7 @@ class StepAvoidsNoDebugTestCase(TestBase):
 
         # Now finish, and make sure the return value is correct.
         threads = lldbutil.get_threads_stopped_at_breakpoint(self.process, inner_bkpt)
-        self.assertEquals(len(threads), 1, "Stopped at inner breakpoint.")
+        self.assertEqual(len(threads), 1, "Stopped at inner breakpoint.")
         self.thread = threads[0]
 
     def do_step_out_past_nodebug(self):

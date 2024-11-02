@@ -23,6 +23,7 @@ using namespace llvm::cas;
 
 void CASContext::anchor() {}
 void ObjectStore::anchor() {}
+void Cancellable::anchor() {}
 
 LLVM_DUMP_METHOD void CASID::dump() const { print(dbgs()); }
 LLVM_DUMP_METHOD void ObjectStore::dump() const { print(dbgs()); }
@@ -36,7 +37,7 @@ std::string CASID::toString() const {
 }
 
 static void printReferenceBase(raw_ostream &OS, StringRef Kind,
-                               uint64_t InternalRef, Optional<CASID> ID) {
+                               uint64_t InternalRef, std::optional<CASID> ID) {
   OS << Kind << "=" << InternalRef;
   if (ID)
     OS << "[" << *ID << "]";
@@ -50,7 +51,7 @@ void ReferenceBase::print(raw_ostream &OS, const ObjectHandle &This) const {
 void ReferenceBase::print(raw_ostream &OS, const ObjectRef &This) const {
   assert(this == &This);
 
-  Optional<CASID> ID;
+  std::optional<CASID> ID;
 #if LLVM_ENABLE_ABI_BREAKING_CHECKS
   if (CAS)
     ID = CAS->getID(This);
@@ -60,7 +61,8 @@ void ReferenceBase::print(raw_ostream &OS, const ObjectRef &This) const {
 
 void ObjectStore::loadIfExistsAsync(
     ObjectRef Ref,
-    unique_function<void(Expected<std::optional<ObjectHandle>>)> Callback) {
+    unique_function<void(Expected<std::optional<ObjectHandle>>)> Callback,
+    std::unique_ptr<Cancellable> *CancelObj) {
   // The default implementation is synchronous.
   Callback(loadIfExists(Ref));
 }
@@ -92,7 +94,7 @@ void ObjectStore::readRefs(ObjectHandle Node,
 }
 
 Expected<ObjectProxy> ObjectStore::getProxy(const CASID &ID) {
-  Optional<ObjectRef> Ref = getReference(ID);
+  std::optional<ObjectRef> Ref = getReference(ID);
   if (!Ref)
     return createUnknownObjectError(ID);
 
@@ -100,7 +102,7 @@ Expected<ObjectProxy> ObjectStore::getProxy(const CASID &ID) {
 }
 
 Expected<ObjectProxy> ObjectStore::getProxy(ObjectRef Ref) {
-  Optional<ObjectHandle> H;
+  std::optional<ObjectHandle> H;
   if (Error E = load(Ref).moveInto(H))
     return std::move(E);
 
@@ -128,22 +130,35 @@ std::future<AsyncProxyValue> ObjectStore::getProxyFuture(ObjectRef Ref) {
 }
 
 void ObjectStore::getProxyAsync(
+    const CASID &ID,
+    unique_function<void(Expected<std::optional<ObjectProxy>>)> Callback,
+    std::unique_ptr<Cancellable> *CancelObj) {
+  std::optional<ObjectRef> Ref = getReference(ID);
+  if (!Ref)
+    return Callback(createUnknownObjectError(ID));
+  return getProxyAsync(*Ref, std::move(Callback), CancelObj);
+}
+
+void ObjectStore::getProxyAsync(
     ObjectRef Ref,
-    unique_function<void(Expected<std::optional<ObjectProxy>>)> Callback) {
+    unique_function<void(Expected<std::optional<ObjectProxy>>)> Callback,
+    std::unique_ptr<Cancellable> *CancelObj) {
   // FIXME: there is potential for use-after-free for the 'this' pointer.
   // Either we should always allocate shared pointers for \c ObjectStore objects
   // and pass \c shared_from_this() or expect that the caller will not release
   // the \c ObjectStore before the callback returns.
   return loadIfExistsAsync(
-      Ref, [this, Ref, Callback = std::move(Callback)](
-               Expected<std::optional<ObjectHandle>> H) mutable {
+      Ref,
+      [this, Ref, Callback = std::move(Callback)](
+          Expected<std::optional<ObjectHandle>> H) mutable {
         if (!H)
           Callback(H.takeError());
         else if (!*H)
           Callback(std::nullopt);
         else
           Callback(ObjectProxy::load(*this, Ref, **H));
-      });
+      },
+      CancelObj);
 }
 
 Error ObjectStore::createUnknownObjectError(const CASID &ID) {
@@ -161,7 +176,7 @@ Expected<ObjectProxy> ObjectStore::createProxy(ArrayRef<ObjectRef> Refs,
 
 Expected<ObjectRef>
 ObjectStore::storeFromOpenFileImpl(sys::fs::file_t FD,
-                                   Optional<sys::fs::file_status> Status) {
+                                   std::optional<sys::fs::file_status> Status) {
   // Copy the file into an immutable memory buffer and call \c store on that.
   // Using \c mmap would be unsafe because there's a race window between when we
   // get the digest hash for the \c mmap contents and when we store the data; if
@@ -273,8 +288,11 @@ cas::createCASFromIdentifier(StringRef Path) {
                              "No CAS identifier is provided");
 
   // FIXME: some current default behavior.
-  if (Path == "auto")
-    return createOnDiskCAS(getDefaultOnDiskCASPath());
+  SmallString<256> PathBuf;
+  if (Path == "auto") {
+    getDefaultOnDiskCASPath(PathBuf);
+    Path = PathBuf;
+  }
 
   // Fallback is to create UnifiedOnDiskCache.
   auto UniDB = builtin::createBuiltinUnifiedOnDiskCache(Path);

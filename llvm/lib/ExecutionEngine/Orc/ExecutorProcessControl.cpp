@@ -9,10 +9,12 @@
 #include "llvm/ExecutionEngine/Orc/ExecutorProcessControl.h"
 
 #include "llvm/ExecutionEngine/Orc/Core.h"
+#include "llvm/ExecutionEngine/Orc/Shared/OrcRTBridge.h"
+#include "llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h"
 #include "llvm/ExecutionEngine/Orc/TargetProcess/TargetExecutionUtils.h"
 #include "llvm/Support/FormatVariadic.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/Process.h"
+#include "llvm/TargetParser/Host.h"
 
 #define DEBUG_TYPE "orc"
 
@@ -42,6 +44,11 @@ SelfExecutorProcessControl::SelfExecutorProcessControl(
                ExecutorAddr::fromPtr(this)};
   if (this->TargetTriple.isOSBinFormatMachO())
     GlobalManglingPrefix = '_';
+
+  this->BootstrapSymbols[rt::RegisterEHFrameSectionWrapperName] =
+      ExecutorAddr::fromPtr(&llvm_orc_registerEHFrameSectionWrapper);
+  this->BootstrapSymbols[rt::DeregisterEHFrameSectionWrapperName] =
+      ExecutorAddr::fromPtr(&llvm_orc_deregisterEHFrameSectionWrapper);
 }
 
 Expected<std::unique_ptr<SelfExecutorProcessControl>>
@@ -75,12 +82,10 @@ SelfExecutorProcessControl::Create(
 Expected<tpctypes::DylibHandle>
 SelfExecutorProcessControl::loadDylib(const char *DylibPath) {
   std::string ErrMsg;
-  auto Dylib = std::make_unique<sys::DynamicLibrary>(
-      sys::DynamicLibrary::getPermanentLibrary(DylibPath, &ErrMsg));
-  if (!Dylib->isValid())
+  auto Dylib = sys::DynamicLibrary::getPermanentLibrary(DylibPath, &ErrMsg);
+  if (!Dylib.isValid())
     return make_error<StringError>(std::move(ErrMsg), inconvertibleErrorCode());
-  DynamicLibraries.push_back(std::move(Dylib));
-  return pointerToJITTargetAddress(DynamicLibraries.back().get());
+  return ExecutorAddr::fromPtr(Dylib.getOSSpecificHandle());
 }
 
 Expected<std::vector<tpctypes::LookupResult>>
@@ -88,26 +93,20 @@ SelfExecutorProcessControl::lookupSymbols(ArrayRef<LookupRequest> Request) {
   std::vector<tpctypes::LookupResult> R;
 
   for (auto &Elem : Request) {
-    auto *Dylib = jitTargetAddressToPointer<sys::DynamicLibrary *>(Elem.Handle);
-    assert(llvm::any_of(DynamicLibraries,
-                        [=](const std::unique_ptr<sys::DynamicLibrary> &DL) {
-                          return DL.get() == Dylib;
-                        }) &&
-           "Invalid handle");
-
-    R.push_back(std::vector<JITTargetAddress>());
+    sys::DynamicLibrary Dylib(Elem.Handle.toPtr<void *>());
+    R.push_back(std::vector<ExecutorAddr>());
     for (auto &KV : Elem.Symbols) {
       auto &Sym = KV.first;
       std::string Tmp((*Sym).data() + !!GlobalManglingPrefix,
                       (*Sym).size() - !!GlobalManglingPrefix);
-      void *Addr = Dylib->getAddressOfSymbol(Tmp.c_str());
+      void *Addr = Dylib.getAddressOfSymbol(Tmp.c_str());
       if (!Addr && KV.second == SymbolLookupFlags::RequiredSymbol) {
         // FIXME: Collect all failing symbols before erroring out.
         SymbolNameVector MissingSymbols;
         MissingSymbols.push_back(Sym);
         return make_error<SymbolsNotFound>(SSP, std::move(MissingSymbols));
       }
-      R.back().push_back(pointerToJITTargetAddress(Addr));
+      R.back().push_back(ExecutorAddr::fromPtr(Addr));
     }
   }
 
@@ -200,7 +199,7 @@ SelfExecutorProcessControl::jitDispatchViaWrapperFunctionManager(
               shared::WrapperFunctionResult Result) mutable {
             ResultP.set_value(std::move(Result));
           },
-          pointerToJITTargetAddress(FnTag), {Data, Size});
+          ExecutorAddr::fromPtr(FnTag), {Data, Size});
 
   return ResultF.get().release();
 }

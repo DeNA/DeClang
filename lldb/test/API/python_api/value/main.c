@@ -22,13 +22,29 @@ const char *weekdays[5] = { "Monday",
 const char **g_table[2] = { days_of_week, weekdays };
 
 typedef int MyInt;
-
+  
 struct MyStruct
 {
   int a;
   int b;
 };
 
+struct MyBiggerStruct
+{
+  int a;
+  int b;
+  int c;
+};
+
+struct Container
+{
+  int discriminator;
+  union Data {
+    struct MyStruct small;
+    struct MyBiggerStruct big;
+  } data;
+};
+  
 int main (int argc, char const *argv[])
 {
     uint32_t uinthex = 0xE0A35F10;
@@ -36,7 +52,10 @@ int main (int argc, char const *argv[])
 
     int i;
     MyInt a = 12345;
-    struct MyStruct s = { 11, 22 };
+    struct MyStruct s = {11, 22};
+    struct MyBiggerStruct f = { 33, 44, 55 };
+    struct Container my_container;
+    my_container.data.big = f;
     int *my_int_ptr = &g_my_int;
     printf("my_int_ptr points to location %p\n", my_int_ptr);
     const char **str_ptr = days_of_week;

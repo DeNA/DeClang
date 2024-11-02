@@ -21,60 +21,26 @@ import unittest2
 
 
 class TestSwiftBool(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_swift_bool(self):
         """Test that we can inspect various Swift bools"""
         self.build()
-        self.do_test()
+        target, process, thread, _ = lldbutil.run_to_source_breakpoint(
+            self, 'Set breakpoint here', lldb.SBFileSpec('main.swift'))
 
-    def setUp(self):
-        TestBase.setUp(self)
-        self.main_source = "main.swift"
-        self.main_source_spec = lldb.SBFileSpec(self.main_source)
-
-    def do_test(self):
-        """Tests that we can break and display simple types"""
-        exe_name = "a.out"
-        exe = self.getBuildArtifact(exe_name)
-
-        # Create the target
-        target = self.dbg.CreateTarget(exe)
-        self.assertTrue(target, VALID_TARGET)
-
-        # Set the breakpoints
-        breakpoint = target.BreakpointCreateBySourceRegex(
-            "Set breakpoint here", self.main_source_spec
-        )
-        self.assertTrue(breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
-
-        # Launch the process, and do not stop at the entry point.
-        process = target.LaunchSimple(None, None, os.getcwd())
-
-        self.assertTrue(process, PROCESS_IS_VALID)
-
-        # Frame #0 should be at our breakpoint.
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, breakpoint)
-
-        self.assertTrue(len(threads) == 1)
-        thread = threads[0]
-
-        frame = thread.frames[0]
-        self.assertTrue(frame.IsValid(), "Couldn't get a frame.")
-
+        self.assertGreater(thread.GetNumFrames(), 0)
+        frame = thread.GetSelectedFrame()
+        
         true_vars = ["reg_true", "odd_true", "odd_true_works", "odd_false_works"]
         for name in true_vars:
             var = frame.FindVariable(name)
             summary = var.GetSummary()
-            self.assertTrue(
-                summary == "true", "%s should be true, was: %s" % (name, summary)
-            )
+            self.assertTrue(summary == "true", "%s should be true, was: %s"%(name, summary))
 
         false_vars = ["reg_false", "odd_false"]
         for name in false_vars:
             var = frame.FindVariable(name)
             summary = var.GetSummary()
-            self.assertTrue(
-                summary == "false", "%s should be false, was: %s" % (name, summary)
-            )
+            self.assertTrue(summary == "false", "%s should be false, was: %s"%(name, summary))
+
+

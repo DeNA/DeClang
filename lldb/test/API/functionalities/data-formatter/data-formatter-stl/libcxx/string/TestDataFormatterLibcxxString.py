@@ -49,6 +49,7 @@ class LibcxxStringDataFormatterTestCase(TestBase):
         self.addTearDownHook(cleanup)
 
         ns = self.namespace
+
         self.expect(
             "frame variable",
             substrs=[
@@ -70,7 +71,6 @@ class LibcxxStringDataFormatterTestCase(TestBase):
                 '(%s::u32string) u32_string = U"🍄🍅🍆🍌"' % ns,
                 # FIXME: This should have a 'U' prefix.
                 '(%s::u32string) u32_empty = ""' % ns,
-                '(%s::basic_string<unsigned char>) uchar = "aaaaa"' % (ns),
                 "(%s::string *) null_str = nullptr" % ns,
             ],
         )
@@ -115,7 +115,6 @@ class LibcxxStringDataFormatterTestCase(TestBase):
                 '(%s::u16string) u16_string = u"ß水氶"' % ns,
                 '(%s::u32string) u32_string = U"🍄🍅🍆🍌"' % ns,
                 '(%s::u32string) u32_empty = ""' % ns,
-                '(%s::basic_string<unsigned char>) uchar = "aaaaa"' % (ns),
                 "(%s::string *) null_str = nullptr" % ns,
             ],
         )

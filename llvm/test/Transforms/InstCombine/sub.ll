@@ -841,7 +841,7 @@ define <2 x i32> @test44vec(<2 x i32> %x) {
 
 define <vscale x 2 x i32> @test44scalablevec(<vscale x 2 x i32> %x) {
 ; CHECK-LABEL: @test44scalablevec(
-; CHECK-NEXT:    [[SUB:%.*]] = add nsw <vscale x 2 x i32> [[X:%.*]], shufflevector (<vscale x 2 x i32> insertelement (<vscale x 2 x i32> poison, i32 -32768, i32 0), <vscale x 2 x i32> poison, <vscale x 2 x i32> zeroinitializer)
+; CHECK-NEXT:    [[SUB:%.*]] = add nsw <vscale x 2 x i32> [[X:%.*]], shufflevector (<vscale x 2 x i32> insertelement (<vscale x 2 x i32> poison, i32 -32768, i64 0), <vscale x 2 x i32> poison, <vscale x 2 x i32> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 2 x i32> [[SUB]]
 ;
   %sub = sub nsw <vscale x 2 x i32> %x, shufflevector (<vscale x 2 x i32> insertelement (<vscale x 2 x i32> undef, i32 32768, i32 0), <vscale x 2 x i32> undef, <vscale x 2 x i32> zeroinitializer)
@@ -861,7 +861,7 @@ define <2 x i16> @test44vecminval(<2 x i16> %x) {
 ; uses m_ImmConstant which matches Constant but (explicitly) not ConstantExpr.
 define <vscale x 2 x i16> @test44scalablevecminval(<vscale x 2 x i16> %x) {
 ; CHECK-LABEL: @test44scalablevecminval(
-; CHECK-NEXT:    [[SUB:%.*]] = add <vscale x 2 x i16> [[X:%.*]], shufflevector (<vscale x 2 x i16> insertelement (<vscale x 2 x i16> poison, i16 -32768, i32 0), <vscale x 2 x i16> poison, <vscale x 2 x i32> zeroinitializer)
+; CHECK-NEXT:    [[SUB:%.*]] = add <vscale x 2 x i16> [[X:%.*]], shufflevector (<vscale x 2 x i16> insertelement (<vscale x 2 x i16> poison, i16 -32768, i64 0), <vscale x 2 x i16> poison, <vscale x 2 x i32> zeroinitializer)
 ; CHECK-NEXT:    ret <vscale x 2 x i16> [[SUB]]
 ;
   %sub = sub nsw <vscale x 2 x i16> %x, shufflevector (<vscale x 2 x i16> insertelement (<vscale x 2 x i16> undef, i16 -32768, i32 0), <vscale x 2 x i16> undef, <vscale x 2 x i32> zeroinitializer)
@@ -1307,8 +1307,8 @@ define <2 x i32> @test69(<2 x i32> %x) {
 ; Check (X | Y) - Y --> X & ~Y when Y is a constant
 define i32 @test70(i32 %A) {
 ; CHECK-LABEL: @test70(
-; CHECK-NEXT:    [[TMP1:%.*]] = and i32 [[A:%.*]], -124
-; CHECK-NEXT:    ret i32 [[TMP1]]
+; CHECK-NEXT:    [[C:%.*]] = and i32 [[A:%.*]], -124
+; CHECK-NEXT:    ret i32 [[C]]
 ;
   %B = or i32 %A, 123
   %C = sub i32 %B, 123
@@ -2117,5 +2117,466 @@ define i8 @demand_low_bits_uses_commute(i8 %x, i8 %y, i8 %z) {
   call void @use8(i8 %a)
   %s = sub i8 %a, %z
   %r = shl i8 %s, 2
+  ret i8 %r
+}
+
+; sub becomes negate and combines with shl
+
+define i8 @shrink_sub_from_constant_lowbits(i8 %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits(
+; CHECK-NEXT:    [[X000_NEG:%.*]] = mul i8 [[X:%.*]], -8
+; CHECK-NEXT:    ret i8 [[X000_NEG]]
+;
+  %x000 = shl i8 %x, 3   ; 3 low bits are known zero
+  %sub = sub i8 7, %x000
+  %r = and i8 %sub, -8   ; 3 low bits are not demanded
+  ret i8 %r
+}
+
+; negative test - extra use prevents shrinking '7'
+
+define i8 @shrink_sub_from_constant_lowbits_uses(i8 %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits_uses(
+; CHECK-NEXT:    [[X000:%.*]] = shl i8 [[X:%.*]], 3
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 7, [[X000]]
+; CHECK-NEXT:    call void @use8(i8 [[SUB]])
+; CHECK-NEXT:    [[R:%.*]] = and i8 [[SUB]], -8
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x000 = shl i8 %x, 3   ; 3 low bits are known zero
+  %sub = sub i8 7, %x000
+  call void @use8(i8 %sub)
+  %r = and i8 %sub, -8   ; 3 low bits are not demanded
+  ret i8 %r
+}
+
+; safe to clear 3 low bits (2 higher bits remain set)
+
+define i8 @shrink_sub_from_constant_lowbits2(i8 %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits2(
+; CHECK-NEXT:    [[X000:%.*]] = and i8 [[X:%.*]], -8
+; CHECK-NEXT:    [[SUB:%.*]] = sub nsw i8 24, [[X000]]
+; CHECK-NEXT:    [[R:%.*]] = and i8 [[SUB]], -16
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x000 = and i8 %x, -8   ; 3 low bits are known zero
+  %sub = sub nsw i8 30, %x000 ; 0b0001_1110
+  %r = and i8 %sub, -16   ; 4 low bits are not demanded
+  ret i8 %r
+}
+
+; safe to clear 3 low bits (2 higher bits remain set)
+
+define <2 x i8> @shrink_sub_from_constant_lowbits3(<2 x i8> %x) {
+; CHECK-LABEL: @shrink_sub_from_constant_lowbits3(
+; CHECK-NEXT:    [[X0000:%.*]] = shl <2 x i8> [[X:%.*]], <i8 4, i8 4>
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw <2 x i8> <i8 24, i8 24>, [[X0000]]
+; CHECK-NEXT:    [[R:%.*]] = lshr exact <2 x i8> [[SUB]], <i8 3, i8 3>
+; CHECK-NEXT:    ret <2 x i8> [[R]]
+;
+  %x0000 = shl <2 x i8> %x, <i8 4, i8 4>     ; 4 low bits are known zero
+  %sub = sub nuw <2 x i8> <i8 31, i8 31>, %x0000
+  %r = lshr <2 x i8> %sub, <i8 3, i8 3>      ; 3 low bits are not demanded
+  ret <2 x i8> %r
+}
+
+; eliminate the mask of y or the mask of the result
+
+define i8 @demand_sub_from_variable_lowbits(i8 %x, i8 %y) {
+; CHECK-LABEL: @demand_sub_from_variable_lowbits(
+; CHECK-NEXT:    [[X000:%.*]] = shl i8 [[X:%.*]], 3
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 [[Y:%.*]], [[X000]]
+; CHECK-NEXT:    [[R:%.*]] = and i8 [[SUB]], -8
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x000 = shl i8 %x, 3   ; 3 low bits are known zero
+  %y000 = and i8 %y, -8
+  %sub = sub i8 %y000, %x000
+  %r = and i8 %sub, -8   ; 3 low bits are not demanded
+  ret i8 %r
+}
+
+; setting the low 3 bits of y doesn't change anything
+
+define i8 @demand_sub_from_variable_lowbits2(i8 %x, i8 %y) {
+; CHECK-LABEL: @demand_sub_from_variable_lowbits2(
+; CHECK-NEXT:    [[X0000:%.*]] = shl i8 [[X:%.*]], 4
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw nsw i8 [[Y:%.*]], [[X0000]]
+; CHECK-NEXT:    [[R:%.*]] = lshr i8 [[SUB]], 4
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x0000 = shl i8 %x, 4   ; 4 low bits are known zero
+  %y111 = or i8 %y, 7
+  %sub = sub nsw nuw i8 %y111, %x0000
+  %r = lshr i8 %sub, 4    ; 4 low bits are not demanded
+  ret i8 %r
+}
+
+; negative test - the mask of y removes an extra bit, so that instruction is needed
+
+define i8 @demand_sub_from_variable_lowbits3(i8 %x, i8 %y) {
+; CHECK-LABEL: @demand_sub_from_variable_lowbits3(
+; CHECK-NEXT:    [[X0000:%.*]] = shl i8 [[X:%.*]], 4
+; CHECK-NEXT:    [[Y00000:%.*]] = and i8 [[Y:%.*]], -32
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 [[Y00000]], [[X0000]]
+; CHECK-NEXT:    [[R:%.*]] = lshr exact i8 [[SUB]], 4
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x0000 = shl i8 %x, 4   ; 4 low bits are known zero
+  %y00000 = and i8 %y, -32
+  %sub = sub i8 %y00000, %x0000
+  %r = lshr i8 %sub, 4    ; 4 low bits are not demanded
+  ret i8 %r
+}
+
+; C - ((C3 - X) & C2) --> (C - (C2 & C3)) + (X & C2) when:
+; (C3 - ((C2 & C3) - 1)) is pow2
+; ((C2 + C3) & ((C2 & C3) - 1)) == ((C2 & C3) - 1)
+; C2 is negative pow2
+define i10 @sub_to_and_nuw(i10 %x) {
+; CHECK-LABEL: @sub_to_and_nuw(
+; CHECK-NEXT:    [[TMP1:%.*]] = and i10 [[X:%.*]], 120
+; CHECK-NEXT:    [[R:%.*]] = add nuw nsw i10 [[TMP1]], 379
+; CHECK-NEXT:    ret i10 [[R]]
+;
+  %sub = sub nuw i10 71, %x
+  %and = and i10 %sub, 120
+  %r = sub i10 443, %and
+  ret i10 %r
+}
+
+; C - ((C3 -nuw X) & C2) --> (C - (C2 & C3)) + (X & C2) when:
+; (C3 - ((C2 & C3) - 1)) is pow2
+; ((C2 + C3) & ((C2 & C3) - 1)) == ((C2 & C3) - 1)
+define i10 @sub_to_and_negpow2(i10 %x) {
+; CHECK-LABEL: @sub_to_and_negpow2(
+; CHECK-NEXT:    [[TMP1:%.*]] = and i10 [[X:%.*]], -8
+; CHECK-NEXT:    [[R:%.*]] = add i10 [[TMP1]], -31
+; CHECK-NEXT:    ret i10 [[R]]
+;
+  %sub = sub i10 71, %x
+  %and = and i10 %sub, -8
+  %r = sub i10 33, %and
+  ret i10 %r
+}
+
+; TODO:
+; C + ((C3 -nuw X) & C2) --> (C + (C2 & C3)) - (X & C2) when:
+define i10 @add_to_and_nuw(i10 %x) {
+; CHECK-LABEL: @add_to_and_nuw(
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw i10 71, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and i10 [[SUB]], 120
+; CHECK-NEXT:    [[R:%.*]] = add nuw nsw i10 [[AND]], 224
+; CHECK-NEXT:    ret i10 [[R]]
+;
+  %sub = sub nuw i10 71, %x
+  %and = and i10 %sub, 120
+  %r = add i10 224, %and
+  ret i10 %r
+}
+
+; (C3 - (C2 & C3) + 1) is not pow2
+define i10 @sub_to_and_negative1(i10 %x) {
+; CHECK-LABEL: @sub_to_and_negative1(
+; CHECK-NEXT:    [[SUB:%.*]] = sub i10 71, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and i10 [[SUB]], 248
+; CHECK-NEXT:    [[R:%.*]] = sub nuw nsw i10 444, [[AND]]
+; CHECK-NEXT:    ret i10 [[R]]
+;
+  %sub = sub nuw i10 327, %x
+  %and = and i10 %sub, 248
+  %r = sub i10 444, %and
+  ret i10 %r
+}
+
+; ((C2 + C3) & ((C2 & C3) - 1)) == ((C2 & C3) - 1)
+define i10 @sub_to_and_negative2(i10 %x) {
+; CHECK-LABEL: @sub_to_and_negative2(
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw i10 71, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and i10 [[SUB]], 88
+; CHECK-NEXT:    [[R:%.*]] = sub nsw i10 64, [[AND]]
+; CHECK-NEXT:    ret i10 [[R]]
+;
+  %sub = sub nuw i10 71, %x
+  %and = and i10 %sub, 88
+  %r = sub i10 64, %and
+  ret i10 %r
+}
+
+; no nuw && C2 is not neg-pow2
+define i10 @sub_to_and_negative3(i10 %x) {
+; CHECK-LABEL: @sub_to_and_negative3(
+; CHECK-NEXT:    [[SUB:%.*]] = sub i10 71, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and i10 [[SUB]], 120
+; CHECK-NEXT:    [[R:%.*]] = sub nsw i10 64, [[AND]]
+; CHECK-NEXT:    ret i10 [[R]]
+;
+  %sub = sub i10 71, %x
+  %and = and i10 %sub, 120
+  %r = sub i10 64, %and
+  ret i10 %r
+}
+
+declare void @use10(i10)
+
+; and is not one-use
+define i10 @sub_to_and_negative4(i10 %x) {
+; CHECK-LABEL: @sub_to_and_negative4(
+; CHECK-NEXT:    [[SUB:%.*]] = sub i10 71, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and i10 [[SUB]], 120
+; CHECK-NEXT:    [[R:%.*]] = sub nsw i10 64, [[AND]]
+; CHECK-NEXT:    call void @use10(i10 [[AND]])
+; CHECK-NEXT:    ret i10 [[R]]
+;
+  %sub = sub i10 71, %x
+  %and = and i10 %sub, 120
+  %r = sub i10 64, %and
+  call void @use10(i10 %and)
+  ret i10 %r
+}
+
+
+define <2 x i8> @sub_to_and_vector1(<2 x i8> %x) {
+; CHECK-LABEL: @sub_to_and_vector1(
+; CHECK-NEXT:    [[TMP1:%.*]] = and <2 x i8> [[X:%.*]], <i8 120, i8 120>
+; CHECK-NEXT:    [[R:%.*]] = add nsw <2 x i8> [[TMP1]], <i8 -9, i8 -9>
+; CHECK-NEXT:    ret <2 x i8> [[R]]
+;
+  %sub = sub nuw <2 x i8> <i8 71, i8 71>, %x
+  %and = and <2 x i8> %sub, <i8 120, i8 120>
+  %r = sub <2 x i8>  <i8 55, i8 55>, %and
+  ret <2 x i8> %r
+}
+
+
+define <2 x i8> @sub_to_and_vector2(<2 x i8> %x) {
+; CHECK-LABEL: @sub_to_and_vector2(
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw <2 x i8> <i8 71, i8 undef>, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and <2 x i8> [[SUB]], <i8 120, i8 120>
+; CHECK-NEXT:    [[R:%.*]] = sub nsw <2 x i8> <i8 77, i8 77>, [[AND]]
+; CHECK-NEXT:    ret <2 x i8> [[R]]
+;
+  %sub = sub nuw <2 x i8> <i8 71, i8 undef>, %x
+  %and = and <2 x i8> %sub, <i8 120, i8 120>
+  %r = sub <2 x i8>  <i8 77, i8 77>, %and
+  ret <2 x i8> %r
+}
+
+
+define <2 x i8> @sub_to_and_vector3(<2 x i8> %x) {
+; CHECK-LABEL: @sub_to_and_vector3(
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw <2 x i8> <i8 71, i8 71>, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and <2 x i8> [[SUB]], <i8 120, i8 undef>
+; CHECK-NEXT:    [[R:%.*]] = sub <2 x i8> <i8 44, i8 44>, [[AND]]
+; CHECK-NEXT:    ret <2 x i8> [[R]]
+;
+  %sub = sub nuw <2 x i8> <i8 71, i8 71>, %x
+  %and = and <2 x i8> %sub, <i8 120, i8 undef>
+  %r = sub <2 x i8>  <i8 44, i8 44>, %and
+  ret <2 x i8> %r
+}
+
+
+define <2 x i8> @sub_to_and_vector4(<2 x i8> %x) {
+; CHECK-LABEL: @sub_to_and_vector4(
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw <2 x i8> <i8 71, i8 71>, [[X:%.*]]
+; CHECK-NEXT:    [[AND:%.*]] = and <2 x i8> [[SUB]], <i8 120, i8 120>
+; CHECK-NEXT:    [[R:%.*]] = sub <2 x i8> <i8 88, i8 undef>, [[AND]]
+; CHECK-NEXT:    ret <2 x i8> [[R]]
+;
+  %sub = sub nuw <2 x i8> <i8 71, i8 71>, %x
+  %and = and <2 x i8> %sub, <i8 120, i8 120>
+  %r = sub <2 x i8>  <i8 88, i8 undef>, %and
+  ret <2 x i8> %r
+}
+
+; (X * X) - (Y * Y) --> (X + Y) * (X - Y)
+
+define i8 @diff_of_squares(i8 %x, i8 %y) {
+; CHECK-LABEL: @diff_of_squares(
+; CHECK-NEXT:    [[ADD:%.*]] = add i8 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = sub i8 [[X]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = mul i8 [[ADD]], [[SUB]]
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x2 = mul i8 %x, %x
+  %y2 = mul i8 %y, %y
+  %r = sub i8 %x2, %y2
+  ret i8 %r
+}
+
+; All-or-nothing for propagation of no-wrap flags (possibly conservative)
+
+define i5 @diff_of_squares_nuw(i5 %x, i5 %y) {
+; CHECK-LABEL: @diff_of_squares_nuw(
+; CHECK-NEXT:    [[ADD:%.*]] = add nuw i5 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw i5 [[X]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = mul nuw i5 [[ADD]], [[SUB]]
+; CHECK-NEXT:    ret i5 [[R]]
+;
+  %x2 = mul nuw i5 %x, %x
+  %y2 = mul nuw i5 %y, %y
+  %r = sub nuw i5 %x2, %y2
+  ret i5 %r
+}
+
+; All-or-nothing for propagation of no-wrap flags (possibly conservative)
+
+define i5 @diff_of_squares_partial_nuw(i5 %x, i5 %y) {
+; CHECK-LABEL: @diff_of_squares_partial_nuw(
+; CHECK-NEXT:    [[ADD:%.*]] = add i5 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = sub i5 [[X]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = mul i5 [[ADD]], [[SUB]]
+; CHECK-NEXT:    ret i5 [[R]]
+;
+  %x2 = mul nuw i5 %x, %x
+  %y2 = mul nuw i5 %y, %y
+  %r = sub i5 %x2, %y2
+  ret i5 %r
+}
+
+; All-or-nothing for propagation of no-wrap flags (possibly conservative)
+
+define <2 x i5> @diff_of_squares_nsw(<2 x i5> %x, <2 x i5> %y) {
+; CHECK-LABEL: @diff_of_squares_nsw(
+; CHECK-NEXT:    [[ADD:%.*]] = add nsw <2 x i5> [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = sub nsw <2 x i5> [[X]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = mul nsw <2 x i5> [[ADD]], [[SUB]]
+; CHECK-NEXT:    ret <2 x i5> [[R]]
+;
+  %x2 = mul nsw <2 x i5> %x, %x
+  %y2 = mul nsw <2 x i5> %y, %y
+  %r = sub nsw <2 x i5> %x2, %y2
+  ret <2 x i5> %r
+}
+
+; All-or-nothing for propagation of no-wrap flags (possibly conservative)
+
+define <2 x i5> @diff_of_squares_partial_nsw(<2 x i5> %x, <2 x i5> %y) {
+; CHECK-LABEL: @diff_of_squares_partial_nsw(
+; CHECK-NEXT:    [[ADD:%.*]] = add <2 x i5> [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = sub <2 x i5> [[X]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = mul <2 x i5> [[ADD]], [[SUB]]
+; CHECK-NEXT:    ret <2 x i5> [[R]]
+;
+  %x2 = mul nsw <2 x i5> %x, %x
+  %y2 = mul <2 x i5> %y, %y
+  %r = sub nsw <2 x i5> %x2, %y2
+  ret <2 x i5> %r
+}
+
+define i1 @diff_of_squares_nsw_i1(i1 %x, i1 %y) {
+; CHECK-LABEL: @diff_of_squares_nsw_i1(
+; CHECK-NEXT:    ret i1 false
+;
+  %x2 = mul nsw i1 %x, %x
+  %y2 = mul nsw i1 %y, %y
+  %r = sub nsw i1 %x2, %y2
+  ret i1 %r
+}
+
+define i1 @diff_of_squares_nuw_i1(i1 %x, i1 %y) {
+; CHECK-LABEL: @diff_of_squares_nuw_i1(
+; CHECK-NEXT:    [[R:%.*]] = xor i1 [[Y:%.*]], [[X:%.*]]
+; CHECK-NEXT:    ret i1 [[R]]
+;
+  %x2 = mul nuw i1 %x, %x
+  %y2 = mul nuw i1 %y, %y
+  %r = sub nuw i1 %x2, %y2
+  ret i1 %r
+}
+
+; It is not correct to propagate nsw.
+; TODO: This should reduce more.
+
+define i2 @diff_of_squares_nsw_i2(i2 %x, i2 %y) {
+; CHECK-LABEL: @diff_of_squares_nsw_i2(
+; CHECK-NEXT:    [[ADD:%.*]] = add i2 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = sub i2 [[X]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = mul i2 [[ADD]], [[SUB]]
+; CHECK-NEXT:    ret i2 [[R]]
+;
+  %x2 = mul nsw i2 %x, %x
+  %y2 = mul nsw i2 %y, %y
+  %r = sub nsw i2 %x2, %y2
+  ret i2 %r
+}
+
+; TODO: This should reduce more.
+
+define i2 @diff_of_squares_nuw_i2(i2 %x, i2 %y) {
+; CHECK-LABEL: @diff_of_squares_nuw_i2(
+; CHECK-NEXT:    [[ADD:%.*]] = add nuw i2 [[X:%.*]], [[Y:%.*]]
+; CHECK-NEXT:    [[SUB:%.*]] = sub nuw i2 [[X]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = mul nuw i2 [[ADD]], [[SUB]]
+; CHECK-NEXT:    ret i2 [[R]]
+;
+  %x2 = mul nuw i2 %x, %x
+  %y2 = mul nuw i2 %y, %y
+  %r = sub nuw i2 %x2, %y2
+  ret i2 %r
+}
+
+; negative test
+
+define i8 @diff_of_squares_use1(i8 %x, i8 %y) {
+; CHECK-LABEL: @diff_of_squares_use1(
+; CHECK-NEXT:    [[X2:%.*]] = mul i8 [[X:%.*]], [[X]]
+; CHECK-NEXT:    call void @use8(i8 [[X2]])
+; CHECK-NEXT:    [[Y2:%.*]] = mul i8 [[Y:%.*]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = sub i8 [[X2]], [[Y2]]
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x2 = mul i8 %x, %x
+  call void @use8(i8 %x2)
+  %y2 = mul i8 %y, %y
+  %r = sub i8 %x2, %y2
+  ret i8 %r
+}
+
+; negative test
+
+define i8 @diff_of_squares_use2(i8 %x, i8 %y) {
+; CHECK-LABEL: @diff_of_squares_use2(
+; CHECK-NEXT:    [[X2:%.*]] = mul i8 [[X:%.*]], [[X]]
+; CHECK-NEXT:    [[Y2:%.*]] = mul i8 [[Y:%.*]], [[Y]]
+; CHECK-NEXT:    call void @use8(i8 [[Y2]])
+; CHECK-NEXT:    [[R:%.*]] = sub i8 [[X2]], [[Y2]]
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x2 = mul i8 %x, %x
+  %y2 = mul i8 %y, %y
+  call void @use8(i8 %y2)
+  %r = sub i8 %x2, %y2
+  ret i8 %r
+}
+
+; negative test - must be squares
+
+define i8 @diff_of_muls1(i8 %x, i8 %y, i8 %z) {
+; CHECK-LABEL: @diff_of_muls1(
+; CHECK-NEXT:    [[M:%.*]] = mul i8 [[X:%.*]], [[Z:%.*]]
+; CHECK-NEXT:    [[Y2:%.*]] = mul i8 [[Y:%.*]], [[Y]]
+; CHECK-NEXT:    [[R:%.*]] = sub i8 [[M]], [[Y2]]
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %m = mul i8 %x, %z
+  %y2 = mul i8 %y, %y
+  %r = sub i8 %m, %y2
+  ret i8 %r
+}
+
+; negative test - must be squares
+
+define i8 @diff_of_muls2(i8 %x, i8 %y, i8 %z) {
+; CHECK-LABEL: @diff_of_muls2(
+; CHECK-NEXT:    [[X2:%.*]] = mul i8 [[X:%.*]], [[X]]
+; CHECK-NEXT:    [[M:%.*]] = mul i8 [[Y:%.*]], [[Z:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = sub i8 [[X2]], [[M]]
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %x2 = mul i8 %x, %x
+  %m = mul i8 %y, %z
+  %r = sub i8 %x2, %m
   ret i8 %r
 }

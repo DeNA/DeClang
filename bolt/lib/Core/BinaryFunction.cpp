@@ -14,6 +14,7 @@
 #include "bolt/Core/BinaryBasicBlock.h"
 #include "bolt/Core/BinaryDomTree.h"
 #include "bolt/Core/DynoStats.h"
+#include "bolt/Core/HashUtilities.h"
 #include "bolt/Core/MCPlusBuilder.h"
 #include "bolt/Utils/NameResolver.h"
 #include "bolt/Utils/NameShortener.h"
@@ -166,9 +167,7 @@ namespace bolt {
 
 constexpr unsigned BinaryFunction::MinAlign;
 
-namespace {
-
-template <typename R> bool emptyRange(const R &Range) {
+template <typename R> static bool emptyRange(const R &Range) {
   return Range.begin() == Range.end();
 }
 
@@ -177,7 +176,7 @@ template <typename R> bool emptyRange(const R &Range) {
 /// to point to this information, which is represented by a
 /// DebugLineTableRowRef. The returned pointer is null if no debug line
 /// information for this instruction was found.
-SMLoc findDebugLineInformationForInstructionAt(
+static SMLoc findDebugLineInformationForInstructionAt(
     uint64_t Address, DWARFUnit *Unit,
     const DWARFDebugLine::LineTable *LineTable) {
   // We use the pointer in SMLoc to store an instance of DebugLineTableRowRef,
@@ -206,15 +205,16 @@ SMLoc findDebugLineInformationForInstructionAt(
   return SMLoc::getFromPointer(Ptr);
 }
 
-std::string buildSectionName(StringRef Prefix, StringRef Name,
-                             const BinaryContext &BC) {
+static std::string buildSectionName(StringRef Prefix, StringRef Name,
+                                    const BinaryContext &BC) {
   if (BC.isELF())
     return (Prefix + Name).str();
   static NameShortener NS;
   return (Prefix + Twine(NS.getID(Name))).str();
 }
 
-raw_ostream &operator<<(raw_ostream &OS, const BinaryFunction::State State) {
+static raw_ostream &operator<<(raw_ostream &OS,
+                               const BinaryFunction::State State) {
   switch (State) {
   case BinaryFunction::State::Empty:         OS << "empty"; break;
   case BinaryFunction::State::Disassembled:  OS << "disassembled"; break;
@@ -226,8 +226,6 @@ raw_ostream &operator<<(raw_ostream &OS, const BinaryFunction::State State) {
 
   return OS;
 }
-
-} // namespace
 
 std::string BinaryFunction::buildCodeSectionName(StringRef Name,
                                                  const BinaryContext &BC) {
@@ -242,24 +240,21 @@ std::string BinaryFunction::buildColdCodeSectionName(StringRef Name,
 
 uint64_t BinaryFunction::Count = 0;
 
-Optional<StringRef> BinaryFunction::hasNameRegex(const StringRef Name) const {
+std::optional<StringRef>
+BinaryFunction::hasNameRegex(const StringRef Name) const {
   const std::string RegexName = (Twine("^") + StringRef(Name) + "$").str();
   Regex MatchName(RegexName);
-  Optional<StringRef> Match = forEachName(
+  return forEachName(
       [&MatchName](StringRef Name) { return MatchName.match(Name); });
-
-  return Match;
 }
 
-Optional<StringRef>
+std::optional<StringRef>
 BinaryFunction::hasRestoredNameRegex(const StringRef Name) const {
   const std::string RegexName = (Twine("^") + StringRef(Name) + "$").str();
   Regex MatchName(RegexName);
-  Optional<StringRef> Match = forEachName([&MatchName](StringRef Name) {
+  return forEachName([&MatchName](StringRef Name) {
     return MatchName.match(NameResolver::restore(Name));
   });
-
-  return Match;
 }
 
 std::string BinaryFunction::getDemangledName() const {
@@ -395,7 +390,7 @@ bool BinaryFunction::isForwardCall(const MCSymbol *CalleeSymbol) const {
   }
 }
 
-void BinaryFunction::dump(bool PrintInstructions) const {
+void BinaryFunction::dump() const {
   // getDynoStats calls FunctionLayout::updateLayoutIndices and
   // BasicBlock::analyzeBranch. The former cannot be const, but should be
   // removed, the latter should be made const, but seems to require refactoring.
@@ -405,11 +400,10 @@ void BinaryFunction::dump(bool PrintInstructions) const {
   // modified. Only BinaryBasicBlocks are actually modified (if it all) and we
   // have mutable pointers to those regardless whether this function is
   // const-qualified or not.
-  const_cast<BinaryFunction &>(*this).print(dbgs(), "", PrintInstructions);
+  const_cast<BinaryFunction &>(*this).print(dbgs(), "");
 }
 
-void BinaryFunction::print(raw_ostream &OS, std::string Annotation,
-                           bool PrintInstructions) {
+void BinaryFunction::print(raw_ostream &OS, std::string Annotation) {
   if (!opts::shouldPrint(*this))
     return;
 
@@ -477,6 +471,7 @@ void BinaryFunction::print(raw_ostream &OS, std::string Annotation,
     OS << "\n  Image       : 0x" << Twine::utohexstr(getImageAddress());
   if (ExecutionCount != COUNT_NO_PROFILE) {
     OS << "\n  Exec Count  : " << ExecutionCount;
+    OS << "\n  Branch Count: " << RawBranchCount;
     OS << "\n  Profile Acc : " << format("%.1f%%", ProfileMatchRatio * 100.0f);
   }
 
@@ -488,7 +483,7 @@ void BinaryFunction::print(raw_ostream &OS, std::string Annotation,
 
   OS << "\n}\n";
 
-  if (opts::PrintDynoStatsOnly || !PrintInstructions || !BC.InstPrinter)
+  if (opts::PrintDynoStatsOnly || !BC.InstPrinter)
     return;
 
   // Offset of the instruction in function.
@@ -673,9 +668,8 @@ void BinaryFunction::printRelocations(raw_ostream &OS, uint64_t Offset,
   }
 }
 
-namespace {
-std::string mutateDWARFExpressionTargetReg(const MCCFIInstruction &Instr,
-                                           MCPhysReg NewReg) {
+static std::string mutateDWARFExpressionTargetReg(const MCCFIInstruction &Instr,
+                                                  MCPhysReg NewReg) {
   StringRef ExprBytes = Instr.getValues();
   assert(ExprBytes.size() > 1 && "DWARF expression CFI is too short");
   uint8_t Opcode = ExprBytes[0];
@@ -698,7 +692,6 @@ std::string mutateDWARFExpressionTargetReg(const MCCFIInstruction &Instr,
       .concat(ExprBytes.drop_front(1 + Size))
       .str();
 }
-} // namespace
 
 void BinaryFunction::mutateCFIRegisterFor(const MCInst &Instr,
                                           MCPhysReg NewReg) {
@@ -796,8 +789,9 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
     // Start at the last label as an approximation of the current basic block.
     // This is a heuristic, since the full set of labels have yet to be
     // determined
-    for (auto LI = Labels.rbegin(); LI != Labels.rend(); ++LI) {
-      auto II = Instructions.find(LI->first);
+    for (const uint32_t Offset :
+         llvm::make_first_range(llvm::reverse(Labels))) {
+      auto II = Instructions.find(Offset);
       if (II != Instructions.end()) {
         Begin = II;
         break;
@@ -894,7 +888,7 @@ BinaryFunction::processIndirectBranch(MCInst &Instruction, unsigned Size,
     if (!Value)
       return IndirectBranchType::UNKNOWN;
 
-    if (!BC.getSectionForAddress(ArrayStart)->isReadOnly())
+    if (BC.getSectionForAddress(ArrayStart)->isWritable())
       return IndirectBranchType::UNKNOWN;
 
     outs() << "BOLT-INFO: fixed indirect branch detected in " << *this
@@ -995,7 +989,7 @@ size_t BinaryFunction::getSizeOfDataInCodeAt(uint64_t Offset) const {
   if (!Islands)
     return 0;
 
-  if (Islands->DataOffsets.find(Offset) == Islands->DataOffsets.end())
+  if (!llvm::is_contained(Islands->DataOffsets, Offset))
     return 0;
 
   auto Iter = Islands->CodeOffsets.upper_bound(Offset);
@@ -1217,7 +1211,7 @@ bool BinaryFunction::disassemble() {
     // Check integrity of LLVM assembler/disassembler.
     if (opts::CheckEncoding && !BC.MIB->isBranch(Instruction) &&
         !BC.MIB->isCall(Instruction) && !BC.MIB->isNoop(Instruction)) {
-      if (!BC.validateEncoding(Instruction, FunctionData.slice(Offset, Size))) {
+      if (!BC.validateInstructionEncoding(FunctionData.slice(Offset, Size))) {
         errs() << "BOLT-WARNING: mismatching LLVM encoding detected in "
                << "function " << *this << " for instruction :\n";
         BC.printInstruction(errs(), Instruction, AbsoluteInstrAddr);
@@ -1233,15 +1227,10 @@ bool BinaryFunction::disassemble() {
         break;
       }
 
-      // Disassemble again without the symbolizer and check that the disassembly
-      // matches the assembler output.
-      MCInst TempInst;
-      BC.DisAsm->getInstruction(TempInst, Size, FunctionData.slice(Offset),
-                                AbsoluteInstrAddr, nulls());
-      if (!BC.validateEncoding(TempInst, FunctionData.slice(Offset, Size))) {
+      if (!BC.validateInstructionEncoding(FunctionData.slice(Offset, Size))) {
         errs() << "BOLT-WARNING: internal assembler/disassembler error "
                   "detected for AVX512 instruction:\n";
-        BC.printInstruction(errs(), TempInst, AbsoluteInstrAddr);
+        BC.printInstruction(errs(), Instruction, AbsoluteInstrAddr);
         errs() << " in function " << *this << '\n';
         setIgnored();
         break;
@@ -1261,7 +1250,7 @@ bool BinaryFunction::disassemble() {
         const bool IsCondBranch = MIB->isConditionalBranch(Instruction);
         MCSymbol *TargetSymbol = nullptr;
 
-        if (BC.MIB->isUnsupportedBranch(Instruction.getOpcode())) {
+        if (BC.MIB->isUnsupportedBranch(Instruction)) {
           setIgnored();
           if (BinaryFunction *TargetFunc =
                   BC.getBinaryFunctionContainingAddress(TargetAddress))
@@ -1334,7 +1323,7 @@ bool BinaryFunction::disassemble() {
         if (BC.isAArch64())
           handleAArch64IndirectCall(Instruction, Offset);
       }
-    } else if (BC.isAArch64()) {
+    } else if (BC.isAArch64() || BC.isRISCV()) {
       // Check if there's a relocation associated with this instruction.
       bool UsedReloc = false;
       for (auto Itr = Relocations.lower_bound(Offset),
@@ -1354,7 +1343,7 @@ bool BinaryFunction::disassemble() {
         UsedReloc = true;
       }
 
-      if (MIB->hasPCRelOperand(Instruction) && !UsedReloc)
+      if (!BC.isRISCV() && MIB->hasPCRelOperand(Instruction) && !UsedReloc)
         handlePCRelOperand(Instruction, AbsoluteInstrAddr, Size);
     }
 
@@ -1423,6 +1412,11 @@ bool BinaryFunction::scanExternalRefs() {
   assert(FunctionData.size() == getMaxSize() &&
          "function size does not match raw data size");
 
+  BC.SymbolicDisAsm->setSymbolizer(
+      BC.MIB->createTargetSymbolizer(*this, /*CreateSymbols*/ false));
+
+  // Disassemble contents of the function. Detect code entry points and create
+  // relocations for references to code that will be moved.
   uint64_t Size = 0; // instruction size
   for (uint64_t Offset = 0; Offset < getSize(); Offset += Size) {
     // Check for data inside code and ignore it
@@ -1433,9 +1427,9 @@ bool BinaryFunction::scanExternalRefs() {
 
     const uint64_t AbsoluteInstrAddr = getAddress() + Offset;
     MCInst Instruction;
-    if (!BC.DisAsm->getInstruction(Instruction, Size,
-                                   FunctionData.slice(Offset),
-                                   AbsoluteInstrAddr, nulls())) {
+    if (!BC.SymbolicDisAsm->getInstruction(Instruction, Size,
+                                           FunctionData.slice(Offset),
+                                           AbsoluteInstrAddr, nulls())) {
       if (opts::Verbosity >= 1 && !isZeroPaddingAt(Offset)) {
         errs() << "BOLT-WARNING: unable to disassemble instruction at offset 0x"
                << Twine::utohexstr(Offset) << " (address 0x"
@@ -1476,88 +1470,57 @@ bool BinaryFunction::scanExternalRefs() {
       return ignoreFunctionRef(*TargetFunction);
     };
 
-    // Detect if the instruction references an address.
-    // Without relocations, we can only trust PC-relative address modes.
-    uint64_t TargetAddress = 0;
-    bool IsPCRel = false;
-    bool IsBranch = false;
-    if (BC.MIB->hasPCRelOperand(Instruction)) {
-      IsPCRel = BC.MIB->evaluateMemOperandTarget(Instruction, TargetAddress,
-                                                 AbsoluteInstrAddr, Size);
-    } else if (BC.MIB->isCall(Instruction) || BC.MIB->isBranch(Instruction)) {
-      IsBranch = BC.MIB->evaluateBranch(Instruction, AbsoluteInstrAddr, Size,
-                                        TargetAddress);
-    }
+    // Handle calls and branches separately as symbolization doesn't work for
+    // them yet.
+    MCSymbol *BranchTargetSymbol = nullptr;
+    if (BC.MIB->isCall(Instruction) || BC.MIB->isBranch(Instruction)) {
+      uint64_t TargetAddress = 0;
+      BC.MIB->evaluateBranch(Instruction, AbsoluteInstrAddr, Size,
+                             TargetAddress);
 
-    MCSymbol *TargetSymbol = nullptr;
+      // Create an entry point at reference address if needed.
+      BinaryFunction *TargetFunction =
+          BC.getBinaryFunctionContainingAddress(TargetAddress);
 
-    // Create an entry point at reference address if needed.
-    BinaryFunction *TargetFunction =
-        BC.getBinaryFunctionContainingAddress(TargetAddress);
-    if (TargetFunction && !ignoreFunctionRef(*TargetFunction)) {
+      if (!TargetFunction || ignoreFunctionRef(*TargetFunction))
+        continue;
+
       const uint64_t FunctionOffset =
           TargetAddress - TargetFunction->getAddress();
-      TargetSymbol = FunctionOffset
-                         ? TargetFunction->addEntryPointAtOffset(FunctionOffset)
+      BranchTargetSymbol =
+          FunctionOffset ? TargetFunction->addEntryPointAtOffset(FunctionOffset)
                          : TargetFunction->getSymbol();
     }
 
-    // Can't find more references and not creating relocations.
+    // Can't find more references. Not creating relocations since we are not
+    // moving code.
     if (!BC.HasRelocations)
       continue;
 
-    // Create a relocation against the TargetSymbol as the symbol might get
-    // moved.
-    if (TargetSymbol) {
-      if (IsBranch) {
-        BC.MIB->replaceBranchTarget(Instruction, TargetSymbol,
-                                    Emitter.LocalCtx.get());
-      } else if (IsPCRel) {
-        const MCExpr *Expr = MCSymbolRefExpr::create(
-            TargetSymbol, MCSymbolRefExpr::VK_None, *Emitter.LocalCtx.get());
-        BC.MIB->replaceMemOperandDisp(
-            Instruction, MCOperand::createExpr(BC.MIB->getTargetExprFor(
-                             Instruction, Expr, *Emitter.LocalCtx.get(), 0)));
-      }
-    }
-
-    // Create more relocations based on input file relocations.
-    bool HasRel = false;
-    for (auto Itr = Relocations.lower_bound(Offset),
-              ItrE = Relocations.lower_bound(Offset + Size);
-         Itr != ItrE; ++Itr) {
-      Relocation &Relocation = Itr->second;
-      if (Relocation.isPCRelative() && BC.isX86())
-        continue;
-      if (ignoreReference(Relocation.Symbol))
-        continue;
-
-      int64_t Value = Relocation.Value;
-      const bool Result = BC.MIB->replaceImmWithSymbolRef(
-          Instruction, Relocation.Symbol, Relocation.Addend,
-          Emitter.LocalCtx.get(), Value, Relocation.Type);
-      (void)Result;
-      assert(Result && "cannot replace immediate with relocation");
-
-      HasRel = true;
-    }
-
-    if (!TargetSymbol && !HasRel)
+    if (BranchTargetSymbol) {
+      BC.MIB->replaceBranchTarget(Instruction, BranchTargetSymbol,
+                                  Emitter.LocalCtx.get());
+    } else if (!llvm::any_of(Instruction,
+                             [](const MCOperand &Op) { return Op.isExpr(); })) {
+      // Skip assembly if the instruction may not have any symbolic operands.
       continue;
+    }
 
     // Emit the instruction using temp emitter and generate relocations.
     SmallString<256> Code;
     SmallVector<MCFixup, 4> Fixups;
-    raw_svector_ostream VecOS(Code);
-    Emitter.MCE->encodeInstruction(Instruction, VecOS, Fixups, *BC.STI);
+    Emitter.MCE->encodeInstruction(Instruction, Code, Fixups, *BC.STI);
 
     // Create relocation for every fixup.
     for (const MCFixup &Fixup : Fixups) {
-      Optional<Relocation> Rel = BC.MIB->createRelocation(Fixup, *BC.MAB);
+      std::optional<Relocation> Rel = BC.MIB->createRelocation(Fixup, *BC.MAB);
       if (!Rel) {
         Success = false;
         continue;
       }
+
+      if (ignoreReference(Rel->Symbol))
+        continue;
 
       if (Relocation::getSizeForType(Rel->Type) < 4) {
         // If the instruction uses a short form, then we might not be able
@@ -1573,6 +1536,9 @@ bool BinaryFunction::scanExternalRefs() {
     if (!Success)
       break;
   }
+
+  // Reset symbolizer for the disassembler.
+  BC.SymbolicDisAsm->setSymbolizer(nullptr);
 
   // Add relocations unless disassembly failed for this function.
   if (!DisassemblyFailed)
@@ -1649,39 +1615,6 @@ void BinaryFunction::postProcessJumpTables() {
                 "detected in function "
              << *this << '\n';
     }
-    if (JT.Entries.empty()) {
-      bool HasOneParent = (JT.Parents.size() == 1);
-      for (unsigned I = 0; I < JT.EntriesAsAddress.size(); ++I) {
-        uint64_t EntryAddress = JT.EntriesAsAddress[I];
-        // builtin_unreachable does not belong to any function
-        // Need to handle separately
-        bool IsBuiltIn = false;
-        for (BinaryFunction *Parent : JT.Parents) {
-          if (EntryAddress == Parent->getAddress() + Parent->getSize()) {
-            IsBuiltIn = true;
-            // Specify second parameter as true to accept builtin_unreachable
-            MCSymbol *Label = getOrCreateLocalLabel(EntryAddress, true);
-            JT.Entries.push_back(Label);
-            break;
-          }
-        }
-        if (IsBuiltIn)
-          continue;
-        // Create local label for targets cannot be reached by other fragments
-        // Otherwise, secondary entry point to target function
-        BinaryFunction *TargetBF =
-            BC.getBinaryFunctionContainingAddress(EntryAddress);
-        if (TargetBF->getAddress() != EntryAddress) {
-          MCSymbol *Label =
-              (HasOneParent && TargetBF == this)
-                  ? getOrCreateLocalLabel(JT.EntriesAsAddress[I], true)
-                  : TargetBF->addEntryPointAtOffset(EntryAddress -
-                                                    TargetBF->getAddress());
-          JT.Entries.push_back(Label);
-        }
-      }
-    }
-
     const uint64_t BDSize =
         BC.getBinaryDataAtAddress(JT.getAddress())->getSize();
     if (!BDSize) {
@@ -1689,6 +1622,37 @@ void BinaryFunction::postProcessJumpTables() {
     } else {
       assert(BDSize >= JT.getSize() &&
              "jump table cannot be larger than the containing object");
+    }
+    if (!JT.Entries.empty())
+      continue;
+
+    bool HasOneParent = (JT.Parents.size() == 1);
+    for (uint64_t EntryAddress : JT.EntriesAsAddress) {
+      // builtin_unreachable does not belong to any function
+      // Need to handle separately
+      bool IsBuiltinUnreachable =
+          llvm::any_of(JT.Parents, [&](const BinaryFunction *Parent) {
+            return EntryAddress == Parent->getAddress() + Parent->getSize();
+          });
+      if (IsBuiltinUnreachable) {
+        MCSymbol *Label = getOrCreateLocalLabel(EntryAddress, true);
+        JT.Entries.push_back(Label);
+        continue;
+      }
+      // Create a local label for targets that cannot be reached by other
+      // fragments. Otherwise, create a secondary entry point in the target
+      // function.
+      BinaryFunction *TargetBF =
+          BC.getBinaryFunctionContainingAddress(EntryAddress);
+      MCSymbol *Label;
+      if (HasOneParent && TargetBF == this) {
+        Label = getOrCreateLocalLabel(EntryAddress, true);
+      } else {
+        const uint64_t Offset = EntryAddress - TargetBF->getAddress();
+        Label = Offset ? TargetBF->addEntryPointAtOffset(Offset)
+                       : TargetBF->getSymbol();
+      }
+      JT.Entries.push_back(Label);
     }
   }
 
@@ -1783,6 +1747,8 @@ bool BinaryFunction::validateExternallyReferencedOffsets() {
 bool BinaryFunction::postProcessIndirectBranches(
     MCPlusBuilder::AllocatorIdTy AllocId) {
   auto addUnknownControlFlow = [&](BinaryBasicBlock &BB) {
+    LLVM_DEBUG(dbgs() << "BOLT-DEBUG: adding unknown control flow in " << *this
+                      << " for " << BB.getName() << "\n");
     HasUnknownControlFlow = true;
     BB.removeAllSuccessors();
     for (uint64_t PossibleDestination : ExternallyReferencedOffsets)
@@ -1890,7 +1856,10 @@ bool BinaryFunction::postProcessIndirectBranches(
   // references, then we should be able to derive the jump table even if we
   // fail to match the pattern.
   if (HasUnknownControlFlow && NumIndirectJumps == 1 &&
-      JumpTables.size() == 1 && LastIndirectJump) {
+      JumpTables.size() == 1 && LastIndirectJump &&
+      !BC.getJumpTableContainingAddress(LastJT)->IsSplit) {
+    LLVM_DEBUG(dbgs() << "BOLT-DEBUG: unsetting unknown control flow in "
+                      << *this << '\n');
     BC.MIB->setJumpTable(*LastIndirectJump, LastJT, LastJTIndexReg, AllocId);
     HasUnknownControlFlow = false;
 
@@ -1928,7 +1897,8 @@ void BinaryFunction::recomputeLandingPads() {
       if (!BC.MIB->isInvoke(Instr))
         continue;
 
-      const Optional<MCPlus::MCLandingPad> EHInfo = BC.MIB->getEHInfo(Instr);
+      const std::optional<MCPlus::MCLandingPad> EHInfo =
+          BC.MIB->getEHInfo(Instr);
       if (!EHInfo || !EHInfo->first)
         continue;
 
@@ -2022,19 +1992,13 @@ bool BinaryFunction::buildCFG(MCPlusBuilder::AllocatorIdTy AllocatorId) {
         updateOffset(LastInstrOffset);
     }
 
-    const uint64_t InstrInputAddr = I->first + Address;
-    bool IsSDTMarker =
-        MIB->isNoop(Instr) && BC.SDTMarkers.count(InstrInputAddr);
-    bool IsLKMarker = BC.LKMarkers.count(InstrInputAddr);
     // Mark all nops with Offset for profile tracking purposes.
-    if (MIB->isNoop(Instr) || IsLKMarker) {
-      if (!MIB->getOffset(Instr))
-        MIB->setOffset(Instr, static_cast<uint32_t>(Offset), AllocatorId);
-      if (IsSDTMarker || IsLKMarker)
-        HasSDTMarker = true;
-      else
-        // Annotate ordinary nops, so we can safely delete them if required.
-        MIB->addAnnotation(Instr, "NOP", static_cast<uint32_t>(1), AllocatorId);
+    if (MIB->isNoop(Instr) && !MIB->getOffset(Instr)) {
+      // If "Offset" annotation is not present, set it and mark the nop for
+      // deletion.
+      MIB->setOffset(Instr, static_cast<uint32_t>(Offset), AllocatorId);
+      // Annotate ordinary nops, so we can safely delete them if required.
+      MIB->addAnnotation(Instr, "NOP", static_cast<uint32_t>(1), AllocatorId);
     }
 
     if (!InsertBB) {
@@ -2045,6 +2009,7 @@ bool BinaryFunction::buildCFG(MCPlusBuilder::AllocatorIdTy AllocatorId) {
       MCInst *PrevInstr = PrevBB->getLastNonPseudoInstr();
       assert(PrevInstr && "no previous instruction for a fall through");
       if (MIB->isUnconditionalBranch(Instr) &&
+          !MIB->isIndirectBranch(*PrevInstr) &&
           !MIB->isUnconditionalBranch(*PrevInstr) &&
           !MIB->getConditionalTailCall(*PrevInstr) &&
           !MIB->isReturn(*PrevInstr)) {
@@ -2285,7 +2250,7 @@ void BinaryFunction::removeConditionalTailCalls() {
     if (!CTCInstr)
       continue;
 
-    Optional<uint64_t> TargetAddressOrNone =
+    std::optional<uint64_t> TargetAddressOrNone =
         BC.MIB->getConditionalTailCall(*CTCInstr);
     if (!TargetAddressOrNone)
       continue;
@@ -2476,7 +2441,8 @@ private:
       CFARule = UNKNOWN;
       break;
     case MCCFIInstruction::OpEscape: {
-      Optional<uint8_t> Reg = readDWARFExpressionTargetReg(Instr.getValues());
+      std::optional<uint8_t> Reg =
+          readDWARFExpressionTargetReg(Instr.getValues());
       // Handle DW_CFA_def_cfa_expression
       if (!Reg) {
         CFARule = RuleNumber;
@@ -2580,7 +2546,8 @@ struct CFISnapshotDiff : public CFISnapshot {
       if (Instr.getOperation() != MCCFIInstruction::OpEscape) {
         Reg = Instr.getRegister();
       } else {
-        Optional<uint8_t> R = readDWARFExpressionTargetReg(Instr.getValues());
+        std::optional<uint8_t> R =
+            readDWARFExpressionTargetReg(Instr.getValues());
         // Handle DW_CFA_def_cfa_expression
         if (!R) {
           if (RestoredCFAReg && RestoredCFAOffset)
@@ -2594,8 +2561,7 @@ struct CFISnapshotDiff : public CFISnapshot {
       if (RestoredRegs[Reg])
         return true;
       RestoredRegs[Reg] = true;
-      const int32_t CurRegRule =
-          RegRule.find(Reg) != RegRule.end() ? RegRule[Reg] : UNKNOWN;
+      const int32_t CurRegRule = RegRule.contains(Reg) ? RegRule[Reg] : UNKNOWN;
       if (CurRegRule == UNKNOWN) {
         if (Instr.getOperation() == MCCFIInstruction::OpRestore ||
             Instr.getOperation() == MCCFIInstruction::OpSameValue)
@@ -2664,10 +2630,10 @@ bool BinaryFunction::replayCFIInstrs(int32_t FromState, int32_t ToState,
   }
 
   // Replay instructions while avoiding duplicates
-  for (auto I = NewCFIs.rbegin(), E = NewCFIs.rend(); I != E; ++I) {
-    if (CFIDiff.isRedundant(FrameInstructions[*I]))
+  for (int32_t State : llvm::reverse(NewCFIs)) {
+    if (CFIDiff.isRedundant(FrameInstructions[State]))
       continue;
-    InsertIt = addCFIPseudo(InBB, InsertIt, *I);
+    InsertIt = addCFIPseudo(InBB, InsertIt, State);
   }
 
   return true;
@@ -2726,7 +2692,8 @@ BinaryFunction::unwindCFIState(int32_t FromState, int32_t ToState,
       if (Instr.getOperation() != MCCFIInstruction::OpEscape) {
         Reg = Instr.getRegister();
       } else {
-        Optional<uint8_t> R = readDWARFExpressionTargetReg(Instr.getValues());
+        std::optional<uint8_t> R =
+            readDWARFExpressionTargetReg(Instr.getValues());
         // Handle DW_CFA_def_cfa_expression
         if (!R) {
           undoStateDefCfa();
@@ -2735,7 +2702,7 @@ BinaryFunction::unwindCFIState(int32_t FromState, int32_t ToState,
         Reg = *R;
       }
 
-      if (ToCFITable.RegRule.find(Reg) == ToCFITable.RegRule.end()) {
+      if (!ToCFITable.RegRule.contains(Reg)) {
         FrameInstructions.emplace_back(
             MCCFIInstruction::createRestore(nullptr, Reg));
         if (FromCFITable.isRedundant(FrameInstructions.back())) {
@@ -2906,16 +2873,12 @@ void BinaryFunction::clearDisasmState() {
 void BinaryFunction::setTrapOnEntry() {
   clearDisasmState();
 
-  auto addTrapAtOffset = [&](uint64_t Offset) {
+  forEachEntryPoint([&](uint64_t Offset, const MCSymbol *Label) -> bool {
     MCInst TrapInstr;
     BC.MIB->createTrap(TrapInstr);
     addInstruction(Offset, std::move(TrapInstr));
-  };
-
-  addTrapAtOffset(0);
-  for (const std::pair<const uint32_t, MCSymbol *> &KV : getLabels())
-    if (getSecondaryEntryPointSymbol(KV.second))
-      addTrapAtOffset(KV.first);
+    return true;
+  });
 
   TrapsOnEntry = true;
 }
@@ -3003,14 +2966,13 @@ void BinaryFunction::duplicateConstantIslands() {
   }
 }
 
-namespace {
-
 #ifndef MAX_PATH
 #define MAX_PATH 255
 #endif
 
-std::string constructFilename(std::string Filename, std::string Annotation,
-                              std::string Suffix) {
+static std::string constructFilename(std::string Filename,
+                                     std::string Annotation,
+                                     std::string Suffix) {
   std::replace(Filename.begin(), Filename.end(), '/', '-');
   if (!Annotation.empty())
     Annotation.insert(0, "-");
@@ -3027,7 +2989,7 @@ std::string constructFilename(std::string Filename, std::string Annotation,
   return Filename;
 }
 
-std::string formatEscapes(const std::string &Str) {
+static std::string formatEscapes(const std::string &Str) {
   std::string Result;
   for (unsigned I = 0; I < Str.size(); ++I) {
     char C = Str[I];
@@ -3044,8 +3006,6 @@ std::string formatEscapes(const std::string &Str) {
   }
   return Result;
 }
-
-} // namespace
 
 void BinaryFunction::dumpGraph(raw_ostream &OS) const {
   OS << "digraph \"" << getPrintName() << "\" {\n"
@@ -3294,8 +3254,7 @@ void BinaryFunction::fixBranches() {
       const BinaryBasicBlock *TSuccessor = BB->getConditionalSuccessor(true);
       const BinaryBasicBlock *FSuccessor = BB->getConditionalSuccessor(false);
       // Check whether we support reversing this branch direction
-      const bool IsSupported =
-          !MIB->isUnsupportedBranch(CondBranch->getOpcode());
+      const bool IsSupported = !MIB->isUnsupportedBranch(*CondBranch);
       if (NextBB && NextBB == TSuccessor && IsSupported) {
         std::swap(TSuccessor, FSuccessor);
         {
@@ -3615,32 +3574,8 @@ size_t BinaryFunction::computeHash(bool UseDFS,
   // The hash is computed by creating a string of all instruction opcodes and
   // possibly their operands and then hashing that string with std::hash.
   std::string HashString;
-  for (const BinaryBasicBlock *BB : Order) {
-    for (const MCInst &Inst : *BB) {
-      unsigned Opcode = Inst.getOpcode();
-
-      if (BC.MIB->isPseudo(Inst))
-        continue;
-
-      // Ignore unconditional jumps since we check CFG consistency by processing
-      // basic blocks in order and do not rely on branches to be in-sync with
-      // CFG. Note that we still use condition code of conditional jumps.
-      if (BC.MIB->isUnconditionalBranch(Inst))
-        continue;
-
-      if (Opcode == 0)
-        HashString.push_back(0);
-
-      while (Opcode) {
-        uint8_t LSB = Opcode & 0xff;
-        HashString.push_back(LSB);
-        Opcode = Opcode >> 8;
-      }
-
-      for (const MCOperand &Op : MCPlus::primeOperands(Inst))
-        HashString.append(OperandHashFunc(Op));
-    }
-  }
+  for (const BinaryBasicBlock *BB : Order)
+    HashString.append(hashBlock(BC, *BB, OperandHashFunc));
 
   return Hash = std::hash<std::string>{}(HashString);
 }
@@ -4099,6 +4034,16 @@ void BinaryFunction::updateOutputValues(const MCAsmLayout &Layout) {
       const uint64_t DataOffset =
           Layout.getSymbolOffset(*getFunctionConstantIslandLabel());
       setOutputDataAddress(BaseAddress + DataOffset);
+      for (auto It : Islands->Offsets) {
+        const uint64_t OldOffset = It.first;
+        BinaryData *BD = BC.getBinaryDataAtAddress(getAddress() + OldOffset);
+        if (!BD)
+          continue;
+
+        MCSymbol *Symbol = It.second;
+        const uint64_t NewOffset = Layout.getSymbolOffset(*Symbol);
+        BD->setOutputLocation(*getCodeSection(), NewOffset);
+      }
     }
     if (isSplit()) {
       for (FunctionFragment &FF : getLayout().getSplitFragments()) {
@@ -4250,92 +4195,88 @@ uint64_t BinaryFunction::translateInputToOutputAddress(uint64_t Address) const {
                   BB->getOutputAddressRange().second);
 }
 
-DebugAddressRangesVector BinaryFunction::translateInputToOutputRanges(
-    const DWARFAddressRangesVector &InputRanges) const {
-  DebugAddressRangesVector OutputRanges;
+DebugAddressRangesVector
+BinaryFunction::translateInputToOutputRange(DebugAddressRange InRange) const {
+  DebugAddressRangesVector OutRanges;
 
+  // The function was removed from the output. Return an empty range.
   if (isFolded())
-    return OutputRanges;
+    return OutRanges;
 
-  // If the function hasn't changed return the same ranges.
+  // If the function hasn't changed return the same range.
   if (!isEmitted()) {
-    OutputRanges.resize(InputRanges.size());
-    llvm::transform(InputRanges, OutputRanges.begin(),
-                    [](const DWARFAddressRange &Range) {
-                      return DebugAddressRange(Range.LowPC, Range.HighPC);
-                    });
-    return OutputRanges;
+    OutRanges.emplace_back(InRange);
+    return OutRanges;
   }
 
-  // Even though we will merge ranges in a post-processing pass, we attempt to
-  // merge them in a main processing loop as it improves the processing time.
-  uint64_t PrevEndAddress = 0;
-  for (const DWARFAddressRange &Range : InputRanges) {
-    if (!containsAddress(Range.LowPC)) {
+  if (!containsAddress(InRange.LowPC))
+    return OutRanges;
+
+  // Special case of an empty range [X, X). Some tools expect X to be updated.
+  if (InRange.LowPC == InRange.HighPC) {
+    if (uint64_t NewPC = translateInputToOutputAddress(InRange.LowPC))
+      OutRanges.push_back(DebugAddressRange{NewPC, NewPC});
+    return OutRanges;
+  }
+
+  uint64_t InputOffset = InRange.LowPC - getAddress();
+  const uint64_t InputEndOffset =
+      std::min(InRange.HighPC - getAddress(), getSize());
+
+  auto BBI = llvm::upper_bound(BasicBlockOffsets,
+                               BasicBlockOffset(InputOffset, nullptr),
+                               CompareBasicBlockOffsets());
+  assert(BBI != BasicBlockOffsets.begin());
+
+  // Iterate over blocks in the input order using BasicBlockOffsets.
+  for (--BBI; InputOffset < InputEndOffset && BBI != BasicBlockOffsets.end();
+       InputOffset = BBI->second->getEndOffset(), ++BBI) {
+    const BinaryBasicBlock &BB = *BBI->second;
+    if (InputOffset < BB.getOffset() || InputOffset >= BB.getEndOffset()) {
       LLVM_DEBUG(
           dbgs() << "BOLT-DEBUG: invalid debug address range detected for "
-                 << *this << " : [0x" << Twine::utohexstr(Range.LowPC) << ", 0x"
-                 << Twine::utohexstr(Range.HighPC) << "]\n");
-      PrevEndAddress = 0;
+                 << *this << " : [0x" << Twine::utohexstr(InRange.LowPC)
+                 << ", 0x" << Twine::utohexstr(InRange.HighPC) << "]\n");
+      break;
+    }
+
+    // Skip the block if it wasn't emitted.
+    if (!BB.getOutputAddressRange().first)
       continue;
+
+    // Find output address for an instruction with an offset greater or equal
+    // to /p Offset. The output address should fall within the same basic
+    // block boundaries.
+    auto translateBlockOffset = [&](const uint64_t Offset) {
+      const uint64_t OutAddress = BB.getOutputAddressRange().first + Offset;
+      return OutAddress;
+    };
+
+    uint64_t OutLowPC = BB.getOutputAddressRange().first;
+    if (InputOffset > BB.getOffset())
+      OutLowPC = translateBlockOffset(InputOffset - BB.getOffset());
+
+    uint64_t OutHighPC = BB.getOutputAddressRange().second;
+    if (InputEndOffset < BB.getEndOffset()) {
+      assert(InputEndOffset >= BB.getOffset());
+      OutHighPC = translateBlockOffset(InputEndOffset - BB.getOffset());
     }
-    uint64_t InputOffset = Range.LowPC - getAddress();
-    const uint64_t InputEndOffset =
-        std::min(Range.HighPC - getAddress(), getSize());
 
-    auto BBI = llvm::upper_bound(BasicBlockOffsets,
-                                 BasicBlockOffset(InputOffset, nullptr),
-                                 CompareBasicBlockOffsets());
-    --BBI;
-    do {
-      const BinaryBasicBlock *BB = BBI->second;
-      if (InputOffset < BB->getOffset() || InputOffset >= BB->getEndOffset()) {
-        LLVM_DEBUG(
-            dbgs() << "BOLT-DEBUG: invalid debug address range detected for "
-                   << *this << " : [0x" << Twine::utohexstr(Range.LowPC)
-                   << ", 0x" << Twine::utohexstr(Range.HighPC) << "]\n");
-        PrevEndAddress = 0;
-        break;
-      }
-
-      // Skip the range if the block was deleted.
-      if (const uint64_t OutputStart = BB->getOutputAddressRange().first) {
-        const uint64_t StartAddress =
-            OutputStart + InputOffset - BB->getOffset();
-        uint64_t EndAddress = BB->getOutputAddressRange().second;
-        if (InputEndOffset < BB->getEndOffset())
-          EndAddress = StartAddress + InputEndOffset - InputOffset;
-
-        if (StartAddress == PrevEndAddress) {
-          OutputRanges.back().HighPC =
-              std::max(OutputRanges.back().HighPC, EndAddress);
-        } else {
-          OutputRanges.emplace_back(StartAddress,
-                                    std::max(StartAddress, EndAddress));
-        }
-        PrevEndAddress = OutputRanges.back().HighPC;
-      }
-
-      InputOffset = BB->getEndOffset();
-      ++BBI;
-    } while (InputOffset < InputEndOffset);
+    // Check if we can expand the last translated range.
+    if (!OutRanges.empty() && OutRanges.back().HighPC == OutLowPC)
+      OutRanges.back().HighPC = std::max(OutRanges.back().HighPC, OutHighPC);
+    else
+      OutRanges.emplace_back(OutLowPC, std::max(OutLowPC, OutHighPC));
   }
 
-  // Post-processing pass to sort and merge ranges.
-  llvm::sort(OutputRanges);
-  DebugAddressRangesVector MergedRanges;
-  PrevEndAddress = 0;
-  for (const DebugAddressRange &Range : OutputRanges) {
-    if (Range.LowPC <= PrevEndAddress) {
-      MergedRanges.back().HighPC =
-          std::max(MergedRanges.back().HighPC, Range.HighPC);
-    } else {
-      MergedRanges.emplace_back(Range.LowPC, Range.HighPC);
-    }
-    PrevEndAddress = MergedRanges.back().HighPC;
-  }
+  LLVM_DEBUG({
+    dbgs() << "BOLT-DEBUG: translated address range " << InRange << " -> ";
+    for (const DebugAddressRange &R : OutRanges)
+      dbgs() << R << ' ';
+    dbgs() << '\n';
+  });
 
-  return MergedRanges;
+  return OutRanges;
 }
 
 MCInst *BinaryFunction::getInstructionAtOffset(uint64_t Offset) {
@@ -4364,92 +4305,6 @@ MCInst *BinaryFunction::getInstructionAtOffset(uint64_t Offset) {
   } else {
     llvm_unreachable("invalid CFG state to use getInstructionAtOffset()");
   }
-}
-
-DebugLocationsVector BinaryFunction::translateInputToOutputLocationList(
-    const DebugLocationsVector &InputLL) const {
-  DebugLocationsVector OutputLL;
-
-  if (isFolded())
-    return OutputLL;
-
-  // If the function hasn't changed - there's nothing to update.
-  if (!isEmitted())
-    return InputLL;
-
-  uint64_t PrevEndAddress = 0;
-  SmallVectorImpl<uint8_t> *PrevExpr = nullptr;
-  for (const DebugLocationEntry &Entry : InputLL) {
-    const uint64_t Start = Entry.LowPC;
-    const uint64_t End = Entry.HighPC;
-    if (!containsAddress(Start)) {
-      LLVM_DEBUG(dbgs() << "BOLT-DEBUG: invalid debug address range detected "
-                           "for "
-                        << *this << " : [0x" << Twine::utohexstr(Start)
-                        << ", 0x" << Twine::utohexstr(End) << "]\n");
-      continue;
-    }
-    uint64_t InputOffset = Start - getAddress();
-    const uint64_t InputEndOffset = std::min(End - getAddress(), getSize());
-    auto BBI = llvm::upper_bound(BasicBlockOffsets,
-                                 BasicBlockOffset(InputOffset, nullptr),
-                                 CompareBasicBlockOffsets());
-    --BBI;
-    do {
-      const BinaryBasicBlock *BB = BBI->second;
-      if (InputOffset < BB->getOffset() || InputOffset >= BB->getEndOffset()) {
-        LLVM_DEBUG(dbgs() << "BOLT-DEBUG: invalid debug address range detected "
-                             "for "
-                          << *this << " : [0x" << Twine::utohexstr(Start)
-                          << ", 0x" << Twine::utohexstr(End) << "]\n");
-        PrevEndAddress = 0;
-        break;
-      }
-
-      // Skip the range if the block was deleted.
-      if (const uint64_t OutputStart = BB->getOutputAddressRange().first) {
-        const uint64_t StartAddress =
-            OutputStart + InputOffset - BB->getOffset();
-        uint64_t EndAddress = BB->getOutputAddressRange().second;
-        if (InputEndOffset < BB->getEndOffset())
-          EndAddress = StartAddress + InputEndOffset - InputOffset;
-
-        if (StartAddress == PrevEndAddress && Entry.Expr == *PrevExpr) {
-          OutputLL.back().HighPC = std::max(OutputLL.back().HighPC, EndAddress);
-        } else {
-          OutputLL.emplace_back(DebugLocationEntry{
-              StartAddress, std::max(StartAddress, EndAddress), Entry.Expr});
-        }
-        PrevEndAddress = OutputLL.back().HighPC;
-        PrevExpr = &OutputLL.back().Expr;
-      }
-
-      ++BBI;
-      InputOffset = BB->getEndOffset();
-    } while (InputOffset < InputEndOffset);
-  }
-
-  // Sort and merge adjacent entries with identical location.
-  llvm::stable_sort(
-      OutputLL, [](const DebugLocationEntry &A, const DebugLocationEntry &B) {
-        return A.LowPC < B.LowPC;
-      });
-  DebugLocationsVector MergedLL;
-  PrevEndAddress = 0;
-  PrevExpr = nullptr;
-  for (const DebugLocationEntry &Entry : OutputLL) {
-    if (Entry.LowPC <= PrevEndAddress && *PrevExpr == Entry.Expr) {
-      MergedLL.back().HighPC = std::max(Entry.HighPC, MergedLL.back().HighPC);
-    } else {
-      const uint64_t Begin = std::max(Entry.LowPC, PrevEndAddress);
-      const uint64_t End = std::max(Begin, Entry.HighPC);
-      MergedLL.emplace_back(DebugLocationEntry{Begin, End, Entry.Expr});
-    }
-    PrevEndAddress = MergedLL.back().HighPC;
-    PrevExpr = &MergedLL.back().Expr;
-  }
-
-  return MergedLL;
 }
 
 void BinaryFunction::printLoopInfo(raw_ostream &OS) const {
@@ -4516,6 +4371,22 @@ bool BinaryFunction::isAArch64Veneer() const {
   }
 
   return true;
+}
+
+void BinaryFunction::addRelocation(uint64_t Address, MCSymbol *Symbol,
+                                   uint64_t RelType, uint64_t Addend,
+                                   uint64_t Value) {
+  assert(Address >= getAddress() && Address < getAddress() + getMaxSize() &&
+         "address is outside of the function");
+  uint64_t Offset = Address - getAddress();
+  LLVM_DEBUG(dbgs() << "BOLT-DEBUG: addRelocation in "
+                    << formatv("{0}@{1:x} against {2}\n", *this, Offset,
+                               Symbol->getName()));
+  bool IsCI = BC.isAArch64() && isInConstantIsland(Address);
+  std::map<uint64_t, Relocation> &Rels =
+      IsCI ? Islands->Relocations : Relocations;
+  if (BC.MIB->shouldRecordCodeRelocation(RelType))
+    Rels[Offset] = Relocation{Offset, Symbol, RelType, Addend, Value};
 }
 
 } // namespace bolt

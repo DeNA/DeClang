@@ -95,7 +95,7 @@ private:
   llvm::DenseMap<std::pair<ArrayRef<uint8_t>, Symbol *>, CieRecord *> cieMap;
 };
 
-class GotSection : public SyntheticSection {
+class GotSection final : public SyntheticSection {
 public:
   GotSection();
   size_t getSize() const override { return size; }
@@ -103,6 +103,7 @@ public:
   bool isNeeded() const override;
   void writeTo(uint8_t *buf) override;
 
+  void addConstant(const Relocation &r);
   void addEntry(Symbol &sym);
   bool addTlsDescEntry(Symbol &sym);
   bool addDynTlsEntry(Symbol &sym);
@@ -134,7 +135,7 @@ public:
   size_t getSize() const override { return 0; }
 };
 
-class GnuPropertySection : public SyntheticSection {
+class GnuPropertySection final : public SyntheticSection {
 public:
   GnuPropertySection();
   void writeTo(uint8_t *buf) override;
@@ -163,7 +164,7 @@ private:
 // respectively.
 class BssSection final : public SyntheticSection {
 public:
-  BssSection(StringRef name, uint64_t size, uint32_t alignment);
+  BssSection(StringRef name, uint64_t size, uint32_t addralign);
   void writeTo(uint8_t *) override {}
   bool isNeeded() const override { return size != 0; }
   size_t getSize() const override { return size; }
@@ -499,7 +500,7 @@ public:
   /// Add a dynamic relocation against \p sym with an optional addend.
   void addSymbolReloc(RelType dynType, InputSectionBase &isec,
                       uint64_t offsetInSec, Symbol &sym, int64_t addend = 0,
-                      llvm::Optional<RelType> addendRelType = llvm::None);
+                      std::optional<RelType> addendRelType = {});
   /// Add a relative dynamic relocation that uses the target address of \p sym
   /// (i.e. InputSection::getRelocTargetVA()) + \p addend as the addend.
   /// This function should only be called for non-preemptible symbols or
@@ -515,8 +516,7 @@ public:
   }
   /// Add a dynamic relocation using the target address of \p sym as the addend
   /// if \p sym is non-preemptible. Otherwise add a relocation against \p sym.
-  void addAddendOnlyRelocIfNonPreemptible(RelType dynType,
-                                          InputSectionBase &isec,
+  void addAddendOnlyRelocIfNonPreemptible(RelType dynType, GotSection &sec,
                                           uint64_t offsetInSec, Symbol &sym,
                                           RelType addendRelType);
   template <bool shard = false>
@@ -526,8 +526,7 @@ public:
     // Write the addends to the relocated address if required. We skip
     // it if the written value would be zero.
     if (config->writeAddends && (expr != R_ADDEND || addend != 0))
-      sec.relocations.push_back(
-          {expr, addendRelType, offsetInSec, addend, &sym});
+      sec.addReloc({expr, addendRelType, offsetInSec, addend, &sym});
     addReloc<shard>({dynType, &sec, offsetInSec, kind, sym, addend, expr});
   }
   bool isNeeded() const override {
@@ -936,14 +935,14 @@ public:
 
 protected:
   MergeSyntheticSection(StringRef name, uint32_t type, uint64_t flags,
-                        uint32_t alignment)
-      : SyntheticSection(flags, type, alignment, name) {}
+                        uint32_t addralign)
+      : SyntheticSection(flags, type, addralign, name) {}
 };
 
 class MergeTailSection final : public MergeSyntheticSection {
 public:
   MergeTailSection(StringRef name, uint32_t type, uint64_t flags,
-                   uint32_t alignment);
+                   uint32_t addralign);
 
   size_t getSize() const override;
   void writeTo(uint8_t *buf) override;
@@ -956,8 +955,8 @@ private:
 class MergeNoTailSection final : public MergeSyntheticSection {
 public:
   MergeNoTailSection(StringRef name, uint32_t type, uint64_t flags,
-                     uint32_t alignment)
-      : MergeSyntheticSection(name, type, flags, alignment) {}
+                     uint32_t addralign)
+      : MergeSyntheticSection(name, type, flags, addralign) {}
 
   size_t getSize() const override { return size; }
   void writeTo(uint8_t *buf) override;
@@ -971,7 +970,7 @@ private:
   // hash collisions.
   size_t getShardId(uint32_t hash) {
     assert((hash >> 31) == 0);
-    return hash >> (31 - llvm::countTrailingZeros(numShards));
+    return hash >> (31 - llvm::countr_zero(numShards));
   }
 
   // Section size
@@ -1037,7 +1036,7 @@ private:
 // of executable file which is pointed to by the DT_MIPS_RLD_MAP entry.
 // See "Dynamic section" in Chapter 5 in the following document:
 // ftp://www.linux-mips.org/pub/linux/mips/doc/ABI/mipsabi.pdf
-class MipsRldMapSection : public SyntheticSection {
+class MipsRldMapSection final : public SyntheticSection {
 public:
   MipsRldMapSection();
   size_t getSize() const override { return config->wordsize; }
@@ -1120,7 +1119,7 @@ private:
 
 // A container for one or more linker generated thunks. Instances of these
 // thunks including ARM interworking and Mips LA25 PI to non-PI thunks.
-class ThunkSection : public SyntheticSection {
+class ThunkSection final : public SyntheticSection {
 public:
   // ThunkSection in OS, with desired outSecOff of Off
   ThunkSection(OutputSection *os, uint64_t off);
@@ -1144,6 +1143,31 @@ private:
   size_t size = 0;
 };
 
+// Cortex-M Security Extensions. Prefix for functions that should be exported
+// for the non-secure world.
+const char ACLESESYM_PREFIX[] = "__acle_se_";
+const int ACLESESYM_SIZE = 8;
+
+class ArmCmseSGVeneer;
+
+class ArmCmseSGSection final : public SyntheticSection {
+public:
+  ArmCmseSGSection();
+  bool isNeeded() const override { return !entries.empty(); }
+  size_t getSize() const override;
+  void writeTo(uint8_t *buf) override;
+  void addSGVeneer(Symbol *sym, Symbol *ext_sym);
+  void addMappingSymbol();
+  void finalizeContents() override;
+  void exportEntries(SymbolTableBaseSection *symTab);
+  uint64_t impLibMaxAddr = 0;
+
+private:
+  SmallVector<std::pair<Symbol *, Symbol *>, 0> entries;
+  SmallVector<ArmCmseSGVeneer *, 0> sgVeneers;
+  uint64_t newEntries = 0;
+};
+
 // Used to compute outSecOff of .got2 in each object file. This is needed to
 // synthesize PLT entries for PPC32 Secure PLT ABI.
 class PPC32Got2Section final : public SyntheticSection {
@@ -1164,7 +1188,7 @@ class PPC64LongBranchTargetSection final : public SyntheticSection {
 public:
   PPC64LongBranchTargetSection();
   uint64_t getEntryVA(const Symbol *sym, int64_t addend);
-  llvm::Optional<uint32_t> addEntry(const Symbol *sym, int64_t addend);
+  std::optional<uint32_t> addEntry(const Symbol *sym, int64_t addend);
   size_t getSize() const override;
   void writeTo(uint8_t *buf) override;
   bool isNeeded() const override;
@@ -1177,7 +1201,7 @@ private:
 };
 
 template <typename ELFT>
-class PartitionElfHeaderSection : public SyntheticSection {
+class PartitionElfHeaderSection final : public SyntheticSection {
 public:
   PartitionElfHeaderSection();
   size_t getSize() const override;
@@ -1185,14 +1209,14 @@ public:
 };
 
 template <typename ELFT>
-class PartitionProgramHeadersSection : public SyntheticSection {
+class PartitionProgramHeadersSection final : public SyntheticSection {
 public:
   PartitionProgramHeadersSection();
   size_t getSize() const override;
   void writeTo(uint8_t *buf) override;
 };
 
-class PartitionIndexSection : public SyntheticSection {
+class PartitionIndexSection final : public SyntheticSection {
 public:
   PartitionIndexSection();
   size_t getSize() const override;
@@ -1203,7 +1227,7 @@ public:
 // See the following link for the Android-specific loader code that operates on
 // this section:
 // https://cs.android.com/android/platform/superproject/+/master:bionic/libc/bionic/libc_init_static.cpp;drc=9425b16978f9c5aa8f2c50c873db470819480d1d;l=192
-class MemtagAndroidNote : public SyntheticSection {
+class MemtagAndroidNote final : public SyntheticSection {
 public:
   MemtagAndroidNote()
       : SyntheticSection(llvm::ELF::SHF_ALLOC, llvm::ELF::SHT_NOTE,
@@ -1212,7 +1236,7 @@ public:
   size_t getSize() const override;
 };
 
-class PackageMetadataNote : public SyntheticSection {
+class PackageMetadataNote final : public SyntheticSection {
 public:
   PackageMetadataNote()
       : SyntheticSection(llvm::ELF::SHF_ALLOC, llvm::ELF::SHT_NOTE,
@@ -1274,11 +1298,13 @@ inline Partition &SectionBase::getPartition() const {
 // a partition.
 struct InStruct {
   std::unique_ptr<InputSection> attributes;
+  std::unique_ptr<SyntheticSection> riscvAttributes;
   std::unique_ptr<BssSection> bss;
   std::unique_ptr<BssSection> bssRelRo;
   std::unique_ptr<GotSection> got;
   std::unique_ptr<GotPltSection> gotPlt;
   std::unique_ptr<IgotPltSection> igotPlt;
+  std::unique_ptr<SyntheticSection> armCmseSGSection;
   std::unique_ptr<PPC64LongBranchTargetSection> ppc64LongBranchTarget;
   std::unique_ptr<SyntheticSection> mipsAbiFlags;
   std::unique_ptr<MipsGotSection> mipsGot;

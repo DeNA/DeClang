@@ -1,5 +1,5 @@
-; RUN: llc -mtriple=aarch64-none-eabi %s -o - | FileCheck %s
-; RUN: llc -mtriple=aarch64-none-eabi -global-isel=true -global-isel-abort=2 %s -o - | FileCheck %s
+; RUN: llc -mtriple=aarch64 %s -o - | FileCheck %s
+; RUN: llc -mtriple=aarch64 -global-isel=true -global-isel-abort=2 %s -o - | FileCheck %s
 
 
 ; Div whose result is unused should be removed unless we have strict exceptions
@@ -174,7 +174,7 @@ declare float @llvm.experimental.constrained.fadd.f32(float, float, metadata, me
 declare float @llvm.experimental.constrained.fsub.f32(float, float, metadata, metadata) #0
 declare float @llvm.experimental.constrained.fmul.f32(float, float, metadata, metadata) #0
 declare float @llvm.experimental.constrained.fdiv.f32(float, float, metadata, metadata) #0
-declare i32 @llvm.flt.rounds()
+declare i32 @llvm.get.rounding()
 declare void @llvm.set.rounding(i32)
 
-attributes #0 = { "strictfp" }
+attributes #0 = { strictfp }

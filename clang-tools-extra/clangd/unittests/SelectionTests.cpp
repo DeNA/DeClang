@@ -466,7 +466,10 @@ TEST(SelectionTest, CommonAncestor) {
       {"struct foo { [[int has^h<:32:>]]; };", "FieldDecl"},
       {"struct foo { [[op^erator int()]]; };", "CXXConversionDecl"},
       {"struct foo { [[^~foo()]]; };", "CXXDestructorDecl"},
-      // FIXME: The following to should be class itself instead.
+      {"struct foo { [[~^foo()]]; };", "CXXDestructorDecl"},
+      {"template <class T> struct foo { ~foo<[[^T]]>(){} };",
+       "TemplateTypeParmTypeLoc"},
+      {"struct foo {}; void bar(foo *f) { [[f->~^foo]](); }", "MemberExpr"},
       {"struct foo { [[fo^o(){}]] };", "CXXConstructorDecl"},
 
       {R"cpp(
@@ -687,7 +690,7 @@ TEST(SelectionTest, PathologicalPreprocessor) {
   auto TU = TestTU::withCode(Test.code());
   TU.AdditionalFiles["Expand.inc"] = "MACRO\n";
   auto AST = TU.build();
-  EXPECT_THAT(*AST.getDiagnostics(), ::testing::IsEmpty());
+  EXPECT_THAT(AST.getDiagnostics(), ::testing::IsEmpty());
   auto T = makeSelectionTree(Case, AST);
 
   EXPECT_EQ("BreakStmt", T.commonAncestor()->kind());

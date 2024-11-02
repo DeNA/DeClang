@@ -36,14 +36,35 @@ namespace dr1423 { // dr1423: 11
 #endif
 }
 
+// dr1425: na abi
+
+namespace dr1432 { // dr1432: 16
+#if __cplusplus >= 201103L
+  template<typename T> T declval();
+
+  template <class... T>
+  struct common_type;
+
+  template <class T, class U>
+  struct common_type<T, U> {
+   typedef decltype(true ? declval<T>() : declval<U>()) type;
+  };
+
+  template <class T, class U, class... V>
+  struct common_type<T, U, V...> {
+   typedef typename common_type<typename common_type<T, U>::type, V...>::type type;
+  };
+
+  template struct common_type<int, double>;
+#endif
+}
+
 namespace dr1443 { // dr1443: yes
 struct A {
   int i;
   A() { void foo(int=i); } // expected-error {{default argument references 'this'}}
 };
 }
-
-// dr1425: na abi
 
 namespace dr1460 { // dr1460: 3.5
 #if __cplusplus >= 201103L
@@ -467,12 +488,23 @@ namespace dr1479 { // dr1479: yes
   int operator"" _a(const char*, std::size_t = 0); // expected-error {{literal operator cannot have a default argument}}
 }
 
+namespace dr1482 { // dr1482: yes
+                   // NB: sup 2516, test reused there
+#if __cplusplus >= 201103L
+template <typename T> struct S {
+  typedef char I;
+};
+enum E2 : S<E2>::I { e };
+// expected-error@-1 {{use of undeclared identifier 'E2'}}
+#endif
+} // namespace dr1482
+
 namespace dr1490 {  // dr1490: 3.7 c++11
   // List-initialization from a string literal
 
   char s[4]{"abc"};                   // Ok
   std::initializer_list<char>{"abc"}; // expected-error {{expected unqualified-id}}}
-} // dr190
+} // dr1490
 
 namespace dr1495 { // dr1495: 4
   // Deduction succeeds in both directions.

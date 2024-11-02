@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -fdouble-square-bracket-attributes -verify=expected,notc2x -Wno-strict-prototypes %s
+// RUN: %clang_cc1 -fsyntax-only -verify=expected,notc2x -Wno-strict-prototypes %s
 // RUN: %clang_cc1 -fsyntax-only -std=gnu2x -verify=expected,c2x %s
 
 enum [[]] E {
@@ -141,3 +141,6 @@ void test_asm(void) {
 struct [[]] S4 *s; // expected-error {{an attribute list cannot appear here}}
 struct S5 {};
 int c = sizeof(struct [[]] S5); // expected-error {{an attribute list cannot appear here}}
+
+// Ensure that '::' outside of attributes does not crash and is not treated as scope
+double n::v; // expected-error {{expected ';' after top level declarator}}

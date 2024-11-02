@@ -8,6 +8,7 @@
 
 #include "TidyProvider.h"
 #include "../clang-tidy/ClangTidyModuleRegistry.h"
+#include "../clang-tidy/ClangTidyOptions.h"
 #include "Config.h"
 #include "support/FileCache.h"
 #include "support/Logger.h"
@@ -21,6 +22,7 @@
 #include "llvm/Support/Process.h"
 #include "llvm/Support/SourceMgr.h"
 #include <memory>
+#include <optional>
 
 namespace clang {
 namespace clangd {
@@ -41,7 +43,7 @@ public:
     std::shared_ptr<const tidy::ClangTidyOptions> Result;
     read(
         TFS, FreshTime,
-        [this](llvm::Optional<llvm::StringRef> Data) {
+        [this](std::optional<llvm::StringRef> Data) {
           Value.reset();
           if (Data && !Data->empty()) {
             tidy::DiagCallback Diagnostics = [](const llvm::SMDiagnostic &D) {
@@ -136,7 +138,7 @@ public:
 
 } // namespace
 
-static void mergeCheckList(llvm::Optional<std::string> &Checks,
+static void mergeCheckList(std::optional<std::string> &Checks,
                            llvm::StringRef List) {
   if (List.empty())
     return;
@@ -148,8 +150,8 @@ static void mergeCheckList(llvm::Optional<std::string> &Checks,
 }
 
 TidyProviderRef provideEnvironment() {
-  static const llvm::Optional<std::string> User = [] {
-    llvm::Optional<std::string> Ret = llvm::sys::Process::GetEnv("USER");
+  static const std::optional<std::string> User = [] {
+    std::optional<std::string> Ret = llvm::sys::Process::GetEnv("USER");
 #ifdef _WIN32
     if (!Ret)
       return llvm::sys::Process::GetEnv("USERNAME");
@@ -194,26 +196,38 @@ TidyProvider addTidyChecks(llvm::StringRef Checks,
 
 TidyProvider disableUnusableChecks(llvm::ArrayRef<std::string> ExtraBadChecks) {
   constexpr llvm::StringLiteral Seperator(",");
-  static const std::string BadChecks =
-      llvm::join_items(Seperator,
-                       // We want this list to start with a seperator to
-                       // simplify appending in the lambda. So including an
-                       // empty string here will force that.
-                       "",
-                       // ----- False Positives -----
+  static const std::string BadChecks = llvm::join_items(
+      Seperator,
+      // We want this list to start with a seperator to
+      // simplify appending in the lambda. So including an
+      // empty string here will force that.
+      "",
+      // include-cleaner is directly integrated in IncludeCleaner.cpp
+      "-misc-include-cleaner",
 
-                       // Check relies on seeing ifndef/define/endif directives,
-                       // clangd doesn't replay those when using a preamble.
-                       "-llvm-header-guard",
+      // ----- False Positives -----
 
-                       // ----- Crashing Checks -----
+      // Check relies on seeing ifndef/define/endif directives,
+      // clangd doesn't replay those when using a preamble.
+      "-llvm-header-guard", "-modernize-macro-to-enum",
 
-                       // Check can choke on invalid (intermediate) c++
-                       // code, which is often the case when clangd
-                       // tries to build an AST.
-                       "-bugprone-use-after-move",
-                       // Alias for bugprone-use-after-moe.
-                       "-hicpp-invalid-access-moved");
+      // ----- Crashing Checks -----
+
+      // Check can choke on invalid (intermediate) c++
+      // code, which is often the case when clangd
+      // tries to build an AST.
+      "-bugprone-use-after-move",
+      // Alias for bugprone-use-after-move.
+      "-hicpp-invalid-access-moved",
+      // Check uses dataflow analysis, which might hang/crash unexpectedly on
+      // incomplete code.
+      "-bugprone-unchecked-optional-access",
+
+      // ----- Performance problems -----
+
+      // This check runs expensive analysis for each variable.
+      // It has been observed to increase reparse time by 10x.
+      "-misc-const-correctness");
 
   size_t Size = BadChecks.size();
   for (const std::string &Str : ExtraBadChecks) {
@@ -276,8 +290,15 @@ TidyProvider combine(std::vector<TidyProvider> Providers) {
 
 tidy::ClangTidyOptions getTidyOptionsForFile(TidyProviderRef Provider,
                                              llvm::StringRef Filename) {
-  tidy::ClangTidyOptions Opts = tidy::ClangTidyOptions::getDefaults();
-  Opts.Checks->clear();
+  // getDefaults instantiates all check factories, which are registered at link
+  // time. So cache the results once.
+  static const auto *DefaultOpts = [] {
+    auto *Opts = new tidy::ClangTidyOptions;
+    *Opts = tidy::ClangTidyOptions::getDefaults();
+    Opts->Checks->clear();
+    return Opts;
+  }();
+  auto Opts = *DefaultOpts;
   if (Provider)
     Provider(Opts, Filename);
   return Opts;

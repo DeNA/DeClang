@@ -10,7 +10,7 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSwitch.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
@@ -31,6 +31,7 @@
 #include "lldb/Utility/RegisterValue.h"
 #include "lldb/Utility/Status.h"
 
+#include <optional>
 #include <vector>
 
 using namespace lldb;
@@ -267,7 +268,7 @@ bool ABISysV_x86_64::GetArgumentValues(Thread &thread,
     // We currently only support extracting values with Clang QualTypes. Do we
     // care about others?
     CompilerType compiler_type = value->GetCompilerType();
-    llvm::Optional<uint64_t> bit_size = compiler_type.GetBitSize(&thread);
+    std::optional<uint64_t> bit_size = compiler_type.GetBitSize(&thread);
     if (!bit_size)
       return false;
     bool is_signed;
@@ -337,7 +338,7 @@ Status ABISysV_x86_64::SetReturnValueObject(lldb::StackFrameSP &frame_sp,
       error.SetErrorString(
           "We don't support returning complex values at present");
     else {
-      llvm::Optional<uint64_t> bit_width =
+      std::optional<uint64_t> bit_width =
           compiler_type.GetBitSize(frame_sp.get());
       if (!bit_width) {
         error.SetErrorString("can't get type size");
@@ -406,7 +407,7 @@ ValueObjectSP ABISysV_x86_64::GetReturnValueObjectSimple(
     if (type_flags & eTypeIsInteger) {
       // Extract the register context so we can read arguments from registers
 
-      llvm::Optional<uint64_t> byte_size =
+      std::optional<uint64_t> byte_size =
           return_compiler_type.GetByteSize(&thread);
       if (!byte_size)
         return return_valobj_sp;
@@ -453,7 +454,7 @@ ValueObjectSP ABISysV_x86_64::GetReturnValueObjectSimple(
       if (type_flags & eTypeIsComplex) {
         // Don't handle complex yet.
       } else {
-        llvm::Optional<uint64_t> byte_size =
+        std::optional<uint64_t> byte_size =
             return_compiler_type.GetByteSize(&thread);
         if (byte_size && *byte_size <= sizeof(long double)) {
           const RegisterInfo *xmm0_info =
@@ -493,7 +494,7 @@ ValueObjectSP ABISysV_x86_64::GetReturnValueObjectSimple(
     return_valobj_sp = ValueObjectConstResult::Create(
         thread.GetStackFrameAtIndex(0).get(), value, ConstString(""));
   } else if (type_flags & eTypeIsVector) {
-    llvm::Optional<uint64_t> byte_size =
+    std::optional<uint64_t> byte_size =
         return_compiler_type.GetByteSize(&thread);
     if (byte_size && *byte_size > 0) {
       const RegisterInfo *altivec_reg =
@@ -590,11 +591,18 @@ static bool ExtractBytesFromRegisters(
     bool child_is_base_class = false;
     bool child_is_deref_of_parent = false;
     uint64_t language_flags;
-    CompilerType field_clang_type = clang_type.GetChildCompilerTypeAtIndex(
+    CompilerType field_clang_type;
+    auto field_clang_type_or_err = clang_type.GetChildCompilerTypeAtIndex(
         &exe_ctx, idx, transparent_pointers, omit_empty_base_classes,
         ignore_array_bounds, name, child_byte_size, child_byte_offset,
         child_bitfield_bit_size, child_bitfield_bit_offset, child_is_base_class,
         child_is_deref_of_parent, nullptr, language_flags);
+    if (!field_clang_type_or_err)
+      LLDB_LOG_ERROR(GetLog(LLDBLog::Types),
+                     field_clang_type_or_err.takeError(),
+                     "could not find child #{1}: {0}", idx);
+    else
+      field_clang_type = *field_clang_type_or_err;
 
     const uint64_t field_bit_offset = child_byte_offset * 8;
     const size_t field_bit_width =
@@ -824,8 +832,8 @@ static bool FlattenAggregateType(
     uint64_t field_bit_offset = 0;
     CompilerType field_compiler_type = return_compiler_type.GetFieldAtIndex(
         idx, name, &field_bit_offset, nullptr, nullptr);
-    llvm::Optional<uint64_t> field_bit_width =
-          field_compiler_type.GetBitSize(&thread);
+    std::optional<uint64_t> field_bit_width =
+        field_compiler_type.GetBitSize(&thread);
 
     // if we don't know the size of the field (e.g. invalid type), exit
     if (!field_bit_width || *field_bit_width == 0) {
@@ -867,7 +875,7 @@ ValueObjectSP ABISysV_x86_64::GetReturnValueObjectImpl(
   if (!reg_ctx_sp)
     return return_valobj_sp;
 
-  llvm::Optional<uint64_t> bit_width = return_compiler_type.GetBitSize(&thread);
+  std::optional<uint64_t> bit_width = return_compiler_type.GetBitSize(&thread);
   if (!bit_width)
     return return_valobj_sp;
   if (return_compiler_type.IsAggregateType()) {

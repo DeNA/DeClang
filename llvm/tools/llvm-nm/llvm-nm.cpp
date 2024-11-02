@@ -16,7 +16,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringSwitch.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/COFF.h"
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/Demangle/Demangle.h"
@@ -40,14 +39,16 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/LLVMDriver.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 #include <vector>
 
 using namespace llvm;
@@ -57,30 +58,29 @@ namespace {
 using namespace llvm::opt; // for HelpHidden in Opts.inc
 enum ID {
   OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_MAKE_OPT_ID(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,   \
-                   FLAGS, PARAM, HELP, METAVAR, VALUES),
+#define OPTION(...) LLVM_MAKE_OPT_ID(__VA_ARGS__),
 #include "Opts.inc"
 #undef OPTION
 };
 
-#define PREFIX(NAME, VALUE) const char *const NAME[] = VALUE;
+#define PREFIX(NAME, VALUE)                                                    \
+  static constexpr StringLiteral NAME##_init[] = VALUE;                        \
+  static constexpr ArrayRef<StringLiteral> NAME(NAME##_init,                   \
+                                                std::size(NAME##_init) - 1);
 #include "Opts.inc"
 #undef PREFIX
 
-const opt::OptTable::Info InfoTable[] = {
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_CONSTRUCT_OPT_INFO(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS,       \
-                          ALIASARGS, FLAGS, PARAM, HELP, METAVAR, VALUES),
+static constexpr opt::OptTable::Info InfoTable[] = {
+#define OPTION(...) LLVM_CONSTRUCT_OPT_INFO(__VA_ARGS__),
 #include "Opts.inc"
 #undef OPTION
 };
 
-class NmOptTable : public opt::OptTable {
+class NmOptTable : public opt::GenericOptTable {
 public:
-  NmOptTable() : OptTable(InfoTable) { setGroupedShortOptions(true); }
+  NmOptTable() : opt::GenericOptTable(InfoTable) {
+    setGroupedShortOptions(true);
+  }
 };
 
 enum OutputFormatTy { bsd, sysv, posix, darwin, just_symbols };
@@ -285,22 +285,6 @@ bool operator==(const NMSymbol &A, const NMSymbol &B) {
   return !(A < B) && !(B < A);
 }
 } // anonymous namespace
-
-static char isSymbolList64Bit(SymbolicFile &Obj) {
-  if (auto *IRObj = dyn_cast<IRObjectFile>(&Obj))
-    return Triple(IRObj->getTargetTriple()).isArch64Bit();
-  if (isa<COFFObjectFile>(Obj) || isa<COFFImportFile>(Obj))
-    return false;
-  if (XCOFFObjectFile *XCOFFObj = dyn_cast<XCOFFObjectFile>(&Obj))
-    return XCOFFObj->is64Bit();
-  if (isa<WasmObjectFile>(Obj))
-    return false;
-  if (TapiFile *Tapi = dyn_cast<TapiFile>(&Obj))
-    return Tapi->is64Bit();
-  if (MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(&Obj))
-    return MachO->is64Bit();
-  return cast<ELFObjectFileBase>(Obj).getBytesInAddress() == 8;
-}
 
 static StringRef CurrentFilename;
 
@@ -577,41 +561,26 @@ struct DarwinStabName {
   const char *Name;
 };
 const struct DarwinStabName DarwinStabNames[] = {
-    {MachO::N_GSYM, "GSYM"},
-    {MachO::N_FNAME, "FNAME"},
-    {MachO::N_FUN, "FUN"},
-    {MachO::N_STSYM, "STSYM"},
-    {MachO::N_LCSYM, "LCSYM"},
-    {MachO::N_BNSYM, "BNSYM"},
-    {MachO::N_PC, "PC"},
-    {MachO::N_AST, "AST"},
-    {MachO::N_OPT, "OPT"},
-    {MachO::N_RSYM, "RSYM"},
-    {MachO::N_SLINE, "SLINE"},
-    {MachO::N_ENSYM, "ENSYM"},
-    {MachO::N_SSYM, "SSYM"},
-    {MachO::N_SO, "SO"},
-    {MachO::N_OSO, "OSO"},
-    {MachO::N_LSYM, "LSYM"},
-    {MachO::N_BINCL, "BINCL"},
-    {MachO::N_SOL, "SOL"},
-    {MachO::N_PARAMS, "PARAM"},
-    {MachO::N_VERSION, "VERS"},
-    {MachO::N_OLEVEL, "OLEV"},
-    {MachO::N_PSYM, "PSYM"},
-    {MachO::N_EINCL, "EINCL"},
-    {MachO::N_ENTRY, "ENTRY"},
-    {MachO::N_LBRAC, "LBRAC"},
-    {MachO::N_EXCL, "EXCL"},
-    {MachO::N_RBRAC, "RBRAC"},
-    {MachO::N_BCOMM, "BCOMM"},
-    {MachO::N_ECOMM, "ECOMM"},
-    {MachO::N_ECOML, "ECOML"},
-    {MachO::N_LENG, "LENG"},
+    {MachO::N_GSYM, "GSYM"},    {MachO::N_FNAME, "FNAME"},
+    {MachO::N_FUN, "FUN"},      {MachO::N_STSYM, "STSYM"},
+    {MachO::N_LCSYM, "LCSYM"},  {MachO::N_BNSYM, "BNSYM"},
+    {MachO::N_PC, "PC"},        {MachO::N_AST, "AST"},
+    {MachO::N_OPT, "OPT"},      {MachO::N_RSYM, "RSYM"},
+    {MachO::N_SLINE, "SLINE"},  {MachO::N_ENSYM, "ENSYM"},
+    {MachO::N_SSYM, "SSYM"},    {MachO::N_SO, "SO"},
+    {MachO::N_OSO, "OSO"},      {MachO::N_LIB, "LIB"},
+    {MachO::N_LSYM, "LSYM"},    {MachO::N_BINCL, "BINCL"},
+    {MachO::N_SOL, "SOL"},      {MachO::N_PARAMS, "PARAM"},
+    {MachO::N_VERSION, "VERS"}, {MachO::N_OLEVEL, "OLEV"},
+    {MachO::N_PSYM, "PSYM"},    {MachO::N_EINCL, "EINCL"},
+    {MachO::N_ENTRY, "ENTRY"},  {MachO::N_LBRAC, "LBRAC"},
+    {MachO::N_EXCL, "EXCL"},    {MachO::N_RBRAC, "RBRAC"},
+    {MachO::N_BCOMM, "BCOMM"},  {MachO::N_ECOMM, "ECOMM"},
+    {MachO::N_ECOML, "ECOML"},  {MachO::N_LENG, "LENG"},
 };
 
 static const char *getDarwinStabString(uint8_t NType) {
-  for (auto I : makeArrayRef(DarwinStabNames))
+  for (auto I : ArrayRef(DarwinStabNames))
     if (I.NType == NType)
       return I.Name;
   return nullptr;
@@ -645,25 +614,25 @@ static void darwinPrintStab(MachOObjectFile *MachO, const NMSymbol &S) {
     outs() << format("   %02x", NType);
 }
 
-static Optional<std::string> demangle(StringRef Name) {
+static std::optional<std::string> demangle(StringRef Name) {
   std::string Demangled;
-  if (nonMicrosoftDemangle(Name.str().c_str(), Demangled))
+  if (nonMicrosoftDemangle(Name, Demangled))
     return Demangled;
-  return None;
+  return std::nullopt;
 }
 
-static Optional<std::string> demangleXCOFF(StringRef Name) {
+static std::optional<std::string> demangleXCOFF(StringRef Name) {
   if (Name.empty() || Name[0] != '.')
     return demangle(Name);
 
   Name = Name.drop_front();
-  Optional<std::string> DemangledName = demangle(Name);
+  std::optional<std::string> DemangledName = demangle(Name);
   if (DemangledName)
     return "." + *DemangledName;
-  return None;
+  return std::nullopt;
 }
 
-static Optional<std::string> demangleMachO(StringRef Name) {
+static std::optional<std::string> demangleMachO(StringRef Name) {
   if (!Name.empty() && Name[0] == '_')
     Name = Name.drop_front();
   return demangle(Name);
@@ -715,7 +684,7 @@ static void printSymbolList(SymbolicFile &Obj,
       outs() << '\n' << CurrentFilename << ":\n";
     } else if (OutputFormat == sysv) {
       outs() << "\n\nSymbols from " << CurrentFilename << ":\n\n";
-      if (isSymbolList64Bit(Obj))
+      if (Obj.is64Bit())
         outs() << "Name                  Value           Class        Type"
                << "         Size             Line  Section\n";
       else
@@ -725,7 +694,7 @@ static void printSymbolList(SymbolicFile &Obj,
   }
 
   const char *printBlanks, *printDashes, *printFormat;
-  if (isSymbolList64Bit(Obj)) {
+  if (Obj.is64Bit()) {
     printBlanks = "                ";
     printDashes = "----------------";
     switch (AddressRadix) {
@@ -760,12 +729,12 @@ static void printSymbolList(SymbolicFile &Obj,
     std::string Name = S.Name;
     MachOObjectFile *MachO = dyn_cast<MachOObjectFile>(&Obj);
     if (Demangle) {
-      function_ref<Optional<std::string>(StringRef)> Fn = ::demangle;
+      function_ref<std::optional<std::string>(StringRef)> Fn = ::demangle;
       if (Obj.isXCOFF())
         Fn = demangleXCOFF;
       if (Obj.isMachO())
         Fn = demangleMachO;
-      if (Optional<std::string> Opt = Fn(S.Name))
+      if (std::optional<std::string> Opt = Fn(S.Name))
         Name = *Opt;
     }
 
@@ -1674,8 +1643,8 @@ static bool shouldDump(SymbolicFile &Obj) {
       !isa<IRObjectFile>(Obj))
     return true;
 
-  return isSymbolList64Bit(Obj) ? BitMode != BitModeTy::Bit32
-                                : BitMode != BitModeTy::Bit64;
+  return Obj.is64Bit() ? BitMode != BitModeTy::Bit32
+                       : BitMode != BitModeTy::Bit64;
 }
 
 static void getXCOFFExports(XCOFFObjectFile *XCOFFObj,
@@ -1964,26 +1933,39 @@ static bool checkMachOAndArchFlags(SymbolicFile *O, StringRef Filename) {
   return true;
 }
 
-static void dumpArchiveMap(Archive *A, StringRef Filename) {
-  Archive::symbol_iterator I = A->symbol_begin();
-  Archive::symbol_iterator E = A->symbol_end();
-  if (I != E) {
-    outs() << "Archive map\n";
-    for (; I != E; ++I) {
-      Expected<Archive::Child> C = I->getMember();
-      if (!C) {
-        error(C.takeError(), Filename);
-        break;
-      }
-      Expected<StringRef> FileNameOrErr = C->getName();
-      if (!FileNameOrErr) {
-        error(FileNameOrErr.takeError(), Filename);
-        break;
-      }
-      StringRef SymName = I->getName();
-      outs() << SymName << " in " << FileNameOrErr.get() << "\n";
+static void printArchiveMap(iterator_range<Archive::symbol_iterator> &map,
+                            StringRef Filename) {
+  for (auto I : map) {
+    Expected<Archive::Child> C = I.getMember();
+    if (!C) {
+      error(C.takeError(), Filename);
+      break;
     }
-    outs() << "\n";
+    Expected<StringRef> FileNameOrErr = C->getName();
+    if (!FileNameOrErr) {
+      error(FileNameOrErr.takeError(), Filename);
+      break;
+    }
+    StringRef SymName = I.getName();
+    outs() << SymName << " in " << FileNameOrErr.get() << "\n";
+  }
+
+  outs() << "\n";
+}
+
+static void dumpArchiveMap(Archive *A, StringRef Filename) {
+  auto Map = A->symbols();
+  if (!Map.empty()) {
+    outs() << "Archive map\n";
+    printArchiveMap(Map, Filename);
+  }
+
+  auto ECMap = A->ec_symbols();
+  if (!ECMap) {
+    warn(ECMap.takeError(), Filename);
+  } else if (!ECMap->empty()) {
+    outs() << "Archive EC map\n";
+    printArchiveMap(*ECMap, Filename);
   }
 }
 
@@ -2264,11 +2246,7 @@ static std::vector<NMSymbol> dumpSymbolNamesFromFile(StringRef Filename) {
   if (error(BufferOrErr.getError(), Filename))
     return SymbolList;
 
-  // Always enable opaque pointers, to handle archives with mixed typed and
-  // opaque pointer bitcode files gracefully. As we're only reading symbols,
-  // the used pointer types don't matter.
   LLVMContext Context;
-  Context.setOpaquePointers(true);
   LLVMContext *ContextPtr = NoLLVMBitcode ? nullptr : &Context;
   Expected<std::unique_ptr<Binary>> BinaryOrErr =
       createBinary(BufferOrErr.get()->getMemBufferRef(), ContextPtr);
@@ -2305,7 +2283,7 @@ exportSymbolNamesFromFiles(const std::vector<std::string> &InputFilenames) {
   printExportSymbolList(SymbolList);
 }
 
-int llvm_nm_main(int argc, char **argv) {
+int llvm_nm_main(int argc, char **argv, const llvm::ToolContext &) {
   InitLLVM X(argc, argv);
   BumpPtrAllocator A;
   StringSaver Saver(A);

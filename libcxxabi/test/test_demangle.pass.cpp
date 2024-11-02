@@ -7,18 +7,19 @@
 //===----------------------------------------------------------------------===//
 
 // The demangler does not pass all these tests with the system dylibs on macOS.
-// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// XFAIL: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
 
 // https://llvm.org/PR51407 was not fixed in some previously-released
 // demanglers, which causes them to run into the infinite loop.
-// UNSUPPORTED: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
-// UNSUPPORTED: use_system_cxx_lib && target={{.+}}-apple-macosx11.0
+// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx11.0
 
 #include "support/timer.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <cxxabi.h>
 #include <string>
 
@@ -30051,7 +30052,7 @@ const char* cases[][2] =
     {"_Zcv1BIRT_EIS1_E", "operator B<><>"},
 
     {"_ZN2FnIXgs4BaseEX4BaseEEEvv","void Fn<::Base, Base>()"},
-    
+
     {"_ZN2FnIXgsnw_iEEXna_ipiLi4EEEEEvv", "void Fn<::new int, new[] int(4)>()"},
     {"_ZN2FnIXnwLj4E_iEEXgsnaLj4E_ipiLi4EEEEEvv", "void Fn<new(4u) int, ::new[](4u) int(4)>()"},
     {"_ZN2FnIXgsdlLi4EEXdaLi4EEEEvv", "void Fn<::delete 4, delete[] 4>()"},
@@ -30111,6 +30112,8 @@ const char* cases[][2] =
      "::basic_ostream()"},
     {"_ZNSsC1Ev", "std::basic_string<char, std::char_traits<char>,"
      " std::allocator<char>>::basic_string()"},
+    {"_ZN1SB8ctor_tagC2Ev", "S[abi:ctor_tag]::S()"},
+    {"_ZN1SB8ctor_tagD2Ev", "S[abi:ctor_tag]::~S()"},
 };
 
 const unsigned N = sizeof(cases) / sizeof(cases[0]);

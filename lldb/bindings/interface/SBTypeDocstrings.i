@@ -140,19 +140,6 @@ SBType supports the eq/ne operator. For example,::
 ) lldb::SBType::IsReferenceType;
 
 %feature("docstring",
-    "Returns true if this type is a function type.
-
-    Language-specific behaviour:
-
-    * C: Returns true for types that represent functions. Note that function
-      pointers are not function types (but their `GetPointeeType()` are function
-      types).
-    * C++: Same as in C.
-    * Objective-C: Returns false for all types.
-    "
-) lldb::SBType::IsPolymorphicClass;
-
-%feature("docstring",
     "Returns true if this type is a polymorphic type.
 
     Language-specific behaviour:
@@ -365,7 +352,7 @@ SBType supports the eq/ne operator. For example,::
 
     Language-specific behaviour:
 
-    * C: Returns a constant-size array `T[size]` for any non-void type.
+    * C: Returns a constant-size array ``T[size]`` for any non-void type.
     * C++: Same as in C.
     * Objective-C: Same as in C.
 

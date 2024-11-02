@@ -30,6 +30,7 @@
 
 #include <mutex>
 #include <vector>
+#include <optional>
 #include <unordered_map>
 
 #if defined(LLDB_CONFIGURATION_DEBUG)
@@ -199,7 +200,7 @@ public:
     return false;
   }
   virtual bool ParseSupportFiles(CompileUnit &comp_unit,
-                                 FileSpecList &support_files) = 0;
+                                 SupportFileList &support_files) = 0;
   virtual size_t ParseTypes(CompileUnit &comp_unit) = 0;
   virtual bool ParseIsOptimized(CompileUnit &comp_unit) { return false; }
 
@@ -221,24 +222,23 @@ public:
   /// To support variable-length array types, this function takes an
   /// optional \p ExecutionContext. If \c exe_ctx is non-null, the
   /// dynamic characteristics for that context are returned.
-  virtual llvm::Optional<ArrayInfo>
+  virtual std::optional<ArrayInfo>
   GetDynamicArrayInfoForUID(lldb::user_id_t type_uid,
                             const lldb_private::ExecutionContext *exe_ctx) = 0;
 
   virtual bool CompleteType(CompilerType &compiler_type) = 0;
   virtual void ParseDeclsForContext(CompilerDeclContext decl_ctx) {}
-  virtual CompilerDecl GetDeclForUID(lldb::user_id_t uid) {
-    return CompilerDecl();
-  }
+  virtual CompilerDecl GetDeclForUID(lldb::user_id_t uid) { return {}; }
   virtual CompilerDeclContext GetDeclContextForUID(lldb::user_id_t uid) {
-    return CompilerDeclContext();
+    return {};
   }
   virtual CompilerDeclContext GetDeclContextContainingUID(lldb::user_id_t uid) {
-    return CompilerDeclContext();
+    return {};
   }
-  virtual void
-  GetDeclContextForUID(llvm::SmallVectorImpl<CompilerContext> &context,
-                       lldb::user_id_t uid) {}
+  virtual std::vector<CompilerContext>
+  GetCompilerContextForUID(lldb::user_id_t uid) {
+    return {};
+  }
   virtual uint32_t ResolveSymbolContext(const Address &so_addr,
                                         lldb::SymbolContextItem resolve_scope,
                                         SymbolContext &sc) = 0;
@@ -304,21 +304,20 @@ public:
                              bool include_inlines, SymbolContextList &sc_list);
   virtual void FindFunctions(const RegularExpression &regex,
                              bool include_inlines, SymbolContextList &sc_list);
-  virtual void
-  FindTypes(ConstString name, const CompilerDeclContext &parent_decl_ctx,
-            uint32_t max_matches,
-            llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-            TypeMap &types);
 
-  /// Find types specified by a CompilerContextPattern.
-  /// \param languages
-  ///     Only return results in these languages.
-  /// \param searched_symbol_files
-  ///     Prevents one file from being visited multiple times.
-  virtual void
-  FindTypes(llvm::ArrayRef<CompilerContext> pattern, LanguageSet languages,
-            llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-            TypeMap &types);
+  /// Find types using a type-matching object that contains all search
+  /// parameters.
+  ///
+  /// \see lldb_private::TypeQuery
+  ///
+  /// \param[in] query
+  ///     A type matching object that contains all of the details of the type
+  ///     search.
+  ///
+  /// \param[in] results
+  ///     Any matching types will be populated into the \a results object using
+  ///     TypeMap::InsertUnique(...).
+  virtual void FindTypes(const TypeQuery &query, TypeResults &results) {}
 
   virtual void
   GetMangledNamesForFunction(const std::string &scope_qualified_name,
@@ -466,18 +465,14 @@ public:
   virtual bool GetDebugInfoHadFrameVariableErrors() const = 0;
   virtual void SetDebugInfoHadFrameVariableErrors() = 0;
 
-  /// This function is used to create types that belong to a SymbolFile. The
-  /// symbol file will own a strong reference to the type in an internal type
-  /// list.
-  virtual lldb::TypeSP MakeType(lldb::user_id_t uid, ConstString name,
-                                llvm::Optional<uint64_t> byte_size,
-                                SymbolContextScope *context,
-                                lldb::user_id_t encoding_uid,
-                                Type::EncodingDataType encoding_uid_type,
-                                const Declaration &decl,
-                                const CompilerType &compiler_qual_type,
-                                Type::ResolveState compiler_type_resolve_state,
-                                uint32_t opaque_payload = 0) = 0;
+  virtual lldb::TypeSP
+  MakeType(lldb::user_id_t uid, ConstString name,
+           std::optional<uint64_t> byte_size, SymbolContextScope *context,
+           lldb::user_id_t encoding_uid,
+           Type::EncodingDataType encoding_uid_type, const Declaration &decl,
+           const CompilerType &compiler_qual_type,
+           Type::ResolveState compiler_type_resolve_state,
+           uint32_t opaque_payload = 0) = 0;
 
   virtual lldb::TypeSP CopyType(const lldb::TypeSP &other_type) = 0;
 
@@ -572,8 +567,11 @@ public:
      m_debug_info_had_variable_errors = true;
   }
 
+  /// This function is used to create types that belong to a SymbolFile. The
+  /// symbol file will own a strong reference to the type in an internal type
+  /// list.
   lldb::TypeSP MakeType(lldb::user_id_t uid, ConstString name,
-                        llvm::Optional<uint64_t> byte_size,
+                        std::optional<uint64_t> byte_size,
                         SymbolContextScope *context,
                         lldb::user_id_t encoding_uid,
                         Type::EncodingDataType encoding_uid_type,
@@ -581,11 +579,12 @@ public:
                         const CompilerType &compiler_qual_type,
                         Type::ResolveState compiler_type_resolve_state,
                         uint32_t opaque_payload = 0) override {
-    lldb::TypeSP type_sp(new Type(
-        uid, this, name, byte_size, context, encoding_uid, encoding_uid_type,
-        decl, compiler_qual_type, compiler_type_resolve_state, opaque_payload));
-    m_type_list.Insert(type_sp);
-    return type_sp;
+     lldb::TypeSP type_sp (new Type(
+         uid, this, name, byte_size, context, encoding_uid,
+         encoding_uid_type, decl, compiler_qual_type,
+         compiler_type_resolve_state, opaque_payload));
+     m_type_list.Insert(type_sp);
+     return type_sp;
   }
 
   lldb::TypeSP CopyType(const lldb::TypeSP &other_type) override {
@@ -607,9 +606,8 @@ protected:
                                    // case it isn't the same as the module
                                    // object file (debug symbols in a separate
                                    // file)
-  llvm::Optional<std::vector<lldb::CompUnitSP>> m_compile_units;
+  std::optional<std::vector<lldb::CompUnitSP>> m_compile_units;
   TypeList m_type_list;
-  Symtab *m_symtab = nullptr;
   uint32_t m_abilities = 0;
   bool m_calculated_abilities = false;
   bool m_index_was_loaded_from_cache = false;
@@ -622,6 +620,10 @@ protected:
 private:
   SymbolFileCommon(const SymbolFileCommon &) = delete;
   const SymbolFileCommon &operator=(const SymbolFileCommon &) = delete;
+
+  /// Do not use m_symtab directly, as it may be freed. Use GetSymtab()
+  /// to access it instead.
+  Symtab *m_symtab = nullptr;
 };
 
 } // namespace lldb_private

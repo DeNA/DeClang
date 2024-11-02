@@ -16,12 +16,7 @@ import dummy_scripted_process
 class ScriptedProcesTestCase(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
-    def setUp(self):
-        TestBase.setUp(self)
-
-    def tearDown(self):
-        TestBase.tearDown(self)
-
+    @skipUnlessDarwin
     def test_python_plugin_package(self):
         """Test that the lldb python module has a `plugins.scripted_process`
         package."""
@@ -211,13 +206,6 @@ class ScriptedProcesTestCase(TestBase):
         self.assertEqual(buff, message)
 
         thread = process_0.GetSelectedThread()
-        self.assertTrue(thread, "Invalid thread.")
-        self.assertEqual(thread.GetThreadID(), 0x19)
-        self.assertEqual(thread.GetName(), "DummyScriptedThread.thread-1")
-        self.assertStopReason(thread.GetStopReason(), lldb.eStopReasonTrace)
-
-        self.assertGreater(thread.GetNumFrames(), 0)
-
         self.assertTrue(thread, "Invalid thread.")
         self.assertEqual(thread.GetThreadID(), 0x19)
         self.assertEqual(thread.GetName(), "DummyScriptedThread.thread-1")

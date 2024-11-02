@@ -67,7 +67,7 @@ public:
   DefGen(const AttrOrTypeDef &def);
 
   void emitDecl(raw_ostream &os) const {
-    if (storageCls) {
+    if (storageCls && def.genStorageClass()) {
       NamespaceEmitter ns(os, def.getStorageNamespace());
       os << "struct " << def.getStorageClassName() << ";\n";
     }
@@ -151,7 +151,7 @@ private:
   Class defCls;
   /// An optional attribute or type storage class. The storage class will
   /// exist if and only if the def has more than zero parameters.
-  Optional<Class> storageCls;
+  std::optional<Class> storageCls;
 
   /// The C++ base value of the def, either "Attribute" or "Type".
   StringRef valueType;
@@ -214,14 +214,42 @@ void DefGen::createParentWithTraits() {
   defCls.addParent(std::move(defParent));
 }
 
+/// Include declarations specified on NativeTrait
+static std::string formatExtraDeclarations(const AttrOrTypeDef &def) {
+  SmallVector<StringRef> extraDeclarations;
+  // Include extra class declarations from NativeTrait
+  for (const auto &trait : def.getTraits()) {
+    if (auto *attrOrTypeTrait = dyn_cast<tblgen::NativeTrait>(&trait)) {
+      StringRef value = attrOrTypeTrait->getExtraConcreteClassDeclaration();
+      if (value.empty())
+        continue;
+      extraDeclarations.push_back(value);
+    }
+  }
+  if (std::optional<StringRef> extraDecl = def.getExtraDecls()) {
+    extraDeclarations.push_back(*extraDecl);
+  }
+  return llvm::join(extraDeclarations, "\n");
+}
+
 /// Extra class definitions have a `$cppClass` substitution that is to be
 /// replaced by the C++ class name.
 static std::string formatExtraDefinitions(const AttrOrTypeDef &def) {
-  if (Optional<StringRef> extraDef = def.getExtraDefs()) {
-    FmtContext ctx = FmtContext().addSubst("cppClass", def.getCppClassName());
-    return tgfmt(*extraDef, &ctx).str();
+  SmallVector<StringRef> extraDefinitions;
+  // Include extra class definitions from NativeTrait
+  for (const auto &trait : def.getTraits()) {
+    if (auto *attrOrTypeTrait = dyn_cast<tblgen::NativeTrait>(&trait)) {
+      StringRef value = attrOrTypeTrait->getExtraConcreteClassDefinition();
+      if (value.empty())
+        continue;
+      extraDefinitions.push_back(value);
+    }
   }
-  return "";
+  if (std::optional<StringRef> extraDef = def.getExtraDefs()) {
+    extraDefinitions.push_back(*extraDef);
+  }
+  FmtContext ctx = FmtContext().addSubst("cppClass", def.getCppClassName());
+  return tgfmt(llvm::join(extraDefinitions, "\n"), &ctx).str();
 }
 
 void DefGen::emitTopLevelDeclarations() {
@@ -230,9 +258,9 @@ void DefGen::emitTopLevelDeclarations() {
   defCls.declare<UsingDeclaration>("Base::Base");
 
   // Emit the extra declarations first in case there's a definition in there.
-  Optional<StringRef> extraDecl = def.getExtraDecls();
+  std::string extraDecl = formatExtraDeclarations(def);
   std::string extraDef = formatExtraDefinitions(def);
-  defCls.declare<ExtraClassDeclaration>(extraDecl ? *extraDecl : "",
+  defCls.declare<ExtraClassDeclaration>(std::move(extraDecl),
                                         std::move(extraDef));
 }
 
@@ -359,7 +387,7 @@ void DefGen::emitCustomBuilder(const AttrOrTypeBuilder &builder) {
   // Don't emit a body if there isn't one.
   auto props = builder.getBody() ? Method::Static : Method::StaticDeclaration;
   StringRef returnType = def.getCppClassName();
-  if (Optional<StringRef> builderReturnType = builder.getReturnType())
+  if (std::optional<StringRef> builderReturnType = builder.getReturnType())
     returnType = *builderReturnType;
   Method *m = defCls.addMethod(returnType, "get", props,
                                getCustomBuilderParams({}, builder));
@@ -387,7 +415,7 @@ void DefGen::emitCheckedCustomBuilder(const AttrOrTypeBuilder &builder) {
   // Don't emit a body if there isn't one.
   auto props = builder.getBody() ? Method::Static : Method::StaticDeclaration;
   StringRef returnType = def.getCppClassName();
-  if (Optional<StringRef> builderReturnType = builder.getReturnType())
+  if (std::optional<StringRef> builderReturnType = builder.getReturnType())
     returnType = *builderReturnType;
   Method *m = defCls.addMethod(
       returnType, "getChecked", props,
@@ -457,6 +485,13 @@ void DefGen::emitKeyType() {
                         [&](auto &param) { os << param.getCppType(); });
   os << '>';
   storageCls->declare<UsingDeclaration>("KeyTy", std::move(os.str()));
+
+  // Add a method to construct the key type from the storage.
+  Method *m = storageCls->addConstMethod<Method::Inline>("KeyTy", "getAsKey");
+  m->body().indent() << "return KeyTy(";
+  llvm::interleaveComma(params, m->body().indent(),
+                        [&](auto &param) { m->body() << param.getName(); });
+  m->body() << ");";
 }
 
 void DefGen::emitEquals() {
@@ -500,7 +535,7 @@ void DefGen::emitConstruct() {
     // Use the parameters' custom allocator code, if provided.
     FmtContext ctx = FmtContext().addSubst("_allocator", "allocator");
     for (auto &param : params) {
-      if (Optional<StringRef> allocCode = param.getAllocator()) {
+      if (std::optional<StringRef> allocCode = param.getAllocator()) {
         ctx.withSelf(param.getName()).addSubst("_dst", param.getName());
         body << tgfmt(*allocCode, &ctx) << '\n';
       }
@@ -727,10 +762,10 @@ void {0}::printType(::mlir::Type type,
 static const char *const dialectDynamicTypeParserDispatch = R"(
   {
     auto parseResult = parseOptionalDynamicType(mnemonic, parser, genType);
-    if (parseResult.hasValue()) {
-      if (::mlir::succeeded(parseResult.getValue()))
+    if (parseResult.has_value()) {
+      if (::mlir::succeeded(parseResult.value()))
         return genType;
-      return Type();
+      return ::mlir::Type();
     }
   }
 )";
@@ -808,7 +843,7 @@ void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
   }
   parse.body() << "    .Default([&](llvm::StringRef keyword, llvm::SMLoc) {\n"
                   "      *mnemonic = keyword;\n"
-                  "      return llvm::None;\n"
+                  "      return std::nullopt;\n"
                   "    });";
   printer.body() << "    .Default([](auto) { return ::mlir::failure(); });";
 

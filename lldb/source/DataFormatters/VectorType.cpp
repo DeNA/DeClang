@@ -9,6 +9,7 @@
 #include "lldb/DataFormatters/VectorType.h"
 
 #include "lldb/Core/ValueObject.h"
+#include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/TypeSystem.h"
@@ -16,6 +17,7 @@
 
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Log.h"
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -192,17 +194,17 @@ static lldb::Format GetItemFormatForFormat(lldb::Format format,
 /// type 'element_type'. Returns a std::nullopt if the
 /// size of the container is not a multiple of 'element_type'
 /// or if an error occurs.
-static llvm::Optional<size_t>
+static std::optional<size_t>
 CalculateNumChildren(CompilerType container_elem_type, uint64_t num_elements,
                      CompilerType element_type) {
-  llvm::Optional<uint64_t> container_elem_size =
+  std::optional<uint64_t> container_elem_size =
       container_elem_type.GetByteSize(/* exe_scope */ nullptr);
   if (!container_elem_size)
     return {};
 
   auto container_size = *container_elem_size * num_elements;
 
-  llvm::Optional<uint64_t> element_size =
+  std::optional<uint64_t> element_size =
       element_type.GetByteSize(/* exe_scope */ nullptr);
   if (!element_size || !*element_size)
     return {};
@@ -223,12 +225,18 @@ public:
 
   ~VectorTypeSyntheticFrontEnd() override = default;
 
-  size_t CalculateNumChildren() override { return m_num_children; }
+  llvm::Expected<uint32_t> CalculateNumChildren() override {
+    return m_num_children;
+  }
 
-  lldb::ValueObjectSP GetChildAtIndex(size_t idx) override {
-    if (idx >= CalculateNumChildren())
+  lldb::ValueObjectSP GetChildAtIndex(uint32_t idx) override {
+    auto num_children_or_err = CalculateNumChildren();
+    if (!num_children_or_err)
+      return ValueObjectConstResult::Create(
+          nullptr, Status(num_children_or_err.takeError()));
+    if (idx >= *num_children_or_err)
       return {};
-    llvm::Optional<uint64_t> size = m_child_type.GetByteSize(nullptr);
+    std::optional<uint64_t> size = m_child_type.GetByteSize(nullptr);
     if (!size)
       return {};
     auto offset = idx * *size;
@@ -244,7 +252,7 @@ public:
     return child_sp;
   }
 
-  bool Update() override {
+  lldb::ChildCacheState Update() override {
     m_parent_format = m_backend.GetFormat();
     CompilerType parent_type(m_backend.GetCompilerType());
     CompilerType element_type;
@@ -257,7 +265,7 @@ public:
         ::CalculateNumChildren(element_type, num_elements, m_child_type)
             .value_or(0);
     m_item_format = GetItemFormatForFormat(m_parent_format, m_child_type);
-    return false;
+    return lldb::ChildCacheState::eRefetch;
   }
 
   bool MightHaveChildren() override { return true; }
@@ -265,7 +273,7 @@ public:
   size_t GetIndexOfChildWithName(ConstString name) override {
     const char *item_name = name.GetCString();
     uint32_t idx = ExtractIndexFromString(item_name);
-    if (idx < UINT32_MAX && idx >= CalculateNumChildren())
+    if (idx < UINT32_MAX && idx >= CalculateNumChildrenIgnoringErrors())
       return UINT32_MAX;
     return idx;
   }
@@ -292,7 +300,8 @@ bool lldb_private::formatters::VectorTypeSummaryProvider(
   s.PutChar('(');
   bool first = true;
 
-  size_t idx = 0, len = synthetic_children->CalculateNumChildren();
+  size_t idx = 0,
+         len = synthetic_children->CalculateNumChildrenIgnoringErrors();
 
   for (; idx < len; idx++) {
     auto child_sp = synthetic_children->GetChildAtIndex(idx);

@@ -99,18 +99,15 @@ const Symbol &Symbol::operator=(const Symbol &rhs) {
 llvm::Expected<Symbol> Symbol::FromJSON(const JSONSymbol &symbol,
                                         SectionList *section_list) {
   if (!section_list)
-    return llvm::make_error<llvm::StringError>("no section list provided",
-                                               llvm::inconvertibleErrorCode());
+    return llvm::createStringError("no section list provided");
 
   if (!symbol.value && !symbol.address)
-    return llvm::make_error<llvm::StringError>(
-        "symbol must contain either a value or an address",
-        llvm::inconvertibleErrorCode());
+    return llvm::createStringError(
+        "symbol must contain either a value or an address");
 
   if (symbol.value && symbol.address)
-    return llvm::make_error<llvm::StringError>(
-        "symbol cannot contain both a value and an address",
-        llvm::inconvertibleErrorCode());
+    return llvm::createStringError(
+        "symbol cannot contain both a value and an address");
 
   const uint64_t size = symbol.size.value_or(0);
   const bool is_artificial = false;
@@ -131,9 +128,8 @@ llvm::Expected<Symbol> Symbol::FromJSON(const JSONSymbol &symbol,
                     AddressRange(section_sp, offset, size), size_is_valid,
                     contains_linker_annotations, flags);
     }
-    return llvm::make_error<llvm::StringError>(
-        llvm::formatv("no section found for address: {0:x}", *symbol.address),
-        llvm::inconvertibleErrorCode());
+    return llvm::createStringError(
+        llvm::formatv("no section found for address: {0:x}", *symbol.address));
   }
 
   // Absolute symbols encode the integer value in the m_offset of the
@@ -168,8 +164,8 @@ bool Symbol::ValueIsAddress() const {
   return (bool)m_addr_range.GetBaseAddress().GetSection();
 }
 
-ConstString Symbol::GetDisplayName() const {
-  return GetMangled().GetDisplayDemangledName();
+ConstString Symbol::GetDisplayName(const SymbolContext *sc) const {
+  return GetMangled().GetDisplayDemangledName(sc);
 }
 
 ConstString Symbol::GetReExportedSymbolName() const {
@@ -488,15 +484,9 @@ Symbol *Symbol::ResolveReExportedSymbolInModuleSpec(
     lldb_private::SymbolContextList sc_list;
     module_sp->FindSymbolsWithNameAndType(reexport_name, eSymbolTypeAny,
                                           sc_list);
-    const size_t num_scs = sc_list.GetSize();
-    if (num_scs > 0) {
-      for (size_t i = 0; i < num_scs; ++i) {
-        lldb_private::SymbolContext sc;
-        if (sc_list.GetContextAtIndex(i, sc)) {
-          if (sc.symbol->IsExternal())
-            return sc.symbol;
-        }
-      }
+    for (const SymbolContext &sc : sc_list) {
+      if (sc.symbol->IsExternal())
+        return sc.symbol;
     }
     // If we didn't find the symbol in this module, it may be because this
     // module re-exports some whole other library.  We have to search those as

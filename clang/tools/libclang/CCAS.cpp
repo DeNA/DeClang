@@ -51,12 +51,25 @@ struct WrappedReplayResult {
   SmallString<256> DiagText;
 };
 
+struct WrappedCancellationToken {
+  std::unique_ptr<llvm::cas::Cancellable> CancelTok;
+};
+
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(WrappedCASObject, CXCASObject)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(WrappedCachedCompilation,
                                    CXCASCachedCompilation)
 DEFINE_SIMPLE_CONVERSION_FUNCTIONS(WrappedReplayResult, CXCASReplayResult)
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(WrappedCancellationToken,
+                                   CXCASCancellationToken)
 
 } // anonymous namespace
+
+static void passAsCXError(Error &&E, CXError *OutError) {
+  if (OutError)
+    *OutError = cxerror::create(std::move(E));
+  else
+    llvm::consumeError(std::move(E));
+}
 
 CXCASCachedCompilation WrappedCachedCompilation::fromResultID(
     Expected<std::optional<CASID>> ResultID, CASID CacheKey,
@@ -64,8 +77,7 @@ CXCASCachedCompilation WrappedCachedCompilation::fromResultID(
     const std::shared_ptr<llvm::cas::ActionCache> &AC, CXError *OutError) {
 
   auto failure = [OutError](Error &&E) -> CXCASCachedCompilation {
-    if (OutError)
-      *OutError = cxerror::create(std::move(E));
+    passAsCXError(std::move(E), OutError);
     return nullptr;
   };
 
@@ -139,6 +151,57 @@ void clang_experimental_cas_Databases_dispose(CXCASDatabases CDBs) {
   delete unwrap(CDBs);
 }
 
+int64_t clang_experimental_cas_Databases_get_storage_size(CXCASDatabases CDBs,
+                                                          CXError *OutError) {
+  // Commonly used ObjectStore implementations (on-disk and plugin) combine a
+  // CAS and action-cache into a single directory managing the storage
+  // holistically for both, so calling the ObjectStore API is sufficient.
+  // FIXME: For completeness we should figure out how to deal with potential
+  // implementations that use separate directories for CAS and action-cache.
+  std::optional<uint64_t> Size;
+  if (Error E = unwrap(CDBs)->CAS->getStorageSize().moveInto(Size)) {
+    passAsCXError(std::move(E), OutError);
+    return -2;
+  }
+  if (!Size)
+    return -1;
+  return *Size;
+}
+
+CXError clang_experimental_cas_Databases_set_size_limit(CXCASDatabases CDBs,
+                                                        int64_t size_limit) {
+  // Commonly used ObjectStore implementations (on-disk and plugin) combine a
+  // CAS and action-cache into a single directory managing the storage
+  // holistically for both, so calling the ObjectStore API is sufficient.
+  // FIXME: For completeness we should figure out how to deal with potential
+  // implementations that use separate directories for CAS and action-cache.
+  std::optional<uint64_t> SizeLimit;
+  if (size_limit < 0) {
+    return cxerror::create(llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        "invalid size limit passed to "
+        "clang_experimental_cas_Databases_set_size_limit"));
+  }
+  if (size_limit > 0) {
+    SizeLimit = size_limit;
+  }
+  if (Error E = unwrap(CDBs)->CAS->setSizeLimit(SizeLimit))
+    return cxerror::create(std::move(E));
+  return nullptr;
+}
+
+CXError
+clang_experimental_cas_Databases_prune_ondisk_data(CXCASDatabases CDBs) {
+  // Commonly used ObjectStore implementations (on-disk and plugin) combine a
+  // CAS and action-cache into a single directory managing the storage
+  // holistically for both, so calling the ObjectStore API is sufficient.
+  // FIXME: For completeness we should figure out how to deal with potential
+  // implementations that use separate directories for CAS and action-cache.
+  if (Error E = unwrap(CDBs)->CAS->pruneStorageData())
+    return cxerror::create(std::move(E));
+  return nullptr;
+}
+
 CXCASObject clang_experimental_cas_loadObjectByString(CXCASDatabases CDBs,
                                                       const char *PrintedID,
                                                       CXError *OutError) {
@@ -149,15 +212,14 @@ CXCASObject clang_experimental_cas_loadObjectByString(CXCASDatabases CDBs,
     *OutError = nullptr;
 
   auto failure = [OutError](Error &&E) -> CXCASObject {
-    if (OutError)
-      *OutError = cxerror::create(std::move(E));
+    passAsCXError(std::move(E), OutError);
     return nullptr;
   };
 
   Expected<CASID> Digest = CAS.parseID(PrintedID);
   if (!Digest)
     return failure(Digest.takeError());
-  Optional<ObjectRef> Ref = CAS.getReference(*Digest);
+  std::optional<ObjectRef> Ref = CAS.getReference(*Digest);
   if (!Ref)
     return nullptr;
 
@@ -203,14 +265,15 @@ void clang_experimental_cas_loadObjectByString_async(
   Expected<CASID> Digest = CAS.parseID(PrintedID);
   if (!Digest)
     return Callback(Ctx, nullptr, cxerror::create(Digest.takeError()));
-  Optional<ObjectRef> Ref = CAS.getReference(*Digest);
+  std::optional<ObjectRef> Ref = CAS.getReference(*Digest);
   if (!Ref)
     return Callback(Ctx, nullptr, nullptr);
 
   /// Asynchronously visits the graph of the object node to ensure it's fully
   /// materialized.
-  class AsyncObjectLoader
-      : public std::enable_shared_from_this<AsyncObjectLoader> {
+  class AsyncObjectLoader final
+      : public llvm::cas::Cancellable,
+        public std::enable_shared_from_this<AsyncObjectLoader> {
     void *Ctx;
     void (*Callback)(void *Ctx, CXCASObject, CXError);
     std::shared_ptr<cas::ObjectStore> CAS;
@@ -221,29 +284,40 @@ void clang_experimental_cas_loadObjectByString_async(
     std::atomic<bool> MissingNode{false};
     /// The first error that occurred.
     std::optional<Error> ErrOccurred;
+
+    const bool MayCancel;
+    bool Cancelled = false;
+    llvm::SmallDenseMap<ObjectRef, std::unique_ptr<llvm::cas::Cancellable>>
+        PendingCancellables;
+
     std::mutex Mutex;
 
   public:
     AsyncObjectLoader(void *Ctx,
                       void (*Callback)(void *Ctx, CXCASObject, CXError),
-                      std::shared_ptr<cas::ObjectStore> CAS)
-        : Ctx(Ctx), Callback(Callback), CAS(std::move(CAS)) {}
+                      std::shared_ptr<cas::ObjectStore> CAS, bool MayCancel)
+        : Ctx(Ctx), Callback(Callback), CAS(std::move(CAS)),
+          MayCancel(MayCancel) {}
 
     void visit(ObjectRef Ref, bool IsRootNode) {
-      bool Inserted;
       {
         std::lock_guard<std::mutex> Guard(Mutex);
-        Inserted = ObjectsSeen.insert(Ref).second;
-        if (Inserted)
-          ++NumPending;
-      }
-      if (!Inserted) {
-        finishedNode();
-        return;
+        if (Cancelled)
+          return;
+        bool Inserted = ObjectsSeen.insert(Ref).second;
+        if (!Inserted)
+          return;
+        ++NumPending;
       }
       auto This = shared_from_this();
+      std::unique_ptr<llvm::cas::Cancellable> CancelObj;
       CAS->getProxyAsync(
-          Ref, [This, IsRootNode](Expected<std::optional<ObjectProxy>> Obj) {
+          Ref,
+          [This, IsRootNode, Ref](Expected<std::optional<ObjectProxy>> Obj) {
+            if (This->MayCancel) {
+              std::lock_guard<std::mutex> Guard(This->Mutex);
+              This->PendingCancellables.erase(Ref);
+            }
             auto _1 = llvm::make_scope_exit([&]() { This->finishedNode(); });
             if (!Obj) {
               This->encounteredError(Obj.takeError());
@@ -259,7 +333,12 @@ void clang_experimental_cas_loadObjectByString_async(
               This->visit(Sub, /*IsRootNode*/ false);
               return Error::success();
             }));
-          });
+          },
+          MayCancel ? &CancelObj : nullptr);
+      if (CancelObj) {
+        std::lock_guard<std::mutex> Guard(This->Mutex);
+        PendingCancellables[Ref] = std::move(CancelObj);
+      }
     }
 
     void finishedNode() {
@@ -291,9 +370,30 @@ void clang_experimental_cas_loadObjectByString_async(
       }
       ErrOccurred = std::move(E);
     }
+
+    void cancel() override {
+      std::lock_guard<std::mutex> Guard(Mutex);
+      Cancelled = true;
+      for (const auto &I : PendingCancellables)
+        I.second->cancel();
+      PendingCancellables.clear();
+    }
   };
 
-  auto WL = std::make_shared<AsyncObjectLoader>(Ctx, Callback, DBs.CAS);
+  auto WL = std::make_shared<AsyncObjectLoader>(
+      Ctx, Callback, DBs.CAS, /*MayCancel=*/OutToken != nullptr);
+  if (OutToken) {
+    // Using a wrapper since \c WrappedCancellationToken expects a
+    // \c std::unique_ptr.
+    struct ObjectLoaderWrapper : public llvm::cas::Cancellable {
+      std::shared_ptr<AsyncObjectLoader> ObjLoader;
+      ObjectLoaderWrapper(std::shared_ptr<AsyncObjectLoader> ObjLoader)
+          : ObjLoader(std::move(ObjLoader)) {}
+      void cancel() override { ObjLoader->cancel(); }
+    };
+    *OutToken = wrap(new WrappedCancellationToken{
+        std::make_unique<ObjectLoaderWrapper>(WL)});
+  }
   WL->visit(*Ref, /*IsRootNode*/ true);
 }
 
@@ -311,8 +411,7 @@ clang_experimental_cas_getCachedCompilation(CXCASDatabases CDBs,
     *OutError = nullptr;
 
   auto failure = [OutError](Error &&E) -> CXCASCachedCompilation {
-    if (OutError)
-      *OutError = cxerror::create(std::move(E));
+    passAsCXError(std::move(E), OutError);
     return nullptr;
   };
 
@@ -320,12 +419,8 @@ clang_experimental_cas_getCachedCompilation(CXCASDatabases CDBs,
   if (!KeyID)
     return failure(KeyID.takeError());
 
-  Optional<CASID> ValID;
-  if (Error E = DBs.Cache->get(*KeyID, Globally).moveInto(ValID))
-    return WrappedCachedCompilation::fromResultID(
-        std::move(E), *KeyID, DBs.CAS, DBs.Cache, OutError);
   return WrappedCachedCompilation::fromResultID(
-      ValID ? std::optional<CASID>(*ValID) : std::optional<CASID>(std::nullopt), *KeyID, DBs.CAS, DBs.Cache, OutError);
+      DBs.Cache->get(*KeyID, Globally), *KeyID, DBs.CAS, DBs.Cache, OutError);
 }
 
 void clang_experimental_cas_getCachedCompilation_async(
@@ -340,16 +435,21 @@ void clang_experimental_cas_getCachedCompilation_async(
   if (!KeyID)
     return Callback(Ctx, nullptr, cxerror::create(KeyID.takeError()));
 
-  DBs.Cache->getAsync(*KeyID, Globally,
-                      [KeyID = *KeyID, CAS = DBs.CAS, AC = DBs.Cache, Ctx,
-                       Callback](Expected<std::optional<CASID>> ResultID) {
-                        CXError Err = nullptr;
-                        CXCASCachedCompilation CComp =
-                            WrappedCachedCompilation::fromResultID(
-                                std::move(ResultID), std::move(KeyID),
-                                std::move(CAS), std::move(AC), &Err);
-                        Callback(Ctx, CComp, Err);
-                      });
+  std::unique_ptr<llvm::cas::Cancellable> CancelObj;
+  DBs.Cache->getAsync(
+      *KeyID, Globally,
+      [KeyID = *KeyID, CAS = DBs.CAS, AC = DBs.Cache, Ctx,
+       Callback](Expected<std::optional<CASID>> ResultID) {
+        CXError Err = nullptr;
+        CXCASCachedCompilation CComp = WrappedCachedCompilation::fromResultID(
+            std::move(ResultID), std::move(KeyID), std::move(CAS),
+            std::move(AC), &Err);
+        Callback(Ctx, CComp, Err);
+      },
+      OutToken != nullptr ? &CancelObj : nullptr);
+  if (OutToken && CancelObj) {
+    *OutToken = wrap(new WrappedCancellationToken{std::move(CancelObj)});
+  }
 }
 
 void clang_experimental_cas_CachedCompilation_dispose(
@@ -399,10 +499,16 @@ void clang_experimental_cas_CachedCompilation_makeGlobal(
     *OutToken = nullptr;
   WrappedCachedCompilation &WComp = *unwrap(CComp);
   CompileJobCacheResult &CacheResult = WComp.CachedResult;
-  WComp.AC->putAsync(WComp.CacheKey, CacheResult.getID(), /*Globally=*/true,
-                     [Ctx, Callback](Error E) {
-                       Callback(Ctx, cxerror::create(std::move(E)));
-                     });
+  std::unique_ptr<llvm::cas::Cancellable> CancelObj;
+  WComp.AC->putAsync(
+      WComp.CacheKey, CacheResult.getID(), /*Globally=*/true,
+      [Ctx, Callback](Error E) {
+        Callback(Ctx, cxerror::create(std::move(E)));
+      },
+      OutToken != nullptr ? &CancelObj : nullptr);
+  if (OutToken && CancelObj) {
+    *OutToken = wrap(new WrappedCancellationToken{std::move(CancelObj)});
+  }
 }
 
 CXCASReplayResult clang_experimental_cas_replayCompilation(
@@ -445,10 +551,7 @@ CXCASReplayResult clang_experimental_cas_replayCompilation(
                     std::move(Invok), WorkingDirectory, WComp.CacheKey,
                     WComp.CachedResult, DiagText)
                     .moveInto(Ret)) {
-    if (OutError)
-      *OutError = cxerror::create(std::move(E));
-    else
-      llvm::consumeError(std::move(E));
+    passAsCXError(std::move(E), OutError);
     return nullptr;
   }
 
@@ -468,12 +571,18 @@ CXString clang_experimental_cas_ReplayResult_getStderr(CXCASReplayResult CRR) {
   return cxstring::createDup(unwrap(CRR)->DiagText);
 }
 
-void clang_experimental_cas_CancellationToken_cancel(CXCASCancellationToken) {
-  // FIXME: Implement.
+void clang_experimental_cas_CancellationToken_cancel(
+    CXCASCancellationToken CCT) {
+  if (!CCT)
+    return;
+  unwrap(CCT)->CancelTok->cancel();
 }
 
-void clang_experimental_cas_CancellationToken_dispose(CXCASCancellationToken) {
-  // FIXME: Implement.
+void clang_experimental_cas_CancellationToken_dispose(
+    CXCASCancellationToken CCT) {
+  if (!CCT)
+    return;
+  delete unwrap(CCT);
 }
 
 void clang_experimental_cas_ObjectStore_dispose(CXCASObjectStore CAS) {

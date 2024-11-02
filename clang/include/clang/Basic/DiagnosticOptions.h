@@ -72,6 +72,7 @@ class DiagnosticOptions : public RefCountedBase<DiagnosticOptions>{
                                   clang::DiagnosticsEngine *, bool);
 
   friend class CompilerInvocation;
+  friend class CompilerInvocationBase;
 
 public:
   enum TextDiagnosticFormat { Clang, MSVC, Vi, SARIF };
@@ -84,7 +85,8 @@ public:
     DefaultTemplateBacktraceLimit = 10,
     DefaultConstexprBacktraceLimit = 10,
     DefaultSpellCheckingLimit = 50,
-    DefaultSnippetLineLimit = 1,
+    DefaultSnippetLineLimit = 16,
+    DefaultShowLineNumbers = 1,
   };
 
   // Define simple diagnostic options (with no accessors).

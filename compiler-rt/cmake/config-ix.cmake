@@ -88,11 +88,11 @@ check_cxx_compiler_flag(-fno-profile-instr-generate COMPILER_RT_HAS_FNO_PROFILE_
 check_cxx_compiler_flag(-fno-profile-instr-use COMPILER_RT_HAS_FNO_PROFILE_INSTR_USE_FLAG)
 check_cxx_compiler_flag(-fno-coverage-mapping COMPILER_RT_HAS_FNO_COVERAGE_MAPPING_FLAG)
 check_cxx_compiler_flag("-Werror -mcrc32"    COMPILER_RT_HAS_MCRC32_FLAG)
-check_cxx_compiler_flag("-Werror -msse3" COMPILER_RT_HAS_MSSE3_FLAG)
 check_cxx_compiler_flag("-Werror -msse4.2"   COMPILER_RT_HAS_MSSE4_2_FLAG)
 check_cxx_compiler_flag(--sysroot=.          COMPILER_RT_HAS_SYSROOT_FLAG)
 check_cxx_compiler_flag("-Werror -mcrc"      COMPILER_RT_HAS_MCRC_FLAG)
 check_cxx_compiler_flag(-fno-partial-inlining COMPILER_RT_HAS_FNO_PARTIAL_INLINING_FLAG)
+check_cxx_compiler_flag(-Werror -ftrivial-auto-var-init=pattern COMPILER_RT_HAS_TRIVIAL_AUTO_INIT)
 
 if(NOT WIN32 AND NOT CYGWIN)
   # MinGW warns if -fvisibility-inlines-hidden is used.
@@ -116,11 +116,13 @@ check_cxx_compiler_flag("-Werror -Wframe-larger-than=512" COMPILER_RT_HAS_WFRAME
 check_cxx_compiler_flag("-Werror -Wglobal-constructors"   COMPILER_RT_HAS_WGLOBAL_CONSTRUCTORS_FLAG)
 check_cxx_compiler_flag("-Werror -Wc99-extensions"     COMPILER_RT_HAS_WC99_EXTENSIONS_FLAG)
 check_cxx_compiler_flag("-Werror -Wgnu"                COMPILER_RT_HAS_WGNU_FLAG)
-check_cxx_compiler_flag("-Werror -Wnon-virtual-dtor"   COMPILER_RT_HAS_WNON_VIRTUAL_DTOR_FLAG)
 check_cxx_compiler_flag("-Werror -Wvariadic-macros"    COMPILER_RT_HAS_WVARIADIC_MACROS_FLAG)
 check_cxx_compiler_flag("-Werror -Wunused-parameter"   COMPILER_RT_HAS_WUNUSED_PARAMETER_FLAG)
 check_cxx_compiler_flag("-Werror -Wcovered-switch-default" COMPILER_RT_HAS_WCOVERED_SWITCH_DEFAULT_FLAG)
 check_cxx_compiler_flag("-Werror -Wsuggest-override"   COMPILER_RT_HAS_WSUGGEST_OVERRIDE_FLAG)
+check_cxx_compiler_flag("-Werror -Wthread-safety" COMPILER_RT_HAS_WTHREAD_SAFETY_FLAG)
+check_cxx_compiler_flag("-Werror -Wthread-safety-reference" COMPILER_RT_HAS_WTHREAD_SAFETY_REFERENCE_FLAG)
+check_cxx_compiler_flag("-Werror -Wthread-safety-beta" COMPILER_RT_HAS_WTHREAD_SAFETY_BETA_FLAG)
 check_cxx_compiler_flag(-Wno-pedantic COMPILER_RT_HAS_WNO_PEDANTIC)
 check_cxx_compiler_flag(-Wno-format COMPILER_RT_HAS_WNO_FORMAT)
 check_cxx_compiler_flag(-Wno-format-pedantic COMPILER_RT_HAS_WNO_FORMAT_PEDANTIC)
@@ -224,7 +226,7 @@ set(COMPILER_RT_SUPPORTED_ARCH)
 # runtime libraries supported by our current compilers cross-compiling
 # abilities.
 set(SIMPLE_SOURCE ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/simple.cc)
-file(WRITE ${SIMPLE_SOURCE} "#include <stdlib.h>\n#include <stdio.h>\nint main() { printf(\"hello, world\"); }\n")
+file(WRITE ${SIMPLE_SOURCE} "#include <stdlib.h>\n#include <stdio.h>\nint main(void) { printf(\"hello, world\"); }\n")
 
 # Detect whether the current target platform is 32-bit or 64-bit, and setup
 # the correct commandline flags needed to attempt to target 32-bit and 64-bit.
@@ -271,6 +273,9 @@ endfunction()
 # specific architecture.  When cross-compiling, this is controled via
 # COMPILER_RT_TEST_COMPILER and COMPILER_RT_TEST_COMPILER_CFLAGS.
 macro(get_test_cc_for_arch arch cc_out cflags_out)
+  if (NOT ${ARGC} EQUAL 3)
+    message(FATAL_ERROR "got too many args. expected 3, got ${ARGC} (namely: ${ARGV})")
+  endif()
   if(ANDROID OR (NOT APPLE AND ${arch} MATCHES "arm|aarch64|riscv32|riscv64"))
     # This is only true if we are cross-compiling.
     # Build all tests with host compiler and use host tools.
@@ -441,7 +446,7 @@ if(APPLE)
 
   # Note: In order to target x86_64h on OS X the minimum deployment target must
   # be 10.8 or higher.
-  set(DEFAULT_SANITIZER_MIN_OSX_VERSION 10.10)
+  set(DEFAULT_SANITIZER_MIN_OSX_VERSION 10.13)
   set(DARWIN_osx_MIN_VER_FLAG "-mmacosx-version-min")
   if(NOT SANITIZER_MIN_OSX_VERSION)
     string(REGEX MATCH "${DARWIN_osx_MIN_VER_FLAG}=([.0-9]+)"
@@ -620,9 +625,6 @@ if(APPLE)
   list_intersect(CFI_SUPPORTED_ARCH
     ALL_CFI_SUPPORTED_ARCH
     SANITIZER_COMMON_SUPPORTED_ARCH)
-  list_intersect(SCUDO_SUPPORTED_ARCH
-    ALL_SCUDO_SUPPORTED_ARCH
-    SANITIZER_COMMON_SUPPORTED_ARCH)
   list_intersect(SCUDO_STANDALONE_SUPPORTED_ARCH
     ALL_SCUDO_STANDALONE_SUPPORTED_ARCH
     SANITIZER_COMMON_SUPPORTED_ARCH)
@@ -662,7 +664,6 @@ else()
   filter_available_targets(SAFESTACK_SUPPORTED_ARCH
     ${ALL_SAFESTACK_SUPPORTED_ARCH})
   filter_available_targets(CFI_SUPPORTED_ARCH ${ALL_CFI_SUPPORTED_ARCH})
-  filter_available_targets(SCUDO_SUPPORTED_ARCH ${ALL_SCUDO_SUPPORTED_ARCH})
   filter_available_targets(SCUDO_STANDALONE_SUPPORTED_ARCH ${ALL_SCUDO_STANDALONE_SUPPORTED_ARCH})
   filter_available_targets(XRAY_SUPPORTED_ARCH ${ALL_XRAY_SUPPORTED_ARCH})
   filter_available_targets(SHADOWCALLSTACK_SUPPORTED_ARCH
@@ -702,7 +703,7 @@ if(COMPILER_RT_SUPPORTED_ARCH)
 endif()
 message(STATUS "Compiler-RT supported architectures: ${COMPILER_RT_SUPPORTED_ARCH}")
 
-set(ALL_SANITIZERS asan;dfsan;msan;hwasan;tsan;safestack;cfi;scudo;ubsan_minimal;gwp_asan;asan_abi)
+set(ALL_SANITIZERS asan;dfsan;msan;hwasan;tsan;safestack;cfi;scudo_standalone;ubsan_minimal;gwp_asan;asan_abi)
 set(COMPILER_RT_SANITIZERS_TO_BUILD all CACHE STRING
     "sanitizers to build if supported on the target (all;${ALL_SANITIZERS})")
 list_replace(COMPILER_RT_SANITIZERS_TO_BUILD all "${ALL_SANITIZERS}")
@@ -829,18 +830,14 @@ else()
 endif()
 
 #TODO(kostyak): add back Android & Fuchsia when the code settles a bit.
-if (SCUDO_STANDALONE_SUPPORTED_ARCH AND OS_NAME MATCHES "Linux" AND
+if (SCUDO_STANDALONE_SUPPORTED_ARCH AND
+    COMPILER_RT_BUILD_SANITIZERS AND
+    "scudo_standalone" IN_LIST COMPILER_RT_SANITIZERS_TO_BUILD AND
+    OS_NAME MATCHES "Linux" AND
     COMPILER_RT_HAS_AUXV)
   set(COMPILER_RT_HAS_SCUDO_STANDALONE TRUE)
 else()
   set(COMPILER_RT_HAS_SCUDO_STANDALONE FALSE)
-endif()
-
-if (COMPILER_RT_HAS_SANITIZER_COMMON AND SCUDO_SUPPORTED_ARCH AND
-    OS_NAME MATCHES "Linux|Fuchsia")
-  set(COMPILER_RT_HAS_SCUDO TRUE)
-else()
-  set(COMPILER_RT_HAS_SCUDO FALSE)
 endif()
 
 if (COMPILER_RT_HAS_SANITIZER_COMMON AND XRAY_SUPPORTED_ARCH AND
@@ -875,7 +872,10 @@ endif()
 # calling malloc on first use.
 # TODO(hctim): Enable this on Android again. Looks like it's causing a SIGSEGV
 # for Scudo and GWP-ASan, further testing needed.
-if (GWP_ASAN_SUPPORTED_ARCH AND COMPILER_RT_BUILD_GWP_ASAN AND
+if (GWP_ASAN_SUPPORTED_ARCH AND
+    COMPILER_RT_BUILD_GWP_ASAN AND
+    COMPILER_RT_BUILD_SANITIZERS AND
+    "gwp_asan" IN_LIST COMPILER_RT_SANITIZERS_TO_BUILD AND
     OS_NAME MATCHES "Linux")
   set(COMPILER_RT_HAS_GWP_ASAN TRUE)
 else()

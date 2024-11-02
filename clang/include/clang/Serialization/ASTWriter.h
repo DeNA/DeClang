@@ -76,6 +76,10 @@ class StoredDeclsList;
 class SwitchCase;
 class Token;
 
+namespace SrcMgr {
+class FileInfo;
+} // namespace SrcMgr
+
 /// Writes an AST file containing the contents of a translation unit.
 ///
 /// The ASTWriter class produces a bitstream containing the serialized
@@ -467,10 +471,15 @@ private:
   std::vector<SourceRange> NonAffectingRanges;
   std::vector<SourceLocation::UIntTy> NonAffectingOffsetAdjustments;
 
-  /// Collects input files that didn't affect compilation of the current module,
+  /// Computes input files that didn't affect compilation of the current module,
   /// and initializes data structures necessary for leaving those files out
   /// during \c SourceManager serialization.
-  void collectNonAffectingInputFiles();
+  void computeNonAffectingInputFiles();
+
+  /// Some affecting files can be included from files that are not affecting.
+  /// This function erases source locations pointing into such files.
+  SourceLocation getAffectingIncludeLoc(const SourceManager &SourceMgr,
+                                        const SrcMgr::FileInfo &File);
 
   /// Returns an adjusted \c FileID, accounting for any non-affecting input
   /// files.
@@ -524,7 +533,6 @@ private:
   void WriteTypeAbbrevs();
   void WriteType(QualType T);
 
-  bool isLookupResultExternal(StoredDeclsList &Result, DeclContext *DC);
   bool isLookupResultEntirelyExternal(StoredDeclsList &Result, DeclContext *DC);
 
   void GenerateNameLookupTable(const DeclContext *DC,
@@ -746,7 +754,7 @@ public:
   bool hasChain() const { return Chain; }
   ASTReader *getChain() const { return Chain; }
 
-  bool isWritingNamedModules() const {
+  bool isWritingStdCXXNamedModules() const {
     return WritingModule && WritingModule->isModulePurview();
   }
 

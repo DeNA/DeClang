@@ -24,6 +24,7 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Expression/IRExecutionUnit.h"
+#include "lldb/Expression/ObjectFileJIT.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -39,7 +40,7 @@
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 
-#include "lldb/../../source/Plugins/ObjectFile/JIT/ObjectFileJIT.h"
+#include <optional>
 
 using namespace lldb_private;
 
@@ -221,7 +222,7 @@ Status IRExecutionUnit::DisassembleFunction(Stream &stream,
                                       UINT32_MAX, false, false);
 
   InstructionList &instruction_list = disassembler_sp->GetInstructionList();
-  instruction_list.Dump(&stream, true, true, /*show_control_flow_kind=*/true,
+  instruction_list.Dump(&stream, true, true, /*show_control_flow_kind=*/false,
                         &exe_ctx);
 
   return ret;
@@ -232,18 +233,17 @@ struct IRExecDiagnosticHandler : public llvm::DiagnosticHandler {
   Status *err;
   IRExecDiagnosticHandler(Status *err) : err(err) {}
   bool handleDiagnostics(const llvm::DiagnosticInfo &DI) override {
-    if (DI.getKind() == llvm::DK_SrcMgr) {
+    if (DI.getSeverity() == llvm::DS_Error) {
       const auto &DISM = llvm::cast<llvm::DiagnosticInfoSrcMgr>(DI);
       if (err && err->Success()) {
         err->SetErrorToGenericError();
         err->SetErrorStringWithFormat(
-            "Inline assembly error: %s",
+            "IRExecution error: %s",
             DISM.getSMDiag().getMessage().str().c_str());
       }
-      return true;
     }
 
-    return false;
+    return true;
   }
 };
 } // namespace
@@ -450,11 +450,11 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
     }
   };
 
-  for (llvm::GlobalVariable &global_var : m_module->getGlobalList()) {
+  for (llvm::GlobalVariable &global_var : m_module->globals()) {
     RegisterOneValue(global_var);
   }
 
-  for (llvm::GlobalAlias &global_alias : m_module->getAliasList()) {
+  for (llvm::GlobalAlias &global_alias : m_module->aliases()) {
     RegisterOneValue(global_alias);
   }
 
@@ -463,7 +463,7 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
   if (m_failed_lookups.size()) {
     StreamString ss;
 
-    ss.PutCString("Couldn't lookup symbols:\n");
+    ss.PutCString("Couldn't look up symbols:\n");
 
     bool emitNewLine = false;
 
@@ -476,7 +476,9 @@ void IRExecutionUnit::GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
     }
 
     m_failed_lookups.clear();
-
+    ss.PutCString(
+        "\nHint: The expression tried to call a function that is not present "
+        "in the target, perhaps because it was optimized out by the compiler.");
     error.SetErrorString(ss.GetString());
 
     return;
@@ -741,9 +743,9 @@ public:
   LoadAddressResolver(Target *target, bool &symbol_was_missing_weak)
       : m_target(target), m_symbol_was_missing_weak(symbol_was_missing_weak) {}
 
-  llvm::Optional<lldb::addr_t> Resolve(SymbolContextList &sc_list) {
+  std::optional<lldb::addr_t> Resolve(SymbolContextList &sc_list) {
     if (sc_list.IsEmpty())
-      return llvm::None;
+      return std::nullopt;
 
     lldb::addr_t load_address = LLDB_INVALID_ADDRESS;
 
@@ -797,7 +799,7 @@ public:
     if (m_symbol_was_missing_weak)
       return 0;
 
-    return llvm::None;
+    return std::nullopt;
   }
 
   lldb::addr_t GetBestInternalLoadAddress() const {
@@ -1240,7 +1242,7 @@ void IRExecutionUnit::PopulateSymtab(lldb_private::ObjectFile *obj_file,
       }
     }
 
-    for (llvm::GlobalVariable &global_var : m_module->getGlobalList()) {
+    for (llvm::GlobalVariable &global_var : m_module->globals()) {
       if (global_var.isDeclaration() ||
           !(global_var.hasExternalLinkage() ||
             global_var.hasLinkOnceODRLinkage()))

@@ -22,6 +22,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Triple.h"
 
 using namespace Fortran::frontend;
 
@@ -116,7 +117,8 @@ CompilerInstance::createOutputFileImpl(llvm::StringRef outputFilePath,
   std::unique_ptr<llvm::raw_fd_ostream> os;
 
   std::error_code error;
-  os.reset(new llvm::raw_fd_ostream(outputFilePath, error,
+  os.reset(new llvm::raw_fd_ostream(
+      outputFilePath, error,
       (binary ? llvm::sys::fs::OF_None : llvm::sys::fs::OF_TextWithCRLF)));
   if (error) {
     return llvm::errorCodeToError(error);
@@ -142,6 +144,11 @@ void CompilerInstance::clearOutputFiles(bool eraseFiles) {
 
 bool CompilerInstance::executeAction(FrontendAction &act) {
   auto &invoc = this->getInvocation();
+
+  llvm::Triple targetTriple{llvm::Triple(invoc.getTargetOpts().triple)};
+  if (targetTriple.getArch() == llvm::Triple::ArchType::x86_64) {
+    invoc.getDefaultKinds().set_quadPrecisionKind(10);
+  }
 
   // Set some sane defaults for the frontend.
   invoc.setDefaultFortranOpts();

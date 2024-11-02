@@ -16,12 +16,7 @@ class TestCase(TestBase):
 
         # First stop tests small strings.
 
-        (
-            _,
-            process,
-            _,
-            _,
-        ) = lldbutil.run_to_source_breakpoint(
+        _, process, _, _, = lldbutil.run_to_source_breakpoint(
             self, "break here", lldb.SBFileSpec("main.swift")
         )
 
@@ -50,6 +45,7 @@ class TestCase(TestBase):
         self.expect(
             "v substrings",
             substrs=[
-                f'[{i}] = "{substring}"' for i, substring in enumerate(subalphabets)
+                f'[{i}] = "{substring}"'
+                for i, substring in enumerate(subalphabets)
             ],
         )

@@ -22,6 +22,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 
 namespace lldb_private {
 class DataExtractor;
@@ -34,7 +35,7 @@ class ValueObjectDynamicValue : public ValueObject {
 public:
   ~ValueObjectDynamicValue() override = default;
 
-  llvm::Optional<uint64_t> GetByteSize() override;
+  std::optional<uint64_t> GetByteSize() override;
 
   ConstString GetTypeName() override;
 
@@ -42,7 +43,7 @@ public:
 
   ConstString GetDisplayTypeName() override;
 
-  size_t CalculateNumChildren(uint32_t max) override;
+  llvm::Expected<uint32_t> CalculateNumChildren(uint32_t max) override;
 
   lldb::ValueType GetValueType() const override;
 
@@ -104,10 +105,6 @@ protected:
   }
 
   bool HasDynamicValueTypeInfo() override { return true; }
-
-  /// Determine whether the scratch AST context has been replaced
-  /// since this dynamic type has been created.
-  bool DynamicValueTypeInfoNeedsUpdate();
 
   CompilerType GetCompilerTypeImpl() override;
 

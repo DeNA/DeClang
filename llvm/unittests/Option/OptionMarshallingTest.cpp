@@ -6,6 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringRef.h"
 #include "gtest/gtest.h"
 
 struct OptionWithMarshallingInfo {

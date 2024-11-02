@@ -549,15 +549,41 @@ func.func @duplicate_dictionary_attr_key() {
 
 // -----
 
-// expected-error@below {{dense array attribute expected ranked tensor type}}
-test.typed_attr i32 = array<1>
+// expected-error@below {{expected '[' after 'distinct'}}
+#attr = distinct<
 
 // -----
 
-// expected-error@below {{does not match parsed type}}
-test.typed_attr tensor<1xi32> = array<>
+// expected-error@below {{expected distinct ID}}
+#attr = distinct[i8
 
 // -----
 
-// expected-error@below {{does not match parsed type}}
-test.typed_attr tensor<0xi32> = array<1>
+// expected-error@below {{expected an unsigned 64-bit integer}}
+#attr = distinct[0xAAAABBBBEEEEFFFF1]
+
+// -----
+
+// expected-error@below {{expected ']' to close distinct ID}}
+#attr = distinct[8)
+
+// -----
+
+// expected-error@below {{expected '<' after distinct ID}}
+#attr = distinct[8](
+
+// -----
+
+// expected-error@below {{expected attribute}}
+#attr = distinct[8]<attribute
+
+// -----
+
+// expected-error@below {{expected '>' to close distinct attribute}}
+#attr = distinct[8]<@foo]
+
+// -----
+
+#attr = distinct[0]<42 : i32>
+// expected-error@below {{referenced attribute does not match previous definition: 42 : i32}}
+#attr1 = distinct[0]<43 : i32>

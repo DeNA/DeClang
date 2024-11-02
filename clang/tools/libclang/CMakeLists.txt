@@ -78,6 +78,7 @@ set(LIBS
   clangSerialization
   clangTooling
   clangToolingRefactor
+  clangToolingSyntax
 )
 
 if (CLANG_ENABLE_ARCMT)
@@ -158,6 +159,7 @@ add_clang_library(libclang ${ENABLE_SHARED} ${ENABLE_STATIC} INSTALL_WITH_TOOLCH
   ${LLVM_TARGETS_TO_BUILD}
   Core
   Support
+  TargetParser
   # NOTE: The following were added to keep BUILD_SHARED_LIBS=TRUE working on
   # Apple's downstream branch. They are not required upstream at the moment.
   Option

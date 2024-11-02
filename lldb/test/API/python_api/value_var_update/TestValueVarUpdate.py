@@ -48,7 +48,9 @@ class ValueVarUpdateTestCase(TestBase):
         if self.TraceOn():
             self.runCmd("frame variable")
 
-        self.assertTrue(i_val != i.GetValueAsUnsigned(0), "GetValue() is saying a lie")
+        self.assertNotEqual(
+            i_val, i.GetValueAsUnsigned(0), "GetValue() is saying a lie"
+        )
         self.assertTrue(i.GetValueDidChange(), "GetValueDidChange() is saying a lie")
 
         # Check complex type

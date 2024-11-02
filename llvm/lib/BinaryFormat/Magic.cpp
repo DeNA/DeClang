@@ -33,6 +33,10 @@ static bool startswith(StringRef Magic, const char (&S)[N]) {
 file_magic llvm::identify_magic(StringRef Magic) {
   if (Magic.size() < 4)
     return file_magic::unknown;
+  // BEGIN MCCAS
+  if (Magic.startswith(casidObjectMagicPrefix))
+    return file_magic::cas_id;
+  // END MCCAS
   switch ((unsigned char)Magic[0]) {
   case 0x00: {
     // COFF bigobj, CL.exe's LTO object file, or short import library file
@@ -242,6 +246,11 @@ file_magic llvm::identify_magic(StringRef Magic) {
     break;
 
   case 0x41: // ARM64EC windows
+    if (Magic[1] == char(0xA6))
+      return file_magic::coff_object;
+    break;
+
+  case 0x4e: // ARM64X windows
     if (Magic[1] == char(0xA6))
       return file_magic::coff_object;
     break;

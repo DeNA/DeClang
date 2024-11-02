@@ -373,6 +373,7 @@ enum StabType {
   N_SSYM = 0x60u,
   N_SO = 0x64u,
   N_OSO = 0x66u,
+  N_LIB = 0x68u,
   N_LSYM = 0x80u,
   N_BINCL = 0x82u,
   N_SOL = 0x84u,
@@ -497,21 +498,14 @@ enum { VM_PROT_READ = 0x1, VM_PROT_WRITE = 0x2, VM_PROT_EXECUTE = 0x4 };
 
 // Values for platform field in build_version_command.
 enum PlatformType {
-  PLATFORM_UNKNOWN = 0,
-  PLATFORM_MACOS = 1,
-  PLATFORM_IOS = 2,
-  PLATFORM_TVOS = 3,
-  PLATFORM_WATCHOS = 4,
-  PLATFORM_BRIDGEOS = 5,
-  PLATFORM_MACCATALYST = 6,
-  PLATFORM_IOSSIMULATOR = 7,
-  PLATFORM_TVOSSIMULATOR = 8,
-  PLATFORM_WATCHOSSIMULATOR = 9,
-  PLATFORM_DRIVERKIT = 10,
+#define PLATFORM(platform, id, name, build_name, target, tapi_target,          \
+                 marketing)                                                    \
+  PLATFORM_##platform = id,
+#include "MachO.def"
 };
 
 // Values for tools enum in build_tool_version.
-enum { TOOL_CLANG = 1, TOOL_SWIFT = 2, TOOL_LD = 3 };
+enum { TOOL_CLANG = 1, TOOL_SWIFT = 2, TOOL_LD = 3, TOOL_LLD = 4 };
 
 // Structs from <mach-o/loader.h>
 
@@ -1039,8 +1033,8 @@ enum {
 // Values for dyld_chained_starts_in_segment::page_start.
 enum {
   DYLD_CHAINED_PTR_START_NONE = 0xFFFF,
-  DYLD_CHAINED_PTR_START_MULTI = 0x8000,
-  DYLD_CHAINED_PTR_START_LAST = 0x8000,
+  DYLD_CHAINED_PTR_START_MULTI = 0x8000, // page which has multiple starts
+  DYLD_CHAINED_PTR_START_LAST = 0x8000,  // last chain_start for a given page
 };
 
 // Values for dyld_chained_starts_in_segment::pointer_format.

@@ -87,6 +87,13 @@ add_entrypoint_object(
 )
 
 add_entrypoint_object(
+  getcwd
+  ALIAS
+  DEPENDS
+    .${LIBC_TARGET_OS}.getcwd
+)
+
+add_entrypoint_object(
   getpid
   ALIAS
   DEPENDS
@@ -246,4 +253,49 @@ add_entrypoint_object(
     environ.cpp
   HDRS
     environ.h
+)
+
+add_entrypoint_object(
+  getopt
+  SRCS
+    getopt.cpp
+  HDRS
+    getopt.h
+  DEPENDS
+    libc.include.unistd
+    libc.src.__support.CPP.optional
+    libc.src.__support.CPP.string_view
+    libc.src.__support.File.file
+    libc.src.stdio.fprintf
+)
+
+add_entrypoint_object(
+  swab
+  SRCS
+    swab.cpp
+  HDRS
+    swab.h
+  DEPENDS
+    libc.include.unistd
+    libc.src.__support.CPP.optional
+)
+
+# These aren't actual external per-se, but this is just an easy way to create
+# targets that don't do anything. They exist to be referenced in entrypoints.txt
+# so that the header will properly expose their definitions. Their declaration
+# is in getopt.cpp.
+add_entrypoint_external(
+  optarg
+)
+
+add_entrypoint_external(
+  optind
+)
+
+add_entrypoint_external(
+  optopt
+)
+
+add_entrypoint_external(
+  opterr
 )

@@ -5,13 +5,7 @@ import lldbsuite.test.lldbutil as lldbutil
 import os
 import unittest2
 
-
 class TestSwiftRewriteClangPaths(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @skipUnlessDarwin
     @skipIfDarwinEmbedded
     @swiftTest
@@ -20,7 +14,8 @@ class TestSwiftRewriteClangPaths(TestBase):
         self.build()
         log = self.getBuildArtifact("types.log")
         self.runCmd('log enable lldb types -f "%s"' % log)
-        target, process, thread, bkpt = lldbutil.run_to_name_breakpoint(self, "main")
+        target, process, thread, bkpt = lldbutil.run_to_name_breakpoint(
+            self, 'main')
         self.expect("expression 1", substrs=["1"])
 
         # Scan through the types log.

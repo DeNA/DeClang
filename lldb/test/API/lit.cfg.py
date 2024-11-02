@@ -128,6 +128,7 @@ if is_configured("llvm_use_sanitizer"):
             config.environment["DYLD_INSERT_LIBRARIES"] = find_sanitizer_runtime(
                 "libclang_rt.asan_osx_dynamic.dylib"
             )
+            config.environment["MallocNanoZone"] = "0"
 
     if "Thread" in config.llvm_use_sanitizer:
         if "Darwin" in config.host_os:
@@ -260,6 +261,9 @@ if is_configured("llvm_tools_dir"):
 if is_configured("server"):
     dotest_cmd += ["--server", config.server]
 
+if is_configured("lldb_obj_root"):
+    dotest_cmd += ["--lldb-obj-root", config.lldb_obj_root]
+
 if is_configured("lldb_libs_dir"):
     dotest_cmd += ["--lldb-libs-dir", config.lldb_libs_dir]
 
@@ -270,7 +274,7 @@ if (
     "lldb-repro-capture" in config.available_features
     or "lldb-repro-replay" in config.available_features
 ):
-    dotest_cmd += ["--skip-category=lldb-vscode", "--skip-category=std-module"]
+    dotest_cmd += ["--skip-category=lldb-dap", "--skip-category=std-module"]
 
 # Skip the swiftmaccatalyst category if its stdlib support is missing.
 if swift_stdlibs_dir and not os.path.isdir(

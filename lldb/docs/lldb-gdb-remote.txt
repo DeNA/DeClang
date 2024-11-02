@@ -38,7 +38,45 @@ read packet: +
 read packet: $OK#9a
 send packet: +
 
+//----------------------------------------------------------------------
+// "QSupported"
+//
+// BRIEF
+//  Query the GDB remote server for features it supports
+//
+// PRIORITY TO IMPLEMENT
+//  Optional.
+//----------------------------------------------------------------------
 
+QSupported is a standard GDB Remote Serial Protocol packet, but
+there are several additions to the response that lldb can parse.
+They are not all listed here.
+
+An example exchange:
+
+send packet: qSupported:xmlRegisters=i386,arm,mips,arc;multiprocess+;fork-events+;vfork-events+
+
+read packet: qXfer:features:read+;PacketSize=20000;qEcho+;native-signals+;SupportedCompressions=lzfse,zlib-deflate,lz4,lzma;SupportedWatchpointTypes=aarch64-mask,aarch64-bas;
+
+In the example above, three lldb extensions are shown:
+
+  PacketSize=20000
+    The base 16 maximum packet size that the stub can handle.
+  SupportedCompressions=<item,item,...>
+    A list of compression types that the stub can use to compress packets 
+    when the QEnableCompression packet is used to request one of them.
+  SupportedWatchpointTypes=<item,item,...>
+    A list of watchpoint types that this stub can manage.
+    Currently defined names are:
+        x86_64       64-bit x86-64 watchpoints
+                     (1, 2, 4, 8 byte watchpoints aligned to those amounts)
+        aarch64-bas  AArch64 Byte Address Select watchpoints
+                     (any number of contiguous bytes within a doubleword)
+        aarch64-mask AArch64 MASK watchpoints
+                     (any power-of-2 region of memory from 8 to 2GB, aligned)
+    If nothing is specified, lldb will default to sending power-of-2 
+    watchpoints, up to a pointer size, `sizeof(void*)`, a reasonable 
+    baseline assumption.
 
 //----------------------------------------------------------------------
 // "A" - launch args packet
@@ -590,7 +628,7 @@ read packet: <binary data>/E<error code>;AAAAAAAAA
 
 With LLDB, for register information, remote GDB servers can add
 support for the "qRegisterInfoN" packet where "N" is a zero based
-base16 register number that must start at zero and increase by one
+base 16 register number that must start at zero and increase by one
 for each register that is supported.  The response is done in typical
 GDB remote fashion where a series of "KEY:VALUE;" pairs are returned.
 An example for the x86_64 registers is included below:
@@ -806,7 +844,7 @@ generic     If the register is a generic register that most CPUs have, classify
                    ABI) would include a "generic=fp;" key value pair)
              ra  (a return address register. for example "name=lr;" (32 bit ARM)
                   would include a "generic=ra;" key value pair)
-             fp  (a CPU flags register. for example "name=eflags;" (i386),
+             flags  (a CPU flags register. for example "name=eflags;" (i386),
                   "name=rflags;" (x86_64), "name=cpsr;" (32 bit ARM)
                   would include a "generic=flags;" key value pair)
              arg1 - arg8 (specified for registers that contain function
@@ -1049,7 +1087,7 @@ Suggested key names:
 //  64-bit slices so it may be impossible to know until you're attached to a real
 //  process to know what you're working with.
 //
-//  All numeric fields return base-16 numbers without any "0x" prefix.
+//  All numeric fields return base 16 numbers without any "0x" prefix.
 //----------------------------------------------------------------------
 
 An i386 process:
@@ -1081,7 +1119,7 @@ main-binary-uuid: is the UUID of a firmware type binary that the gdb stub knows 
 main-binary-address: is the load address of the firmware type binary
 main-binary-slide: is the slide of the firmware type binary, if address isn't known
 
-binary-addresses: A comma-separated list of binary load addresses base16.  
+binary-addresses: A comma-separated list of binary load addresses base 16.  
                   lldb will parse the binaries in memory to get UUIDs, then
                   try to find the binaries & debug info by UUID.  Intended for
                   use with a small number of firmware type binaries where the 
@@ -1298,7 +1336,7 @@ tuples to return are:
 
     dirty-pages:[<hexaddr>][,<hexaddr]; // A list of memory pages within this
                  // region that are "dirty" -- they have been modified.
-                 // Page addresses are in base16.  The size of a page can
+                 // Page addresses are in base 16.  The size of a page can
                  // be found from the qHostInfo's page-size key-value.
                  //
                  // If the stub supports identifying dirty pages within a
@@ -1567,17 +1605,57 @@ for this region.
 //                          "signal" stopped due to an actual unix signal, not
 //                              just the debugger using a unix signal to keep
 //                              the GDB remote client happy.
-//                          "watchpoint". Should be used in conjunction with
-//                              the "watch"/"rwatch"/"awatch" key value pairs.
+//                          "watchpoint". Can be used with of the 
+//                              "watch"/"rwatch"/"awatch" key value pairs.
+//                              Or can be used *instead* of those keys, 
+//                              with the specially formatted "description" field.
 //                          "exception" an exception stop reason. Use with
 //                              the "description" key/value pair to describe the
 //                              exceptional event the user should see as the stop
 //                              reason.
 //  "description" ascii-hex An ASCII hex string that contains a more descriptive
-//                          reason that the thread stopped. This is only needed
-//                          if none of the key/value pairs are enough to
-//                          describe why something stopped.
+//           reason that the thread stopped. This is only needed
+//           if none of the key/value pairs are enough to
+//           describe why something stopped.
 //
+//           For "reason:watchpoint", "description" is an ascii-hex
+//           encoded string with between one and three base 10 numbers,
+//           space separated.  The three numbers are
+//             1. watchpoint address.  This address should always be within
+//                a memory region lldb has a watchpoint on.  
+//                On architectures where the actual reported hit address may
+//                be outside the watchpoint that was triggered, the remote
+//                stub should determine which watchpoint was triggered and
+//                report an address from within its range.
+//             2. watchpoint hardware register index number.
+//             3. actual watchpoint trap address, which may be outside
+//                the range of any watched region of memory. On MIPS, an addr
+//                outside a watched range means lldb should disable the wp, 
+//                step, re-enable the wp and continue silently.
+//
+//           On MIPS, the low 3 bits are masked so if a watchpoint is on 
+//           0x1004, a 2-byte write to 0x1000 will trigger the watchpoint 
+//           (a false positive hit), and lldb needs to disable the 
+//           watchpoint at 0x1004, inst-step, then re-enable the watchpoint
+//           and not make this a user visible event. The description here 
+//           would be "0x1004 0 0x1000". lldb needs a known watchpoint address
+//           in the first field, so it can disable it & step.
+//
+//           On AArch64 we have a related issue, where you watch 4 bytes at 
+//           0x1004, an instruction does an 8-byte write starting at 
+//           0x1000 (a true watchpoint hit) and the hardware may report the 
+//           trap address as 0x1000 - before the watched memory region - 
+//           with the write extending into the watched region.  This can 
+//           be reported as "0x1004 0 0x1000".  lldb will use 0x1004 to 
+//           identify which Watchpoint was triggered, and can report 0x1000 
+//           to the user.  The behavior of silently stepping over the 
+//           watchpoint, with an 3rd field addr outside the range, is 
+//           restricted to MIPS.
+//           There may be false-positive watchpoint hits on AArch64 as well,
+//           in the SVE Streaming Mode, but that is less common (see ESR 
+//           register flag "WPF", "Watchpoint might be False-Positive") and
+//           not currently handled by lldb.
+//           
 //  "threads"     comma-sep-base16  A list of thread ids for all threads (including
 //                                  the thread that we're reporting as stopped) that
 //                                  are live in the process right now.  lldb may
@@ -1867,7 +1945,7 @@ for this region.
 //
 //  jThreadExtendedInfo:{"thread":612910}
 //
-// Because this is a JSON string, the thread number is provided in base10.
+// Because this is a JSON string, the thread number is provided in base 10.
 // Additional key-value pairs may be provided by lldb to the gdb remote
 // stub.  For instance, on some versions of macOS, lldb can read offset
 // information out of the system libraries.  Using those offsets, debugserver
@@ -1936,13 +2014,13 @@ for this region.
 //
 //   $N<uncompressed payload>#00
 //
-//   $C<size of uncompressed payload in base10>:<compressed payload>#00
+//   $C<size of uncompressed payload in base 10>:<compressed payload>#00
 //
 //  Where "#00" is the actual checksum value if noack mode is not enabled.  The checksum
 //  value is for the "N<uncompressed payload>" or
-//  "C<size of uncompressed payload in base10>:<compressed payload>" bytes in the packet.
+//  "C<size of uncompressed payload in base 10>:<compressed payload>" bytes in the packet.
 //
-//  The size of the uncompressed payload in base10 is provided because it will simplify
+//  The size of the uncompressed payload in base 10 is provided because it will simplify
 //  decompression if the final buffer size needed is known ahead of time.
 //
 //  Compression on low-latency connections is unlikely to be an improvement.  Particularly
@@ -2171,6 +2249,23 @@ Example packet:
     { "port": 5432 },
     { "socket_name": "foo" }
 ]
+
+//----------------------------------------------------------------------
+// "QSetDetachOnError"
+//
+// BRIEF
+//  Sets what the server should do when the communication channel with LLDB
+//  goes down. Either kill the inferior process (0) or remove breakpoints and
+//  detach (1).
+//
+// PRIORITY TO IMPLEMENT
+//  Low. Only required if the target wants to keep the inferior process alive
+//  when the communication channel goes down.
+//----------------------------------------------------------------------
+
+The data in this packet is a single a character, which should be '0' if the
+inferior process should be killed, or '1' if the server should remove all
+breakpoints and detach from the inferior.
 
 //----------------------------------------------------------------------
 // "jGetDyldProcessState"

@@ -222,11 +222,11 @@ class TestCStepping(TestBase):
         # should end up back in "a" as if nothing had happened:
         process.Continue()
 
-        self.assertTrue(
-            thread.GetFrameAtIndex(0).GetLineEntry().GetLine() == current_line
+        self.assertEqual(
+            thread.GetFrameAtIndex(0).GetLineEntry().GetLine(), current_line
         )
-        self.assertTrue(
-            thread.GetFrameAtIndex(0).GetLineEntry().GetFileSpec() == current_file
+        self.assertEqual(
+            thread.GetFrameAtIndex(0).GetLineEntry().GetFileSpec(), current_file
         )
 
         # Now we are going to test step in targeting a function:
@@ -270,7 +270,7 @@ class TestCStepping(TestBase):
         break_before_complex_2.SetEnabled(False)
 
         thread.StepInto("complex")
-        self.assertTrue(thread.GetFrameAtIndex(0).GetFunctionName() == "complex")
+        self.assertEqual(thread.GetFrameAtIndex(0).GetFunctionName(), "complex")
 
         # Now continue out and stop at the next call to complex.  This time
         # enable breakpoints in a and c and then step targeting b:

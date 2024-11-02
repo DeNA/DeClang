@@ -140,8 +140,8 @@ TEST(DwarfTest, getVirtuality) {
 }
 
 TEST(DwarfTest, FixedFormSizes) {
-  Optional<uint8_t> RefSize;
-  Optional<uint8_t> AddrSize;
+  std::optional<uint8_t> RefSize;
+  std::optional<uint8_t> AddrSize;
 
   // Test 32 bit DWARF version 2 with 4 byte addresses.
   FormParams Params_2_4_32 = {2, 4, DWARF32};
@@ -203,5 +203,20 @@ TEST(DwarfTest, format_provider) {
   EXPECT_EQ("DW_TAG_unknown_ffff", formatv("{0}", DW_TAG_hi_user).str());
   EXPECT_EQ("DW_OP_lit0", formatv("{0}", DW_OP_lit0).str());
   EXPECT_EQ("DW_OP_unknown_ff", formatv("{0}", DW_OP_hi_user).str());
+}
+
+TEST(DwarfTest, lname) {
+  auto roundtrip = [](llvm::dwarf::SourceLanguage sl) {
+    auto name_version = toDW_LNAME(sl);
+    // Ignore ones without a defined mapping.
+    if (sl == DW_LANG_Mips_Assembler || sl == DW_LANG_GOOGLE_RenderScript ||
+        !name_version.has_value())
+      return sl;
+    return dwarf::toDW_LANG(name_version->first, name_version->second)
+        .value_or(sl);
+  };
+#define HANDLE_DW_LANG(ID, NAME, LOWER_BOUND, VERSION, VENDOR)                 \
+  EXPECT_EQ(roundtrip(DW_LANG_##NAME), DW_LANG_##NAME);
+#include "llvm/BinaryFormat/Dwarf.def"
 }
 } // end namespace

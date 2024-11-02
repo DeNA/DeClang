@@ -8,7 +8,12 @@ let Definition = "modulelist" in {
   def EnableBackgroundLookup: Property<"enable-background-lookup", "Boolean">,
     Global,
     DefaultFalse,
-    Desc<"On macOS, enable calling dsymForUUID (or an equivalent script/binary) in the background to locate symbol files that weren't found.">;
+    Desc<"Alias for backward compatibility: when enabled this is the equivalent to 'symbols.download background'.">;
+  def AutoDownload: Property<"auto-download", "Enum">,
+    Global,
+    DefaultEnumValue<"eSymbolDownloadOff">,
+    EnumValues<"OptionEnumValues(g_auto_download_enum_values)">,
+    Desc<"On macOS, automatically download symbols with dsymForUUID (or an equivalent script/binary) for relevant images in the debug session.">;
   def ClangModulesCachePath: Property<"clang-modules-cache-path", "FileSpec">,
     Global,
     DefaultStringValue<"">,
@@ -26,6 +31,9 @@ let Definition = "modulelist" in {
   def SwiftValidateTypeSystem: Property<"swift-validate-typesystem", "Boolean">,
     DefaultFalse,
     Desc<"Validate all Swift typesystem queries. Used for testing an asserts-enabled LLDB only.">;
+  def UseSwiftPreciseCompilerInvocation: Property<"swift-precise-compiler-invocation", "Boolean">,
+    DefaultTrue,
+    Desc<"In the Swift expression evaluator, create many Swift compiler instances with the precise invocation for the current context, instead of a single compiler instance that merges all flags from the entire project.">;
   def SwiftModuleLoadingMode: Property<"swift-module-loading-mode", "Enum">,
     DefaultEnumValue<"eSwiftModuleLoadingModePreferSerialized">,
     EnumValues<"OptionEnumValues(g_swift_module_loading_mode_enums)">,
@@ -46,6 +54,20 @@ let Definition = "modulelist" in {
     Global,
     DefaultUnsignedValue<7>,
     Desc<"The expiration time in days for a Swift reflection cache file. When a file hasn't been accessed for the specified amount of days, it is removed from the cache. A value of 0 disables the expiration-based pruning.">;
+  def SwiftEnableCxxInterop: Property<"swift-enable-cxx-interop", "Enum">,
+    Global,
+    DefaultEnumValue<"llvm::to_underlying(AutoBool::Auto)">,
+    EnumValues<"OptionEnumValues(g_enable_swift_cxx_interop_values)">,
+    Desc<"Passes the -enable-cxx-interop flag to the swift compiler.">;
+  def SwiftEnableFullDwarfDebugging: Property<"swift-enable-full-dwarf-debugging", "Enum">,
+    Global,
+    DefaultEnumValue<"llvm::to_underlying(AutoBool::Auto)">,
+    EnumValues<"OptionEnumValues(g_enable_full_dwarf_debugging)">,
+    Desc<"Read full debug information from DWARF for Swift debugging. By default LLDB will use DWARF debug information if it cannot use reflection metadata.">;
+  def SwiftEnableASTContext: Property<"swift-enable-ast-context", "Boolean">,
+    Global,
+    DefaultTrue,
+    Desc<"Enable instantiating Swift AST contexts.">;
 // END SWIFT
   def SymLinkPaths: Property<"debug-info-symlink-paths", "FileSpecList">,
     Global,
@@ -99,6 +121,14 @@ let Definition = "debugger" in {
     DefaultEnumValue<"OptionValueString::eOptionEncodeCharacterEscapeSequences">,
     DefaultStringValue<"(lldb) ">,
     Desc<"The debugger command line prompt displayed for the user.">;
+  def PromptAnsiPrefix: Property<"prompt-ansi-prefix", "String">,
+    Global,
+    DefaultStringValue<"${ansi.faint}">,
+    Desc<"When in a color-enabled terminal, use the ANSI terminal code specified in this format immediately before the prompt.">;
+  def PromptAnsiSuffix: Property<"prompt-ansi-suffix", "String">,
+    Global,
+    DefaultStringValue<"${ansi.normal}">,
+    Desc<"When in a color-enabled terminal, use the ANSI terminal code specified in this format immediately after the prompt.">;
   def ScriptLanguage: Property<"script-lang", "Enum">,
     Global,
     DefaultEnumValue<"eScriptLanguagePython">,
@@ -108,7 +138,7 @@ let Definition = "debugger" in {
     Global,
     DefaultEnumValue<"eLanguageTypeUnknown">,
     Desc<"The language to use for the REPL.">;
-  def StopDisassemblyCount: Property<"stop-disassembly-count", "SInt64">,
+  def StopDisassemblyCount: Property<"stop-disassembly-count", "UInt64">,
     Global,
     DefaultUnsignedValue<4>,
     Desc<"The number of disassembly lines to show when displaying a stopped context.">;
@@ -121,11 +151,11 @@ let Definition = "debugger" in {
     Global,
     DefaultUnsignedValue<32000>,
     Desc<"The size limit to use when disassembling large functions (default: 32KB).">;
-  def StopLineCountAfter: Property<"stop-line-count-after", "SInt64">,
+  def StopLineCountAfter: Property<"stop-line-count-after", "UInt64">,
     Global,
     DefaultUnsignedValue<3>,
     Desc<"The number of sources lines to display that come after the current source line when displaying a stopped context.">;
-  def StopLineCountBefore: Property<"stop-line-count-before", "SInt64">,
+  def StopLineCountBefore: Property<"stop-line-count-before", "UInt64">,
     Global,
     DefaultUnsignedValue<3>,
     Desc<"The number of sources lines to display that come before the current source line when displaying a stopped context.">;
@@ -153,7 +183,7 @@ let Definition = "debugger" in {
     Global,
     DefaultStringValue<"${ansi.normal}">,
     Desc<"When displaying the line marker in a color-enabled terminal, use the ANSI terminal code specified in this format immediately after the line to be marked.">;
-  def TerminalWidth: Property<"term-width", "SInt64">,
+  def TerminalWidth: Property<"term-width", "UInt64">,
     Global,
     DefaultUnsignedValue<80>,
     Desc<"The maximum number of columns to use for displaying text.">;
@@ -169,6 +199,10 @@ let Definition = "debugger" in {
     Global,
     DefaultFalse,
     Desc<"Whether to use an external editor or not.">;
+  def ExternalEditor: Property<"external-editor", "String">,
+    Global,
+    DefaultStringValue<"">,
+    Desc<"External editor to use when use-external-editor is enabled.">;
   def UseColor: Property<"use-color", "Boolean">,
     Global,
     DefaultTrue,
@@ -225,6 +259,10 @@ let Definition = "debugger" in {
     Global,
     DefaultStringValue<"${ansi.normal}">,
     Desc<"When displaying suggestion in a color-enabled terminal, use the ANSI terminal code specified in this format immediately after the suggestion.">;
+  def ShowDontUsePoHint: Property<"show-dont-use-po-hint", "Boolean">,
+    Global,
+    DefaultTrue,
+    Desc<"If true, and object description was requested for a type that does not implement it, LLDB will print a hint telling the user to consider using p instead.">;
   def DWIMPrintVerbosity: Property<"dwim-print-verbosity", "Enum">,
     Global,
     DefaultEnumValue<"eDWIMPrintVerbosityNone">,

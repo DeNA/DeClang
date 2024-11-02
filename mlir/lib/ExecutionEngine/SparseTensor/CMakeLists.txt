@@ -8,11 +8,13 @@
 add_mlir_library(MLIRSparseTensorRuntime
   File.cpp
   NNZ.cpp
+  PermutationRef.cpp
   Storage.cpp
 
   EXCLUDE_FROM_LIBMLIR
 
   LINK_LIBS PUBLIC
+  MLIRSparseTensorEnums
   mlir_float16_utils
   )
 set_property(TARGET MLIRSparseTensorRuntime PROPERTY CXX_STANDARD 17)

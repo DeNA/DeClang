@@ -20,7 +20,6 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
@@ -169,6 +168,154 @@ TEST(ToolChainTest, VFSGCCInstallationRelativeDir) {
             S);
 }
 
+TEST(ToolChainTest, VFSSolarisMultiGCCInstallation) {
+  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
+
+  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
+  struct TestDiagnosticConsumer : public DiagnosticConsumer {};
+  IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> InMemoryFileSystem(
+      new llvm::vfs::InMemoryFileSystem);
+
+  const char *EmptyFiles[] = {
+      // Sort entries so the latest version doesn't come first.
+      "/usr/gcc/7/lib/gcc/sparcv9-sun-solaris2.11/7.5.0/32/crtbegin.o",
+      "/usr/gcc/7/lib/gcc/sparcv9-sun-solaris2.11/7.5.0/crtbegin.o",
+      "/usr/gcc/7/lib/gcc/x86_64-pc-solaris2.11/7.5.0/32/crtbegin.o",
+      "/usr/gcc/7/lib/gcc/x86_64-pc-solaris2.11/7.5.0/crtbegin.o",
+      "/usr/gcc/11/lib/gcc/sparcv9-sun-solaris2.11/11.4.0/crtbegin.o",
+      "/usr/gcc/11/lib/gcc/sparcv9-sun-solaris2.11/11.4.0/sparcv8plus/crtbegin.o",
+      "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0/32/crtbegin.o",
+      "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0/crtbegin.o",
+      "/usr/gcc/4.7/lib/gcc/i386-pc-solaris2.11/4.7.3/amd64/crtbegin.o",
+      "/usr/gcc/4.7/lib/gcc/i386-pc-solaris2.11/4.7.3/crtbegin.o",
+      "/usr/gcc/4.7/lib/gcc/sparc-sun-solaris2.11/4.7.3/crtbegin.o",
+      "/usr/gcc/4.7/lib/gcc/sparc-sun-solaris2.11/4.7.3/sparcv9/crtbegin.o",
+  };
+
+  for (const char *Path : EmptyFiles)
+    InMemoryFileSystem->addFile(Path, 0,
+                                llvm::MemoryBuffer::getMemBuffer("\n"));
+
+  {
+    DiagnosticsEngine Diags(DiagID, &*DiagOpts, new TestDiagnosticConsumer);
+    Driver TheDriver("/bin/clang", "i386-pc-solaris2.11", Diags,
+                     "clang LLVM compiler", InMemoryFileSystem);
+    std::unique_ptr<Compilation> C(
+        TheDriver.BuildCompilation({"-v", "--gcc-toolchain=", "--sysroot="}));
+    ASSERT_TRUE(C);
+    std::string S;
+    {
+      llvm::raw_string_ostream OS(S);
+      C->getDefaultToolChain().printVerboseInfo(OS);
+    }
+    if (is_style_windows(llvm::sys::path::Style::native))
+      std::replace(S.begin(), S.end(), '\\', '/');
+    EXPECT_EQ("Found candidate GCC installation: "
+              "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0\n"
+              "Selected GCC installation: "
+              "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0\n"
+              "Candidate multilib: .;@m64\n"
+              "Candidate multilib: 32;@m32\n"
+              "Selected multilib: 32;@m32\n",
+              S);
+  }
+
+  {
+    DiagnosticsEngine Diags(DiagID, &*DiagOpts, new TestDiagnosticConsumer);
+    Driver TheDriver("/bin/clang", "amd64-pc-solaris2.11", Diags,
+                     "clang LLVM compiler", InMemoryFileSystem);
+    std::unique_ptr<Compilation> C(
+        TheDriver.BuildCompilation({"-v", "--gcc-toolchain=", "--sysroot="}));
+    ASSERT_TRUE(C);
+    std::string S;
+    {
+      llvm::raw_string_ostream OS(S);
+      C->getDefaultToolChain().printVerboseInfo(OS);
+    }
+    if (is_style_windows(llvm::sys::path::Style::native))
+      std::replace(S.begin(), S.end(), '\\', '/');
+    EXPECT_EQ("Found candidate GCC installation: "
+              "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0\n"
+              "Selected GCC installation: "
+              "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0\n"
+              "Candidate multilib: .;@m64\n"
+              "Candidate multilib: 32;@m32\n"
+              "Selected multilib: .;@m64\n",
+              S);
+  }
+
+  {
+    DiagnosticsEngine Diags(DiagID, &*DiagOpts, new TestDiagnosticConsumer);
+    Driver TheDriver("/bin/clang", "x86_64-pc-solaris2.11", Diags,
+                     "clang LLVM compiler", InMemoryFileSystem);
+    std::unique_ptr<Compilation> C(
+        TheDriver.BuildCompilation({"-v", "--gcc-toolchain=", "--sysroot="}));
+    ASSERT_TRUE(C);
+    std::string S;
+    {
+      llvm::raw_string_ostream OS(S);
+      C->getDefaultToolChain().printVerboseInfo(OS);
+    }
+    if (is_style_windows(llvm::sys::path::Style::native))
+      std::replace(S.begin(), S.end(), '\\', '/');
+    EXPECT_EQ("Found candidate GCC installation: "
+              "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0\n"
+              "Selected GCC installation: "
+              "/usr/gcc/11/lib/gcc/x86_64-pc-solaris2.11/11.4.0\n"
+              "Candidate multilib: .;@m64\n"
+              "Candidate multilib: 32;@m32\n"
+              "Selected multilib: .;@m64\n",
+              S);
+  }
+
+  {
+    DiagnosticsEngine Diags(DiagID, &*DiagOpts, new TestDiagnosticConsumer);
+    Driver TheDriver("/bin/clang", "sparc-sun-solaris2.11", Diags,
+                     "clang LLVM compiler", InMemoryFileSystem);
+    std::unique_ptr<Compilation> C(
+        TheDriver.BuildCompilation({"-v", "--gcc-toolchain=", "--sysroot="}));
+    ASSERT_TRUE(C);
+    std::string S;
+    {
+      llvm::raw_string_ostream OS(S);
+      C->getDefaultToolChain().printVerboseInfo(OS);
+    }
+    if (is_style_windows(llvm::sys::path::Style::native))
+      std::replace(S.begin(), S.end(), '\\', '/');
+    EXPECT_EQ("Found candidate GCC installation: "
+              "/usr/gcc/11/lib/gcc/sparcv9-sun-solaris2.11/11.4.0\n"
+              "Selected GCC installation: "
+              "/usr/gcc/11/lib/gcc/sparcv9-sun-solaris2.11/11.4.0\n"
+              "Candidate multilib: .;@m64\n"
+              "Candidate multilib: sparcv8plus;@m32\n"
+              "Selected multilib: sparcv8plus;@m32\n",
+              S);
+  }
+  {
+    DiagnosticsEngine Diags(DiagID, &*DiagOpts, new TestDiagnosticConsumer);
+    Driver TheDriver("/bin/clang", "sparcv9-sun-solaris2.11", Diags,
+                     "clang LLVM compiler", InMemoryFileSystem);
+    std::unique_ptr<Compilation> C(
+        TheDriver.BuildCompilation({"-v", "--gcc-toolchain=", "--sysroot="}));
+    ASSERT_TRUE(C);
+    std::string S;
+    {
+      llvm::raw_string_ostream OS(S);
+      C->getDefaultToolChain().printVerboseInfo(OS);
+    }
+    if (is_style_windows(llvm::sys::path::Style::native))
+      std::replace(S.begin(), S.end(), '\\', '/');
+    EXPECT_EQ("Found candidate GCC installation: "
+              "/usr/gcc/11/lib/gcc/sparcv9-sun-solaris2.11/11.4.0\n"
+              "Selected GCC installation: "
+              "/usr/gcc/11/lib/gcc/sparcv9-sun-solaris2.11/11.4.0\n"
+              "Candidate multilib: .;@m64\n"
+              "Candidate multilib: sparcv8plus;@m32\n"
+              "Selected multilib: .;@m64\n",
+              S);
+  }
+}
+
 TEST(ToolChainTest, DefaultDriverMode) {
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
 
@@ -244,7 +391,7 @@ TEST(ToolChainTest, GetTargetAndMode) {
   llvm::InitializeAllTargets();
   std::string IgnoredError;
   if (!llvm::TargetRegistry::lookupTarget("x86_64", IgnoredError))
-    return;
+    GTEST_SKIP();
 
   ParsedClangName Res = ToolChain::getTargetAndModeFromProgramName("clang");
   EXPECT_TRUE(Res.TargetPrefix.empty());
@@ -368,10 +515,20 @@ TEST(ToolChainTest, PostCallback) {
   EXPECT_TRUE(CallbackHasCalled);
 }
 
+TEST(CompilerInvocation, SplitSwarfSingleCrash) {
+  static constexpr const char *Args[] = {
+      "clang",     "--target=arm-linux-gnueabi",
+      "-gdwarf-4", "-gsplit-dwarf=single",
+      "-c",        "foo.cpp"};
+  CreateInvocationOptions CIOpts;
+  std::unique_ptr<CompilerInvocation> CI = createInvocation(Args, CIOpts);
+  EXPECT_TRUE(CI); // no-crash
+}
+
 TEST(GetDriverMode, PrefersLastDriverMode) {
   static constexpr const char *Args[] = {"clang-cl", "--driver-mode=foo",
                                          "--driver-mode=bar", "foo.cpp"};
-  EXPECT_EQ(getDriverMode(Args[0], llvm::makeArrayRef(Args).slice(1)), "bar");
+  EXPECT_EQ(getDriverMode(Args[0], llvm::ArrayRef(Args).slice(1)), "bar");
 }
 
 struct SimpleDiagnosticConsumer : public DiagnosticConsumer {
@@ -393,96 +550,6 @@ struct SimpleDiagnosticConsumer : public DiagnosticConsumer {
   std::vector<SmallString<32>> Msgs;
   std::vector<SmallString<32>> Errors;
 };
-
-TEST(ToolChainTest, Toolsets) {
-  // Ignore this test on Windows hosts.
-  llvm::Triple Host(llvm::sys::getProcessTriple());
-  if (Host.isOSWindows())
-    GTEST_SKIP();
-
-  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
-  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
-
-  // Check (newer) GCC toolset installation.
-  {
-    IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> InMemoryFileSystem(
-        new llvm::vfs::InMemoryFileSystem);
-
-    // These should be ignored.
-    InMemoryFileSystem->addFile("/opt/rh/gcc-toolset-2", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-    InMemoryFileSystem->addFile("/opt/rh/gcc-toolset-", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-    InMemoryFileSystem->addFile("/opt/rh/gcc-toolset--", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-    InMemoryFileSystem->addFile("/opt/rh/gcc-toolset--1", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-
-    // File needed for GCC installation detection.
-    InMemoryFileSystem->addFile("/opt/rh/gcc-toolset-12/root/usr/lib/gcc/"
-                                "x86_64-redhat-linux/11/crtbegin.o",
-                                0, llvm::MemoryBuffer::getMemBuffer("\n"));
-
-    DiagnosticsEngine Diags(DiagID, &*DiagOpts, new SimpleDiagnosticConsumer);
-    Driver TheDriver("/bin/clang", "x86_64-redhat-linux", Diags,
-                     "clang LLVM compiler", InMemoryFileSystem);
-    std::unique_ptr<Compilation> C(
-        TheDriver.BuildCompilation({"clang", "--gcc-toolchain="}));
-    ASSERT_TRUE(C);
-    std::string S;
-    {
-      llvm::raw_string_ostream OS(S);
-      C->getDefaultToolChain().printVerboseInfo(OS);
-    }
-    EXPECT_EQ("Found candidate GCC installation: "
-              "/opt/rh/gcc-toolset-12/root/usr/lib/gcc/x86_64-redhat-linux/11\n"
-              "Selected GCC installation: "
-              "/opt/rh/gcc-toolset-12/root/usr/lib/gcc/x86_64-redhat-linux/11\n"
-              "Candidate multilib: .;@m64\n"
-              "Selected multilib: .;@m64\n",
-              S);
-  }
-
-  // And older devtoolset.
-  {
-    IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> InMemoryFileSystem(
-        new llvm::vfs::InMemoryFileSystem);
-
-    // These should be ignored.
-    InMemoryFileSystem->addFile("/opt/rh/devtoolset-2", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-    InMemoryFileSystem->addFile("/opt/rh/devtoolset-", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-    InMemoryFileSystem->addFile("/opt/rh/devtoolset--", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-    InMemoryFileSystem->addFile("/opt/rh/devtoolset--1", 0,
-                                llvm::MemoryBuffer::getMemBuffer("\n"));
-
-    // File needed for GCC installation detection.
-    InMemoryFileSystem->addFile("/opt/rh/devtoolset-12/root/usr/lib/gcc/"
-                                "x86_64-redhat-linux/11/crtbegin.o",
-                                0, llvm::MemoryBuffer::getMemBuffer("\n"));
-
-    DiagnosticsEngine Diags(DiagID, &*DiagOpts, new SimpleDiagnosticConsumer);
-    Driver TheDriver("/bin/clang", "x86_64-redhat-linux", Diags,
-                     "clang LLVM compiler", InMemoryFileSystem);
-    std::unique_ptr<Compilation> C(
-        TheDriver.BuildCompilation({"clang", "--gcc-toolchain="}));
-    ASSERT_TRUE(C);
-    std::string S;
-    {
-      llvm::raw_string_ostream OS(S);
-      C->getDefaultToolChain().printVerboseInfo(OS);
-    }
-    EXPECT_EQ("Found candidate GCC installation: "
-              "/opt/rh/devtoolset-12/root/usr/lib/gcc/x86_64-redhat-linux/11\n"
-              "Selected GCC installation: "
-              "/opt/rh/devtoolset-12/root/usr/lib/gcc/x86_64-redhat-linux/11\n"
-              "Candidate multilib: .;@m64\n"
-              "Selected multilib: .;@m64\n",
-              S);
-  }
-}
 
 TEST(ToolChainTest, ConfigFileSearch) {
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
@@ -538,6 +605,260 @@ TEST(ToolChainTest, ConfigFileSearch) {
     ASSERT_TRUE(C);
     ASSERT_FALSE(C->containsError());
     EXPECT_EQ("/opt/sdk/platform2", TheDriver.SysRoot);
+  }
+}
+
+struct FileSystemWithError : public llvm::vfs::FileSystem {
+  llvm::ErrorOr<llvm::vfs::Status> status(const Twine &Path) override {
+    return std::make_error_code(std::errc::no_such_file_or_directory);
+  }
+  llvm::ErrorOr<std::unique_ptr<llvm::vfs::File>>
+  openFileForRead(const Twine &Path) override {
+    return std::make_error_code(std::errc::permission_denied);
+  }
+  llvm::vfs::directory_iterator dir_begin(const Twine &Dir,
+                                          std::error_code &EC) override {
+    return llvm::vfs::directory_iterator();
+  }
+  std::error_code setCurrentWorkingDirectory(const Twine &Path) override {
+    return std::make_error_code(std::errc::permission_denied);
+  }
+  llvm::ErrorOr<std::string> getCurrentWorkingDirectory() const override {
+    return std::make_error_code(std::errc::permission_denied);
+  }
+};
+
+TEST(ToolChainTest, ConfigFileError) {
+  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
+  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
+  std::unique_ptr<SimpleDiagnosticConsumer> DiagConsumer(
+      new SimpleDiagnosticConsumer());
+  DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagConsumer.get(), false);
+  IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS(new FileSystemWithError);
+
+  Driver TheDriver("/home/test/bin/clang", "arm-linux-gnueabi", Diags,
+                   "clang LLVM compiler", FS);
+  std::unique_ptr<Compilation> C(
+      TheDriver.BuildCompilation({"/home/test/bin/clang", "--no-default-config",
+                                  "--config", "./root.cfg", "--version"}));
+  ASSERT_TRUE(C);
+  ASSERT_TRUE(C->containsError());
+  EXPECT_EQ(1U, Diags.getNumErrors());
+  EXPECT_STREQ("configuration file './root.cfg' cannot be opened: cannot get "
+               "absolute path",
+               DiagConsumer->Errors[0].c_str());
+}
+
+TEST(ToolChainTest, BadConfigFile) {
+  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
+  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
+  std::unique_ptr<SimpleDiagnosticConsumer> DiagConsumer(
+      new SimpleDiagnosticConsumer());
+  DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagConsumer.get(), false);
+  IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> FS(
+      new llvm::vfs::InMemoryFileSystem);
+
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#define FILENAME "C:/opt/root.cfg"
+#define DIRNAME "C:/opt"
+#else
+  const char *TestRoot = "/";
+#define FILENAME "/opt/root.cfg"
+#define DIRNAME "/opt"
+#endif
+  // UTF-16 string must be aligned on 2-byte boundary. Strings and char arrays
+  // do not provide necessary alignment, so copy constant string into properly
+  // allocated memory in heap.
+  llvm::BumpPtrAllocator Alloc;
+  char *StrBuff = (char *)Alloc.Allocate(16, 4);
+  std::memset(StrBuff, 0, 16);
+  std::memcpy(StrBuff, "\xFF\xFE\x00\xD8\x00\x00", 6);
+  StringRef BadUTF(StrBuff, 6);
+  FS->setCurrentWorkingDirectory(TestRoot);
+  FS->addFile("/opt/root.cfg", 0, llvm::MemoryBuffer::getMemBuffer(BadUTF));
+  FS->addFile("/home/user/test.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("@file.rsp"));
+
+  {
+    Driver TheDriver("/home/test/bin/clang", "arm-linux-gnueabi", Diags,
+                     "clang LLVM compiler", FS);
+    std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(
+        {"/home/test/bin/clang", "--config", "/opt/root.cfg", "--version"}));
+    ASSERT_TRUE(C);
+    ASSERT_TRUE(C->containsError());
+    EXPECT_EQ(1U, DiagConsumer->Errors.size());
+    EXPECT_STREQ("cannot read configuration file '" FILENAME
+                 "': Could not convert UTF16 to UTF8",
+                 DiagConsumer->Errors[0].c_str());
+  }
+  DiagConsumer->clear();
+  {
+    Driver TheDriver("/home/test/bin/clang", "arm-linux-gnueabi", Diags,
+                     "clang LLVM compiler", FS);
+    std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(
+        {"/home/test/bin/clang", "--config", "/opt", "--version"}));
+    ASSERT_TRUE(C);
+    ASSERT_TRUE(C->containsError());
+    EXPECT_EQ(1U, DiagConsumer->Errors.size());
+    EXPECT_STREQ("configuration file '" DIRNAME
+                 "' cannot be opened: not a regular file",
+                 DiagConsumer->Errors[0].c_str());
+  }
+  DiagConsumer->clear();
+  {
+    Driver TheDriver("/home/test/bin/clang", "arm-linux-gnueabi", Diags,
+                     "clang LLVM compiler", FS);
+    std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(
+        {"/home/test/bin/clang", "--config", "root",
+         "--config-system-dir=", "--config-user-dir=", "--version"}));
+    ASSERT_TRUE(C);
+    ASSERT_TRUE(C->containsError());
+    EXPECT_EQ(1U, DiagConsumer->Errors.size());
+    EXPECT_STREQ("configuration file 'root' cannot be found",
+                 DiagConsumer->Errors[0].c_str());
+  }
+
+#undef FILENAME
+#undef DIRNAME
+}
+
+TEST(ToolChainTest, ConfigInexistentInclude) {
+  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
+  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
+  std::unique_ptr<SimpleDiagnosticConsumer> DiagConsumer(
+      new SimpleDiagnosticConsumer());
+  DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagConsumer.get(), false);
+  IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> FS(
+      new llvm::vfs::InMemoryFileSystem);
+
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#define USERCONFIG "C:\\home\\user\\test.cfg"
+#define UNEXISTENT "C:\\home\\user\\file.rsp"
+#else
+  const char *TestRoot = "/";
+#define USERCONFIG "/home/user/test.cfg"
+#define UNEXISTENT "/home/user/file.rsp"
+#endif
+  FS->setCurrentWorkingDirectory(TestRoot);
+  FS->addFile("/home/user/test.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("@file.rsp"));
+
+  {
+    Driver TheDriver("/home/test/bin/clang", "arm-linux-gnueabi", Diags,
+                     "clang LLVM compiler", FS);
+    std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(
+        {"/home/test/bin/clang", "--config", "test.cfg",
+         "--config-system-dir=", "--config-user-dir=/home/user", "--version"}));
+    ASSERT_TRUE(C);
+    ASSERT_TRUE(C->containsError());
+    EXPECT_EQ(1U, DiagConsumer->Errors.size());
+    EXPECT_STRCASEEQ("cannot read configuration file '" USERCONFIG
+                     "': cannot not open file '" UNEXISTENT
+                     "': no such file or directory",
+                     DiagConsumer->Errors[0].c_str());
+  }
+
+#undef USERCONFIG
+#undef UNEXISTENT
+}
+
+TEST(ToolChainTest, ConfigRecursiveInclude) {
+  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
+  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
+  std::unique_ptr<SimpleDiagnosticConsumer> DiagConsumer(
+      new SimpleDiagnosticConsumer());
+  DiagnosticsEngine Diags(DiagID, &*DiagOpts, DiagConsumer.get(), false);
+  IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> FS(
+      new llvm::vfs::InMemoryFileSystem);
+
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#define USERCONFIG "C:\\home\\user\\test.cfg"
+#define INCLUDED1 "C:\\home\\user\\file1.cfg"
+#else
+  const char *TestRoot = "/";
+#define USERCONFIG "/home/user/test.cfg"
+#define INCLUDED1 "/home/user/file1.cfg"
+#endif
+  FS->setCurrentWorkingDirectory(TestRoot);
+  FS->addFile("/home/user/test.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("@file1.cfg"));
+  FS->addFile("/home/user/file1.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("@file2.cfg"));
+  FS->addFile("/home/user/file2.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("@file3.cfg"));
+  FS->addFile("/home/user/file3.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("@file1.cfg"));
+
+  {
+    Driver TheDriver("/home/test/bin/clang", "arm-linux-gnueabi", Diags,
+                     "clang LLVM compiler", FS);
+    std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(
+        {"/home/test/bin/clang", "--config", "test.cfg",
+         "--config-system-dir=", "--config-user-dir=/home/user", "--version"}));
+    ASSERT_TRUE(C);
+    ASSERT_TRUE(C->containsError());
+    EXPECT_EQ(1U, DiagConsumer->Errors.size());
+    EXPECT_STREQ("cannot read configuration file '" USERCONFIG
+                 "': recursive expansion of: '" INCLUDED1 "'",
+                 DiagConsumer->Errors[0].c_str());
+  }
+
+#undef USERCONFIG
+#undef INCLUDED1
+}
+
+TEST(ToolChainTest, NestedConfigFile) {
+  IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts = new DiagnosticOptions();
+  IntrusiveRefCntPtr<DiagnosticIDs> DiagID(new DiagnosticIDs());
+  struct TestDiagnosticConsumer : public DiagnosticConsumer {};
+  DiagnosticsEngine Diags(DiagID, &*DiagOpts, new TestDiagnosticConsumer);
+  IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> FS(
+      new llvm::vfs::InMemoryFileSystem);
+
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#else
+  const char *TestRoot = "/";
+#endif
+  FS->setCurrentWorkingDirectory(TestRoot);
+
+  FS->addFile("/opt/sdk/root.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("--config=platform.cfg\n"));
+  FS->addFile("/opt/sdk/platform.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("--sysroot=/platform-sys\n"));
+  FS->addFile("/home/test/bin/platform.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("--sysroot=/platform-bin\n"));
+
+  SmallString<128> ClangExecutable("/home/test/bin/clang");
+  FS->makeAbsolute(ClangExecutable);
+
+  // User file is absent - use system definitions.
+  {
+    Driver TheDriver(ClangExecutable, "arm-linux-gnueabi", Diags,
+                     "clang LLVM compiler", FS);
+    std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(
+        {"/home/test/bin/clang", "--config", "root.cfg",
+         "--config-system-dir=/opt/sdk", "--config-user-dir=/home/test/sdk"}));
+    ASSERT_TRUE(C);
+    ASSERT_FALSE(C->containsError());
+    EXPECT_EQ("/platform-sys", TheDriver.SysRoot);
+  }
+
+  // User file overrides system definitions.
+  FS->addFile("/home/test/sdk/platform.cfg", 0,
+              llvm::MemoryBuffer::getMemBuffer("--sysroot=/platform-user\n"));
+  {
+    Driver TheDriver(ClangExecutable, "arm-linux-gnueabi", Diags,
+                     "clang LLVM compiler", FS);
+    std::unique_ptr<Compilation> C(TheDriver.BuildCompilation(
+        {"/home/test/bin/clang", "--config", "root.cfg",
+         "--config-system-dir=/opt/sdk", "--config-user-dir=/home/test/sdk"}));
+    ASSERT_TRUE(C);
+    ASSERT_FALSE(C->containsError());
+    EXPECT_EQ("/platform-user", TheDriver.SysRoot);
   }
 }
 

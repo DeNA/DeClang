@@ -508,14 +508,13 @@ int SBProcess::GetExitStatus() {
 const char *SBProcess::GetExitDescription() {
   LLDB_INSTRUMENT_VA(this);
 
-  const char *exit_desc = nullptr;
   ProcessSP process_sp(GetSP());
-  if (process_sp) {
-    std::lock_guard<std::recursive_mutex> guard(
-        process_sp->GetTarget().GetAPIMutex());
-    exit_desc = process_sp->GetExitDescription();
-  }
-  return exit_desc;
+  if (!process_sp)
+    return nullptr;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      process_sp->GetTarget().GetAPIMutex());
+  return ConstString(process_sp->GetExitDescription()).GetCString();
 }
 
 lldb::pid_t SBProcess::GetProcessID() {
@@ -748,7 +747,9 @@ SBProcess::GetRestartedReasonAtIndexFromEvent(const lldb::SBEvent &event,
                                               size_t idx) {
   LLDB_INSTRUMENT_VA(event, idx);
 
-  return Process::ProcessEventData::GetRestartedReasonAtIndex(event.get(), idx);
+  return ConstString(Process::ProcessEventData::GetRestartedReasonAtIndex(
+                         event.get(), idx))
+      .GetCString();
 }
 
 SBProcess SBProcess::GetProcessFromEvent(const SBEvent &event) {
@@ -780,8 +781,8 @@ SBProcess::GetStructuredDataFromEvent(const lldb::SBEvent &event) {
 bool SBProcess::EventIsProcessEvent(const SBEvent &event) {
   LLDB_INSTRUMENT_VA(event);
 
-  return (event.GetBroadcasterClass() == SBProcess::GetBroadcasterClass()) &&
-         !EventIsStructuredDataEvent(event);
+  return Process::ProcessEventData::GetEventDataFromEvent(event.get()) !=
+         nullptr;
 }
 
 bool SBProcess::EventIsStructuredDataEvent(const lldb::SBEvent &event) {
@@ -813,8 +814,13 @@ size_t SBProcess::ReadMemory(addr_t addr, void *dst, size_t dst_len,
                              SBError &sb_error) {
   LLDB_INSTRUMENT_VA(this, addr, dst, dst_len, sb_error);
 
-  size_t bytes_read = 0;
+  if (!dst) {
+    sb_error.SetErrorStringWithFormat(
+        "no buffer provided to read %zu bytes into", dst_len);
+    return 0;
+  }
 
+  size_t bytes_read = 0;
   ProcessSP process_sp(GetSP());
 
 
@@ -1236,6 +1242,109 @@ lldb::SBProcessInfo SBProcess::GetProcessInfo() {
     sb_proc_info.SetProcessInfo(proc_info);
   }
   return sb_proc_info;
+}
+
+lldb::SBFileSpec SBProcess::GetCoreFile() {
+  LLDB_INSTRUMENT_VA(this);
+
+  ProcessSP process_sp(GetSP());
+  FileSpec core_file;
+  if (process_sp) {
+    core_file = process_sp->GetCoreFile();
+  }
+  return SBFileSpec(core_file);
+}
+
+addr_t SBProcess::GetAddressMask(AddressMaskType type,
+                                 AddressMaskRange addr_range) {
+  LLDB_INSTRUMENT_VA(this, type, addr_range);
+
+  if (ProcessSP process_sp = GetSP()) {
+    switch (type) {
+    case eAddressMaskTypeCode:
+      if (addr_range == eAddressMaskRangeHigh)
+        return process_sp->GetHighmemCodeAddressMask();
+      else
+        return process_sp->GetCodeAddressMask();
+    case eAddressMaskTypeData:
+      if (addr_range == eAddressMaskRangeHigh)
+        return process_sp->GetHighmemDataAddressMask();
+      else
+        return process_sp->GetDataAddressMask();
+    case eAddressMaskTypeAny:
+      if (addr_range == eAddressMaskRangeHigh)
+        return process_sp->GetHighmemDataAddressMask();
+      else
+        return process_sp->GetDataAddressMask();
+    }
+  }
+  return LLDB_INVALID_ADDRESS_MASK;
+}
+
+void SBProcess::SetAddressMask(AddressMaskType type, addr_t mask,
+                               AddressMaskRange addr_range) {
+  LLDB_INSTRUMENT_VA(this, type, mask, addr_range);
+
+  if (ProcessSP process_sp = GetSP()) {
+    switch (type) {
+    case eAddressMaskTypeCode:
+      if (addr_range == eAddressMaskRangeAll) {
+        process_sp->SetCodeAddressMask(mask);
+        process_sp->SetHighmemCodeAddressMask(mask);
+      } else if (addr_range == eAddressMaskRangeHigh) {
+        process_sp->SetHighmemCodeAddressMask(mask);
+      } else {
+        process_sp->SetCodeAddressMask(mask);
+      }
+      break;
+    case eAddressMaskTypeData:
+      if (addr_range == eAddressMaskRangeAll) {
+        process_sp->SetDataAddressMask(mask);
+        process_sp->SetHighmemDataAddressMask(mask);
+      } else if (addr_range == eAddressMaskRangeHigh) {
+        process_sp->SetHighmemDataAddressMask(mask);
+      } else {
+        process_sp->SetDataAddressMask(mask);
+      }
+      break;
+    case eAddressMaskTypeAll:
+      if (addr_range == eAddressMaskRangeAll) {
+        process_sp->SetCodeAddressMask(mask);
+        process_sp->SetDataAddressMask(mask);
+        process_sp->SetHighmemCodeAddressMask(mask);
+        process_sp->SetHighmemDataAddressMask(mask);
+      } else if (addr_range == eAddressMaskRangeHigh) {
+        process_sp->SetHighmemCodeAddressMask(mask);
+        process_sp->SetHighmemDataAddressMask(mask);
+      } else {
+        process_sp->SetCodeAddressMask(mask);
+        process_sp->SetDataAddressMask(mask);
+      }
+      break;
+    }
+  }
+}
+
+void SBProcess::SetAddressableBits(AddressMaskType type, uint32_t num_bits,
+                                   AddressMaskRange addr_range) {
+  LLDB_INSTRUMENT_VA(this, type, num_bits, addr_range);
+
+  SetAddressMask(type, AddressableBits::AddressableBitToMask(num_bits),
+                 addr_range);
+}
+
+addr_t SBProcess::FixAddress(addr_t addr, AddressMaskType type) {
+  LLDB_INSTRUMENT_VA(this, addr, type);
+
+  if (ProcessSP process_sp = GetSP()) {
+    if (type == eAddressMaskTypeAny)
+      return process_sp->FixAnyAddress(addr);
+    else if (type == eAddressMaskTypeData)
+      return process_sp->FixDataAddress(addr);
+    else if (type == eAddressMaskTypeCode)
+      return process_sp->FixCodeAddress(addr);
+  }
+  return addr;
 }
 
 lldb::addr_t SBProcess::AllocateMemory(size_t size, uint32_t permissions,

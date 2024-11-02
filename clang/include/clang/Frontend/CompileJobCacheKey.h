@@ -27,6 +27,7 @@ class raw_ostream;
 namespace clang {
 
 class CompilerInvocation;
+class CowCompilerInvocation;
 class DiagnosticsEngine;
 
 /// Caching-related options for a given \c CompilerInvocation that are
@@ -36,6 +37,8 @@ struct CompileJobCachingOptions {
   std::string CompilationCachingServicePath;
   /// See \c FrontendOptions::DisableCachedCompileJobReplay.
   bool DisableCachedCompileJobReplay;
+  /// See \c FrontendOptions::WriteOutputAsCASID.
+  bool WriteOutputAsCASID;
   /// See \c FrontendOptions::PathPrefixMappings.
   std::vector<std::string> PathPrefixMappings;
 };
@@ -43,14 +46,17 @@ struct CompileJobCachingOptions {
 /// Create a cache key for the given \c CompilerInvocation as a \c CASID. If \p
 /// Invocation will later be used to compile code, use \c
 /// canonicalizeAndCreateCacheKey instead.
-llvm::Optional<llvm::cas::CASID>
+std::optional<llvm::cas::CASID>
 createCompileJobCacheKey(llvm::cas::ObjectStore &CAS, DiagnosticsEngine &Diags,
                          const CompilerInvocation &Invocation);
+std::optional<llvm::cas::CASID>
+createCompileJobCacheKey(llvm::cas::ObjectStore &CAS, DiagnosticsEngine &Diags,
+                         const CowCompilerInvocation &Invocation);
 
 /// Perform any destructive changes needed to canonicalize \p Invocation for
 /// caching, extracting the settings that affect compilation even if they do not
 /// affect caching, and return the resulting cache key as a \c CASID.
-llvm::Optional<llvm::cas::CASID> canonicalizeAndCreateCacheKey(
+std::optional<llvm::cas::CASID> canonicalizeAndCreateCacheKey(
     llvm::cas::ObjectStore &CAS, DiagnosticsEngine &Diags,
     CompilerInvocation &Invocation, CompileJobCachingOptions &Opts);
 

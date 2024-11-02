@@ -21,31 +21,29 @@ import unittest2
 
 
 class TestSwiftPrivateTypeAlias(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @swiftTest
     def test_swift_private_typealias(self):
         """Test that we can correctly print variables whose types are private type aliases"""
         self.build()
-        (target, process, thread, breakpoint1) = lldbutil.run_to_source_breakpoint(
-            self, "breakpoint 1", lldb.SBFileSpec("main.swift")
-        )
+        (target, process, thread, breakpoint1) = \
+            lldbutil.run_to_source_breakpoint(
+                self, 'breakpoint 1', lldb.SBFileSpec('main.swift'))
         breakpoint2 = target.BreakpointCreateBySourceRegex(
-            "breakpoint 2", lldb.SBFileSpec("main.swift")
-        )
+            'breakpoint 2', lldb.SBFileSpec('main.swift'))
         self.assertTrue(breakpoint1.GetNumLocations() > 0, VALID_BREAKPOINT)
         self.assertTrue(breakpoint2.GetNumLocations() > 0, VALID_BREAKPOINT)
 
         var = self.frame().FindVariable("i")
         lldbutil.check_variable(
-            self, var, False, typename="a.MyStruct.IntegerType", value="123"
-        )
+            self,
+            var,
+            False,
+            typename="a.MyStruct.IntegerType",
+            value="123")
 
         process.Continue()
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, breakpoint2)
+        threads = lldbutil.get_threads_stopped_at_breakpoint(process,
+                                                             breakpoint2)
         self.assertTrue(len(threads) == 1)
 
         var = self.frame().FindVariable("a")
@@ -53,10 +51,8 @@ class TestSwiftPrivateTypeAlias(TestBase):
         child_0 = dict_child_0.GetChildAtIndex(0)
         child_1 = dict_child_0.GetChildAtIndex(1)
         lldbutil.check_variable(
-            self,
-            var,
-            False,
-            typename="Swift.Dictionary<Swift.String, a.MyStruct.IntegerType>",
-        )
+            self, var, False, typename=
+            "Swift.Dictionary<Swift.String, a.MyStruct.IntegerType>")
         lldbutil.check_variable(self, child_0, False, '"hello"')
-        lldbutil.check_variable(self, child_1, False, value="234")
+        lldbutil.check_variable(self, child_1, False, value='234')
+

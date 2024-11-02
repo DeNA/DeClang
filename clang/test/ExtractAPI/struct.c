@@ -2,7 +2,7 @@
 // RUN: split-file %s %t
 // RUN: sed -e "s@INPUT_DIR@%{/t:regex_replacement}@g" \
 // RUN: %t/reference.output.json.in >> %t/reference.output.json
-// RUN: %clang -extract-api -target arm64-apple-macosx \
+// RUN: %clang -extract-api --pretty-sgf -target arm64-apple-macosx \
 // RUN: %t/input.h -o %t/output.json | FileCheck -allow-empty %s
 
 // Generator version is not consistent across test runs, normalize it.
@@ -161,6 +161,10 @@ struct Color {
         {
           "kind": "identifier",
           "spelling": "Red"
+        },
+        {
+          "kind": "text",
+          "spelling": ";"
         }
       ],
       "identifier": {
@@ -213,6 +217,10 @@ struct Color {
         {
           "kind": "identifier",
           "spelling": "Green"
+        },
+        {
+          "kind": "text",
+          "spelling": ";"
         }
       ],
       "identifier": {
@@ -265,6 +273,10 @@ struct Color {
         {
           "kind": "identifier",
           "spelling": "Blue"
+        },
+        {
+          "kind": "text",
+          "spelling": ";"
         }
       ],
       "identifier": {
@@ -317,6 +329,10 @@ struct Color {
         {
           "kind": "identifier",
           "spelling": "Alpha"
+        },
+        {
+          "kind": "text",
+          "spelling": ";"
         }
       ],
       "docComment": {

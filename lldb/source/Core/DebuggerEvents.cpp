@@ -9,6 +9,7 @@
 #include "lldb/Core/DebuggerEvents.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Core/Progress.h"
 #include "llvm/Support/WithColor.h"
 
 using namespace lldb_private;
@@ -23,12 +24,11 @@ static const T *GetEventDataFromEventImpl(const Event *event_ptr) {
   return nullptr;
 }
 
-ConstString ProgressEventData::GetFlavorString() {
-  static ConstString g_flavor("ProgressEventData");
-  return g_flavor;
+llvm::StringRef ProgressEventData::GetFlavorString() {
+  return "ProgressEventData";
 }
 
-ConstString ProgressEventData::GetFlavor() const {
+llvm::StringRef ProgressEventData::GetFlavor() const {
   return ProgressEventData::GetFlavorString();
 }
 
@@ -42,7 +42,7 @@ void ProgressEventData::Dump(Stream *s) const {
     s->PutCString(", type = update");
   // If m_total is UINT64_MAX, there is no progress to report, just "start"
   // and "end". If it isn't we will show the completed and total amounts.
-  if (m_total != UINT64_MAX)
+  if (m_total != Progress::kNonDeterministicTotal)
     s->Printf(", progress = %" PRIu64 " of %" PRIu64, m_completed, m_total);
 }
 
@@ -73,17 +73,19 @@ ProgressEventData::GetAsStructuredData(const Event *event_ptr) {
 }
 
 llvm::StringRef DiagnosticEventData::GetPrefix() const {
-  switch (m_type) {
-  case Type::Warning:
+  switch (m_severity) {
+  case Severity::eSeverityInfo:
+    return "info";
+  case Severity::eSeverityWarning:
     return "warning";
-  case Type::Error:
+  case Severity::eSeverityError:
     return "error";
   }
   llvm_unreachable("Fully covered switch above!");
 }
 
 void DiagnosticEventData::Dump(Stream *s) const {
-  llvm::HighlightColor color = m_type == Type::Warning
+  llvm::HighlightColor color = m_severity == lldb::eSeverityWarning
                                    ? llvm::HighlightColor::Warning
                                    : llvm::HighlightColor::Error;
   llvm::WithColor(s->AsRawOstream(), color, llvm::ColorMode::Enable)
@@ -92,12 +94,11 @@ void DiagnosticEventData::Dump(Stream *s) const {
   s->Flush();
 }
 
-ConstString DiagnosticEventData::GetFlavorString() {
-  static ConstString g_flavor("DiagnosticEventData");
-  return g_flavor;
+llvm::StringRef DiagnosticEventData::GetFlavorString() {
+  return "DiagnosticEventData";
 }
 
-ConstString DiagnosticEventData::GetFlavor() const {
+llvm::StringRef DiagnosticEventData::GetFlavor() const {
   return DiagnosticEventData::GetFlavorString();
 }
 
@@ -106,12 +107,27 @@ DiagnosticEventData::GetEventDataFromEvent(const Event *event_ptr) {
   return GetEventDataFromEventImpl<DiagnosticEventData>(event_ptr);
 }
 
-ConstString SymbolChangeEventData::GetFlavorString() {
-  static ConstString g_flavor("SymbolChangeEventData");
-  return g_flavor;
+StructuredData::DictionarySP
+DiagnosticEventData::GetAsStructuredData(const Event *event_ptr) {
+  const DiagnosticEventData *diagnostic_data =
+      DiagnosticEventData::GetEventDataFromEvent(event_ptr);
+
+  if (!diagnostic_data)
+    return {};
+
+  auto dictionary_sp = std::make_shared<StructuredData::Dictionary>();
+  dictionary_sp->AddStringItem("message", diagnostic_data->GetMessage());
+  dictionary_sp->AddStringItem("type", diagnostic_data->GetPrefix());
+  dictionary_sp->AddBooleanItem("debugger_specific",
+                                diagnostic_data->IsDebuggerSpecific());
+  return dictionary_sp;
 }
 
-ConstString SymbolChangeEventData::GetFlavor() const {
+llvm::StringRef SymbolChangeEventData::GetFlavorString() {
+  return "SymbolChangeEventData";
+}
+
+llvm::StringRef SymbolChangeEventData::GetFlavor() const {
   return SymbolChangeEventData::GetFlavorString();
 }
 

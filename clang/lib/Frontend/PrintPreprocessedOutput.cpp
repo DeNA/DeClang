@@ -146,8 +146,9 @@ public:
   void InclusionDirective(SourceLocation HashLoc, const Token &IncludeTok,
                           StringRef FileName, bool IsAngled,
                           CharSourceRange FilenameRange,
-                          Optional<FileEntryRef> File, StringRef SearchPath,
-                          StringRef RelativePath, const Module *Imported,
+                          OptionalFileEntryRef File, StringRef SearchPath,
+                          StringRef RelativePath, const Module *SuggestedModule,
+                          bool ModuleImported,
                           SrcMgr::CharacteristicKind FileType) override;
   void Ident(SourceLocation Loc, StringRef str) override;
   void PragmaMessage(SourceLocation Loc, StringRef Namespace,
@@ -389,16 +390,10 @@ void PrintPPOutputPPCallbacks::FileChanged(SourceLocation Loc,
 }
 
 void PrintPPOutputPPCallbacks::InclusionDirective(
-    SourceLocation HashLoc,
-    const Token &IncludeTok,
-    StringRef FileName,
-    bool IsAngled,
-    CharSourceRange FilenameRange,
-    Optional<FileEntryRef> File,
-    StringRef SearchPath,
-    StringRef RelativePath,
-    const Module *Imported,
-    SrcMgr::CharacteristicKind FileType) {
+    SourceLocation HashLoc, const Token &IncludeTok, StringRef FileName,
+    bool IsAngled, CharSourceRange FilenameRange, OptionalFileEntryRef File,
+    StringRef SearchPath, StringRef RelativePath, const Module *SuggestedModule,
+    bool ModuleImported, SrcMgr::CharacteristicKind FileType) {
   // In -dI mode, dump #include directives prior to dumping their content or
   // interpretation.
   if (DumpIncludeDirectives) {
@@ -412,13 +407,13 @@ void PrintPPOutputPPCallbacks::InclusionDirective(
   }
 
   // When preprocessing, turn implicit imports into module import pragmas.
-  if (Imported) {
+  if (ModuleImported) {
     switch (IncludeTok.getIdentifierInfo()->getPPKeywordID()) {
     case tok::pp_include:
     case tok::pp_import:
     case tok::pp_include_next:
       MoveToLine(HashLoc, /*RequireStartOfLine=*/true);
-      OS << "#pragma clang module import " << Imported->getFullModuleName(true)
+      OS << "#pragma clang module import " << SuggestedModule->getFullModuleName(true)
          << " /* clang -E: implicit import for "
          << "#" << PP.getSpelling(IncludeTok) << " "
          << (IsAngled ? '<' : '"') << FileName << (IsAngled ? '>' : '"')
@@ -669,7 +664,8 @@ void PrintPPOutputPPCallbacks::HandleWhitespaceBeforeTok(const Token &Tok,
   // them.
   if (Tok.is(tok::eof) ||
       (Tok.isAnnotation() && !Tok.is(tok::annot_header_unit) &&
-       !Tok.is(tok::annot_module_begin) && !Tok.is(tok::annot_module_end)))
+       !Tok.is(tok::annot_module_begin) && !Tok.is(tok::annot_module_end) &&
+       !Tok.is(tok::annot_repl_input_end)))
     return;
 
   // EmittedDirectiveOnThisLine takes priority over RequireSameLine.
@@ -823,6 +819,9 @@ static void PrintPreprocessedTokens(Preprocessor &PP, Token &Tok,
       // Skip comments. Normally the preprocessor does not generate
       // tok::comment nodes at all when not keeping comments, but under
       // -traditional-cpp the lexer keeps /all/ whitespace, including comments.
+      PP.Lex(Tok);
+      continue;
+    } else if (Tok.is(tok::annot_repl_input_end)) {
       PP.Lex(Tok);
       continue;
     } else if (Tok.is(tok::eod)) {

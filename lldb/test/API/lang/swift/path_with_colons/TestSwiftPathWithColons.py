@@ -25,26 +25,21 @@ import unittest2
 # this should be a perfectly general feature but I could not
 # cause the failure to reproduce against clang, so put it here
 class TestSwiftPathWithColon(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    @skipIf(oslist=["windows"])
+    @skipIf(oslist=['windows'])
     @skipIfiOSSimulator
     @swiftTest
     def test_path_with_colon(self):
         """Test that LLDB correctly handles paths with colons"""
         self.do_test()
 
-    def setUp(self):
-        TestBase.setUp(self)
-
     def do_test(self):
         """Test that LLDB correctly handles paths with colons"""
-        src = os.path.join(self.getSourceDir(), "main.swift")
-        colon_dir = self.getBuildArtifact("pro:ject")
-        copied_src = os.path.join(colon_dir, "main.swift")
-        dst = os.path.join(colon_dir, "a.out")
-        dst_makefile = os.path.join(colon_dir, "Makefile")
-        exe = os.path.join(colon_dir, "a.out")
+        src = os.path.join(self.getSourceDir(), 'main.swift')
+        colon_dir = self.getBuildArtifact('pro:ject')
+        copied_src = os.path.join(colon_dir, 'main.swift')
+        dst = os.path.join(colon_dir, 'a.out')
+        dst_makefile = os.path.join(colon_dir, 'Makefile')
+        exe = os.path.join(colon_dir, 'a.out')
 
         if not os.path.exists(colon_dir):
             os.makedirs(colon_dir)
@@ -57,13 +52,11 @@ class TestSwiftPathWithColon(TestBase):
         # Execute the cleanup function during test case tear down.
         self.addTearDownHook(cleanup)
 
-        f = open(dst_makefile, "w")
-        f.write(
-            """
+        f = open(dst_makefile, 'w')
+        f.write('''
 SWIFT_SOURCES := main.swift
 include Makefile.rules
-"""
-        )
+''')
         f.close()
 
         shutil.copy(src, copied_src)
@@ -75,10 +68,11 @@ include Makefile.rules
         self.assertTrue(target, VALID_TARGET)
 
         # Don't allow ansi highlighting to interfere with the output.
-        self.runCmd("settings set stop-show-column none")
+        self.runCmd('settings set stop-show-column none')
 
-        self.expect("breakpoint set -l 13", substrs=["foo"])
+        self.expect('breakpoint set -l 13', substrs=['foo'])
 
-        self.expect("source list -l 13", substrs=["return x + y - z"])
+        self.expect('source list -l 13', substrs=['return x + y - z'])
 
-        self.expect("run", substrs=["return x + y - z"])
+        self.expect('run', substrs=['return x + y - z'])
+

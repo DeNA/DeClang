@@ -15,14 +15,24 @@
 
 #include "DWARFASTParser.h"
 #include "DWARFDIE.h"
+#include "swift/RemoteInspection/DescriptorFinder.h"
+#include "swift/RemoteInspection/TypeRef.h"
 
-class DWARFDebugInfoEntry;
-class DWARFDIECollection;
+namespace swift {
+namespace reflection {
+class TypeInfo;
+} // namespace reflection
+namespace remote {
+struct TypeInfoProvider;
+} // namespace remote
+} // namespace swift
 
 namespace lldb_private { class TypeSystemSwiftTypeRef; }
 
-class DWARFASTParserSwift : public DWARFASTParser {
+class DWARFASTParserSwift : public lldb_private::plugin::dwarf::DWARFASTParser,
+                            public swift::reflection::DescriptorFinder {
 public:
+  using DWARFDIE = lldb_private::plugin::dwarf::DWARFDIE;
   DWARFASTParserSwift(lldb_private::TypeSystemSwiftTypeRef &swift_typesystem);
 
   virtual ~DWARFASTParserSwift();
@@ -59,8 +69,37 @@ public:
   void EnsureAllDIEsInDeclContextHaveBeenParsed(
       lldb_private::CompilerDeclContext decl_context) override {}
 
+  // FIXME: What should this do?
+  lldb_private::ConstString
+  GetDIEClassTemplateParams(const DWARFDIE &die) override {
+    assert(false && "DWARFASTParserSwift::GetDIEClassTemplateParams has not "
+                    "yet been implemented");
+    return lldb_private::ConstString();
+  }
+
+  static bool classof(const DWARFASTParser *Parser) {
+    return Parser->GetKind() == Kind::DWARFASTParserSwift;
+  }
+
+  /// Returns a field descriptor constructed from DWARF info.
+  std::unique_ptr<swift::reflection::FieldDescriptorBase>
+  getFieldDescriptor(const swift::reflection::TypeRef *TR) override;
+
+  /// Returns a builtin descriptor constructed from DWARF info.
+  std::unique_ptr<swift::reflection::BuiltinTypeDescriptorBase>
+  getBuiltinTypeDescriptor(const swift::reflection::TypeRef *TR) override;
+
+  /// Returns a builtin descriptor constructed from DWARF info.
+  std::unique_ptr<swift::reflection::MultiPayloadEnumDescriptorBase>
+  getMultiPayloadEnumDescriptor(const swift::reflection::TypeRef *TR) override;
+
+private:
+  /// Returns the canonical demangle tree of a die's type.
+  NodePointer GetCanonicalDemangleTree(DWARFDIE &die);
+
 protected:
   lldb_private::TypeSystemSwiftTypeRef &m_swift_typesystem;
+  swift::Demangle::Demangler m_dem;
 };
 
 #endif // SymbolFileDWARF_DWARFASTParserSwift_h_

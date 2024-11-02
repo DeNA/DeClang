@@ -10,6 +10,7 @@
 #define LLDB_SYMBOL_SYMBOLFILEONDEMAND_H
 
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include "lldb/Symbol/ObjectFile.h"
@@ -80,7 +81,7 @@ public:
       llvm::function_ref<bool(lldb_private::Module &)>) override;
 
   bool ParseSupportFiles(lldb_private::CompileUnit &comp_unit,
-                         lldb_private::FileSpecList &support_files) override;
+                         lldb_private::SupportFileList &support_files) override;
 
   bool ParseIsOptimized(lldb_private::CompileUnit &comp_unit) override;
 
@@ -96,7 +97,7 @@ public:
   ParseVariablesForContext(const lldb_private::SymbolContext &sc) override;
 
   lldb_private::Type *ResolveTypeUID(lldb::user_id_t type_uid) override;
-  llvm::Optional<ArrayInfo> GetDynamicArrayInfoForUID(
+  std::optional<ArrayInfo> GetDynamicArrayInfoForUID(
       lldb::user_id_t type_uid,
       const lldb_private::ExecutionContext *exe_ctx) override;
 
@@ -116,6 +117,9 @@ public:
   uint32_t ResolveSymbolContext(const lldb_private::Address &so_addr,
                                 lldb::SymbolContextItem resolve_scope,
                                 lldb_private::SymbolContext &sc) override;
+
+  lldb_private::Status
+  CalculateFrameVariableError(lldb_private::StackFrame &frame) override;
 
   uint32_t ResolveSymbolContext(
       const lldb_private::SourceLocationSpec &src_location_spec,
@@ -148,17 +152,8 @@ public:
       const std::string &scope_qualified_name,
       std::vector<lldb_private::ConstString> &mangled_names) override;
 
-  void
-  FindTypes(lldb_private::ConstString name,
-            const lldb_private::CompilerDeclContext &parent_decl_ctx,
-            uint32_t max_matches,
-            llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-            lldb_private::TypeMap &types) override;
-
-  void FindTypes(llvm::ArrayRef<lldb_private::CompilerContext> pattern,
-                 lldb_private::LanguageSet languages,
-                 llvm::DenseSet<SymbolFile *> &searched_symbol_files,
-                 lldb_private::TypeMap &types) override;
+  void FindTypes(const lldb_private::TypeQuery &query,
+                 lldb_private::TypeResults &results) override;
 
   void GetTypes(lldb_private::SymbolContextScope *sc_scope,
                 lldb::TypeClass type_mask,
@@ -225,7 +220,7 @@ public:
   }
 
   lldb::TypeSP MakeType(lldb::user_id_t uid, ConstString name,
-                        llvm::Optional<uint64_t> byte_size,
+                        std::optional<uint64_t> byte_size,
                         SymbolContextScope *context,
                         lldb::user_id_t encoding_uid,
                         Type::EncodingDataType encoding_uid_type,

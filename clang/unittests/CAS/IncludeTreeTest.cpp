@@ -5,8 +5,10 @@
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/CAS/ObjectStore.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Testing/Support/Error.h"
 #include "gtest/gtest.h"
+#include <system_error>
 
 using namespace clang;
 using namespace clang::cas;
@@ -61,20 +63,20 @@ TEST(IncludeTree, IncludeTreeScan) {
                                           "t.cpp",
                                           "-o"
                                           "t.cpp.o"};
-  Optional<IncludeTreeRoot> Root;
+  std::optional<IncludeTreeRoot> Root;
   ASSERT_THAT_ERROR(
       ScanTool.getIncludeTree(*DB, CommandLine, /*CWD*/ "", nullptr)
           .moveInto(Root),
       llvm::Succeeded());
 
-  Optional<IncludeTree::File> MainFile;
-  Optional<IncludeTree::File> A1File;
-  Optional<IncludeTree::File> B1File;
-  Optional<IncludeTree::File> SysFile;
-  Optional<IncludeTree::File> SysDirectiveFile;
-  Optional<IncludeTree::File> SysIndirectFile;
+  std::optional<IncludeTree::File> MainFile;
+  std::optional<IncludeTree::File> A1File;
+  std::optional<IncludeTree::File> B1File;
+  std::optional<IncludeTree::File> SysFile;
+  std::optional<IncludeTree::File> SysDirectiveFile;
+  std::optional<IncludeTree::File> SysIndirectFile;
 
-  Optional<IncludeTree> Main;
+  std::optional<IncludeTree> Main;
   ASSERT_THAT_ERROR(Root->getMainFileTree().moveInto(Main), llvm::Succeeded());
   {
     ASSERT_THAT_ERROR(Main->getBaseFile().moveInto(MainFile),
@@ -87,7 +89,7 @@ TEST(IncludeTree, IncludeTreeScan) {
   }
   ASSERT_EQ(Main->getNumIncludes(), uint32_t(4));
 
-  Optional<IncludeTree> Predef;
+  std::optional<IncludeTree> Predef;
   ASSERT_THAT_ERROR(Main->getIncludeTree(0).moveInto(Predef),
                     llvm::Succeeded());
   EXPECT_EQ(Main->getIncludeOffset(0), uint32_t(0));
@@ -99,7 +101,7 @@ TEST(IncludeTree, IncludeTreeScan) {
     EXPECT_EQ(FI.Filename, "<built-in>");
   }
 
-  Optional<IncludeTree> A1;
+  std::optional<IncludeTree> A1;
   ASSERT_THAT_ERROR(Main->getIncludeTree(1).moveInto(A1), llvm::Succeeded());
   EXPECT_EQ(Main->getIncludeOffset(1), uint32_t(21));
   {
@@ -113,7 +115,7 @@ TEST(IncludeTree, IncludeTreeScan) {
     EXPECT_TRUE(A1->getCheckResult(1));
 
     ASSERT_EQ(A1->getNumIncludes(), uint32_t(1));
-    Optional<IncludeTree> B1;
+    std::optional<IncludeTree> B1;
     ASSERT_THAT_ERROR(A1->getIncludeTree(0).moveInto(B1), llvm::Succeeded());
     EXPECT_EQ(A1->getIncludeOffset(0), uint32_t(122));
     {
@@ -128,7 +130,7 @@ TEST(IncludeTree, IncludeTreeScan) {
     }
   }
 
-  Optional<IncludeTree> Sys;
+  std::optional<IncludeTree> Sys;
   ASSERT_THAT_ERROR(Main->getIncludeTree(2).moveInto(Sys), llvm::Succeeded());
   EXPECT_EQ(Main->getIncludeOffset(2), uint32_t(42));
   {
@@ -142,7 +144,7 @@ TEST(IncludeTree, IncludeTreeScan) {
     ASSERT_EQ(Sys->getNumIncludes(), uint32_t(0));
   }
 
-  Optional<IncludeTree> SysDirective;
+  std::optional<IncludeTree> SysDirective;
   ASSERT_THAT_ERROR(Main->getIncludeTree(3).moveInto(SysDirective),
                     llvm::Succeeded());
   EXPECT_EQ(Main->getIncludeOffset(3), uint32_t(73));
@@ -153,7 +155,7 @@ TEST(IncludeTree, IncludeTreeScan) {
     // the start of the file here.
     EXPECT_EQ(SysDirective->getFileCharacteristic(), SrcMgr::C_User);
     ASSERT_EQ(SysDirective->getNumIncludes(), uint32_t(1));
-    Optional<IncludeTree> SysIndirect;
+    std::optional<IncludeTree> SysIndirect;
     ASSERT_THAT_ERROR(SysDirective->getIncludeTree(0).moveInto(SysIndirect),
                       llvm::Succeeded());
     {
@@ -164,7 +166,7 @@ TEST(IncludeTree, IncludeTreeScan) {
     }
   }
 
-  Optional<IncludeTree::FileList> FileList;
+  std::optional<IncludeTree::FileList> FileList;
   ASSERT_THAT_ERROR(Root->getFileList().moveInto(FileList), llvm::Succeeded());
 
   SmallVector<std::pair<IncludeTree::File, IncludeTree::FileList::FileSizeTy>>
@@ -194,10 +196,10 @@ TEST(IncludeTree, IncludeTreeFileList) {
   std::shared_ptr<ObjectStore> DB = llvm::cas::createInMemoryCAS();
   SmallVector<IncludeTree::File> Files;
   for (unsigned I = 0; I < 10; ++I) {
-    Optional<IncludeTree::File> File;
+    std::optional<IncludeTree::File> File;
     std::string Path = "/file" + std::to_string(I);
     static constexpr StringRef Bytes = "123456789";
-    Optional<ObjectRef> Content;
+    std::optional<ObjectRef> Content;
     ASSERT_THAT_ERROR(
         DB->storeFromString({}, Bytes.substr(0, I)).moveInto(Content),
         llvm::Succeeded());
@@ -215,7 +217,7 @@ TEST(IncludeTree, IncludeTreeFileList) {
     return IncludeTree::FileList::create(*DB, Entries, Lists);
   };
 
-  Optional<IncludeTree::FileList> L89, L7, L29, L;
+  std::optional<IncludeTree::FileList> L89, L7, L29, L;
   ASSERT_THAT_ERROR(MakeFileList(8, 10, {}).moveInto(L89), llvm::Succeeded());
   EXPECT_EQ(L89->getNumReferences(), 2u);
   ASSERT_THAT_ERROR(MakeFileList(7, 8, {}).moveInto(L7), llvm::Succeeded());
@@ -293,4 +295,49 @@ TEST(IncludeTree, IncludeTreeFileListDuplicates) {
       }),
       llvm::Succeeded());
   EXPECT_EQ(I, Files.size());
+}
+
+TEST(IncludeTree, IncludeTreeFileSystemOverlay) {
+  std::shared_ptr<ObjectStore> DB = llvm::cas::createInMemoryCAS();
+  SmallVector<IncludeTree::FileList::FileEntry> Files;
+  for (unsigned I = 0; I < 10; ++I) {
+    std::optional<IncludeTree::File> File;
+    std::string Path = "/file" + std::to_string(I);
+    static constexpr StringRef Bytes = "123456789";
+    std::optional<ObjectRef> Content;
+    ASSERT_THAT_ERROR(
+        DB->storeFromString({}, Bytes.substr(0, I)).moveInto(Content),
+        llvm::Succeeded());
+    ASSERT_THAT_ERROR(
+        IncludeTree::File::create(*DB, Path, *Content).moveInto(File),
+        llvm::Succeeded());
+    Files.push_back({File->getRef(), I});
+  }
+  std::optional<IncludeTree::FileList> FileList;
+  ASSERT_THAT_ERROR(
+      IncludeTree::FileList::create(*DB, Files, {}).moveInto(FileList),
+      llvm::Succeeded());
+  IntrusiveRefCntPtr<llvm::vfs::FileSystem> IncludeTreeFS;
+  ASSERT_THAT_ERROR(
+      createIncludeTreeFileSystem(*DB, *FileList).moveInto(IncludeTreeFS),
+      llvm::Succeeded());
+
+  auto FS = llvm::makeIntrusiveRefCnt<llvm::vfs::InMemoryFileSystem>();
+  FS->setCurrentWorkingDirectory("/dir");
+  FS->addFile("file1", 0,  llvm::MemoryBuffer::getMemBuffer("str"));
+  FS->addFile("file2", 0,  llvm::MemoryBuffer::getMemBuffer("other"));
+
+  llvm::vfs::OverlayFileSystem OverlayFS(std::move(FS));
+  OverlayFS.pushOverlay(IncludeTreeFS);
+
+  std::error_code EC;
+  int NumFile = 0;
+  for (auto I = OverlayFS.dir_begin("/dir", EC);
+       !EC && I != llvm::vfs::directory_iterator(); I.increment(EC)) {
+    ASSERT_FALSE(EC);
+    ++NumFile;
+    std::string Path = "/dir/file" + std::to_string(NumFile);
+    ASSERT_EQ(I->path(), Path);
+  }
+  ASSERT_EQ(NumFile, 2);
 }

@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14
+// TODO: Change to XFAIL once https://github.com/llvm/llvm-project/issues/40340 is fixed
+// UNSUPPORTED: availability-pmr-missing
 
 // test_memory_resource requires RTTI for dynamic_cast
 // UNSUPPORTED: no-rtti
@@ -35,12 +37,12 @@ int main(int, char**) {
   auto& P                      = R.getController();
   std::pmr::memory_resource& M = R;
   {
-    ASSERT_SAME_TYPE(decltype(M.deallocate(nullptr, 0, 0)), void);
-    ASSERT_SAME_TYPE(decltype(M.deallocate(nullptr, 0)), void);
+    ASSERT_SAME_TYPE(decltype(M.deallocate(std::declval<int*>(), 0, 0)), void);
+    ASSERT_SAME_TYPE(decltype(M.deallocate(std::declval<int*>(), 0)), void);
   }
   {
-    static_assert(!noexcept(M.deallocate(nullptr, 0, 0)));
-    static_assert(!noexcept(M.deallocate(nullptr, 0)));
+    static_assert(!noexcept(M.deallocate(std::declval<int*>(), 0, 0)));
+    static_assert(!noexcept(M.deallocate(std::declval<int*>(), 0)));
   }
   {
     int s   = 100;

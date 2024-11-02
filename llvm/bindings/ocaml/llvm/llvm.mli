@@ -1044,9 +1044,11 @@ val const_vector : llvalue array -> llvalue
     or [None] if this is not a string constant. *)
 val string_of_const : llvalue -> string option
 
-(** [const_element c] returns a constant for a specified index's element.
-    See the method ConstantDataSequential::getElementAsConstant. *)
-val const_element : llvalue -> int -> llvalue
+(** [aggregate_element c idx] returns [Some elt] where [elt] is the element of
+    constant aggregate [c] at the specified index [idx], or [None] if [idx] is
+    out of range or it's not possible to determine the element.
+    See the method [llvm::Constant::getAggregateElement]. *)
+val aggregate_element : llvalue -> int -> llvalue option
 
 
 (** {7 Constant expressions} *)
@@ -1169,10 +1171,10 @@ val const_ashr : llvalue -> llvalue -> llvalue
     See the method [llvm::ConstantExpr::getGetElementPtr]. *)
 val const_gep : lltype -> llvalue -> llvalue array -> llvalue
 
-(** [const_in_bounds_gep pc indices] returns the constant [getElementPtr] of [pc]
-    with the constant integers indices from the array [indices].
+(** [const_in_bounds_gep ty pc indices] returns the constant [getElementPtr] of
+    [pc] with the constant integers indices from the array [indices].
     See the method [llvm::ConstantExpr::getInBoundsGetElementPtr]. *)
-val const_in_bounds_gep : llvalue -> llvalue array -> llvalue
+val const_in_bounds_gep : lltype -> llvalue -> llvalue array -> llvalue
 
 (** [const_trunc c ty] returns the constant truncation of integer constant [c]
     to the smaller integer type [ty].
@@ -1265,11 +1267,6 @@ val const_intcast : llvalue -> lltype -> is_signed:bool -> llvalue
     fp casts of constant [c] to type [ty].
     See the method [llvm::ConstantExpr::getFPCast]. *)
 val const_fpcast : llvalue -> lltype -> llvalue
-
-(** [const_select cond t f] returns the constant conditional which returns value
-    [t] if the boolean constant [cond] is true and the value [f] otherwise.
-    See the method [llvm::ConstantExpr::getSelect]. *)
-val const_select : llvalue -> llvalue -> llvalue -> llvalue
 
 (** [const_extractelement vec i] returns the constant [i]th element of
     constant vector [vec]. [i] must be a constant [i32] value unsigned less than
@@ -2619,55 +2616,4 @@ module MemoryBuffer : sig
 
   (** Disposes of a memory buffer. *)
   val dispose : llmemorybuffer -> unit
-end
-
-
-(** {6 Pass Managers} *)
-
-module PassManager : sig
-  (**  *)
-  type 'a t
-  type any = [ `Module | `Function ]
-
-  (** [PassManager.create ()] constructs a new whole-module pass pipeline. This
-      type of pipeline is suitable for link-time optimization and whole-module
-      transformations.
-      See the constructor of [llvm::PassManager]. *)
-  val create : unit -> [ `Module ] t
-
-  (** [PassManager.create_function m] constructs a new function-by-function
-      pass pipeline over the module [m]. It does not take ownership of [m].
-      This type of pipeline is suitable for code generation and JIT compilation
-      tasks.
-      See the constructor of [llvm::FunctionPassManager]. *)
-  val create_function : llmodule -> [ `Function ] t
-
-  (** [run_module m pm] initializes, executes on the module [m], and finalizes
-      all of the passes scheduled in the pass manager [pm]. Returns [true] if
-      any of the passes modified the module, [false] otherwise.
-      See the [llvm::PassManager::run] method. *)
-  val run_module : llmodule -> [ `Module ] t -> bool
-
-  (** [initialize fpm] initializes all of the function passes scheduled in the
-      function pass manager [fpm]. Returns [true] if any of the passes modified
-      the module, [false] otherwise.
-      See the [llvm::FunctionPassManager::doInitialization] method. *)
-  val initialize : [ `Function ] t -> bool
-
-  (** [run_function f fpm] executes all of the function passes scheduled in the
-      function pass manager [fpm] over the function [f]. Returns [true] if any
-      of the passes modified [f], [false] otherwise.
-      See the [llvm::FunctionPassManager::run] method. *)
-  val run_function : llvalue -> [ `Function ] t -> bool
-
-  (** [finalize fpm] finalizes all of the function passes scheduled in the
-      function pass manager [fpm]. Returns [true] if any of the passes
-      modified the module, [false] otherwise.
-      See the [llvm::FunctionPassManager::doFinalization] method. *)
-  val finalize : [ `Function ] t -> bool
-
-  (** Frees the memory of a pass pipeline. For function pipelines, does not free
-      the module.
-      See the destructor of [llvm::BasePassManager]. *)
-  val dispose : [< any ] t -> unit
 end

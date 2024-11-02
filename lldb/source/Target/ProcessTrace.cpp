@@ -34,15 +34,16 @@ ProcessSP ProcessTrace::CreateInstance(TargetSP target_sp,
                                        bool can_connect) {
   if (can_connect)
     return nullptr;
-  return std::make_shared<ProcessTrace>(target_sp, listener_sp);
+  return std::make_shared<ProcessTrace>(target_sp, listener_sp, *crash_file);
 }
 
 bool ProcessTrace::CanDebug(TargetSP target_sp, bool plugin_specified_by_name) {
   return plugin_specified_by_name;
 }
 
-ProcessTrace::ProcessTrace(TargetSP target_sp, ListenerSP listener_sp)
-    : PostMortemProcess(target_sp, listener_sp) {}
+ProcessTrace::ProcessTrace(TargetSP target_sp, ListenerSP listener_sp,
+                           const FileSpec &core_file)
+    : PostMortemProcess(target_sp, listener_sp, core_file) {}
 
 ProcessTrace::~ProcessTrace() {
   Clear();
@@ -63,7 +64,7 @@ void ProcessTrace::DidAttach(ArchSpec &process_arch) {
   SetPrivateState(eStateStopped);
 
   EventSP event_sp;
-  WaitForProcessToStop(llvm::None, &event_sp, true, listener_sp);
+  WaitForProcessToStop(std::nullopt, &event_sp, true, listener_sp);
 
   RestoreProcessEvents();
 

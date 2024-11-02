@@ -29,10 +29,7 @@
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
-
-#if (defined __APPLE__ && defined __MACH__)
 #include <dlfcn.h>
-#endif
 
 #include "omp-tools.h"
 
@@ -53,9 +50,9 @@
 #define KMP_FALLTHROUGH() ((void)0)
 #endif
 
-static int runOnTsan;
 static int hasReductionCallback;
 
+namespace {
 class ArcherFlags {
 public:
 #if (LLVM_VERSION) >= 40
@@ -66,6 +63,7 @@ public:
   int enabled{1};
   int report_data_leak{0};
   int ignore_serial{0};
+  std::atomic<int> all_memory{0};
 
   ArcherFlags(const char *env) {
     if (env) {
@@ -73,6 +71,7 @@ public:
       std::string token;
       std::string str(env);
       std::istringstream iss(str);
+      int tmp_int;
       while (std::getline(iss, token, ' '))
         tokens.push_back(token);
 
@@ -92,6 +91,10 @@ public:
           continue;
         if (sscanf(it->c_str(), "ignore_serial=%d", &ignore_serial))
           continue;
+        if (sscanf(it->c_str(), "all_memory=%d", &tmp_int)) {
+          all_memory = tmp_int;
+          continue;
+        }
         std::cerr << "Illegal values for ARCHER_OPTIONS variable: " << token
                   << std::endl;
       }
@@ -132,6 +135,7 @@ public:
     }
   }
 };
+} // namespace
 
 #if (LLVM_VERSION) >= 40
 extern "C" {
@@ -139,14 +143,13 @@ int __attribute__((weak)) __archer_get_omp_status();
 void __attribute__((weak)) __tsan_flush_memory() {}
 }
 #endif
-ArcherFlags *archer_flags;
+static ArcherFlags *archer_flags;
 
 #ifndef TsanHappensBefore
 // Thread Sanitizer is a tool that finds races in code.
 // See http://code.google.com/p/data-race-test/wiki/DynamicAnnotations .
 // tsan detects these exact functions by name.
 extern "C" {
-#if (defined __APPLE__ && defined __MACH__)
 static void (*AnnotateHappensAfter)(const char *, int, const volatile void *);
 static void (*AnnotateHappensBefore)(const char *, int, const volatile void *);
 static void (*AnnotateIgnoreWritesBegin)(const char *, int);
@@ -155,37 +158,7 @@ static void (*AnnotateNewMemory)(const char *, int, const volatile void *,
                                  size_t);
 static void (*__tsan_func_entry)(const void *);
 static void (*__tsan_func_exit)(void);
-
-static int RunningOnValgrind() {
-  int (*fptr)();
-
-  fptr = (int (*)())dlsym(RTLD_DEFAULT, "RunningOnValgrind");
-  // If we found RunningOnValgrind other than this function, we assume
-  // Annotation functions present in this execution and leave runOnTsan=1
-  // otherwise we change to runOnTsan=0
-  if (!fptr || fptr == RunningOnValgrind)
-    runOnTsan = 0;
-  return 0;
-}
-#else
-void __attribute__((weak))
-AnnotateHappensAfter(const char *file, int line, const volatile void *cv) {}
-void __attribute__((weak))
-AnnotateHappensBefore(const char *file, int line, const volatile void *cv) {}
-void __attribute__((weak))
-AnnotateIgnoreWritesBegin(const char *file, int line) {}
-void __attribute__((weak)) AnnotateIgnoreWritesEnd(const char *file, int line) {
-}
-void __attribute__((weak))
-AnnotateNewMemory(const char *file, int line, const volatile void *cv,
-                  size_t size) {}
-int __attribute__((weak)) RunningOnValgrind() {
-  runOnTsan = 0;
-  return 0;
-}
-void __attribute__((weak)) __tsan_func_entry(const void *call_pc) {}
-void __attribute__((weak)) __tsan_func_exit(void) {}
-#endif
+static int (*RunningOnValgrind)(void);
 }
 
 // This marker is used to define a happens-before arc. The race detector will
@@ -232,6 +205,7 @@ static int pagesize{0};
 
 // Data structure to provide a threadsafe pool of reusable objects.
 // DataPool<Type of objects>
+namespace {
 template <typename T> struct DataPool final {
   static __thread DataPool<T> *ThreadDataPool;
   std::mutex DPMutex{};
@@ -483,6 +457,9 @@ struct TaskData final : DataPoolEntry<TaskData> {
   /// this task.
   ompt_tsan_clockid Taskwait{0};
 
+  /// Child tasks use its address to model omp_all_memory dependencies
+  ompt_tsan_clockid AllMemory[2]{0};
+
   /// Whether this task is currently executing a barrier.
   bool InBarrier{false};
 
@@ -538,9 +515,15 @@ struct TaskData final : DataPoolEntry<TaskData> {
   bool isInitial() { return TaskType & ompt_task_initial; }
   bool isTarget() { return TaskType & ompt_task_target; }
 
+  void setAllMemoryDep() { AllMemory[0] = 1; }
+  bool hasAllMemoryDep() { return AllMemory[0]; }
+
   void *GetTaskPtr() { return &Task; }
 
   void *GetTaskwaitPtr() { return &Taskwait; }
+
+  void *GetLastAllMemoryPtr() { return AllMemory; }
+  void *GetNextAllMemoryPtr() { return AllMemory + 1; }
 
   TaskData *Init(TaskData *parent, int taskType) {
     TaskType = taskType;
@@ -598,14 +581,15 @@ struct TaskData final : DataPoolEntry<TaskData> {
 
   TaskData(DataPool<TaskData> *dp) : DataPoolEntry<TaskData>(dp) {}
 };
+} // namespace
 
 static inline TaskData *ToTaskData(ompt_data_t *task_data) {
   return reinterpret_cast<TaskData *>(task_data->ptr);
 }
 
 /// Store a mutex for each wait_id to resolve race condition with callbacks.
-std::unordered_map<ompt_wait_id_t, std::mutex> Locks;
-std::mutex LocksMutex;
+static std::unordered_map<ompt_wait_id_t, std::mutex> Locks;
+static std::mutex LocksMutex;
 
 static void ompt_tsan_thread_begin(ompt_thread_t thread_type,
                                    ompt_data_t *thread_data) {
@@ -886,13 +870,30 @@ static void freeTask(TaskData *task) {
   }
 }
 
+// LastAllMemoryPtr marks the beginning of an all_memory epoch
+// NextAllMemoryPtr marks the end of an all_memory epoch
+// All tasks with depend begin execution after LastAllMemoryPtr
+// and end before NextAllMemoryPtr
 static void releaseDependencies(TaskData *task) {
+  if (archer_flags->all_memory) {
+    if (task->hasAllMemoryDep()) {
+      TsanHappensBefore(task->Parent->GetLastAllMemoryPtr());
+      TsanHappensBefore(task->Parent->GetNextAllMemoryPtr());
+    } else if (task->DependencyCount)
+      TsanHappensBefore(task->Parent->GetNextAllMemoryPtr());
+  }
   for (unsigned i = 0; i < task->DependencyCount; i++) {
     task->Dependencies[i].AnnotateEnd();
   }
 }
 
 static void acquireDependencies(TaskData *task) {
+  if (archer_flags->all_memory) {
+    if (task->hasAllMemoryDep())
+      TsanHappensAfter(task->Parent->GetNextAllMemoryPtr());
+    else if (task->DependencyCount)
+      TsanHappensAfter(task->Parent->GetLastAllMemoryPtr());
+  }
   for (unsigned i = 0; i < task->DependencyCount; i++) {
     task->Dependencies[i].AnnotateBegin();
   }
@@ -1014,13 +1015,28 @@ static void ompt_tsan_dependences(ompt_data_t *task_data,
     Data->Dependencies =
         (TaskDependency *)malloc(sizeof(TaskDependency) * ndeps);
     Data->DependencyCount = ndeps;
-    for (int i = 0; i < ndeps; i++) {
+    for (int i = 0, d = 0; i < ndeps; i++, d++) {
+      if (deps[i].dependence_type == ompt_dependence_type_out_all_memory ||
+          deps[i].dependence_type == ompt_dependence_type_inout_all_memory) {
+        Data->setAllMemoryDep();
+        Data->DependencyCount--;
+        if (!archer_flags->all_memory) {
+          printf("The application uses omp_all_memory, but Archer was\n"
+                 "started to not consider omp_all_memory. This can lead\n"
+                 "to false data race alerts.\n"
+                 "Include all_memory=1 in ARCHER_OPTIONS to consider\n"
+                 "omp_all_memory from the beginning.\n");
+          archer_flags->all_memory = 1;
+        }
+        d--;
+        continue;
+      }
       auto ret = Data->Parent->DependencyMap->insert(
           std::make_pair(deps[i].variable.ptr, nullptr));
       if (ret.second) {
         ret.first->second = DependencyData::New();
       }
-      new ((void *)(Data->Dependencies + i))
+      new ((void *)(Data->Dependencies + d))
           TaskDependency(ret.first->second, deps[i].dependence_type);
     }
 
@@ -1074,6 +1090,14 @@ static void ompt_tsan_mutex_released(ompt_mutex_t kind, ompt_wait_id_t wait_id,
 
 #define SET_CALLBACK(event) SET_CALLBACK_T(event, event)
 
+#define findTsanFunction(f, fSig)                                              \
+  do {                                                                         \
+    if (NULL == (f = fSig dlsym(RTLD_DEFAULT, #f)))                            \
+      printf("Unable to find TSan function " #f ".\n");                        \
+  } while (0)
+
+#define findTsanFunctionSilent(f, fSig) f = fSig dlsym(RTLD_DEFAULT, #f)
+
 static int ompt_tsan_initialize(ompt_function_lookup_t lookup, int device_num,
                                 ompt_data_t *tool_data) {
   const char *options = getenv("TSAN_OPTIONS");
@@ -1095,13 +1119,6 @@ static int ompt_tsan_initialize(ompt_function_lookup_t lookup, int device_num,
     exit(1);
   }
 
-#if (defined __APPLE__ && defined __MACH__)
-#define findTsanFunction(f, fSig)                                              \
-  do {                                                                         \
-    if (NULL == (f = fSig dlsym(RTLD_DEFAULT, #f)))                            \
-      printf("Unable to find TSan function " #f ".\n");                        \
-  } while (0)
-
   findTsanFunction(AnnotateHappensAfter,
                    (void (*)(const char *, int, const volatile void *)));
   findTsanFunction(AnnotateHappensBefore,
@@ -1113,7 +1130,6 @@ static int ompt_tsan_initialize(ompt_function_lookup_t lookup, int device_num,
       (void (*)(const char *, int, const volatile void *, size_t)));
   findTsanFunction(__tsan_func_entry, (void (*)(const void *)));
   findTsanFunction(__tsan_func_exit, (void (*)(void)));
-#endif
 
   SET_CALLBACK(thread_begin);
   SET_CALLBACK(thread_end);
@@ -1177,10 +1193,9 @@ ompt_start_tool(unsigned int omp_version, const char *runtime_version) {
   // an implementation of the Annotation interface is available in the
   // execution or disable the tool (by returning NULL).
 
-  runOnTsan = 1;
-  RunningOnValgrind();
-  if (!runOnTsan) // if we are not running on TSAN, give a different tool the
-                  // chance to be loaded
+  findTsanFunctionSilent(RunningOnValgrind, (int (*)(void)));
+  if (!RunningOnValgrind) // if we are not running on TSAN, give a different
+                          // tool the chance to be loaded
   {
     if (archer_flags->verbose)
       std::cout << "Archer detected OpenMP application without TSan "

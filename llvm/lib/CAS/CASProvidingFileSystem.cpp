@@ -34,7 +34,7 @@ public:
                                      IsVolatile);
   }
 
-  ErrorOr<Optional<cas::ObjectRef>> getObjectRefForContent() override {
+  ErrorOr<std::optional<cas::ObjectRef>> getObjectRefForContent() override {
     auto UnderlyingCASRef = UnderlyingFile->getObjectRefForContent();
     if (!UnderlyingCASRef || *UnderlyingCASRef)
       return UnderlyingCASRef;
@@ -43,7 +43,7 @@ public:
                                             /*RequiresNullTerminator*/ false);
     if (!Buffer)
       return Buffer.getError();
-    auto Blob = DB->storeFromString(None, (*Buffer)->getBuffer());
+    auto Blob = DB->storeFromString(std::nullopt, (*Buffer)->getBuffer());
     if (!Blob)
       return errorToErrorCode(Blob.takeError());
     return *Blob;

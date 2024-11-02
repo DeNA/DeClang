@@ -11,7 +11,7 @@ class BackendInfo : CatBackend, ShowInSystemHeader;
 let Component = "Frontend" in {
 
 def err_fe_error_opening : Error<"error opening '%0': %1">;
-def err_fe_error_reading : Error<"error reading '%0'">;
+def err_fe_error_reading : Error<"error reading '%0': %1">;
 def err_fe_error_writing : Error<"error writing '%0': %1">;
 def err_fe_error_reading_stdin : Error<"error reading stdin: %0">;
 def err_fe_error_backend : Error<"error in backend: %0">, DefaultFatal;
@@ -36,6 +36,11 @@ def note_fe_backend_frame_larger_than: Note<"%0">, BackendInfo;
 
 def warn_fe_backend_plugin: Warning<"%0">, BackendInfo, InGroup<BackendPlugin>;
 def err_fe_backend_plugin: Error<"%0">, BackendInfo;
+
+def warn_fe_backend_resource_limit: Warning<"%0 (%1) exceeds limit (%2) in '%3'">, BackendInfo, InGroup<BackendPlugin>;
+def err_fe_backend_resource_limit: Error<"%0 (%1) exceeds limit (%2) in '%3'">, BackendInfo;
+def note_fe_backend_resource_limit: Note<"%0 (%1) exceeds limit (%2) in '%3'">, BackendInfo;
+
 def remark_fe_backend_plugin: Remark<"%0">, BackendInfo, InGroup<RemarkBackendPlugin>;
 def note_fe_backend_plugin: Note<"%0">, BackendInfo;
 
@@ -51,6 +56,9 @@ def warn_fe_backend_unsupported_fp_exceptions : Warning<
 def warn_fe_backend_invalid_feature_flag : Warning<
     "feature flag '%0' must start with either '+' to enable the feature or '-'"
     " to disable it; flag ignored">, InGroup<InvalidCommandLineArgument>;
+def warn_fe_backend_readonly_feature_flag : Warning<
+    "feature flag '%0' is ignored since the feature is read only">,
+    InGroup<InvalidCommandLineArgument>;
 
 def err_incompatible_fp_eval_method_options : Error<
     "option 'ffp-eval-method' cannot be used with option "
@@ -82,9 +90,9 @@ def err_fe_backend_unsupported : Error<"%0">, BackendInfo;
 def warn_fe_backend_unsupported : Warning<"%0">, BackendInfo;
 
 def err_fe_backend_error_attr :
-  Error<"call to %0 declared with 'error' attribute: %1">, BackendInfo;
+  Error<"call to '%0' declared with 'error' attribute: %1">, BackendInfo;
 def warn_fe_backend_warning_attr :
-  Warning<"call to %0 declared with 'warning' attribute: %1">, BackendInfo,
+  Warning<"call to '%0' declared with 'warning' attribute: %1">, BackendInfo,
   InGroup<BackendWarningAttributes>;
 
 def err_fe_invalid_code_complete_file : Error<
@@ -128,9 +136,6 @@ def err_fe_invalid_alignment : Error<
     "invalid value '%1' in '%0'; alignment must be a power of 2">;
 def err_fe_invalid_exception_model
    : Error<"invalid exception model '%select{none|sjlj|seh|dwarf|wasm}0' for target '%1'">;
-def warn_fe_concepts_ts_flag : Warning<
-  "-fconcepts-ts is deprecated - use '-std=c++20' for Concepts support">,
-  InGroup<Deprecated>;
 def err_fe_invalid_source_date_epoch : Error<
     "environment variable 'SOURCE_DATE_EPOCH' ('%0') must be a non-negative decimal integer <= %1">;
 
@@ -215,10 +220,7 @@ def note_incompatible_analyzer_plugin_api : Note<
 def err_module_build_requires_fmodules : Error<
   "module compilation requires '-fmodules'">;
 def err_module_interface_requires_cpp_modules : Error<
-  "module interface compilation requires '-std=c++20' or '-fmodules-ts'">;
-def err_header_module_requires_modules : Error<
-  "header module compilation requires '-fmodules', '-std=c++20', or "
-  "'-fmodules-ts'">;
+  "module interface compilation requires '-std=c++20'">;
 def warn_module_config_mismatch : Warning<
   "module file %0 cannot be loaded due to a configuration mismatch with the current "
   "compilation">, InGroup<DiagGroup<"module-file-config-mismatch">>, DefaultError;
@@ -290,11 +292,15 @@ def warn_avx_calling_convention
     : Warning<"AVX vector %select{return|argument}0 of type %1 without '%2' "
               "enabled changes the ABI">,
       InGroup<DiagGroup<"psabi">>;
-def err_avx_calling_convention : Error<warn_avx_calling_convention.Text>;
+def err_avx_calling_convention : Error<warn_avx_calling_convention.Summary>;
 
 def err_alias_to_undefined : Error<
   "%select{alias|ifunc}0 must point to a defined "
   "%select{variable or |}1function">;
+def note_alias_requires_mangled_name : Note<
+  "the %select{function or variable|function}0 specified in an %select{alias|ifunc}1 must refer to its mangled name">;
+def note_alias_mangled_name_alternative: Note<
+  "function by that name is mangled as \"%0\"">;
 def warn_alias_to_weak_alias : Warning<
   "%select{alias|ifunc}2 will always resolve to %0 even if weak definition of "
   "%1 is overridden">,
@@ -321,6 +327,10 @@ def warn_atomic_op_oversized : Warning<
   "significant performance penalty"
   "; the access size (%0 bytes) exceeds the max lock-free size (%1  bytes)">,
 InGroup<AtomicAlignment>;
+
+def warn_sync_op_misaligned : Warning<
+  "__sync builtin operation MUST have natural alignment (consider using __atomic).">,
+  InGroup<SyncAlignment>;
 
 def warn_alias_with_section : Warning<
   "%select{alias|ifunc}1 will not be in section '%0' but in the same section "
@@ -349,5 +359,9 @@ def warn_profile_data_misexpect : Warning<
 
 def err_extract_api_ignores_file_not_found :
   Error<"file '%0' specified by '--extract-api-ignores=' not found">, DefaultFatal;
+
+def warn_missing_symbol_graph_dir : Warning<
+  "Missing symbol graph output directory, defaulting to working directory">,
+  InGroup<ExtractAPIMisuse>;
 
 }

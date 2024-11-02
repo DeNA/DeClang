@@ -32,7 +32,7 @@ entry:
 ; RELOC-NEXT: Relocations [
 ; RELOC-NEXT:   Section (index: 1) .text {
 ; RELOC-NEXT:   Relocation {
-; RELOC-NEXT:     Virtual Address: 0x12
+; RELOC-NEXT:     Virtual Address: 0xE
 ; RELOC-NEXT:     Symbol: .TIUninit (23)
 ; RELOC-NEXT:     IsSigned: No
 ; RELOC-NEXT:     FixupBitValue: 0
@@ -40,7 +40,7 @@ entry:
 ; RELOC-NEXT:     Type: R_TOC (0x3)
 ; RELOC-NEXT:   }
 ; RELOC-NEXT:   Relocation {
-; RELOC-NEXT:     Virtual Address: 0x16
+; RELOC-NEXT:     Virtual Address: 0x12
 ; RELOC-NEXT:     Symbol: TIUninit (25)
 ; RELOC-NEXT:     IsSigned: No
 ; RELOC-NEXT:     FixupBitValue: 0
@@ -56,7 +56,7 @@ entry:
 ; RELOC-NEXT:     Type: R_RBA (0x18)
 ; RELOC-NEXT:   }
 ; RELOC-NEXT:   Relocation {
-; RELOC-NEXT:     Virtual Address: 0x3E
+; RELOC-NEXT:     Virtual Address: 0x3A
 ; RELOC-NEXT:     Symbol: .TGInit (27)
 ; RELOC-NEXT:     IsSigned: No
 ; RELOC-NEXT:     FixupBitValue: 0
@@ -64,7 +64,7 @@ entry:
 ; RELOC-NEXT:     Type: R_TOC (0x3)
 ; RELOC-NEXT:   }
 ; RELOC-NEXT:   Relocation {
-; RELOC-NEXT:     Virtual Address: 0x42
+; RELOC-NEXT:     Virtual Address: 0x3E
 ; RELOC-NEXT:     Symbol: TGInit (29)
 ; RELOC-NEXT:     IsSigned: No
 ; RELOC-NEXT:     FixupBitValue: 0
@@ -174,8 +174,8 @@ entry:
 ; SYM-NEXT:     Name: <stdin>
 ; SYM-NEXT:     Value (SymbolTableIndex): 0x0
 ; SYM-NEXT:     Section: N_DEBUG
-; SYM-NEXT:     Source Language ID: TB_C (0x0)
-; SYM-NEXT:     CPU Version ID: 0x0
+; SYM-NEXT:     Source Language ID: TB_CPLUSPLUS (0x9)
+; SYM-NEXT:     CPU Version ID: TCPU_COM (0x3)
 ; SYM-NEXT:     StorageClass: C_FILE (0x67)
 ; SYM-NEXT:     NumberOfAuxEntries: 0
 ; SYM-NEXT:   }
@@ -201,7 +201,7 @@ entry:
 ; SYM-NEXT:   }
 ; SYM-NEXT:   Symbol {
 ; SYM-NEXT:     Index: 3
-; SYM-NEXT:     Name: .text
+; SYM-NEXT:     Name:
 ; SYM-NEXT:     Value (RelocatableAddress): 0x0
 ; SYM-NEXT:     Section: .text
 ; SYM-NEXT:     Type: 0x0
@@ -565,13 +565,13 @@ entry:
 ; DIS:      Disassembly of section .text:
 ; DIS:      00000000 (idx: 5) .storesTIUninit:
 ; DIS-NEXT:                                      mflr 0
-; DIS-NEXT:                                      stw 0, 8(1)
 ; DIS-NEXT:                                      stwu 1, -32(1)
 ; DIS-NEXT:                                      mr 6, 3
 ; DIS-NEXT: [[#%x, ADDR:]]: {{.*}}               lwz 3, 0(2)
 ; DIS-NEXT: {{0*}}[[#ADDR + 2]]: R_TOC (idx: 23) .TIUninit[TC]
 ; DIS-NEXT: [[#%x, ADDR:]]: {{.*}}               lwz 4, 4(2)
 ; DIS-NEXT: {{0*}}[[#ADDR + 2]]: R_TOC (idx: 25) TIUninit[TC]
+; DIS-NEXT:                                      stw 0, 40(1)
 ; DIS-NEXT: [[#%x, ADDR:]]: {{.*}}               bla 0
 ; DIS-NEXT: {{0*}}[[#ADDR]]: R_RBA (idx: 1)      .__tls_get_addr[PR]
 ; DIS-NEXT:                                      stw 6, 0(3)
@@ -581,12 +581,12 @@ entry:
 ; DIS-NEXT:                                      blr
 ; DIS:      00000030 (idx: 7) .loadsTGInit:
 ; DIS-NEXT:                                      mflr 0
-; DIS-NEXT:                                      stw 0, 8(1)
 ; DIS-NEXT:                                      stwu 1, -32(1)
 ; DIS-NEXT: [[#%x, ADDR:]]: {{.*}}               lwz 3, 8(2)
 ; DIS-NEXT: {{0*}}[[#ADDR + 2]]: R_TOC (idx: 27) .TGInit[TC]
 ; DIS-NEXT: [[#%x, ADDR:]]: {{.*}}               lwz 4, 12(2)
 ; DIS-NEXT: {{0*}}[[#ADDR + 2]]: R_TOC (idx: 29) TGInit[TC]
+; DIS-NEXT:                                      stw 0, 40(1)
 ; DIS-NEXT: [[#%x, ADDR:]]: {{.*}}               bla 0
 ; DIS-NEXT: {{0*}}[[#ADDR]]: R_RBA (idx: 1)      .__tls_get_addr[PR]
 ; DIS-NEXT: [[#%x, ADDR:]]: {{.*}}               lwz 4, 16(2)
@@ -640,5 +640,5 @@ entry:
 ; DIS:      00000004 (idx: 37) TIUninit[UL]:
 ; DIS-NEXT: ...
 
-attributes #0 = { nofree norecurse nounwind willreturn writeonly "frame-pointer"="none" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="pwr4" "target-features"="-altivec,-bpermd,-crypto,-direct-move,-extdiv,-float128,-htm,-mma,-paired-vector-memops,-power10-vector,-power8-vector,-power9-vector,-rop-protection,-spe,-vsx" }
-attributes #1 = { norecurse nounwind readonly willreturn "frame-pointer"="none" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="pwr4" "target-features"="-altivec,-bpermd,-crypto,-direct-move,-extdiv,-float128,-htm,-mma,-paired-vector-memops,-power10-vector,-power8-vector,-power9-vector,-rop-protection,-spe,-vsx" }
+attributes #0 = { nofree norecurse nounwind willreturn writeonly "frame-pointer"="none" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="pwr4" "target-features"="-altivec,-bpermd,-crypto,-direct-move,-extdiv,-float128,-htm,-mma,-paired-vector-memops,-power10-vector,-power8-vector,-power9-vector,-spe,-vsx" }
+attributes #1 = { norecurse nounwind readonly willreturn "frame-pointer"="none" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="pwr4" "target-features"="-altivec,-bpermd,-crypto,-direct-move,-extdiv,-float128,-htm,-mma,-paired-vector-memops,-power10-vector,-power8-vector,-power9-vector,-spe,-vsx" }

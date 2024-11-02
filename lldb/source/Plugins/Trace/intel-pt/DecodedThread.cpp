@@ -10,6 +10,7 @@
 #include "TraceCursorIntelPT.h"
 #include <intel-pt.h>
 #include <memory>
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -154,20 +155,24 @@ lldb::cpu_id_t DecodedThread::GetCPUByIndex(uint64_t item_index) const {
   return it == m_cpus.begin() ? LLDB_INVALID_CPU_ID : prev(it)->second;
 }
 
-Optional<DecodedThread::TSCRange>
+std::optional<DecodedThread::TSCRange>
 DecodedThread::GetTSCRangeByIndex(uint64_t item_index) const {
   auto next_it = m_tscs.upper_bound(item_index);
   if (next_it == m_tscs.begin())
-    return None;
+    return std::nullopt;
   return prev(next_it)->second;
 }
 
-Optional<DecodedThread::NanosecondsRange>
+std::optional<DecodedThread::NanosecondsRange>
 DecodedThread::GetNanosecondsRangeByIndex(uint64_t item_index) {
   auto next_it = m_nanoseconds.upper_bound(item_index);
   if (next_it == m_nanoseconds.begin())
-    return None;
+    return std::nullopt;
   return prev(next_it)->second;
+}
+
+uint64_t DecodedThread::GetTotalInstructionCount() const {
+  return m_insn_count;
 }
 
 void DecodedThread::AppendEvent(lldb::TraceEvent event) {
@@ -177,25 +182,21 @@ void DecodedThread::AppendEvent(lldb::TraceEvent event) {
 
 void DecodedThread::AppendInstruction(const pt_insn &insn) {
   CreateNewTraceItem(lldb::eTraceItemKindInstruction).load_address = insn.ip;
+  m_insn_count++;
 }
 
 void DecodedThread::AppendError(const IntelPTError &error) {
-  CreateNewTraceItem(lldb::eTraceItemKindError).error =
-      ConstString(error.message()).AsCString();
+  CreateNewTraceItem(lldb::eTraceItemKindError).error = error.message();
+  m_error_stats.RecordError(/*fatal=*/false);
 }
 
-void DecodedThread::AppendCustomError(StringRef err) {
-  CreateNewTraceItem(lldb::eTraceItemKindError).error =
-      ConstString(err).AsCString();
+void DecodedThread::AppendCustomError(StringRef err, bool fatal) {
+  CreateNewTraceItem(lldb::eTraceItemKindError).error = err.str();
+  m_error_stats.RecordError(fatal);
 }
 
 lldb::TraceEvent DecodedThread::GetEventByIndex(int item_index) const {
   return m_item_data[item_index].event;
-}
-
-void DecodedThread::LibiptErrorsStats::RecordError(int libipt_error_code) {
-  libipt_errors_counts[pt_errstr(pt_errcode(libipt_error_code))]++;
-  total_count++;
 }
 
 const DecodedThread::EventsStats &DecodedThread::GetEventsStats() const {
@@ -207,18 +208,43 @@ void DecodedThread::EventsStats::RecordEvent(lldb::TraceEvent event) {
   total_count++;
 }
 
+uint64_t DecodedThread::ErrorStats::GetTotalCount() const {
+  uint64_t total = 0;
+  for (const auto &[kind, count] : libipt_errors)
+    total += count;
+
+  return total + other_errors + fatal_errors;
+}
+
+void DecodedThread::ErrorStats::RecordError(bool fatal) {
+  if (fatal)
+    fatal_errors++;
+  else
+    other_errors++;
+}
+
+void DecodedThread::ErrorStats::RecordError(int libipt_error_code) {
+  libipt_errors[pt_errstr(pt_errcode(libipt_error_code))]++;
+}
+
+const DecodedThread::ErrorStats &DecodedThread::GetErrorStats() const {
+  return m_error_stats;
+}
+
 lldb::TraceItemKind
 DecodedThread::GetItemKindByIndex(uint64_t item_index) const {
   return static_cast<lldb::TraceItemKind>(m_item_kinds[item_index]);
 }
 
-const char *DecodedThread::GetErrorByIndex(uint64_t item_index) const {
+llvm::StringRef DecodedThread::GetErrorByIndex(uint64_t item_index) const {
+  if (item_index >= m_item_data.size())
+    return llvm::StringRef();
   return m_item_data[item_index].error;
 }
 
 DecodedThread::DecodedThread(
     ThreadSP thread_sp,
-    const llvm::Optional<LinuxPerfZeroTscConversion> &tsc_conversion)
+    const std::optional<LinuxPerfZeroTscConversion> &tsc_conversion)
     : m_thread_sp(thread_sp), m_tsc_conversion(tsc_conversion) {}
 
 size_t DecodedThread::CalculateApproximateMemoryUsage() const {

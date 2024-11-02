@@ -13,7 +13,7 @@ from __future__ import print_function
 # System modules
 import os
 import platform
-
+import sys
 
 # Third-party modules
 import unittest2
@@ -51,6 +51,7 @@ dsymutil = None
 sdkroot = None
 swiftCompiler = None
 swiftLibrary = None
+python = sys.executable
 
 # The overriden dwarf verison.
 dwarf_version = 0
@@ -67,7 +68,7 @@ yaml2obj = None
 # The arch might dictate some specific CFLAGS to be passed to the toolchain to build
 # the inferior programs.  The global variable cflags_extras provides a hook to do
 # just that.
-cflags_extras = ''
+cflags_extras = ""
 
 # The filters (testclass.testmethod) used to admit tests into our test suite.
 filters = []
@@ -83,7 +84,7 @@ xfail_tests = None
 # Set this flag if there is any session info dumped during the test run.
 sdir_has_content = False
 # svn_info stores the output from 'svn info lldb.base.dir'.
-svn_info = ''
+svn_info = ""
 
 # Default verbosity is 0.
 verbose = 0
@@ -98,7 +99,7 @@ testdirs = [lldbsuite.lldb_test_root]
 test_src_root = lldbsuite.lldb_test_root
 
 # Separator string.
-separator = '-' * 70
+separator = "-" * 70
 
 failed = False
 
@@ -129,6 +130,7 @@ all_tests = set()
 
 # LLDB library directory.
 lldb_libs_dir = None
+lldb_obj_root = None
 
 libcxx_include_dir = None
 libcxx_include_target_dir = None
@@ -140,8 +142,10 @@ enabled_plugins = []
 
 def shouldSkipBecauseOfCategories(test_categories):
     if use_categories:
-        if len(test_categories) == 0 or len(
-                categories_list & set(test_categories)) == 0:
+        if (
+            len(test_categories) == 0
+            or len(categories_list & set(test_categories)) == 0
+        ):
             return True
 
     for category in skip_categories:
@@ -157,6 +161,7 @@ def get_filecheck_path():
     """
     if filecheck and os.path.lexists(filecheck):
         return filecheck
+
 
 def get_yaml2obj_path():
     """

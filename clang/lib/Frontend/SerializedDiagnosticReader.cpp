@@ -10,7 +10,6 @@
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/FileSystemOptions.h"
 #include "clang/Frontend/SerializedDiagnostics.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Bitstream/BitCodes.h"
@@ -20,6 +19,7 @@
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/ManagedStatic.h"
 #include <cstdint>
+#include <optional>
 #include <system_error>
 
 using namespace clang;
@@ -40,7 +40,7 @@ std::error_code SerializedDiagnosticReader::readDiagnostics(StringRef File) {
 std::error_code
 SerializedDiagnosticReader::readDiagnostics(llvm::MemoryBufferRef Buffer) {
   llvm::BitstreamCursor Stream(Buffer);
-  Optional<llvm::BitstreamBlockInfo> BlockInfo;
+  std::optional<llvm::BitstreamBlockInfo> BlockInfo;
 
   if (Stream.AtEndOfStream())
     return SDError::InvalidSignature;
@@ -78,7 +78,7 @@ SerializedDiagnosticReader::readDiagnostics(llvm::MemoryBufferRef Buffer) {
 
     switch (MaybeSubBlockID.get()) {
     case llvm::bitc::BLOCKINFO_BLOCK_ID: {
-      Expected<Optional<llvm::BitstreamBlockInfo>> MaybeBlockInfo =
+      Expected<std::optional<llvm::BitstreamBlockInfo>> MaybeBlockInfo =
           Stream.ReadBlockInfoBlock();
       if (!MaybeBlockInfo) {
         // FIXME this drops the error on the floor.

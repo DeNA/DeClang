@@ -11,9 +11,11 @@ static_library("lib") {
     "//llvm/lib/ExecutionEngine/MCJIT",
     "//llvm/lib/IR",
     "//llvm/lib/MC",
+    "//llvm/lib/MCA",
     "//llvm/lib/Object",
     "//llvm/lib/ObjectYAML",
     "//llvm/lib/Support",
+    "//llvm/lib/TargetParser",
   ]
   sources = [
     "Analysis.cpp",
@@ -22,6 +24,7 @@ static_library("lib") {
     "BenchmarkRunner.cpp",
     "Clustering.cpp",
     "CodeTemplate.cpp",
+    "DisassemblerHelper.cpp",
     "Error.cpp",
     "LatencyBenchmarkRunner.cpp",
     "LlvmState.cpp",
@@ -35,6 +38,7 @@ static_library("lib") {
     "SnippetFile.cpp",
     "SnippetGenerator.cpp",
     "SnippetRepetitor.cpp",
+    "SubprocessMemory.cpp",
     "Target.cpp",
     "UopsBenchmarkRunner.cpp",
   ]

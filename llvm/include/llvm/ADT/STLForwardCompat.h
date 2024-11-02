@@ -17,6 +17,7 @@
 #ifndef LLVM_ADT_STLFORWARDCOMPAT_H
 #define LLVM_ADT_STLFORWARDCOMPAT_H
 
+#include <optional>
 #include <type_traits>
 
 namespace llvm {
@@ -34,6 +35,37 @@ struct remove_cvref // NOLINT(readability-identifier-naming)
 template <typename T>
 using remove_cvref_t // NOLINT(readability-identifier-naming)
     = typename llvm::remove_cvref<T>::type;
+
+//===----------------------------------------------------------------------===//
+//     Features from C++23
+//===----------------------------------------------------------------------===//
+
+// TODO: Remove this in favor of std::optional<T>::transform once we switch to
+// C++23.
+template <typename T, typename Function>
+auto transformOptional(const std::optional<T> &O, const Function &F)
+    -> std::optional<decltype(F(*O))> {
+  if (O)
+    return F(*O);
+  return std::nullopt;
+}
+
+// TODO: Remove this in favor of std::optional<T>::transform once we switch to
+// C++23.
+template <typename T, typename Function>
+auto transformOptional(std::optional<T> &&O, const Function &F)
+    -> std::optional<decltype(F(*std::move(O)))> {
+  if (O)
+    return F(*std::move(O));
+  return std::nullopt;
+}
+
+/// Returns underlying integer value of an enum. Backport of C++23
+/// std::to_underlying.
+template <typename Enum>
+[[nodiscard]] constexpr std::underlying_type_t<Enum> to_underlying(Enum E) {
+  return static_cast<std::underlying_type_t<Enum>>(E);
+}
 
 } // namespace llvm
 

@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -std=c++2b %s -emit-llvm -triple x86_64-linux -o - | FileCheck %s
-// RUN: %clang_cc1 -std=c++2b %s -emit-llvm -triple x86_64-windows-msvc -o - | FileCheck %s
+// RUN: %clang_cc1 -std=c++23 %s -emit-llvm -triple x86_64-linux -o - | FileCheck %s
+// RUN: %clang_cc1 -std=c++23 %s -emit-llvm -triple x86_64-windows-msvc -o - | FileCheck %s
 
 struct Functor {
   static int operator()(int x, int y) {
@@ -28,6 +28,7 @@ void call_static_call_operator() {
   f(101, 102);
   f.operator()(201, 202);
   Functor{}(301, 302);
+  Functor::operator()(401, 402);
 }
 
 // CHECK:      define {{.*}}call_static_call_operator{{.*}}
@@ -35,6 +36,7 @@ void call_static_call_operator() {
 // CHECK:        {{.*}} = call noundef i32 {{.*}}Functor{{.*}}(i32 noundef 101, i32 noundef 102)
 // CHECK-NEXT:   {{.*}} = call noundef i32 {{.*}}Functor{{.*}}(i32 noundef 201, i32 noundef 202)
 // CHECK-NEXT:   {{.*}} = call noundef i32 {{.*}}Functor{{.*}}(i32 noundef 301, i32 noundef 302)
+// CHECK-NEXT:   {{.*}} = call noundef i32 {{.*}}Functor{{.*}}(i32 noundef 401, i32 noundef 402)
 // CHECK-NEXT:   ret void
 // CHECK-NEXT: }
 

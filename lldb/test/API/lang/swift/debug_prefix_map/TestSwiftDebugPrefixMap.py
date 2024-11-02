@@ -23,23 +23,18 @@ import unittest2
 
 
 class TestSwiftDebugPrefixMap(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_debug_prefix_map(self):
         self.do_test()
-
-    def setUp(self):
-        TestBase.setUp(self)
 
     def do_test(self):
         # Mirror the same source tree layout used in the Makefile. When lldb is
         # invoked in the CWD, it should find the source files with the same
         # relative paths used during compilation because the compiler's CWD was
         # remapped to ".".
-        src = os.path.join(self.getSourceDir(), "Inputs", "main.swift")
-        local_srcroot = self.getBuildArtifact("srcroot")
-        local_main = os.path.join(local_srcroot, "main.swift")
+        src = os.path.join(self.getSourceDir(), 'Inputs', 'main.swift')
+        local_srcroot = self.getBuildArtifact('srcroot')
+        local_main = os.path.join(local_srcroot, 'main.swift')
 
         if not os.path.exists(local_srcroot):
             os.makedirs(local_srcroot)
@@ -47,14 +42,15 @@ class TestSwiftDebugPrefixMap(TestBase):
 
         self.build()
         # Map "." back to the build dir.
-        self.expect("settings set target.source-map . " + self.getBuildArtifact("."))
+        self.expect('settings set target.source-map . ' +
+                    self.getBuildArtifact("."))
 
         # Create the target.
         target = self.dbg.CreateTarget(self.getBuildArtifact())
         self.assertTrue(target, VALID_TARGET)
 
         # Don't allow ANSI highlighting to interfere with the output.
-        self.runCmd("settings set stop-show-column none")
-        self.expect("breakpoint set -l 13", substrs=["foo"])
-        self.expect("source list -l 13", substrs=["return x + y - z"])
-        self.expect("run", substrs=["return x + y - z"])
+        self.runCmd('settings set stop-show-column none')
+        self.expect('breakpoint set -l 13', substrs=['foo'])
+        self.expect('source list -l 13', substrs=['return x + y - z'])
+        self.expect('run', substrs=['return x + y - z'])

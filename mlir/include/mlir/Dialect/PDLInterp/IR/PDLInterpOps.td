@@ -38,6 +38,7 @@ def PDLInterp_Dialect : Dialect {
   let name = "pdl_interp";
   let cppNamespace = "::mlir::pdl_interp";
   let dependentDialects = ["pdl::PDLDialect"];
+  let usePropertiesForAttributes = 1;
   let extraClassDeclaration = [{
     /// Returns the name of the function containing the matcher code. This
     /// function is called by the interpreter when matching an operation.
@@ -558,7 +559,7 @@ def PDLInterp_ExtractOp
   let builders = [
     OpBuilder<(ins "Value":$range, "unsigned":$index), [{
       build($_builder, $_state,
-            range.getType().cast<pdl::RangeType>().getElementType(),
+            ::llvm::cast<pdl::RangeType>(range.getType()).getElementType(),
             range, index);
     }]>,
   ];
@@ -630,7 +631,7 @@ def PDLInterp_ForEachOp
 //===----------------------------------------------------------------------===//
 
 def PDLInterp_FuncOp : PDLInterp_Op<"func", [
-    FunctionOpInterface, IsolatedFromAbove, Symbol
+    FunctionOpInterface, IsolatedFromAbove
   ]> {
   let summary = "PDL Interpreter Function Operation";
   let description = [{
@@ -652,7 +653,9 @@ def PDLInterp_FuncOp : PDLInterp_Op<"func", [
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    TypeAttrOf<FunctionType>:$function_type
+    TypeAttrOf<FunctionType>:$function_type,
+    OptionalAttr<DictArrayAttr>:$arg_attrs,
+    OptionalAttr<DictArrayAttr>:$res_attrs
   );
   let regions = (region MinSizedRegion<1>:$body);
 
@@ -814,7 +817,7 @@ def PDLInterp_GetOperandsOp : PDLInterp_Op<"get_operands", [Pure]> {
   let assemblyFormat = "($index^)? `of` $inputOp `:` type($value) attr-dict";
   let builders = [
     OpBuilder<(ins "Type":$resultType, "Value":$inputOp,
-                   "Optional<unsigned>":$index), [{
+                   "std::optional<unsigned>":$index), [{
       build($_builder, $_state, resultType, inputOp,
             index ? $_builder.getI32IntegerAttr(*index) : IntegerAttr());
     }]>,
@@ -881,7 +884,7 @@ def PDLInterp_GetResultsOp : PDLInterp_Op<"get_results", [Pure]> {
   let assemblyFormat = "($index^)? `of` $inputOp `:` type($value) attr-dict";
   let builders = [
     OpBuilder<(ins "Type":$resultType, "Value":$inputOp,
-                   "Optional<unsigned>":$index), [{
+                   "std::optional<unsigned>":$index), [{
       build($_builder, $_state, resultType, inputOp,
             index ? $_builder.getI32IntegerAttr(*index) : IntegerAttr());
     }]>,
@@ -961,7 +964,7 @@ def PDLInterp_GetValueTypeOp : PDLInterp_Op<"get_value_type", [Pure,
       Type valType = value.getType();
       Type typeType = $_builder.getType<pdl::TypeType>();
       build($_builder, $_state,
-            valType.isa<pdl::RangeType>() ? pdl::RangeType::get(typeType)
+            ::llvm::isa<pdl::RangeType>(valType) ? pdl::RangeType::get(typeType)
                                           : typeType,
             value);
     }]>
@@ -990,6 +993,43 @@ def PDLInterp_IsNotNullOp
 
   let arguments = (ins PDL_AnyType:$value);
   let assemblyFormat = "$value `:` type($value) attr-dict `->` successors";
+}
+
+
+//===----------------------------------------------------------------------===//
+// pdl_interp::CreateRangeOp
+//===----------------------------------------------------------------------===//
+
+def PDLInterp_CreateRangeOp : PDLInterp_Op<"create_range", [Pure]> {
+  let summary = "Construct a range of PDL entities";
+  let description = [{
+    `pdl_interp.create_range` operations construct a range from a given set of PDL
+    entities, which all share the same underlying element type. For example, a
+    `!pdl.range<value>` may be constructed from a list of `!pdl.value`
+    or `!pdl.range<value>` entities.
+
+    Example:
+
+    ```mlir
+    // Construct a range of values.
+    %valueRange = pdl_interp.create_range %inputValue, %inputRange : !pdl.value, !pdl.range<value>
+
+    // Construct a range of types.
+    %typeRange = pdl_interp.create_range %inputType, %inputRange : !pdl.type, !pdl.range<type>
+
+    // Construct an empty range of types.
+    %valueRange = pdl_interp.create_range : !pdl.range<type>
+    ```
+  }];
+
+  let arguments = (ins Variadic<PDL_AnyType>:$arguments);
+  let results = (outs PDL_RangeOf<AnyTypeOf<[PDL_Type, PDL_Value]>>:$result);
+  let assemblyFormat = [{
+    ($arguments^ `:` type($arguments))?
+    custom<RangeType>(ref(type($arguments)), type($result))
+    attr-dict
+  }];
+  let hasVerifier = 1;
 }
 
 //===----------------------------------------------------------------------===//

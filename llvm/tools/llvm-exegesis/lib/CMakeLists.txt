@@ -22,10 +22,12 @@ endforeach()
 set(LLVM_LINK_COMPONENTS
   Analysis
   CodeGen
+  CodeGenTypes
   Core
   ExecutionEngine
   GlobalISel
   MC
+  MCA
   MCDisassembler
   MCJIT
   MCParser
@@ -33,11 +35,15 @@ set(LLVM_LINK_COMPONENTS
   ObjectYAML
   RuntimeDyld
   Support
+  TargetParser
   )
 
 set(libs)
 if(LLVM_ENABLE_LIBPFM AND HAVE_LIBPFM)
   list(APPEND libs pfm)
+endif()
+if(HAVE_LIBRT)
+  list(APPEND libs rt)
 endif()
 
 add_llvm_library(LLVMExegesis
@@ -49,6 +55,7 @@ add_llvm_library(LLVMExegesis
   BenchmarkRunner.cpp
   Clustering.cpp
   CodeTemplate.cpp
+  DisassemblerHelper.cpp
   Error.cpp
   LatencyBenchmarkRunner.cpp
   LlvmState.cpp
@@ -62,6 +69,7 @@ add_llvm_library(LLVMExegesis
   SnippetFile.cpp
   SnippetGenerator.cpp
   SnippetRepetitor.cpp
+  SubprocessMemory.cpp
   Target.cpp
   UopsBenchmarkRunner.cpp
 

@@ -11,6 +11,7 @@
 
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/StringSaver.h"
 
@@ -25,9 +26,9 @@ namespace clang::cc1depscand {
 struct DepscanSharing {
   bool OnlyShareParent = false;
   bool ShareViaIdentifier = false;
-  Optional<StringRef> Name;
-  Optional<StringRef> Stop;
-  Optional<StringRef> Path;
+  std::optional<StringRef> Name;
+  std::optional<StringRef> Stop;
+  std::optional<StringRef> Path;
   SmallVector<const char *> CASArgs;
 };
 

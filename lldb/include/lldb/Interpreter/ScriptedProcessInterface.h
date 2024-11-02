@@ -15,6 +15,7 @@
 
 #include "lldb/lldb-private.h"
 
+#include <optional>
 #include <string>
 
 namespace lldb_private {
@@ -37,7 +38,7 @@ public:
 
   virtual Status Resume() { return Status("ScriptedProcess did not resume"); }
 
-  virtual llvm::Optional<MemoryRegionInfo>
+  virtual std::optional<MemoryRegionInfo>
   GetMemoryRegionContainingAddress(lldb::addr_t address, Status &error) {
     error.SetErrorString("ScriptedProcess have no memory region.");
     return {};
@@ -55,9 +56,9 @@ public:
     return {};
   }
 
-  virtual size_t WriteMemoryAtAddress(lldb::addr_t addr,
-                                      lldb::DataExtractorSP data_sp,
-                                      Status &error) {
+  virtual lldb::offset_t WriteMemoryAtAddress(lldb::addr_t addr,
+                                              lldb::DataExtractorSP data_sp,
+                                              Status &error) {
     return LLDB_INVALID_OFFSET;
   };
 
@@ -67,8 +68,8 @@ public:
 
   virtual bool IsAlive() { return true; }
 
-  virtual llvm::Optional<std::string> GetScriptedThreadPluginName() {
-    return llvm::None;
+  virtual std::optional<std::string> GetScriptedThreadPluginName() {
+    return std::nullopt;
   }
 
   virtual StructuredData::DictionarySP GetMetadata() { return {}; }
@@ -91,11 +92,11 @@ public:
 
   virtual lldb::tid_t GetThreadID() { return LLDB_INVALID_THREAD_ID; }
 
-  virtual llvm::Optional<std::string> GetName() { return llvm::None; }
+  virtual std::optional<std::string> GetName() { return std::nullopt; }
 
   virtual lldb::StateType GetState() { return lldb::eStateInvalid; }
 
-  virtual llvm::Optional<std::string> GetQueue() { return llvm::None; }
+  virtual std::optional<std::string> GetQueue() { return std::nullopt; }
 
   virtual StructuredData::DictionarySP GetStopReason() { return {}; }
 
@@ -103,8 +104,8 @@ public:
 
   virtual StructuredData::DictionarySP GetRegisterInfo() { return {}; }
 
-  virtual llvm::Optional<std::string> GetRegisterContext() {
-    return llvm::None;
+  virtual std::optional<std::string> GetRegisterContext() {
+    return std::nullopt;
   }
 
   virtual StructuredData::ArraySP GetExtendedInfo() { return {}; }

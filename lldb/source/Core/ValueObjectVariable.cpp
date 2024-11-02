@@ -32,12 +32,15 @@
 #include "lldb/lldb-private-enumerations.h"
 #include "lldb/lldb-types.h"
 
+#if defined(LLDB_ENABLE_SWIFT)
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
+#endif
 
 #include "llvm/ADT/StringRef.h"
 
 #include <cassert>
 #include <memory>
+#include <optional>
 
 namespace lldb_private {
 class ExecutionContextScope;
@@ -100,19 +103,23 @@ ConstString ValueObjectVariable::GetQualifiedTypeName() {
   return ConstString();
 }
 
-size_t ValueObjectVariable::CalculateNumChildren(uint32_t max) {
+llvm::Expected<uint32_t>
+ValueObjectVariable::CalculateNumChildren(uint32_t max) {
   CompilerType type(GetCompilerType());
 
   if (!type.IsValid())
-    return 0;
+    return llvm::make_error<llvm::StringError>("invalid type",
+                                               llvm::inconvertibleErrorCode());
 
   ExecutionContext exe_ctx(GetExecutionContextRef());
   const bool omit_empty_base_classes = true;
   auto child_count = type.GetNumChildren(omit_empty_base_classes, &exe_ctx);
-  return child_count <= max ? child_count : max;
+  if (!child_count)
+    return child_count;
+  return *child_count <= max ? *child_count : max;
 }
 
-llvm::Optional<uint64_t> ValueObjectVariable::GetByteSize() {
+std::optional<uint64_t> ValueObjectVariable::GetByteSize() {
   ExecutionContext exe_ctx(GetExecutionContextRef());
 
   CompilerType type(GetCompilerType());
@@ -140,7 +147,7 @@ bool ValueObjectVariable::UpdateValue() {
   CompilerType var_type(GetCompilerTypeImpl());
   if (var_type.IsValid() && var_type.GetMinimumLanguage() == lldb::eLanguageTypeSwift) {
     ExecutionContext exe_ctx(GetExecutionContextRef());
-    llvm::Optional<uint64_t> size =
+    std::optional<uint64_t> size =
       var_type.GetByteSize(exe_ctx.GetBestExecutionContextScope());
     if (size && *size == 0) {
       m_value.SetCompilerType(var_type);

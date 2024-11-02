@@ -314,6 +314,26 @@ TEST_F(FileManagerTest, getFileRefReturnsCorrectNameForDifferentStatPath) {
   EXPECT_EQ(&F2->getFileEntry(), &F2Alias2->getFileEntry());
 }
 
+TEST_F(FileManagerTest, getFileRefReturnsCorrectDirNameForDifferentStatPath) {
+  // Inject files with the same inode into distinct directories (name & inode).
+  auto StatCache = std::make_unique<FakeStatCache>();
+  StatCache->InjectDirectory("dir1", 40);
+  StatCache->InjectDirectory("dir2", 41);
+  StatCache->InjectFile("dir1/f.cpp", 42);
+  StatCache->InjectFile("dir2/f.cpp", 42, "dir1/f.cpp");
+
+  manager.setStatCache(std::move(StatCache));
+  auto Dir1F = manager.getFileRef("dir1/f.cpp");
+  auto Dir2F = manager.getFileRef("dir2/f.cpp");
+
+  ASSERT_FALSE(!Dir1F);
+  ASSERT_FALSE(!Dir2F);
+  EXPECT_EQ("dir1", Dir1F->getDir().getName());
+  EXPECT_EQ("dir2", Dir2F->getDir().getName());
+  EXPECT_EQ("dir1/f.cpp", Dir1F->getNameAsRequested());
+  EXPECT_EQ("dir2/f.cpp", Dir2F->getNameAsRequested());
+}
+
 // getFile() returns the same FileEntry for virtual files that have
 // corresponding real files that are aliases.
 TEST_F(FileManagerTest, getFileReturnsSameFileEntryForAliasedVirtualFiles) {
@@ -538,7 +558,7 @@ TEST_F(FileManagerTest, getBypassFile) {
 
   // Calling a second time should not affect the UID or size.
   unsigned VirtualUID = FE.getUID();
-  llvm::Optional<FileEntryRef> SearchRef;
+  OptionalFileEntryRef SearchRef;
   ASSERT_THAT_ERROR(Manager.getFileRef("/tmp/test").moveInto(SearchRef),
                     Succeeded());
   EXPECT_EQ(&FE, &SearchRef->getFileEntry());
@@ -546,8 +566,7 @@ TEST_F(FileManagerTest, getBypassFile) {
   EXPECT_EQ(FE.getSize(), 10);
 
   // Bypass the file.
-  llvm::Optional<FileEntryRef> BypassRef =
-      Manager.getBypassFile(File->getLastRef());
+  OptionalFileEntryRef BypassRef = Manager.getBypassFile(File->getLastRef());
   ASSERT_TRUE(BypassRef);
   EXPECT_EQ("/tmp/test", BypassRef->getName());
 
@@ -575,32 +594,32 @@ TEST_F(FileManagerTest, CASProvider) {
   FileSystemOptions Opts;
   {
     FileManager Manager(Opts, CASFS);
-    Optional<ObjectRef> CASContents;
+    std::optional<ObjectRef> CASContents;
     auto Buf = Manager.getBufferForFile(Path, /*IsVolatile*/ false,
                                         /*RequiresNullTerminator*/ false,
                                         &CASContents);
     ASSERT_TRUE(Buf);
     EXPECT_EQ(Contents, (*Buf)->getBuffer());
     ASSERT_TRUE(CASContents);
-    Optional<ObjectProxy> BlobContents;
+    std::optional<ObjectProxy> BlobContents;
     ASSERT_THAT_ERROR(DB->getProxy(*CASContents).moveInto(BlobContents),
                       llvm::Succeeded());
     EXPECT_EQ(BlobContents->getData(), Contents);
   }
   {
     FileManager Manager(Opts, CASFS);
-    Optional<FileEntryRef> FERef;
+    std::optional<FileEntryRef> FERef;
     ASSERT_THAT_ERROR(
         Manager.getFileRef(Path, /*OpenFile*/ true).moveInto(FERef),
         llvm::Succeeded());
-    Optional<ObjectRef> CASContents;
+    std::optional<ObjectRef> CASContents;
     auto Buf = Manager.getBufferForFile(*FERef, /*IsVolatile*/ false,
                                         /*RequiresNullTerminator*/ false,
                                         &CASContents);
     ASSERT_TRUE(Buf);
     EXPECT_EQ(Contents, (*Buf)->getBuffer());
     ASSERT_TRUE(CASContents);
-    Optional<ObjectProxy> BlobContents;
+    std::optional<ObjectProxy> BlobContents;
     ASSERT_THAT_ERROR(DB->getProxy(*CASContents).moveInto(BlobContents),
                       llvm::Succeeded());
     EXPECT_EQ(BlobContents->getData(), Contents);
@@ -608,11 +627,11 @@ TEST_F(FileManagerTest, CASProvider) {
   {
     FileSystemOptions Opts;
     FileManager Manager(Opts, CASFS);
-    llvm::ErrorOr<Optional<ObjectRef>> CASContents =
+    llvm::ErrorOr<std::optional<ObjectRef>> CASContents =
         Manager.getObjectRefForFileContent(Path);
     ASSERT_TRUE(CASContents);
     ASSERT_TRUE(*CASContents);
-    Optional<ObjectProxy> BlobContents;
+    std::optional<ObjectProxy> BlobContents;
     ASSERT_THAT_ERROR(DB->getProxy(**CASContents).moveInto(BlobContents),
                       llvm::Succeeded());
     EXPECT_EQ(BlobContents->getData(), Contents);
@@ -621,11 +640,11 @@ TEST_F(FileManagerTest, CASProvider) {
     FileSystemOptions Opts;
     Opts.WorkingDir = "/root";
     FileManager Manager(Opts, CASFS);
-    llvm::ErrorOr<Optional<ObjectRef>> CASContents =
+    llvm::ErrorOr<std::optional<ObjectRef>> CASContents =
         Manager.getObjectRefForFileContent("a.txt");
     ASSERT_TRUE(CASContents);
     ASSERT_TRUE(*CASContents);
-    Optional<ObjectProxy> BlobContents;
+    std::optional<ObjectProxy> BlobContents;
     ASSERT_THAT_ERROR(DB->getProxy(**CASContents).moveInto(BlobContents),
                       llvm::Succeeded());
     EXPECT_EQ(BlobContents->getData(), Contents);

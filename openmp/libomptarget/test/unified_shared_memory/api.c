@@ -4,10 +4,9 @@
 
 // Fails on amdgpu with error: GPU Memory Error
 // UNSUPPORTED: amdgcn-amd-amdhsa
-// UNSUPPORTED: amdgcn-amd-amdhsa-LTO
 
-#include <stdio.h>
 #include <omp.h>
+#include <stdio.h>
 
 // ---------------------------------------------------------------------------
 // Various definitions copied from OpenMP RTL

@@ -102,6 +102,10 @@ std::string getClangToolFullVersion(StringRef ToolName) {
     OS << " " << repo;
   }
 
+  //DECLANG CODES BEGIN
+  OS << " DeNA clang-swift6.0";
+  //DECLANG CODES END
+
   return buf;
 }
 

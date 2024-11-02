@@ -2,30 +2,30 @@
 # RUN: llc -mtriple=thumbv7m-none-eabi -mcpu=cortex-m7 -run-pass=pipeliner --pipeliner-force-issue-width=10 -o - %s | FileCheck %s --check-prefix=CHECK
 
 --- |
-  define hidden float @dot(float* nocapture noundef readonly %a, float* nocapture noundef readonly %b, i32 noundef %sz) local_unnamed_addr #0 {
+  define hidden float @dot(ptr nocapture noundef readonly %a, ptr nocapture noundef readonly %b, i32 noundef %sz) local_unnamed_addr #0 {
   entry:
     %cmp8 = icmp sgt i32 %sz, 0
     br i1 %cmp8, label %for.body.preheader, label %for.end
 
   for.body.preheader:                               ; preds = %entry
-    %scevgep = getelementptr float, float* %b, i32 -1
-    %scevgep4 = getelementptr float, float* %a, i32 -1
+    %scevgep = getelementptr float, ptr %b, i32 -1
+    %scevgep4 = getelementptr float, ptr %a, i32 -1
     br label %for.body
 
   for.body:                                         ; preds = %for.body.preheader, %for.body
-    %lsr.iv5 = phi float* [ %scevgep4, %for.body.preheader ], [ %scevgep6, %for.body ]
-    %lsr.iv1 = phi float* [ %scevgep, %for.body.preheader ], [ %scevgep2, %for.body ]
+    %lsr.iv5 = phi ptr [ %scevgep4, %for.body.preheader ], [ %scevgep6, %for.body ]
+    %lsr.iv1 = phi ptr [ %scevgep, %for.body.preheader ], [ %scevgep2, %for.body ]
     %lsr.iv = phi i32 [ %sz, %for.body.preheader ], [ %lsr.iv.next, %for.body ]
     %sum.010 = phi float [ %add, %for.body ], [ 0.000000e+00, %for.body.preheader ]
-    %scevgep7 = getelementptr float, float* %lsr.iv5, i32 1
-    %0 = load float, float* %scevgep7, align 4
-    %scevgep3 = getelementptr float, float* %lsr.iv1, i32 1
-    %1 = load float, float* %scevgep3, align 4
+    %scevgep7 = getelementptr float, ptr %lsr.iv5, i32 1
+    %0 = load float, ptr %scevgep7, align 4
+    %scevgep3 = getelementptr float, ptr %lsr.iv1, i32 1
+    %1 = load float, ptr %scevgep3, align 4
     %mul = fmul fast float %1, %0
     %add = fadd fast float %mul, %sum.010
     %lsr.iv.next = add i32 %lsr.iv, -1
-    %scevgep2 = getelementptr float, float* %lsr.iv1, i32 1
-    %scevgep6 = getelementptr float, float* %lsr.iv5, i32 1
+    %scevgep2 = getelementptr float, ptr %lsr.iv1, i32 1
+    %scevgep6 = getelementptr float, ptr %lsr.iv5, i32 1
     %exitcond.not = icmp ne i32 %lsr.iv.next, 0
     br i1 %exitcond.not, label %for.body, label %for.end, !llvm.loop !0
 
@@ -85,7 +85,7 @@ body:             |
   ; CHECK-NEXT:   [[VLDRS2:%[0-9]+]]:spr = VLDRS [[COPY4]], 1, 14 /* CC::al */, $noreg :: (load (s32) from %ir.scevgep7)
   ; CHECK-NEXT:   [[t2ADDri1:%[0-9]+]]:rgpr = t2ADDri [[COPY3]], 4, 14 /* CC::al */, $noreg, $noreg
   ; CHECK-NEXT:   [[VLDRS3:%[0-9]+]]:spr = VLDRS [[COPY3]], 1, 14 /* CC::al */, $noreg :: (load (s32) from %ir.scevgep3)
-  ; CHECK-NEXT:   INLINEASM &nop, 0 /* attdialect */, 196618 /* regdef:SPR */, def %30, 2147483657 /* reguse tiedto:$0 */, [[VLDRS2]]
+  ; CHECK-NEXT:   INLINEASM &nop, 0 /* attdialect */, 196618 /* regdef:SPR */, def %30, 2147483657 /* reguse tiedto:$0 */, [[VLDRS2]](tied-def 3)
   ; CHECK-NEXT:   [[t2SUBri2:%[0-9]+]]:rgpr = t2SUBri [[COPY]], 1, 14 /* CC::al */, $noreg, def $cpsr
   ; CHECK-NEXT:   [[COPY5:%[0-9]+]]:gprnopc = COPY [[t2SUBri2]]
   ; CHECK-NEXT:   [[COPY6:%[0-9]+]]:gprnopc = COPY [[t2ADDri1]]
@@ -101,7 +101,7 @@ body:             |
   ; CHECK-NEXT:   [[VLDRS4:%[0-9]+]]:spr = VLDRS [[COPY7]], 1, 14 /* CC::al */, $noreg :: (load unknown-size from %ir.scevgep7, align 4)
   ; CHECK-NEXT:   [[t2ADDri3:%[0-9]+]]:rgpr = t2ADDri [[COPY6]], 4, 14 /* CC::al */, $noreg, $noreg
   ; CHECK-NEXT:   [[VLDRS5:%[0-9]+]]:spr = VLDRS [[COPY6]], 1, 14 /* CC::al */, $noreg :: (load unknown-size from %ir.scevgep3, align 4)
-  ; CHECK-NEXT:   INLINEASM &nop, 0 /* attdialect */, 196618 /* regdef:SPR */, def %40, 2147483657 /* reguse tiedto:$0 */, [[VLDRS4]]
+  ; CHECK-NEXT:   INLINEASM &nop, 0 /* attdialect */, 196618 /* regdef:SPR */, def %40, 2147483657 /* reguse tiedto:$0 */, [[VLDRS4]](tied-def 3)
   ; CHECK-NEXT:   [[t2SUBri3:%[0-9]+]]:rgpr = t2SUBri [[COPY5]], 1, 14 /* CC::al */, $noreg, def $cpsr
   ; CHECK-NEXT:   [[COPY8:%[0-9]+]]:gpr = COPY [[t2SUBri3]]
   ; CHECK-NEXT:   [[COPY9:%[0-9]+]]:gpr = COPY [[t2ADDri3]]

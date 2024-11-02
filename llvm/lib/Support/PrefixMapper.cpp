@@ -8,27 +8,28 @@
 
 #include "llvm/Support/PrefixMapper.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/VirtualFileSystem.h"
 
 using namespace llvm;
 
-Optional<MappedPrefix> MappedPrefix::getFromJoined(StringRef JoinedMapping) {
+std::optional<MappedPrefix> MappedPrefix::getFromJoined(StringRef JoinedMapping) {
   auto Equals = JoinedMapping.find('=');
   if (Equals == StringRef::npos)
-    return None;
+    return std::nullopt;
   StringRef Old = JoinedMapping.substr(0, Equals);
   StringRef New = JoinedMapping.substr(Equals + 1);
   return MappedPrefix{Old, New};
 }
 
 template <bool StopOnInvalid, class StringT>
-static Optional<StringRef>
+static std::optional<StringRef>
 transformJoinedImpl(ArrayRef<StringT> JoinedMappings,
                     SmallVectorImpl<MappedPrefix> &Mappings) {
   size_t OriginalSize = Mappings.size();
   for (StringRef Joined : JoinedMappings) {
-    if (Optional<MappedPrefix> Split = MappedPrefix::getFromJoined(Joined)) {
+    if (std::optional<MappedPrefix> Split = MappedPrefix::getFromJoined(Joined)) {
       Mappings.push_back(*Split);
       continue;
     }
@@ -37,10 +38,10 @@ transformJoinedImpl(ArrayRef<StringT> JoinedMappings,
     Mappings.resize(OriginalSize);
     return Joined;
   }
-  return None;
+  return std::nullopt;
 }
 
-static Error makeErrorForInvalidJoin(Optional<StringRef> Joined) {
+static Error makeErrorForInvalidJoin(std::optional<StringRef> Joined) {
   if (!Joined)
     return Error::success();
   return createStringError(inconvertibleErrorCode(),
@@ -94,7 +95,7 @@ static bool startsWith(StringRef Path, StringRef Prefix,
   return true;
 }
 
-Optional<StringRef> PrefixMapper::mapImpl(StringRef Path,
+std::optional<StringRef> PrefixMapper::mapImpl(StringRef Path,
                                           SmallVectorImpl<char> &Storage) {
   for (const MappedPrefix &Map : Mappings) {
     StringRef Old = Map.Old;
@@ -114,12 +115,12 @@ Optional<StringRef> PrefixMapper::mapImpl(StringRef Path,
     llvm::sys::path::append(Storage, PathStyle, Suffix.drop_front());
     return StringRef(Storage.begin(), Storage.size());
   }
-  return None;
+  return std::nullopt;
 }
 
 bool PrefixMapper::map(StringRef Path, SmallVectorImpl<char> &NewPath) {
   NewPath.clear();
-  Optional<StringRef> Mapped = mapImpl(Path, NewPath);
+  std::optional<StringRef> Mapped = mapImpl(Path, NewPath);
   if (!NewPath.empty())
     return true;
   bool Modified = Mapped.has_value();
@@ -131,20 +132,20 @@ bool PrefixMapper::map(StringRef Path, SmallVectorImpl<char> &NewPath) {
 
 bool PrefixMapper::map(StringRef Path, std::string &NewPath) {
   SmallString<256> Storage;
-  Optional<StringRef> Mapped = mapImpl(Path, Storage);
+  std::optional<StringRef> Mapped = mapImpl(Path, Storage);
   NewPath = Mapped ? Mapped->str() : Path.str();
   return Mapped.has_value();
 }
 
 std::string PrefixMapper::mapToString(StringRef Path) {
   SmallString<256> Storage;
-  Optional<StringRef> Mapped = mapImpl(Path, Storage);
+  std::optional<StringRef> Mapped = mapImpl(Path, Storage);
   return Mapped ? Mapped->str() : Path.str();
 }
 
 bool PrefixMapper::mapInPlace(SmallVectorImpl<char> &Path) {
   SmallString<256> Storage;
-  Optional<StringRef> Mapped =
+  std::optional<StringRef> Mapped =
       mapImpl(StringRef(Path.begin(), Path.size()), Storage);
   if (!Mapped)
     return false;
@@ -157,7 +158,7 @@ bool PrefixMapper::mapInPlace(SmallVectorImpl<char> &Path) {
 
 bool PrefixMapper::mapInPlace(std::string &Path) {
   SmallString<256> Storage;
-  Optional<StringRef> Mapped = mapImpl(Path, Storage);
+  std::optional<StringRef> Mapped = mapImpl(Path, Storage);
   if (!Mapped)
     return false;
   Path.assign(Mapped->begin(), Mapped->size());
@@ -179,15 +180,15 @@ TreePathPrefixMapper::TreePathPrefixMapper(
 
 TreePathPrefixMapper::~TreePathPrefixMapper() = default;
 
-Optional<StringRef>
+std::optional<StringRef>
 TreePathPrefixMapper::mapImpl(StringRef Path, SmallVectorImpl<char> &Storage) {
   StringRef TreePath = getTreePath(Path);
-  Optional<StringRef> Mapped = PrefixMapper::mapImpl(TreePath, Storage);
+  std::optional<StringRef> Mapped = PrefixMapper::mapImpl(TreePath, Storage);
   if (Mapped)
     return *Mapped;
   if (TreePath != Path)
     return TreePath;
-  return None;
+  return std::nullopt;
 }
 
 StringRef TreePathPrefixMapper::getTreePath(StringRef Path) {
@@ -217,6 +218,6 @@ StringRef
 TreePathPrefixMapper::mapDirEntry(const vfs::CachedDirectoryEntry &Entry,
                                   SmallVectorImpl<char> &Storage) {
   StringRef TreePath = Entry.getTreePath();
-  Optional<StringRef> Mapped = PrefixMapper::mapImpl(TreePath, Storage);
+  std::optional<StringRef> Mapped = PrefixMapper::mapImpl(TreePath, Storage);
   return Mapped ? *Mapped : TreePath;
 }

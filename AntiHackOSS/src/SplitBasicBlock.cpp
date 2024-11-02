@@ -84,7 +84,7 @@ bool SplitBasicBlock::runOnFunction(Function &F) {
       llvm::Regex reFuncName(funcName);
 
       std::string seed = obj.getAsObject()->getString("seed")->str();
-      int SplitNum = obj.getAsObject()->getInteger("split_level").getValueOr(0);
+      int SplitNum = obj.getAsObject()->getInteger("split_level").value_or(0);
       if (!((SplitNum >= 0) && (SplitNum <= 10))) {
         (*logFile) << "[Frontend]: Config Error: split_level should be 0 to 10.\n";
         return false;

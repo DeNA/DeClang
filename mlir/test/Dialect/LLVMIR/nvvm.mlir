@@ -83,7 +83,7 @@ func.func @llvm_nvvm_bar_warp_sync(%mask : i32) {
   // CHECK: nvvm.bar.warp.sync %{{.*}}
   nvvm.bar.warp.sync %mask : i32
   llvm.return
-}  
+}
 
 // CHECK-LABEL: @nvvm_mma_m8n8k4_row_col_f32_f32
 func.func @nvvm_mma_m8n8k4_row_col_f32_f32(%a0 : vector<2xf16>, %a1 : vector<2xf16>,
@@ -266,11 +266,11 @@ func.func @nvvm_mma_m16n8k32_s4_s4(%a0 : i32, %a1 : i32,
 }
 
 // CHECK-LABEL: @nvvm_wmma_load_tf32
-func.func @nvvm_wmma_load_tf32(%arg0: !llvm.ptr<i32>, %arg1 : i32) -> !llvm.struct<(i32, i32, i32, i32)> {
+func.func @nvvm_wmma_load_tf32(%arg0: !llvm.ptr, %arg1 : i32) -> !llvm.struct<(i32, i32, i32, i32)> {
   // CHECK: nvvm.wmma.load {{.*}} {eltype = #nvvm.mma_type<tf32>, frag = #nvvm.mma_frag<a>, k = 8 : i32, layout = #nvvm.mma_layout<row>, m = 16 : i32, n = 16 : i32}
   %0 = nvvm.wmma.load %arg0, %arg1
     {eltype = #nvvm.mma_type<tf32>, frag = #nvvm.mma_frag<a>, k = 8 : i32, layout = #nvvm.mma_layout<row>, m = 16 : i32, n = 16 : i32}
-    : (!llvm.ptr<i32>) -> !llvm.struct<(i32, i32, i32, i32)>
+    : (!llvm.ptr) -> !llvm.struct<(i32, i32, i32, i32)>
   llvm.return %0 : !llvm.struct<(i32, i32, i32, i32)>
 }
 
@@ -288,11 +288,11 @@ func.func @nvvm_wmma_mma(%0 : i32, %1 : i32, %2 : i32, %3 : i32, %4 : i32, %5 : 
 }
 
 // CHECK-LABEL: @cp_async
-llvm.func @cp_async(%arg0: !llvm.ptr<i8, 3>, %arg1: !llvm.ptr<i8, 1>) {
-// CHECK:  nvvm.cp.async.shared.global %{{.*}}, %{{.*}}, 16
-  nvvm.cp.async.shared.global %arg0, %arg1, 16
-// CHECK:  nvvm.cp.async.shared.global %{{.*}}, %{{.*}}, 16 {bypass_l1}
-  nvvm.cp.async.shared.global %arg0, %arg1, 16 {bypass_l1}
+llvm.func @cp_async(%arg0: !llvm.ptr<3>, %arg1: !llvm.ptr<1>) {
+// CHECK:  nvvm.cp.async.shared.global %{{.*}}, %{{.*}}, 16, cache = ca
+  nvvm.cp.async.shared.global %arg0, %arg1, 16, cache = ca : !llvm.ptr<3>, !llvm.ptr<1>
+// CHECK:  nvvm.cp.async.shared.global %{{.*}}, %{{.*}}, 16, cache = cg
+  nvvm.cp.async.shared.global %arg0, %arg1, 16, cache = cg : !llvm.ptr<3>, !llvm.ptr<1>
 // CHECK: nvvm.cp.async.commit.group
   nvvm.cp.async.commit.group
 // CHECK: nvvm.cp.async.wait.group 0
@@ -301,16 +301,131 @@ llvm.func @cp_async(%arg0: !llvm.ptr<i8, 3>, %arg1: !llvm.ptr<i8, 1>) {
 }
 
 // CHECK-LABEL: llvm.func @ld_matrix
-llvm.func @ld_matrix(%arg0: !llvm.ptr<i32, 3>) {
-  // CHECK: nvvm.ldmatrix %{{.*}} {layout = #nvvm.mma_layout<row>, num = 1 : i32} : (!llvm.ptr<i32, 3>) -> i32
-  %l1 = nvvm.ldmatrix %arg0 {num = 1 : i32, layout = #nvvm.mma_layout<row>} : (!llvm.ptr<i32, 3>) -> i32
-  // CHECK: nvvm.ldmatrix %{{.*}} {layout = #nvvm.mma_layout<row>, num = 2 : i32} : (!llvm.ptr<i32, 3>) -> !llvm.struct<(i32, i32)>
-  %l2 = nvvm.ldmatrix %arg0 {num = 2 : i32, layout = #nvvm.mma_layout<row>} : (!llvm.ptr<i32, 3>) -> !llvm.struct<(i32, i32)>
-  // CHECK: nvvm.ldmatrix %{{.*}} {layout = #nvvm.mma_layout<row>, num = 4 : i32} : (!llvm.ptr<i32, 3>) -> !llvm.struct<(i32, i32, i32, i32)>
-  %l4 = nvvm.ldmatrix %arg0 {num = 4 : i32, layout = #nvvm.mma_layout<row>} : (!llvm.ptr<i32, 3>) -> !llvm.struct<(i32, i32, i32, i32)>
+llvm.func @ld_matrix(%arg0: !llvm.ptr<3>) {
+  // CHECK: nvvm.ldmatrix %{{.*}} {layout = #nvvm.mma_layout<row>, num = 1 : i32} : (!llvm.ptr<3>) -> i32
+  %l1 = nvvm.ldmatrix %arg0 {num = 1 : i32, layout = #nvvm.mma_layout<row>} : (!llvm.ptr<3>) -> i32
+  // CHECK: nvvm.ldmatrix %{{.*}} {layout = #nvvm.mma_layout<row>, num = 2 : i32} : (!llvm.ptr<3>) -> !llvm.struct<(i32, i32)>
+  %l2 = nvvm.ldmatrix %arg0 {num = 2 : i32, layout = #nvvm.mma_layout<row>} : (!llvm.ptr<3>) -> !llvm.struct<(i32, i32)>
+  // CHECK: nvvm.ldmatrix %{{.*}} {layout = #nvvm.mma_layout<row>, num = 4 : i32} : (!llvm.ptr<3>) -> !llvm.struct<(i32, i32, i32, i32)>
+  %l4 = nvvm.ldmatrix %arg0 {num = 4 : i32, layout = #nvvm.mma_layout<row>} : (!llvm.ptr<3>) -> !llvm.struct<(i32, i32, i32, i32)>
   llvm.return
 }
+
+// CHECK-LABEL: llvm.func @redux_sync
+llvm.func @redux_sync(%value : i32, %offset : i32) -> i32 {
+  // CHECK: nvvm.redux.sync  add %{{.*}}
+  %r1 = nvvm.redux.sync add %value, %offset : i32 -> i32
+  // CHECK: nvvm.redux.sync  max %{{.*}}
+  %r2 = nvvm.redux.sync max %value, %offset : i32 -> i32
+  // CHECK: nvvm.redux.sync  min %{{.*}}
+  %r3 = nvvm.redux.sync min %value, %offset : i32 -> i32
+  // CHECK: nvvm.redux.sync  umax %{{.*}}
+  %r5 = nvvm.redux.sync umax %value, %offset : i32 -> i32
+  // CHECK: nvvm.redux.sync  umin %{{.*}}
+  %r6 = nvvm.redux.sync umin %value, %offset : i32 -> i32
+  // CHECK: nvvm.redux.sync  and %{{.*}}
+  %r7 = nvvm.redux.sync and %value, %offset : i32 -> i32
+  // CHECK: nvvm.redux.sync  or %{{.*}}
+  %r8 = nvvm.redux.sync or %value, %offset : i32 -> i32
+  // CHECK: nvvm.redux.sync  xor %{{.*}}
+  %r9 = nvvm.redux.sync xor %value, %offset : i32 -> i32
+  llvm.return %r1 : i32
+}
+
+
 // -----
 
 // expected-error@below {{attribute attached to unexpected op}}
 func.func private @expected_llvm_func() attributes { nvvm.kernel }
+
+// -----
+
+llvm.func private @mbarrier_init_generic(%barrier: !llvm.ptr) {
+  %count = nvvm.read.ptx.sreg.ntid.x : i32
+  // CHECK:   nvvm.mbarrier.init %{{.*}}, %{{.*}} : !llvm.ptr, i32
+  nvvm.mbarrier.init %barrier, %count : !llvm.ptr, i32
+  llvm.return
+}
+
+
+llvm.func private @mbarrier_init_shared(%barrier: !llvm.ptr<3>) {
+  %count = nvvm.read.ptx.sreg.ntid.x : i32
+  // CHECK:   nvvm.mbarrier.init.shared %{{.*}}, %{{.*}} : !llvm.ptr<3>, i32
+  nvvm.mbarrier.init.shared %barrier, %count : !llvm.ptr<3>, i32
+  llvm.return
+}
+
+
+llvm.func private @mbarrier_inval_generic(%barrier: !llvm.ptr) {
+  // CHECK:   nvvm.mbarrier.inval %{{.*}} : !llvm.ptr
+  nvvm.mbarrier.inval %barrier : !llvm.ptr
+  llvm.return
+}
+
+
+llvm.func private @mbarrier_inval_shared(%barrier: !llvm.ptr<3>) {
+  // CHECK:   nvvm.mbarrier.inval.shared %{{.*}} : !llvm.ptr<3>
+  nvvm.mbarrier.inval.shared %barrier : !llvm.ptr<3>
+  llvm.return
+}
+
+llvm.func private @mbarrier_arrive(%barrier: !llvm.ptr) {
+  // CHECK:   nvvm.mbarrier.arrive %{{.*}} : !llvm.ptr
+  %0 = nvvm.mbarrier.arrive %barrier : !llvm.ptr  -> i64
+  llvm.return
+}
+
+llvm.func private @mbarrier_arrive_shared(%barrier: !llvm.ptr<3>) {
+  // CHECK:   nvvm.mbarrier.arrive.shared %{{.*}} : !llvm.ptr<3>
+  %0 = nvvm.mbarrier.arrive.shared %barrier : !llvm.ptr<3> -> i64
+  llvm.return
+}
+
+llvm.func private @mbarrier_arrive_nocomplete(%barrier: !llvm.ptr) {
+  %count = nvvm.read.ptx.sreg.ntid.x : i32
+  // CHECK:   nvvm.mbarrier.arrive.nocomplete %{{.*}} : !llvm.ptr
+  %0 = nvvm.mbarrier.arrive.nocomplete %barrier, %count : !llvm.ptr, i32 -> i64
+  llvm.return
+}
+
+llvm.func private @mbarrier_arrive_nocomplete_shared(%barrier: !llvm.ptr<3>) {
+  %count = nvvm.read.ptx.sreg.ntid.x : i32
+  // CHECK:   nvvm.mbarrier.arrive.nocomplete.shared %{{.*}} : !llvm.ptr<3>
+  %0 = nvvm.mbarrier.arrive.nocomplete.shared %barrier, %count : !llvm.ptr<3>, i32  -> i64
+  llvm.return
+}
+
+llvm.func private @mbarrier_test_wait(%barrier: !llvm.ptr, %token : i64) -> i1 {  
+  // CHECK:   nvvm.mbarrier.test.wait %{{.*}}
+  %isComplete = nvvm.mbarrier.test.wait %barrier, %token : !llvm.ptr, i64 -> i1
+  llvm.return %isComplete : i1
+}
+
+llvm.func private @mbarrier_test_wait_shared(%barrier: !llvm.ptr<3>, %token : i64) {
+  %count = nvvm.read.ptx.sreg.ntid.x : i32
+  // CHECK:   nvvm.mbarrier.test.wait.shared %{{.*}}
+  %isComplete = nvvm.mbarrier.test.wait.shared %barrier, %token : !llvm.ptr<3>, i64 -> i1
+  llvm.return
+}
+
+// CHECK-LABEL : @wgmma_fence_aligned
+func.func @wgmma_fence_aligned() {
+  // CHECK : nvvm.wgmma.fence.aligned
+  nvvm.wgmma.fence.aligned
+  return
+}
+
+// CHECK-LABEL : @wgmma_commit_group_sync_aligned
+func.func @wgmma_commit_group_sync_aligned() {
+  // CHECK : nvvm.wgmma.commit.group.sync.aligned
+  nvvm.wgmma.commit.group.sync.aligned
+  return
+}
+
+
+// CHECK-LABEL : @wgmma_commit_group_sync_aligned
+func.func @wgmma_wait_group_sync_aligned() {
+  // CHECK : nvvm.wgmma.wait.group.sync.aligned
+  nvvm.wgmma.wait.group.sync.aligned 0
+  return
+}

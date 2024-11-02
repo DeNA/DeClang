@@ -21,8 +21,10 @@
 #include "lldb/Utility/Scalar.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/lldb-types.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 
 #include <cstring>
+#include <optional>
 namespace lldb_private {
 class Declaration;
 }
@@ -93,17 +95,20 @@ ConstString ValueObjectDynamicValue::GetDisplayTypeName() {
   return m_parent->GetDisplayTypeName();
 }
 
-size_t ValueObjectDynamicValue::CalculateNumChildren(uint32_t max) {
+llvm::Expected<uint32_t>
+ValueObjectDynamicValue::CalculateNumChildren(uint32_t max) {
   const bool success = UpdateValueIfNeeded(false);
   if (success && m_dynamic_type_info.HasType()) {
     ExecutionContext exe_ctx(GetExecutionContextRef());
     auto children_count = GetCompilerType().GetNumChildren(true, &exe_ctx);
-    return children_count <= max ? children_count : max;
+    if (!children_count)
+      return children_count;
+    return *children_count <= max ? *children_count : max;
   } else
     return m_parent->GetNumChildren(max);
 }
 
-llvm::Optional<uint64_t> ValueObjectDynamicValue::GetByteSize() {
+std::optional<uint64_t> ValueObjectDynamicValue::GetByteSize() {
   const bool success = UpdateValueIfNeeded(false);
   if (success && m_dynamic_type_info.HasType()) {
     ExecutionContext exe_ctx(GetExecutionContextRef());
@@ -163,8 +168,8 @@ bool ValueObjectDynamicValue::UpdateValue() {
 #ifdef LLDB_ENABLE_SWIFT
   // An Objective-C object inside a Swift frame.
   if (known_type == eLanguageTypeObjC)
-    if ((exe_ctx.GetFramePtr() &&
-         exe_ctx.GetFramePtr()->GetLanguage() == lldb::eLanguageTypeSwift) ||
+    if ((exe_ctx.GetFramePtr() && exe_ctx.GetFramePtr()->GetLanguage().name ==
+                                      llvm::dwarf::DW_LNAME_Swift) ||
         (exe_ctx.GetTargetPtr() && exe_ctx.GetTargetPtr()->IsSwiftREPL())) {
       runtime = process->GetLanguageRuntime(lldb::eLanguageTypeSwift);
       if (runtime)
@@ -435,24 +440,4 @@ void ValueObjectDynamicValue::SetLanguageFlags(uint64_t flags) {
     m_parent->SetLanguageFlags(flags);
   else
     this->ValueObject::SetLanguageFlags(flags);
-}
-
-bool ValueObjectDynamicValue::DynamicValueTypeInfoNeedsUpdate() {
-  if (GetPreferredDisplayLanguage() != eLanguageTypeSwift)
-    return false;
-
-  if (!m_dynamic_type_info.HasType())
-    return false;
-
-#ifdef LLDB_ENABLE_SWIFT
-  auto cached_ctx = m_value.GetCompilerType().GetTypeSystem();
-  llvm::Optional<SwiftScratchContextReader> scratch_ctx(
-      GetSwiftScratchContext());
-
-  if (!scratch_ctx || !cached_ctx)
-    return true;
-  return (void*)cached_ctx.GetSharedPointer().get() != (void*)scratch_ctx->get();
-#else // !LLDB_ENABLE_SWIFT
-  return false;
-#endif // LLDB_ENABLE_SWIFT
 }

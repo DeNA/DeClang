@@ -31,6 +31,7 @@
 #include "lldb/lldb-types.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <cinttypes>
@@ -220,7 +221,7 @@ uint64_t Value::GetValueByteSize(Status *error_ptr, ExecutionContext *exe_ctx) {
   case ContextType::Variable: // Variable *
   {
     auto *scope = exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr;
-    if (llvm::Optional<uint64_t> size = GetCompilerType().GetByteSize(scope)) {
+    if (std::optional<uint64_t> size = GetCompilerType().GetByteSize(scope)) {
       if (error_ptr)
         error_ptr->Clear();
       return *size;
@@ -318,7 +319,7 @@ Status Value::GetValueAsData(ExecutionContext *exe_ctx, DataExtractor &data,
   AddressType address_type = eAddressTypeFile;
   Address file_so_addr;
   const CompilerType &ast_type = GetCompilerType();
-  llvm::Optional<uint64_t> type_size = ast_type.GetByteSize(
+  std::optional<uint64_t> type_size = ast_type.GetByteSize(
       exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr);
   // Nothing to be done for a zero-sized type.
   if (type_size && *type_size == 0)
@@ -571,7 +572,7 @@ Status Value::GetValueAsData(ExecutionContext *exe_ctx, DataExtractor &data,
   return error;
 }
 
-Scalar &Value::ResolveValue(ExecutionContext *exe_ctx) {
+Scalar &Value::ResolveValue(ExecutionContext *exe_ctx, Module *module) {
   const CompilerType &compiler_type = GetCompilerType();
   if (compiler_type.IsValid()) {
     switch (m_value_type) {
@@ -586,7 +587,7 @@ Scalar &Value::ResolveValue(ExecutionContext *exe_ctx) {
     {
       DataExtractor data;
       lldb::addr_t addr = m_value.ULongLong(LLDB_INVALID_ADDRESS);
-      Status error(GetValueAsData(exe_ctx, data, nullptr));
+      Status error(GetValueAsData(exe_ctx, data, module));
       if (error.Success()) {
         Scalar scalar;
         if (compiler_type.GetValueAsScalar(

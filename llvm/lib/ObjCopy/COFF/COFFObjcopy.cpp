@@ -13,6 +13,7 @@
 #include "llvm/ObjCopy/COFF/COFFConfig.h"
 #include "llvm/ObjCopy/CommonConfig.h"
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/CRC.h"
@@ -268,9 +269,9 @@ static Error handleArgs(const CommonConfig &Config,
       Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_ALIGN_1BYTES;
 
     addSection(Obj, NewSection.SectionName,
-               makeArrayRef(reinterpret_cast<const uint8_t *>(
-                                NewSection.SectionData->getBufferStart()),
-                            NewSection.SectionData->getBufferSize()),
+               ArrayRef(reinterpret_cast<const uint8_t *>(
+                            NewSection.SectionData->getBufferStart()),
+                        NewSection.SectionData->getBufferSize()),
                Characteristics);
   }
 

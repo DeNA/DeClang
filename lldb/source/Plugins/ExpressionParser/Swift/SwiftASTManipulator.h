@@ -13,15 +13,17 @@
 #ifndef liblldb_SwiftASTManipulator_h
 #define liblldb_SwiftASTManipulator_h
 
-#include "lldb/Utility/Stream.h"
 #include "lldb/Expression/Expression.h"
 #include "lldb/Symbol/CompilerType.h"
+#include "lldb/Utility/Status.h"
+#include "lldb/Utility/Stream.h"
 
 #include "swift/AST/Decl.h"
 #include "swift/Basic/SourceLoc.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 
+#include <optional>
 
 namespace swift {
 class CaseStmt;
@@ -35,6 +37,7 @@ class VarDecl;
 } // namespace swift
 
 namespace lldb_private {
+class SwiftASTContextForExpressions;
 
 class SwiftASTManipulatorBase {
 public:
@@ -101,9 +104,11 @@ public:
   struct VariableInfo {
     CompilerType GetType() const { return m_type; }
     swift::Identifier GetName() const { return m_name; }
+    VariableMetadata *GetMetadata() const { return m_metadata.get(); }
+    void TakeMetadata(VariableMetadata *vmd) { m_metadata.reset(vmd); }
     swift::VarDecl *GetDecl() const { return m_decl; }
     swift::VarDecl::Introducer GetVarIntroducer() const;
-    bool GetIsCaptureList() const;
+    bool IsCaptureList() const;
     bool IsMetadataPointer() const { return m_name.str().startswith("$τ"); }
     bool IsOutermostMetadataPointer() const {
       return m_name.str().startswith("$τ_0_");
@@ -116,38 +121,47 @@ public:
     }
     bool IsUnboundPack() const { return m_is_unbound_pack; }
 
-    VariableInfo() : m_type(), m_name(), m_metadata() {}
-
-    VariableInfo(CompilerType &type, swift::Identifier name,
+    VariableInfo() : m_lookup_error(llvm::Error::success()) {}
+    VariableInfo(CompilerType type, swift::Identifier name,
                  VariableMetadataSP metadata,
                  swift::VarDecl::Introducer introducer,
                  bool is_capture_list = false, bool is_unbound_pack = false)
-        : m_type(type), m_name(name), m_var_introducer(introducer),
+        : m_type(type), m_name(name), m_metadata(metadata),
+          m_var_introducer(introducer), m_lookup_error(llvm::Error::success()),
           m_is_capture_list(is_capture_list),
-          m_is_unbound_pack(is_unbound_pack), m_metadata(metadata) {}
+          m_is_unbound_pack(is_unbound_pack) {}
+
+    VariableInfo(CompilerType type, swift::Identifier name,
+                 swift::VarDecl *decl)
+        : m_type(type), m_name(name), m_decl(decl),
+          m_lookup_error(llvm::Error::success()) {}
 
     void Print(Stream &stream) const;
 
     void SetType(CompilerType new_type) { m_type = new_type; }
+    void SetLookupError(llvm::Error &&error) {
+      m_lookup_error = std::move(error);
+    }
+    llvm::Error TakeLookupError() { return m_lookup_error.ToError(); }
 
     friend class SwiftASTManipulator;
 
   protected:
     CompilerType m_type;
     swift::Identifier m_name;
+    VariableMetadataSP m_metadata;
     swift::VarDecl *m_decl = nullptr;
     swift::VarDecl::Introducer m_var_introducer =
         swift::VarDecl::Introducer::Var;
+    Status m_lookup_error;
     bool m_is_capture_list = false;
     bool m_is_unbound_pack = false;
-
-  public:
-    VariableMetadataSP m_metadata;
   };
 
-  SwiftASTManipulatorBase(swift::SourceFile &source_file, bool repl,
+  SwiftASTManipulatorBase(swift::SourceFile &source_file,
+                          const SymbolContext &sc, bool repl,
                           lldb::BindGenericTypes bind_generic_types)
-      : m_source_file(source_file), m_variables(), m_repl(repl),
+      : m_source_file(source_file), m_sc(sc), m_repl(repl),
         m_bind_generic_types(bind_generic_types) {
     DoInitialization();
   }
@@ -167,7 +181,7 @@ private:
 protected:
   swift::SourceFile &m_source_file;
   llvm::SmallVector<VariableInfo, 1> m_variables;
-
+  const SymbolContext &m_sc;
   bool m_repl = false;
 
   lldb::BindGenericTypes m_bind_generic_types = lldb::eBindAuto;
@@ -194,22 +208,24 @@ protected:
 
 class SwiftASTManipulator : public SwiftASTManipulatorBase {
 public:
-  SwiftASTManipulator(swift::SourceFile &source_file, bool repl,
-                      lldb::BindGenericTypes bind_generic_types);
+  SwiftASTManipulator(SwiftASTContextForExpressions &swift_ast_ctx,
+                      swift::SourceFile &source_file, const SymbolContext &sc,
+                      bool repl, lldb::BindGenericTypes bind_generic_types);
+  SwiftASTContextForExpressions &GetScratchContext() { return m_swift_ast_ctx; }
 
   void FindSpecialNames(llvm::SmallVectorImpl<swift::Identifier> &names,
                         llvm::StringRef prefix);
 
-  swift::VarDecl *AddExternalVariable(swift::Identifier name,
-                                      CompilerType &type,
-                                      VariableMetadataSP &metadata_sp);
+  llvm::Expected<swift::VarDecl *>
+  AddExternalVariable(swift::Identifier name, CompilerType &type,
+                      VariableMetadataSP &metadata_sp);
 
   swift::FuncDecl *GetFunctionToInjectVariableInto(
       const SwiftASTManipulator::VariableInfo &variable) const;
-  swift::VarDecl *GetVarDeclForVariableInFunction(
+  llvm::Expected<swift::VarDecl *> GetVarDeclForVariableInFunction(
       const SwiftASTManipulator::VariableInfo &variable,
       swift::FuncDecl *containing_function);
-  llvm::Optional<swift::Type> GetSwiftTypeForVariable(
+  llvm::Expected<swift::Type> GetSwiftTypeForVariable(
       const SwiftASTManipulator::VariableInfo &variable) const;
 
   bool AddExternalVariables(llvm::MutableArrayRef<VariableInfo> variables);
@@ -229,12 +245,18 @@ public:
 
   /// Makes a typealias binding name to type in the scope of the decl_ctx. If
   /// decl_ctx is a nullptr this is a global typealias.
-  swift::TypeAliasDecl *MakeTypealias(swift::Identifier name,
-                                      CompilerType &type,
-                                      bool make_private = true,
-                                      swift::DeclContext *decl_ctx = nullptr);
+  llvm::Expected<swift::TypeAliasDecl *>
+  MakeTypealias(swift::Identifier name, CompilerType &type,
+                bool make_private = true,
+                swift::DeclContext *decl_ctx = nullptr);
 
-  bool FixupResultAfterTypeChecking(Status &error);
+  /// Returns true if $__lldb_result is a non copyable type.
+  /// Currently LLDB cannot deal with expressions whose result is a non copyable
+  /// type, this function exists so LLDB can diagnose this situation and provide
+  /// a proper error message.
+  bool IsExpressionResultNonCopyable();
+
+  llvm::Error FixupResultAfterTypeChecking();
 
   static const char *GetArgumentName() { return "$__lldb_arg"; }
   static const char *GetResultName() { return "$__lldb_result"; }
@@ -294,6 +316,7 @@ private:
 
   std::vector<ResultLocationInfo> m_result_info;
   llvm::StringMap<swift::TypeBase *> m_type_aliases;
+  SwiftASTContextForExpressions &m_swift_ast_ctx;
 };
 }
 

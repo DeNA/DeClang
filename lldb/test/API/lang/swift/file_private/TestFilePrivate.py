@@ -20,8 +20,6 @@ import os
 
 
 class TestFilePrivate(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     def setUp(self):
         TestBase.setUp(self)
         self.a_source = "a.swift"
@@ -30,18 +28,6 @@ class TestFilePrivate(TestBase):
         self.b_source_spec = lldb.SBFileSpec(self.b_source)
         self.main_source = "main.swift"
         self.main_source_spec = lldb.SBFileSpec(self.main_source)
-
-    def check_expression(self, expression, expected_result, use_summary=True):
-        value = self.frame().EvaluateExpression(expression)
-        self.assertTrue(value.IsValid(), expression + "returned a valid value")
-        # print value.GetSummary()
-        # print value.GetValue()
-        if use_summary:
-            answer = value.GetSummary()
-        else:
-            answer = value.GetValue()
-        report_str = "%s expected: %s got: %s" % (expression, expected_result, answer)
-        self.assertTrue(answer == expected_result, report_str)
 
     @swiftTest
     def test(self):
@@ -54,37 +40,39 @@ class TestFilePrivate(TestBase):
 
         # Set the breakpoints
         a_breakpoint = target.BreakpointCreateBySourceRegex(
-            "break here", self.a_source_spec
-        )
+            'break here', self.a_source_spec)
         self.assertTrue(a_breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
         b_breakpoint = target.BreakpointCreateBySourceRegex(
-            "break here", self.b_source_spec
-        )
+            'break here', self.b_source_spec)
         self.assertTrue(b_breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
         main_breakpoint = target.BreakpointCreateBySourceRegex(
-            "break here", self.main_source_spec
-        )
-        self.assertTrue(main_breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
+            'break here', self.main_source_spec)
+        self.assertTrue(
+            main_breakpoint.GetNumLocations() > 0,
+            VALID_BREAKPOINT)
 
         process = target.LaunchSimple(None, None, os.getcwd())
         self.assertTrue(process, PROCESS_IS_VALID)
 
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, a_breakpoint)
+        threads = lldbutil.get_threads_stopped_at_breakpoint(
+            process, a_breakpoint)
 
         self.assertTrue(len(threads) == 1)
-        self.check_expression("privateVariable", '"five"')
+        lldbutil.check_expression(self, self.frame(), "privateVariable", "\"five\"", use_summary=True)
 
         process.Continue()
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, b_breakpoint)
+        threads = lldbutil.get_threads_stopped_at_breakpoint(
+            process, b_breakpoint)
 
         self.assertTrue(len(threads) == 1)
-        self.check_expression("privateVariable", "3", False)
+        lldbutil.check_expression(self, self.frame(), "privateVariable", "3", use_summary=False)
 
         process.Continue()
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, main_breakpoint)
+        threads = lldbutil.get_threads_stopped_at_breakpoint(
+            process, main_breakpoint)
 
         self.assertTrue(len(threads) == 1)
 
-        self.check_expression("privateVariable", None)
-        self.check_expression("privateVariable as Int", "3", False)
-        self.check_expression("privateVariable as String", '"five"')
+        lldbutil.check_expression(self, self.frame(), "privateVariable", None, use_summary=True)
+        lldbutil.check_expression(self, self.frame(), "privateVariable as Int", "3", use_summary=False)
+        lldbutil.check_expression(self, self.frame(), "privateVariable as String", "\"five\"", use_summary=True)

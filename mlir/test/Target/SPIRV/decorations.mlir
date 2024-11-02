@@ -1,4 +1,4 @@
-// RUN: mlir-translate -split-input-file -test-spirv-roundtrip %s | FileCheck %s
+// RUN: mlir-translate -no-implicit-module -split-input-file -test-spirv-roundtrip %s | FileCheck %s
 
 spirv.module Logical GLSL450 requires #spirv.vce<v1.0, [Shader], []> {
   // CHECK: location = 0 : i32
@@ -55,4 +55,14 @@ spirv.module Logical GLSL450 requires #spirv.vce<v1.0, [Shader], []> {
   // CHECK: relaxed_precision
   spirv.GlobalVariable @var {location = 0 : i32, relaxed_precision} : !spirv.ptr<vector<4xf32>, Output>
 }
+// -----
 
+spirv.module Logical GLSL450 requires #spirv.vce<v1.0, [Shader, Linkage], []> {
+  // CHECK: linkage_attributes = #spirv.linkage_attributes<linkage_name = outSideGlobalVar1, linkage_type = <Import>>
+  spirv.GlobalVariable @var1 {
+    linkage_attributes=#spirv.linkage_attributes<
+      linkage_name="outSideGlobalVar1", 
+      linkage_type=<Import>
+    >
+  } : !spirv.ptr<f32, Private>
+}

@@ -34,14 +34,14 @@ public:
 };
 
 Type matchContainerType(Type element, Type container) {
-  if (auto shapedTy = container.dyn_cast<ShapedType>())
+  if (auto shapedTy = dyn_cast<ShapedType>(container))
     return shapedTy.clone(element);
 
   return element;
 }
 
-Attribute getConstantAttr(Type type, int64_t value, PatternRewriter &rewriter) {
-  if (auto shapedTy = type.dyn_cast<ShapedType>()) {
+TypedAttr getConstantAttr(Type type, int64_t value, PatternRewriter &rewriter) {
+  if (auto shapedTy = dyn_cast<ShapedType>(type)) {
     Type eTy = shapedTy.getElementType();
     APInt valueInt(eTy.getIntOrFloatBitWidth(), value);
     return DenseIntElementsAttr::get(shapedTy, valueInt);
@@ -127,7 +127,6 @@ public:
 
     Type resultTy = op.getType();
     Type i32Ty = matchContainerType(rewriter.getI32Type(), resultTy);
-    Type i64Ty = matchContainerType(rewriter.getI64Type(), resultTy);
 
     Value value = op.getValue();
     if (getElementTypeOrSelf(value.getType()).getIntOrFloatBitWidth() > 32) {
@@ -144,20 +143,13 @@ public:
     Value two32 = getConstantValue(loc, i32Ty, 2, rewriter);
     Value thirty32 = getConstantValue(loc, i32Ty, 30, rewriter);
     Value thirtyTwo32 = getConstantValue(loc, i32Ty, 32, rewriter);
-    Value thirtyTwo64 = getConstantValue(loc, i64Ty, 32, rewriter);
 
     // Compute the multiplication in 64-bits then select the high / low parts.
-    Value value64 = rewriter.create<arith::ExtSIOp>(loc, i64Ty, value32);
-    Value multiplier64 =
-        rewriter.create<arith::ExtSIOp>(loc, i64Ty, multiplier32);
-    Value multiply64 =
-        rewriter.create<arith::MulIOp>(loc, value64, multiplier64);
-
     // Grab out the high/low of the computation
-    Value high64 =
-        rewriter.create<arith::ShRUIOp>(loc, multiply64, thirtyTwo64);
-    Value high32 = rewriter.create<arith::TruncIOp>(loc, i32Ty, high64);
-    Value low32 = rewriter.create<arith::MulIOp>(loc, value32, multiplier32);
+    auto value64 =
+        rewriter.create<arith::MulSIExtendedOp>(loc, value32, multiplier32);
+    Value low32 = value64.getLow();
+    Value high32 = value64.getHigh();
 
     // Determine the direction and amount to shift the high bits.
     Value shiftOver32 = rewriter.create<arith::CmpIOp>(

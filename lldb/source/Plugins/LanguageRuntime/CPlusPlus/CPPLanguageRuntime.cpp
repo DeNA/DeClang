@@ -44,16 +44,17 @@ bool CPPLanguageRuntime::IsAllowedRuntimeValue(ConstString name) {
   return name == g_this;
 }
 
-bool CPPLanguageRuntime::GetObjectDescription(Stream &str,
-                                              ValueObject &object) {
+llvm::Error CPPLanguageRuntime::GetObjectDescription(Stream &str,
+                                                     ValueObject &object) {
   // C++ has no generic way to do this.
-  return false;
+  return llvm::createStringError("C++ does not support object descriptions");
 }
 
-bool CPPLanguageRuntime::GetObjectDescription(
-    Stream &str, Value &value, ExecutionContextScope *exe_scope) {
+llvm::Error
+CPPLanguageRuntime::GetObjectDescription(Stream &str, Value &value,
+                                         ExecutionContextScope *exe_scope) {
   // C++ has no generic way to do this.
-  return false;
+  return llvm::createStringError("C++ does not support object descriptions");
 }
 
 bool contains_lambda_identifier(llvm::StringRef &str_ref) {
@@ -138,12 +139,10 @@ CPPLanguageRuntime::FindLibCppStdFunctionCallableInfo(
   //    we will obtain the name from this pointer.
   // 5) a free function. A pointer to the function will stored after the vtable
   //    we will obtain the name from this pointer.
-  ValueObjectSP member_f_(
-      valobj_sp->GetChildMemberWithName(ConstString("__f_"), true));
+  ValueObjectSP member_f_(valobj_sp->GetChildMemberWithName("__f_"));
 
   if (member_f_) {
-    ValueObjectSP sub_member_f_(
-       member_f_->GetChildMemberWithName(ConstString("__f_"), true));
+    ValueObjectSP sub_member_f_(member_f_->GetChildMemberWithName("__f_"));
 
     if (sub_member_f_)
         member_f_ = sub_member_f_;

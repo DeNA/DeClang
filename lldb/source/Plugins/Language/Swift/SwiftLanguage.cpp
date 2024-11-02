@@ -12,6 +12,8 @@
 
 #include "SwiftLanguage.h"
 
+#include "SwiftUnsafeTypes.h"
+#include "lldb/Core/Debugger.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Core/ValueObjectVariable.h"
@@ -21,6 +23,7 @@
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 
+#include "Plugins/ExpressionParser/Clang/ClangASTMetadata.h"
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Symbol/CompileUnit.h"
@@ -37,6 +40,7 @@
 #include <functional>
 #include <mutex>
 
+#include "lldb/lldb-enumerations.h"
 #include "swift/AST/ImportCache.h"
 #include "swift/Basic/InitializeSwiftModules.h"
 #include "swift/Demangling/ManglingMacros.h"
@@ -134,6 +138,25 @@ SwiftLanguage::GetMethodNameVariants(ConstString method_name) const {
   if (method_name.GetMangledCounterpart(counterpart))
     if (SwiftLanguageRuntime::IsSwiftMangledName(counterpart.GetStringRef()))
       variant_names.emplace_back(counterpart, eFunctionNameTypeFull);
+
+  // Properties can have multiple accessor blocks. This section of code supports
+  // breakpoints on accessor blocks by name.
+  //
+  // By default, the name `A.B` is treated as a fully qualified name, where `B`
+  // is the basename. However, some names can be interpreted in two ways, for
+  // example `A.get`. First, it can refer to the name `get` (in module `A`, or
+  // in type `A`). Second, it can refer the *getter* block for property `A`.
+  // LLDB's baseline behavior handles the first case. The second case is
+  // produced here as a variant name.
+  for (StringRef suffix : {".get", ".set", ".willset", ".didset"})
+    if (method_name.GetStringRef().ends_with(suffix)) {
+      // The method name, complete with suffix, *is* the variant.
+      variant_names.emplace_back(method_name, eFunctionNameTypeFull |
+                                                  eFunctionNameTypeBase |
+                                                  eFunctionNameTypeMethod);
+      break;
+    }
+
   return variant_names;
 }
 
@@ -766,6 +789,10 @@ ExtractSwiftTypeNameFromCxxInteropType(CompilerType type) {
   }
 
   const clang::RecordDecl *record_decl = record_type->getDecl();
+  auto *metadata = tsc->GetMetadata(record_decl);
+  if (metadata && !metadata->GetIsPotentiallySwiftInteropType())
+    return {};
+
   for (auto *child_decl : record_decl->decls()) {
     auto *var_decl = llvm::dyn_cast<clang::VarDecl>(child_decl);
     if (!var_decl)
@@ -831,11 +858,9 @@ class ValueObjectWrapperSyntheticChildren : public SyntheticChildren {
     ValueObjectWrapperFrontEndProvider(ValueObject &backend)
         : SyntheticChildrenFrontEnd(backend) {}
 
-    size_t CalculateNumChildren() override {
-      return 1;
-    }
+    llvm::Expected<uint32_t> CalculateNumChildren() override { return 1; }
 
-    lldb::ValueObjectSP GetChildAtIndex(size_t idx) override {
+    lldb::ValueObjectSP GetChildAtIndex(uint32_t idx) override {
       return idx == 0 ? m_backend.GetSP() : nullptr;
     }
 
@@ -843,7 +868,7 @@ class ValueObjectWrapperSyntheticChildren : public SyntheticChildren {
       return m_backend.GetName() == name ? 0 : UINT32_MAX;
     }
 
-    bool Update() override { return false; }
+    lldb::ChildCacheState Update() override { return ChildCacheState::eRefetch; }
 
     bool MightHaveChildren() override { return true; }
 
@@ -874,7 +899,6 @@ public:
 private:
   ValueObjectSP m_valobj;
 };
-
 
 HardcodedFormatters::HardcodedSyntheticFinder
 SwiftLanguage::GetHardcodedSynthetics() {
@@ -1024,7 +1048,7 @@ SwiftLanguage::GetHardcodedSynthetics() {
         LLDB_LOGV(log, "[Matching CxxBridgedSyntheticChildProvider] - "
                        "Could not get the swift runtime.");
 
-      llvm::Optional<SwiftScratchContextReader> scratch_ctx_reader =
+      std::optional<SwiftScratchContextReader> scratch_ctx_reader =
           valobj.GetSwiftScratchContext();
       if (!scratch_ctx_reader || !scratch_ctx_reader->get()) {
         LLDB_LOGV(log, "[Matching CxxBridgedSyntheticChildProvider] - "
@@ -1042,9 +1066,9 @@ SwiftLanguage::GetHardcodedSynthetics() {
         return nullptr;
       }
 
-      auto swift_valobj =
+      auto maybe_swift_valobj =
           SwiftLanguageRuntime::ExtractSwiftValueObjectFromCxxWrapper(valobj);
-      if (!swift_valobj) {
+      if (!maybe_swift_valobj) {
         StreamString clang_desc;
         type.DumpTypeDescription(&clang_desc);
 
@@ -1058,9 +1082,23 @@ SwiftLanguage::GetHardcodedSynthetics() {
                   clang_desc.GetData(), swift_desc.GetData());
         return nullptr;
       }
+      auto [swift_valobj, should_wrap_in_ptr] = *maybe_swift_valobj;
+
+      auto swift_type_system =
+          swift_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
+      if (!swift_type_system) {
+        LLDB_LOGF(log, "[Matching CxxBridgedSyntheticChildProvider] - "
+                       "Could not get Swift TypeSystem ");
+        return nullptr;
+      }
+      CompilerType cast_target_type = swift_type;
+      if (should_wrap_in_ptr)
+        cast_target_type =
+            swift_type_system->GetPointerType(swift_type.GetOpaqueQualType());
+
       // Cast it to a Swift type since thhe swift runtime expects a Swift value
       // object.
-      auto casted_to_swift = swift_valobj->Cast(swift_type);
+      auto casted_to_swift = swift_valobj->Cast(cast_target_type);
       if (!casted_to_swift) {
         LLDB_LOGF(log, "[Matching CxxBridgedSyntheticChildProvider] - "
                        "Could not cast value object to swift type.");
@@ -1092,9 +1130,25 @@ SwiftLanguage::GetHardcodedSynthetics() {
 
       casted_to_swift->SetName(ConstString("Swift_Type"));
 
-      SyntheticChildrenSP synth_sp =
-          SyntheticChildrenSP(new ValueObjectWrapperSyntheticChildren(
-              casted_to_swift, SyntheticChildren::Flags()));
+      SyntheticChildrenSP synth_sp;
+      if (should_wrap_in_ptr) {
+        // If we have a pointer to a Swift value type, dereference the pointer
+        // and present those as the contents instead.
+        auto children = lldb_private::formatters::swift::
+            ExtractChildrenFromSwiftPointerValueObject(casted_to_swift);
+
+        if (children.empty())
+          return nullptr;
+        // The pointer should only have one child: the pointee.
+        assert(children.size() == 1 &&
+               "Unexpected size for pointer's children!");
+
+        synth_sp = SyntheticChildrenSP(new ValueObjectWrapperSyntheticChildren(
+            children[0], SyntheticChildren::Flags()));
+      } else {
+        synth_sp = SyntheticChildrenSP(new ValueObjectWrapperSyntheticChildren(
+            casted_to_swift, SyntheticChildren::Flags()));
+      }
       return synth_sp;
     });
     g_formatters.push_back([](lldb_private::ValueObject &valobj,
@@ -1104,9 +1158,6 @@ SwiftLanguage::GetHardcodedSynthetics() {
       // instead of attempting to disguise them as Swift types.
 
       Log *log(GetLog(LLDBLog::DataFormatters));
-
-      if (!valobj.GetTargetSP()->IsSwiftCxxInteropEnabled())
-        return nullptr;
 
       CompilerType type(valobj.GetCompilerType());
       auto swift_type_system =
@@ -1137,6 +1188,29 @@ SwiftLanguage::GetHardcodedSynthetics() {
         return nullptr;
       }
 
+      // Find the compile unit and module using the frame, because the value
+      // object may not have a module in the case of an expression that
+      // evaluates to a type.
+      if (!valobj.GetFrameSP())
+        return nullptr;
+
+      auto sc = valobj.GetFrameSP()->GetSymbolContext(
+          lldb::SymbolContextItem::eSymbolContextCompUnit |
+          lldb::SymbolContextItem::eSymbolContextModule);
+
+      // If there is a compile unit, use that to check if C++ interop should be
+      // enabled. If there is no compiler unit, use the module. If neither
+      // exist, assume that C++ interop is disabled.
+      if (auto *cu = sc.comp_unit) {
+        if (!SwiftASTContext::ShouldEnableCXXInterop(cu))
+          return nullptr;
+      } else if (sc.module_sp) {
+        if (!sc.module_sp->IsSwiftCxxInteropEnabled())
+          return nullptr;
+      } else {
+        return nullptr;
+      }
+
       casted->SetName(ConstString("Clang_Type"));
 
       SyntheticChildrenSP synth_sp =
@@ -1153,9 +1227,10 @@ bool SwiftLanguage::IsSourceFile(llvm::StringRef file_path) const {
   return file_path.endswith(".swift");
 }
 
-std::vector<ConstString> SwiftLanguage::GetPossibleFormattersMatches(
+std::vector<FormattersMatchCandidate>
+SwiftLanguage::GetPossibleFormattersMatches(
     ValueObject &valobj, lldb::DynamicValueType use_dynamic) {
-  std::vector<ConstString> result;
+  std::vector<FormattersMatchCandidate> result;
 
   if (use_dynamic == lldb::eNoDynamicValues)
     return result;
@@ -1192,7 +1267,9 @@ std::vector<ConstString> SwiftLanguage::GetPossibleFormattersMatches(
                                          address, value_type))
     return result;
   if (ConstString name = type_and_or_name.GetName())
-    result.push_back(name);
+    result.push_back(
+        {name, valobj.GetTargetSP()->GetDebugger().GetScriptInterpreter(),
+         TypeImpl(compiler_type), FormattersMatchCandidate::Flags{}});
   return result;
 }
 
@@ -1290,13 +1367,16 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
             if (target) {
               const bool create_on_demand = false;
               Status error;
-              llvm::Optional<SwiftScratchContextReader> maybe_scratch_ctx =
+              std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
                   target->GetSwiftScratchContext(error, *exe_scope,
                                                  create_on_demand);
+              const SymbolContext *sc = nullptr;
+              if (auto frame_sp = exe_scope->CalculateStackFrame())
+                sc = &frame_sp->GetSymbolContext(lldb::eSymbolContextFunction);
               if (maybe_scratch_ctx)
                 if (auto scratch_ctx = maybe_scratch_ctx->get())
                   if (SwiftASTContext *ast_ctx =
-                          scratch_ctx->GetSwiftASTContext()) {
+                          scratch_ctx->GetSwiftASTContext(sc)) {
                     ConstString cs_input{input};
                     Mangled mangled(cs_input);
                     if (mangled.GuessLanguage() == eLanguageTypeSwift) {
@@ -1333,8 +1413,16 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
                 if (result_sp && result_sp->GetCompilerType().IsValid()) {
                   CompilerType result_type(result_sp->GetCompilerType());
                   if (Flags(result_type.GetTypeInfo())
-                          .AllSet(eTypeIsSwift | eTypeIsMetatype))
-                    result_type = TypeSystemSwift::GetInstanceType(result_type);
+                      .AllSet(eTypeIsSwift | eTypeIsMetatype)) {
+                    result_type = TypeSystemSwift::GetInstanceType(result_type,
+                                                                   exe_scope);
+                    if (auto swift_ast_ctx =
+                            result_type.GetTypeSystem()
+                                .dyn_cast_or_null<SwiftASTContext>())
+                      result_type = swift_ast_ctx->GetTypeSystemSwiftTypeRef()
+                                        .GetTypeFromMangledTypename(
+                                            result_type.GetMangledTypeName());
+                  }
                   results.insert(TypeOrDecl(result_type));
                 }
               }
@@ -1352,76 +1440,79 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
             Target *target = exe_scope->CalculateTarget().get();
             const bool create_on_demand = false;
             Status error;
-            llvm::Optional<SwiftScratchContextReader> maybe_scratch_ctx =
+            std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
                 target->GetSwiftScratchContext(error, *exe_scope,
                                                create_on_demand);
-              if (maybe_scratch_ctx)
-                if (auto scratch_ctx = maybe_scratch_ctx->get())
-                  if (SwiftASTContext *ast_ctx =
-                          scratch_ctx->GetSwiftASTContext()) {
-                    auto iter = ast_ctx->GetModuleCache().begin(),
-                         end = ast_ctx->GetModuleCache().end();
+            const SymbolContext *sc = nullptr;
+            if (auto frame_sp = exe_scope->CalculateStackFrame())
+              sc = &frame_sp->GetSymbolContext(lldb::eSymbolContextFunction);
 
-                    std::vector<llvm::StringRef> name_parts;
-                    SplitDottedName(input, name_parts);
+            if (maybe_scratch_ctx)
+              if (auto scratch_ctx = maybe_scratch_ctx->get())
+                if (SwiftASTContext *ast_ctx =
+                        scratch_ctx->GetSwiftASTContext(sc)) {
+                  auto iter = ast_ctx->GetModuleCache().begin(),
+                       end = ast_ctx->GetModuleCache().end();
 
-                    std::function<void(swift::ModuleDecl *)> lookup_func =
-                        [&ast_ctx, input, name_parts,
-                         &results](swift::ModuleDecl *module) -> void {
-                      for (auto imported_module :
-                           swift::namelookup::getAllImports(module)) {
-                        auto module = imported_module.importedModule;
-                        TypesOrDecls local_results;
-                        ast_ctx->FindTypesOrDecls(input, module, local_results,
-                                                  false);
-                        llvm::Optional<TypeOrDecl> candidate;
-                        if (local_results.empty() && name_parts.size() > 1) {
-                          size_t idx_of_deeper = 1;
-                          // if you're looking for Swift.Int in module Swift,
-                          // try looking for Int
-                          if (name_parts.front() == module->getName().str()) {
-                            candidate = ast_ctx->FindTypeOrDecl(
-                                name_parts[1].str().c_str(), module);
-                            idx_of_deeper = 2;
-                          }
-                          // this is probably the top-level name of a nested
-                          // type String.UTF8View
-                          else {
-                            candidate = ast_ctx->FindTypeOrDecl(
-                                name_parts[0].str().c_str(), module);
-                          }
-                          if (candidate.has_value()) {
-                            TypesOrDecls candidates{candidate.value()};
-                            for (; idx_of_deeper < name_parts.size();
-                                 idx_of_deeper++) {
-                              TypesOrDecls new_candidates;
-                              for (auto candidate : candidates) {
-                                ast_ctx->FindContainedTypeOrDecl(
-                                    name_parts[idx_of_deeper], candidate,
-                                    new_candidates);
-                              }
-                              candidates = new_candidates;
-                            }
+                  std::vector<llvm::StringRef> name_parts;
+                  SplitDottedName(input, name_parts);
+
+                  std::function<void(swift::ModuleDecl *)> lookup_func =
+                      [&ast_ctx, input, name_parts,
+                       &results](swift::ModuleDecl *module) -> void {
+                    for (auto imported_module :
+                         swift::namelookup::getAllImports(module)) {
+                      auto module = imported_module.importedModule;
+                      TypesOrDecls local_results;
+                      ast_ctx->FindTypesOrDecls(input, module, local_results,
+                                                false);
+                      std::optional<TypeOrDecl> candidate;
+                      if (local_results.empty() && name_parts.size() > 1) {
+                        size_t idx_of_deeper = 1;
+                        // if you're looking for Swift.Int in module Swift,
+                        // try looking for Int
+                        if (name_parts.front() == module->getName().str()) {
+                          candidate = ast_ctx->FindTypeOrDecl(
+                              name_parts[1].str().c_str(), module);
+                          idx_of_deeper = 2;
+                        }
+                        // this is probably the top-level name of a nested
+                        // type String.UTF8View
+                        else {
+                          candidate = ast_ctx->FindTypeOrDecl(
+                              name_parts[0].str().c_str(), module);
+                        }
+                        if (candidate.has_value()) {
+                          TypesOrDecls candidates{candidate.value()};
+                          for (; idx_of_deeper < name_parts.size();
+                               idx_of_deeper++) {
+                            TypesOrDecls new_candidates;
                             for (auto candidate : candidates) {
-                              if (candidate)
-                                results.insert(candidate);
+                              ast_ctx->FindContainedTypeOrDecl(
+                                  name_parts[idx_of_deeper], candidate,
+                                  new_candidates);
                             }
+                            candidates = new_candidates;
                           }
-                        } else if (local_results.size() > 0) {
-                          for (const auto &result : local_results)
-                            results.insert(result);
-                        } else if (local_results.empty() && module &&
-                                   name_parts.size() == 1 &&
-                                   name_parts.front() ==
-                                       module->getName().str())
-                          results.insert(
-                              ToCompilerType(swift::ModuleType::get(module)));
-                      }
-                    };
+                          for (auto candidate : candidates) {
+                            if (candidate)
+                              results.insert(candidate);
+                          }
+                        }
+                      } else if (local_results.size() > 0) {
+                        for (const auto &result : local_results)
+                          results.insert(result);
+                      } else if (local_results.empty() && module &&
+                                 name_parts.size() == 1 &&
+                                 name_parts.front() == module->getName().str())
+                        results.insert(
+                            ToCompilerType(swift::ModuleType::get(module)));
+                    }
+                  };
 
-                    for (; iter != end; iter++)
-                      lookup_func(iter->second);
-                  }
+                  for (; iter != end; iter++)
+                    lookup_func(iter->second);
+                }
           }
 
           return (results.size() - before);
@@ -1470,61 +1561,21 @@ const char *SwiftLanguage::GetLanguageSpecificTypeLookupHelp() {
          "print all types and declarations available in that module";
 }
 
-bool SwiftLanguage::GetFormatterPrefixSuffix(ValueObject &valobj,
-                                             ConstString type_hint,
-                                             std::string &prefix,
-                                             std::string &suffix) {
-  static ConstString g_NSNumberChar("NSNumber:char");
-  static ConstString g_NSNumberShort("NSNumber:short");
-  static ConstString g_NSNumberInt("NSNumber:int");
-  static ConstString g_NSNumberLong("NSNumber:long");
-  static ConstString g_NSNumberInt128("NSNumber:int128_t");
-  static ConstString g_NSNumberFloat("NSNumber:float");
-  static ConstString g_NSNumberDouble("NSNumber:double");
+std::pair<llvm::StringRef, llvm::StringRef>
+SwiftLanguage::GetFormatterPrefixSuffix(llvm::StringRef type_hint) {
+  static const llvm::StringMap<
+      std::pair<const llvm::StringRef, const llvm::StringRef>>
+      g_affix_map = {
+          {"NSNumber:char", {"UInt8(", ")"}},
+          {"NSNumber:short", {"Int16(", ")"}},
+          {"NSNumber:int", {"Int32(", ")"}},
+          {"NSNumber:long", {"Int64(", ")"}},
+          {"NSNumber:int128_t", {"Int128(", ")"}},
+          {"NSNumber:float", {"Float(", ")"}},
+          {"NSNumber:double", {"Double(", ")"}},
+      };
 
-  if (type_hint.IsEmpty())
-    return false;
-
-  prefix.clear();
-  suffix.clear();
-
-  if (type_hint == g_NSNumberChar) {
-    prefix = "UInt8(";
-    suffix = ")";
-    return true;
-  }
-  if (type_hint == g_NSNumberShort) {
-    prefix = "Int16(";
-    suffix = ")";
-    return true;
-  }
-  if (type_hint == g_NSNumberInt) {
-    prefix = "Int32(";
-    suffix = ")";
-    return true;
-  }
-  if (type_hint == g_NSNumberLong) {
-    prefix = "Int64(";
-    suffix = ")";
-    return true;
-  }
-  if (type_hint == g_NSNumberInt128) {
-    prefix = "Int128(";
-    suffix = ")";
-    return true;
-  }
-  if (type_hint == g_NSNumberFloat) {
-    prefix = "Float(";
-    suffix = ")";
-    return true;
-  }
-  if (type_hint == g_NSNumberDouble) {
-    prefix = "Double(";
-    suffix = ")";
-    return true;
-  }
-
-  return false;
+  return g_affix_map.lookup(type_hint);
 }
 
 DumpValueObjectOptions::DeclPrintingHelper
@@ -1561,8 +1612,7 @@ LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
 
   Scalar scalar_value;
 
-  auto swift_ty = GetCanonicalSwiftType(valobj.GetCompilerType());
-  CompilerType valobj_type = ToCompilerType(swift_ty);
+  CompilerType valobj_type = valobj.GetCompilerType();
   Flags type_flags(valobj_type.GetTypeInfo());
   if (valobj_type.GetTypeSystem().isa_and_nonnull<TypeSystemSwift>()) {
     if (type_flags.AllSet(eTypeIsStructUnion) &&
@@ -1607,152 +1657,154 @@ bool SwiftLanguage::GetFunctionDisplayName(
   SwiftScratchContextLock scratch_ctx_lock(exe_ctx);
   switch (representation) {
   case Language::FunctionNameRepresentation::eName:
-    break; // no need to customize this
+    // No need to customize this.
+    return false;
   case Language::FunctionNameRepresentation::eNameWithNoArgs: {
-    if (sc->function) {
-      if (sc->function->GetLanguage() == eLanguageTypeSwift) {
-        if (ConstString cs = sc->function->GetDisplayName(sc)) {
-          s.Printf("%s", cs.AsCString());
-          return true;
-        }
-      }
-    }
-    break;
+    if (!sc->function)
+      return false;
+    if (sc->function->GetLanguage() != eLanguageTypeSwift)
+      return false;
+    std::string display_name = SwiftLanguageRuntime::DemangleSymbolAsString(
+        sc->function->GetMangled().GetMangledName().GetStringRef(),
+        SwiftLanguageRuntime::eSimplified, sc, exe_ctx);
+    if (display_name.empty())
+      return false;
+    s << display_name;
+    return true;
   }
   case Language::FunctionNameRepresentation::eNameWithArgs: {
-    if (sc->function) {
-      if (sc->function->GetLanguage() == eLanguageTypeSwift) {
-        if (const char *cstr = sc->function->GetDisplayName(sc).AsCString()) {
-          ExecutionContextScope *exe_scope =
-              exe_ctx ? exe_ctx->GetBestExecutionContextScope() : NULL;
-          const InlineFunctionInfo *inline_info = NULL;
-          VariableListSP variable_list_sp;
-          bool get_function_vars = true;
-          if (sc->block) {
-            Block *inline_block = sc->block->GetContainingInlinedBlock();
+    if (!sc->function)
+      return false;
+    if (sc->function->GetLanguage() != eLanguageTypeSwift)
+      return false;
+    std::string display_name = SwiftLanguageRuntime::DemangleSymbolAsString(
+        sc->function->GetMangled().GetMangledName().GetStringRef(),
+        SwiftLanguageRuntime::eSimplified, sc, exe_ctx);
+    if (display_name.empty())
+      return false;
+    ExecutionContextScope *exe_scope =
+        exe_ctx ? exe_ctx->GetBestExecutionContextScope() : NULL;
+    const InlineFunctionInfo *inline_info = NULL;
+    VariableListSP variable_list_sp;
+    bool get_function_vars = true;
+    if (sc->block) {
+      Block *inline_block = sc->block->GetContainingInlinedBlock();
 
-            if (inline_block) {
-              get_function_vars = false;
-              inline_info = sc->block->GetInlinedFunctionInfo();
-              if (inline_info)
-                variable_list_sp = inline_block->GetBlockVariableList(true);
-            }
-          }
-
-          if (get_function_vars) {
-            variable_list_sp =
-                sc->function->GetBlock(true).GetBlockVariableList(true);
-          }
-
-          if (inline_info) {
-            s.PutCString(cstr);
-            s.PutCString(" [inlined] ");
-            cstr = inline_info->GetName().GetCString();
-          }
-
-          VariableList args;
-          if (variable_list_sp)
-            variable_list_sp->AppendVariablesWithScope(
-                eValueTypeVariableArgument, args);
-          if (args.GetSize() > 0) {
-            const char *open_paren = strchr(cstr, '(');
-            const char *close_paren = nullptr;
-            const char *generic = strchr(cstr, '<');
-            // if before the arguments list begins there is a template sign
-            // then scan to the end of the generic args before you try to find
-            // the arguments list
-            if (generic && open_paren && generic < open_paren) {
-              int generic_depth = 1;
-              ++generic;
-              for (; *generic && generic_depth > 0; generic++) {
-                if (*generic == '<')
-                  generic_depth++;
-                if (*generic == '>')
-                  generic_depth--;
-              }
-              if (*generic)
-                open_paren = strchr(generic, '(');
-              else
-                open_paren = nullptr;
-            }
-            if (open_paren) {
-              close_paren = strchr(open_paren, ')');
-            }
-
-            if (open_paren)
-              s.Write(cstr, open_paren - cstr + 1);
-            else {
-              s.PutCString(cstr);
-              s.PutChar('(');
-            }
-            const size_t num_args = args.GetSize();
-            for (size_t arg_idx = 0; arg_idx < num_args; ++arg_idx) {
-              std::string buffer;
-
-              VariableSP var_sp(args.GetVariableAtIndex(arg_idx));
-              ValueObjectSP var_value_sp(
-                  ValueObjectVariable::Create(exe_scope, var_sp));
-              StreamString ss;
-              const char *var_representation = nullptr;
-              const char *var_name = var_value_sp->GetName().GetCString();
-              if (var_value_sp->GetCompilerType().IsValid()) {
-                if (var_value_sp && exe_scope->CalculateTarget())
-                  var_value_sp =
-                      var_value_sp->GetQualifiedRepresentationIfAvailable(
-                          exe_scope->CalculateTarget()
-                              ->TargetProperties::GetPreferDynamicValue(),
-                          exe_scope->CalculateTarget()
-                              ->TargetProperties::GetEnableSyntheticValue());
-                if (var_value_sp->GetCompilerType().IsAggregateType() &&
-                    DataVisualization::ShouldPrintAsOneLiner(
-                        *var_value_sp.get())) {
-                  static StringSummaryFormat format(
-                      TypeSummaryImpl::Flags()
-                          .SetHideItemNames(false)
-                          .SetShowMembersOneLiner(true),
-                      "");
-                  format.FormatObject(var_value_sp.get(), buffer,
-                                      TypeSummaryOptions());
-                  var_representation = buffer.c_str();
-                } else
-                  var_value_sp->DumpPrintableRepresentation(
-                      ss,
-                      ValueObject::ValueObjectRepresentationStyle::
-                          eValueObjectRepresentationStyleSummary,
-                      eFormatDefault,
-                      ValueObject::PrintableRepresentationSpecialCases::eAllow,
-                      false);
-              }
-              if (ss.GetData() && ss.GetSize())
-                var_representation = ss.GetData();
-              if (arg_idx > 0)
-                s.PutCString(", ");
-              if (var_value_sp->GetError().Success()) {
-                if (var_representation)
-                  s.Printf("%s=%s", var_name, var_representation);
-                else
-                  s.Printf("%s=%s at %s", var_name,
-                           var_value_sp->GetTypeName().GetCString(),
-                           var_value_sp->GetLocationAsCString());
-              } else
-                s.Printf("%s=<unavailable>", var_name);
-            }
-
-            if (close_paren)
-              s.PutCString(close_paren);
-            else
-              s.PutChar(')');
-
-          } else {
-            s.PutCString(cstr);
-          }
-          return true;
-        }
+      if (inline_block) {
+        get_function_vars = false;
+        inline_info = sc->block->GetInlinedFunctionInfo();
+        if (inline_info)
+          variable_list_sp = inline_block->GetBlockVariableList(true);
       }
     }
-  }
-  }
 
+    if (get_function_vars) {
+      variable_list_sp =
+          sc->function->GetBlock(true).GetBlockVariableList(true);
+    }
+
+    if (inline_info) {
+      s << display_name;
+      s.PutCString(" [inlined] ");
+      display_name = inline_info->GetName().GetString();
+    }
+
+    VariableList args;
+    if (variable_list_sp)
+      variable_list_sp->AppendVariablesWithScope(eValueTypeVariableArgument,
+                                                 args);
+    if (args.GetSize() == 0) {
+      s << display_name;
+      return true;
+    }
+    const char *cstr = display_name.data();
+    const char *open_paren = strchr(cstr, '(');
+    const char *close_paren = nullptr;
+    const char *generic = strchr(cstr, '<');
+    // If before the arguments list begins there is a template sign
+    // then scan to the end of the generic args before you try to find
+    // the arguments list.
+    if (generic && open_paren && generic < open_paren) {
+      int generic_depth = 1;
+      ++generic;
+      for (; *generic && generic_depth > 0; generic++) {
+        if (*generic == '<')
+          generic_depth++;
+        if (*generic == '>')
+          generic_depth--;
+      }
+      if (*generic)
+        open_paren = strchr(generic, '(');
+      else
+        open_paren = nullptr;
+    }
+    if (open_paren) {
+      close_paren = strchr(open_paren, ')');
+    }
+
+    if (open_paren)
+      s.Write(cstr, open_paren - cstr + 1);
+    else {
+      s << display_name;
+      s.PutChar('(');
+    }
+    const size_t num_args = args.GetSize();
+    for (size_t arg_idx = 0; arg_idx < num_args; ++arg_idx) {
+      std::string buffer;
+
+      VariableSP var_sp(args.GetVariableAtIndex(arg_idx));
+      ValueObjectSP var_value_sp(
+          ValueObjectVariable::Create(exe_scope, var_sp));
+      if (!var_sp || !var_value_sp || var_sp->IsArtificial())
+        continue;
+      StreamString ss;
+      const char *var_representation = nullptr;
+      const char *var_name = var_value_sp->GetName().GetCString();
+      if (var_value_sp->GetCompilerType().IsValid()) {
+        if (var_value_sp && exe_scope->CalculateTarget())
+          var_value_sp = var_value_sp->GetQualifiedRepresentationIfAvailable(
+              exe_scope->CalculateTarget()
+                  ->TargetProperties::GetPreferDynamicValue(),
+              exe_scope->CalculateTarget()
+                  ->TargetProperties::GetEnableSyntheticValue());
+        if (var_value_sp->GetCompilerType().IsAggregateType() &&
+            DataVisualization::ShouldPrintAsOneLiner(*var_value_sp.get())) {
+          static StringSummaryFormat format(TypeSummaryImpl::Flags()
+                                                .SetHideItemNames(false)
+                                                .SetShowMembersOneLiner(true),
+                                            "");
+          format.FormatObject(var_value_sp.get(), buffer, TypeSummaryOptions());
+          var_representation = buffer.c_str();
+        } else
+          var_value_sp->DumpPrintableRepresentation(
+              ss,
+              ValueObject::ValueObjectRepresentationStyle::
+                  eValueObjectRepresentationStyleSummary,
+              eFormatDefault,
+              ValueObject::PrintableRepresentationSpecialCases::eAllow, false);
+      }
+      if (ss.GetData() && ss.GetSize())
+        var_representation = ss.GetData();
+      if (arg_idx > 0)
+        s.PutCString(", ");
+      if (var_value_sp->GetError().Success()) {
+        if (var_representation)
+          s.Printf("%s=%s", var_name, var_representation);
+        else
+          s.Printf("%s=%s at %s", var_name,
+                   var_value_sp->GetTypeName().GetCString(),
+                   var_value_sp->GetLocationAsCString());
+      } else
+        s.Printf("%s=<unavailable>", var_name);
+    }
+
+    if (close_paren)
+      s.PutCString(close_paren);
+    else
+      s.PutChar(')');
+    } 
+    return true;
+  }
   return false;
 }
 

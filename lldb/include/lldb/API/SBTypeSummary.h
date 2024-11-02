@@ -25,6 +25,7 @@ public:
 
   SBTypeSummaryOptions(const lldb::SBTypeSummaryOptions &rhs);
 
+
   ~SBTypeSummaryOptions();
 
   explicit operator bool() const;

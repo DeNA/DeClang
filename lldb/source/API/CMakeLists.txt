@@ -16,6 +16,11 @@ if(LLDB_BUILD_FRAMEWORK)
 endif()
 
 if(LLDB_ENABLE_PYTHON)
+  if (APPLE AND LLVM_ENABLE_LOCAL_SUBMODULE_VISIBILITY)
+    # Work around an issue with the Python headers, which have a modular include
+    # inside an extern "C" block.
+    remove_module_flags()
+  endif()
   get_target_property(python_bindings_dir swig_wrapper_python BINARY_DIR)
   set(lldb_python_wrapper ${python_bindings_dir}/LLDBWrapPython.cpp)
 endif()
@@ -24,6 +29,22 @@ if(LLDB_ENABLE_LUA)
   get_target_property(lua_bindings_dir swig_wrapper_lua BINARY_DIR)
   set(lldb_lua_wrapper ${lua_bindings_dir}/LLDBWrapLua.cpp)
 endif()
+
+# Generate SBLanguages.h from Dwarf.def.
+set(sb_languages_file
+  ${CMAKE_CURRENT_BINARY_DIR}/../../include/lldb/API/SBLanguages.h)
+add_custom_command(
+  COMMENT "Generating SBLanguages.h from Dwarf.def"
+  COMMAND "${Python3_EXECUTABLE}"
+      ${LLDB_SOURCE_DIR}/scripts/generate-sbapi-dwarf-enum.py
+      ${LLVM_MAIN_INCLUDE_DIR}/llvm/BinaryFormat/Dwarf.def
+      -o ${sb_languages_file}
+  OUTPUT ${sb_languages_file}
+  DEPENDS ${LLVM_MAIN_INCLUDE_DIR}/llvm/BinaryFormat/Dwarf.def
+  WORKING_DIRECTORY ${LLVM_LIBRARY_OUTPUT_INTDIR}
+)
+add_custom_target(lldb-sbapi-dwarf-enums
+  DEPENDS ${sb_languages_file})
 
 add_lldb_library(liblldb SHARED ${option_framework}
   SBAddress.cpp
@@ -50,6 +71,7 @@ add_lldb_library(liblldb SHARED ${option_framework}
   SBFileSpec.cpp
   SBFile.cpp
   SBFileSpecList.cpp
+  SBFormat.cpp
   SBFrame.cpp
   SBFunction.cpp
   SBHostOS.cpp
@@ -66,7 +88,6 @@ add_lldb_library(liblldb SHARED ${option_framework}
   SBPlatform.cpp
   SBProcess.cpp
   SBProcessInfo.cpp
-  SBProcessInfoList.cpp
   SBQueue.cpp
   SBQueueItem.cpp
   SBReproducer.cpp
@@ -97,10 +118,14 @@ add_lldb_library(liblldb SHARED ${option_framework}
   SBValueList.cpp
   SBVariablesOptions.cpp
   SBWatchpoint.cpp
+  SBWatchpointOptions.cpp
   SBUnixSignals.cpp
   SystemInitializerFull.cpp
   ${lldb_python_wrapper}
   ${lldb_lua_wrapper}
+
+  DEPENDS
+    lldb-sbapi-dwarf-enums
 
   LINK_LIBS
     lldbBreakpoint
@@ -232,12 +257,11 @@ else()
   # When building the LLDB framework, this isn't necessary as there we copy everything we need into
   # the framework (including the Clang resourece directory).
   if(NOT LLDB_BUILD_FRAMEWORK)
-    get_target_property(liblldb_TARGET_FILE_DIR liblldb TARGET_FILE_DIR)
-    file(MAKE_DIRECTORY "${liblldb_TARGET_FILE_DIR}/clang")
+    set(LLDB_CLANG_RESOURCE_DIR "$<TARGET_FILE_DIR:liblldb>/clang")
     add_custom_command(TARGET liblldb POST_BUILD
-      COMMENT "Linking Clang resource dir into LLDB build directory: ${liblldb_TARGET_FILE_DIR}/clang"
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${liblldb_TARGET_FILE_DIR}/clang"
-      COMMAND ${CMAKE_COMMAND} -E create_symlink "${LLDB_EXTERNAL_CLANG_RESOURCE_DIR}" "${liblldb_TARGET_FILE_DIR}/clang/${LLDB_CLANG_RESOURCE_DIR_NAME}"
+      COMMENT "Linking Clang resource dir into LLDB build directory: ${LLDB_CLANG_RESOURCE_DIR}"
+      COMMAND ${CMAKE_COMMAND} -E create_symlink
+      "${LLDB_EXTERNAL_CLANG_RESOURCE_DIR}" "${LLDB_CLANG_RESOURCE_DIR}"
     )
   endif()
 endif()
@@ -262,11 +286,7 @@ set(lib_dir "${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX}")
 if(EXISTS ${SWIFT_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX}/swift/clang)
   set(CLANG_RESOURCE_PATH "${SWIFT_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX}/swift/clang")
 elseif(LLDB_BUILT_STANDALONE)
-  set(CLANG_VERSION ${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH})
-  set(CLANG_RESOURCE_PATH "${Clang_DIR}/../../../lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION}")
-  if(NOT EXISTS ${CLANG_RESOURCE_PATH})
-    message(SEND_ERROR "standalone build cannot locate clang resource directory")
-  endif()
+  set(CLANG_RESOURCE_PATH ${LLDB_EXTERNAL_CLANG_RESOURCE_DIR})
 elseif(LLVM_LIBRARY_OUTPUT_INTDIR)
   set(CLANG_RESOURCE_PATH "${LLVM_LIBRARY_OUTPUT_INTDIR}/swift/clang")
 else()

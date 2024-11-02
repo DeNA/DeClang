@@ -75,9 +75,9 @@ Type Dialect::parseType(DialectAsmParser &parser) const {
   return Type();
 }
 
-Optional<Dialect::ParseOpHook>
+std::optional<Dialect::ParseOpHook>
 Dialect::getParseOperationHook(StringRef opName) const {
-  return None;
+  return std::nullopt;
 }
 
 llvm::unique_function<void(Operation *, OpAsmPrinter &printer)>
@@ -96,6 +96,9 @@ bool Dialect::isValidNamespace(StringRef str) {
 
 /// Register a set of dialect interfaces with this dialect instance.
 void Dialect::addInterface(std::unique_ptr<DialectInterface> interface) {
+  // Handle the case where the models resolve a promised interface.
+  handleAdditionOfUndefinedPromisedInterface(interface->getID());
+
   auto it = registeredInterfaces.try_emplace(interface->getID(),
                                              std::move(interface));
   (void)it;
@@ -119,8 +122,12 @@ MLIRContext *DialectInterface::getContext() const {
 }
 
 DialectInterfaceCollectionBase::DialectInterfaceCollectionBase(
-    MLIRContext *ctx, TypeID interfaceKind) {
+    MLIRContext *ctx, TypeID interfaceKind, StringRef interfaceName) {
   for (auto *dialect : ctx->getLoadedDialects()) {
+#ifndef NDEBUG
+    dialect->handleUseOfUndefinedPromisedInterface(interfaceKind,
+                                                   interfaceName);
+#endif
     if (auto *interface = dialect->getRegisteredInterface(interfaceKind)) {
       interfaces.insert(interface);
       orderedInterfaces.push_back(interface);
@@ -142,6 +149,16 @@ DialectInterfaceCollectionBase::getInterfaceFor(Operation *op) const {
 //===----------------------------------------------------------------------===//
 
 DialectExtensionBase::~DialectExtensionBase() = default;
+
+void dialect_extension_detail::handleUseOfUndefinedPromisedInterface(
+    Dialect &dialect, TypeID interfaceID, StringRef interfaceName) {
+  dialect.handleUseOfUndefinedPromisedInterface(interfaceID, interfaceName);
+}
+
+void dialect_extension_detail::handleAdditionOfUndefinedPromisedInterface(
+    Dialect &dialect, TypeID interfaceID) {
+  dialect.handleAdditionOfUndefinedPromisedInterface(interfaceID);
+}
 
 //===----------------------------------------------------------------------===//
 // DialectRegistry
@@ -227,8 +244,9 @@ void DialectRegistry::applyExtensions(Dialect *dialect) const {
     extension.apply(ctx, requiredDialects);
   };
 
-  for (const auto &extension : extensions)
-    applyExtension(*extension);
+  // Note: Additional extensions may be added while applying an extension.
+  for (int i = 0; i < static_cast<int>(extensions.size()); ++i)
+    applyExtension(*extensions[i]);
 }
 
 void DialectRegistry::applyExtensions(MLIRContext *ctx) const {
@@ -248,8 +266,9 @@ void DialectRegistry::applyExtensions(MLIRContext *ctx) const {
     extension.apply(ctx, requiredDialects);
   };
 
-  for (const auto &extension : extensions)
-    applyExtension(*extension);
+  // Note: Additional extensions may be added while applying an extension.
+  for (int i = 0; i < static_cast<int>(extensions.size()); ++i)
+    applyExtension(*extensions[i]);
 }
 
 bool DialectRegistry::isSubsetOf(const DialectRegistry &rhs) const {

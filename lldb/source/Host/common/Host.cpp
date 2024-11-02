@@ -63,7 +63,6 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/lldb-private-forward.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Errno.h"
 #include "llvm/Support/FileSystem.h"
 
@@ -90,7 +89,39 @@ using namespace lldb;
 using namespace lldb_private;
 
 #if !defined(__APPLE__)
-void Host::SystemLog(llvm::StringRef message) { llvm::errs() << message; }
+#if !defined(_WIN32)
+#include <syslog.h>
+void Host::SystemLog(Severity severity, llvm::StringRef message) {
+  static llvm::once_flag g_openlog_once;
+  llvm::call_once(g_openlog_once,
+                  [] { openlog("lldb", LOG_PID | LOG_NDELAY, LOG_USER); });
+  int level = LOG_DEBUG;
+  switch (severity) {
+  case lldb::eSeverityInfo:
+    level = LOG_INFO;
+    break;
+  case lldb::eSeverityWarning:
+    level = LOG_WARNING;
+    break;
+  case lldb::eSeverityError:
+    level = LOG_ERR;
+    break;
+  }
+  syslog(level, "%s", message.data());
+}
+#else
+void Host::SystemLog(Severity severity, llvm::StringRef message) {
+  switch (severity) {
+  case lldb::eSeverityInfo:
+  case lldb::eSeverityWarning:
+    llvm::outs() << message;
+    break;
+  case lldb::eSeverityError:
+    llvm::errs() << message;
+    break;
+  }
+}
+#endif
 #endif
 
 #if !defined(__APPLE__) && !defined(_WIN32)
@@ -547,9 +578,11 @@ void Host::Kill(lldb::pid_t pid, int signo) { ::kill(pid, signo); }
 #endif
 
 #if !defined(__APPLE__)
-bool Host::OpenFileInExternalEditor(const FileSpec &file_spec,
-                                    uint32_t line_no) {
-  return false;
+llvm::Error Host::OpenFileInExternalEditor(llvm::StringRef editor,
+                                           const FileSpec &file_spec,
+                                           uint32_t line_no) {
+  return llvm::errorCodeToError(
+      std::error_code(ENOTSUP, std::system_category()));
 }
 
 bool Host::IsInteractiveGraphicSession() { return false; }
@@ -621,5 +654,5 @@ char SystemLogHandler::ID;
 SystemLogHandler::SystemLogHandler() {}
 
 void SystemLogHandler::Emit(llvm::StringRef message) {
-  Host::SystemLog(message);
+  Host::SystemLog(lldb::eSeverityInfo, message);
 }

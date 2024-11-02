@@ -17,7 +17,6 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
@@ -25,7 +24,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ADT/ilist_iterator.h"
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/DomTreeUpdater.h"
 #include "llvm/Analysis/InstructionSimplify.h"
@@ -46,6 +44,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/ValueHandle.h"
@@ -217,6 +216,8 @@ void llvm::simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
                                    ScalarEvolution *SE, DominatorTree *DT,
                                    AssumptionCache *AC,
                                    const TargetTransformInfo *TTI) {
+  using namespace llvm::PatternMatch;
+
   // Simplify any new induction variables in the partially unrolled loop.
   if (SE && SimplifyIVs) {
     SmallVector<WeakTrackingVH, 16> DeadInsts;
@@ -242,6 +243,30 @@ void llvm::simplifyLoopAfterUnroll(Loop *L, bool SimplifyIVs, LoopInfo *LI,
           Inst.replaceAllUsesWith(V);
       if (isInstructionTriviallyDead(&Inst))
         DeadInsts.emplace_back(&Inst);
+
+      // Fold ((add X, C1), C2) to (add X, C1+C2). This is very common in
+      // unrolled loops, and handling this early allows following code to
+      // identify the IV as a "simple recurrence" without first folding away
+      // a long chain of adds.
+      {
+        Value *X;
+        const APInt *C1, *C2;
+        if (match(&Inst, m_Add(m_Add(m_Value(X), m_APInt(C1)), m_APInt(C2)))) {
+          auto *InnerI = dyn_cast<Instruction>(Inst.getOperand(0));
+          auto *InnerOBO = cast<OverflowingBinaryOperator>(Inst.getOperand(0));
+          bool SignedOverflow;
+          APInt NewC = C1->sadd_ov(*C2, SignedOverflow);
+          Inst.setOperand(0, X);
+          Inst.setOperand(1, ConstantInt::get(Inst.getType(), NewC));
+          Inst.setHasNoUnsignedWrap(Inst.hasNoUnsignedWrap() &&
+                                    InnerOBO->hasNoUnsignedWrap());
+          Inst.setHasNoSignedWrap(Inst.hasNoSignedWrap() &&
+                                  InnerOBO->hasNoSignedWrap() &&
+                                  !SignedOverflow);
+          if (InnerI && isInstructionTriviallyDead(InnerI))
+            DeadInsts.emplace_back(InnerI);
+        }
+      }
     }
     // We can't do recursive deletion until we're done iterating, as we might
     // have a phi which (potentially indirectly) uses instructions later in
@@ -311,6 +336,9 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
 
   const unsigned MaxTripCount = SE->getSmallConstantMaxTripCount(L);
   const bool MaxOrZero = SE->isBackedgeTakenCountMaxOrZero(L);
+  unsigned EstimatedLoopInvocationWeight = 0;
+  std::optional<unsigned> OriginalTripCount =
+      llvm::getLoopEstimatedTripCount(L, &EstimatedLoopInvocationWeight);
 
   // Effectively "DCE" unrolled iterations that are beyond the max tripcount
   // and will never be executed.
@@ -510,10 +538,11 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
 
   // When a FSDiscriminator is enabled, we don't need to add the multiply
   // factors to the discriminators.
-  if (Header->getParent()->isDebugInfoForProfiling() && !EnableFSDiscriminator)
+  if (Header->getParent()->shouldEmitDebugInfoForProfiling() &&
+      !EnableFSDiscriminator)
     for (BasicBlock *BB : L->getBlocks())
       for (Instruction &I : *BB)
-        if (!isa<DbgInfoIntrinsic>(&I))
+        if (!I.isDebugOrPseudoInst())
           if (const DILocation *DIL = I.getDebugLoc()) {
             auto NewDIL = DIL->cloneByMultiplyingDuplicationFactor(ULO.Count);
             if (NewDIL)
@@ -541,7 +570,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
     for (LoopBlocksDFS::RPOIterator BB = BlockBegin; BB != BlockEnd; ++BB) {
       ValueToValueMapTy VMap;
       BasicBlock *New = CloneBasicBlock(*BB, VMap, "." + Twine(It));
-      Header->getParent()->getBasicBlockList().insert(BlockInsertPt, New);
+      Header->getParent()->insert(BlockInsertPt, New);
 
       assert((*BB != Header || LI->getLoopFor(*BB) == L) &&
              "Header should not be in a sub-loop");
@@ -560,7 +589,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
             if (It > 1 && L->contains(InValI))
               InVal = LastValueMap[InValI];
           VMap[OrigPHI] = InVal;
-          New->getInstList().erase(NewPHI);
+          NewPHI->eraseFromParent();
         }
 
       // Update our running map of newest clones
@@ -579,6 +608,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
           if (It != LastValueMap.end())
             Incoming = It->second;
           PHI.addIncoming(Incoming, New);
+          SE->forgetValue(&PHI);
         }
       }
       // Keep track of new headers and latches as we create them, so that
@@ -633,7 +663,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
   for (PHINode *PN : OrigPHINode) {
     if (CompletelyUnroll) {
       PN->replaceAllUsesWith(PN->getIncomingValueForBlock(Preheader));
-      Header->getInstList().erase(PN);
+      PN->eraseFromParent();
     } else if (ULO.Count > 1) {
       Value *InVal = PN->removeIncomingValue(LatchBlock, false);
       // If this value was defined in the loop, take the value defined by the
@@ -698,11 +728,11 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
   };
 
   auto WillExit = [&](const ExitInfo &Info, unsigned i, unsigned j,
-                      bool IsLatch) -> Optional<bool> {
+                      bool IsLatch) -> std::optional<bool> {
     if (CompletelyUnroll) {
       if (PreserveOnlyFirst) {
         if (i == 0)
-          return None;
+          return std::nullopt;
         return j == 0;
       }
       // Complete (but possibly inexact) unrolling
@@ -710,7 +740,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
         return true;
       if (Info.TripCount && j != Info.TripCount)
         return false;
-      return None;
+      return std::nullopt;
     }
 
     if (ULO.Runtime) {
@@ -718,7 +748,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
       // exits may be stale.
       if (IsLatch && j != 0)
         return false;
-      return None;
+      return std::nullopt;
     }
 
     if (j != Info.BreakoutTrip &&
@@ -727,7 +757,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
       // unconditional branch for some iterations.
       return false;
     }
-    return None;
+    return std::nullopt;
   };
 
   // Fold branches for iterations where we know that they will exit or not
@@ -738,7 +768,7 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
       // The branch destination.
       unsigned j = (i + 1) % e;
       bool IsLatch = Pair.first == LatchBlock;
-      Optional<bool> KnownWillExit = WillExit(Info, i, j, IsLatch);
+      std::optional<bool> KnownWillExit = WillExit(Info, i, j, IsLatch);
       if (!KnownWillExit) {
         if (!Info.FirstExitingBlock)
           Info.FirstExitingBlock = Info.ExitingBlocks[i];
@@ -829,8 +859,16 @@ LoopUnrollResult llvm::UnrollLoop(Loop *L, UnrollLoopOptions ULO, LoopInfo *LI,
 
   Loop *OuterL = L->getParentLoop();
   // Update LoopInfo if the loop is completely removed.
-  if (CompletelyUnroll)
+  if (CompletelyUnroll) {
     LI->erase(L);
+    // We shouldn't try to use `L` anymore.
+    L = nullptr;
+  } else if (OriginalTripCount) {
+    // Update the trip count. Note that the remainder has already logic
+    // computing it in `UnrollRuntimeLoopRemainder`.
+    setLoopEstimatedTripCount(L, *OriginalTripCount / ULO.Count,
+                              EstimatedLoopInvocationWeight);
+  }
 
   // LoopInfo should not be valid, confirm that.
   if (UnrollVerifyLoopInfo)

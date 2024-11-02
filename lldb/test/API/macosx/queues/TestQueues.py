@@ -431,12 +431,12 @@ class TestQueues(TestBase):
             queue_performer_2.GetPendingItemAtIndex(0).IsValid(),
             "queue 2's pending item #0 is valid",
         )
-        self.assertTrue(
+        self.assertEqual(
             queue_performer_2.GetPendingItemAtIndex(0)
             .GetAddress()
             .GetSymbol()
-            .GetName()
-            == "doing_the_work_2",
+            .GetName(),
+            "doing_the_work_2",
             "queue 2's pending item #0 should be doing_the_work_2",
         )
         self.assertEqual(
@@ -448,12 +448,12 @@ class TestQueues(TestBase):
             queue_performer_2.GetPendingItemAtIndex(9998).IsValid(),
             "queue 2's pending item #9998 is valid",
         )
-        self.assertTrue(
+        self.assertEqual(
             queue_performer_2.GetPendingItemAtIndex(9998)
             .GetAddress()
             .GetSymbol()
-            .GetName()
-            == "doing_the_work_2",
+            .GetName(),
+            "doing_the_work_2",
             "queue 2's pending item #0 should be doing_the_work_2",
         )
         self.assertTrue(

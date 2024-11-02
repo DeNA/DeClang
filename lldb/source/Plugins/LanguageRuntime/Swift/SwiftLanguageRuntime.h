@@ -14,13 +14,14 @@
 #define liblldb_SwiftLanguageRuntime_h_
 
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntimeV2.h"
+#include "Plugins/LanguageRuntime/Swift/SwiftMetadataCache.h"
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "lldb/Breakpoint/BreakpointPrecondition.h"
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/lldb-private.h"
 
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Casting.h"
 
@@ -50,14 +51,14 @@ class TypeBase;
 } // namespace swift
 
 namespace lldb_private {
-
-/// Statically cast a CompilerType to a Swift type.
-swift::Type GetSwiftType(CompilerType type);
-/// Statically cast a CompilerType to a Swift type and get its canonical form.
-swift::CanType GetCanonicalSwiftType(CompilerType type);
+template <typename T>
+struct LockGuarded;
 
 class SwiftLanguageRuntimeStub;
 class SwiftLanguageRuntimeImpl;
+class ReflectionContextInterface;
+
+using ThreadSafeReflectionContext = LockGuarded<ReflectionContextInterface>;
 
 class SwiftLanguageRuntime : public LanguageRuntime {
 protected:
@@ -73,6 +74,7 @@ protected:
   std::unique_ptr<SwiftLanguageRuntimeImpl> m_impl;
 
 public:
+  ThreadSafeReflectionContext GetReflectionContext();
   static char ID;
 
   bool isA(const void *ClassID) const override {
@@ -107,16 +109,19 @@ public:
   /// PluginInterface protocol.
   llvm::StringRef GetPluginName() override { return GetPluginNameStatic(); }
 
-  bool GetObjectDescription(Stream &str, Value &value,
-                            ExecutionContextScope *exe_scope) override {
+  llvm::Error
+  GetObjectDescription(Stream &str, Value &value,
+                       ExecutionContextScope *exe_scope) override {
     // This is only interesting to do with a ValueObject for Swift.
-    return false;
-   }
+    return llvm::createStringError(
+        "Swift values do not have an object description");
+  }
 
   lldb::LanguageType GetLanguageType() const override {
     return lldb::eLanguageTypeSwift;
   }
 
+  void SymbolsDidLoad(const ModuleList &module_list) override;
   void ModulesDidLoad(const ModuleList &module_list) override;
 
   bool IsSymbolARuntimeThunk(const Symbol &symbol) override;
@@ -133,7 +138,7 @@ public:
   /// Return true if name is a Swift async function, await resume partial
   /// function, or suspend resume partial function symbol.
   static bool IsAnySwiftAsyncFunctionSymbol(llvm::StringRef name);
-  
+
   /// Return the async context address using the target's specific register.
   static lldb::addr_t GetAsyncContext(RegisterContext *regctx);
 
@@ -141,9 +146,10 @@ public:
   IsSwiftAsyncAwaitResumePartialFunctionSymbol(llvm::StringRef name);
 
   enum DemangleMode { eSimplified, eTypeName, eDisplayTypeName };
-  static std::string DemangleSymbolAsString(llvm::StringRef symbol,
-                                            DemangleMode mode,
-                                            const SymbolContext *sc = nullptr);
+  static std::string
+  DemangleSymbolAsString(llvm::StringRef symbol, DemangleMode mode,
+                         const SymbolContext *sc = nullptr,
+                         const ExecutionContext *exe_ctx = nullptr);
 
   /// Demangle a symbol to a swift::Demangle node tree.
   ///
@@ -220,8 +226,11 @@ public:
       std::function<CompilerType(unsigned, unsigned)> finder);
 
   /// Extract the value object which contains the Swift type's "contents".
-  /// Returns null if this is not a C++ wrapping a Swift type.
-  static lldb::ValueObjectSP
+  /// Returns None if this is not a C++ wrapping a Swift type, returns
+  /// the a pair containing the extracted value object and a boolean indicating
+  /// whether the corresponding Swift type should be a pointer (for example, if
+  /// the Swift type is a value type but the storage is behind a C pointer.
+  static std::optional<std::pair<lldb::ValueObjectSP, bool>>
   ExtractSwiftValueObjectFromCxxWrapper(ValueObject &valobj);
 
   TypeAndOrName FixUpDynamicType(const TypeAndOrName &type_and_or_name,
@@ -230,7 +239,7 @@ public:
                                                      bool catch_bp,
                                                      bool throw_bp) override;
   bool CouldHaveDynamicValue(ValueObject &in_value) override;
-  bool GetObjectDescription(Stream &str, ValueObject &object) override;
+  llvm::Error GetObjectDescription(Stream &str, ValueObject &object) override;
   CompilerType GetConcreteType(ExecutionContextScope *exe_scope,
                                ConstString abstract_type_name) override;
 
@@ -243,7 +252,7 @@ public:
   /// Populate a map with the names of all archetypes in a function's generic
   /// context.
   static void GetGenericParameterNamesForFunction(
-      const SymbolContext &sc,
+      const SymbolContext &sc, const ExecutionContext *exe_ctx,
       llvm::DenseMap<ArchetypePath, llvm::StringRef> &dict);
 
   /// Invoke callback for each DependentGenericParamType.
@@ -289,7 +298,7 @@ public:
     unsigned GetCountForTypePack(unsigned i) { return count_for_type_pack[i]; }
   };
   /// Extract the generic signature out of a mangled Swift function name.
-  static llvm::Optional<GenericSignature>
+  static std::optional<GenericSignature>
   GetGenericSignature(llvm::StringRef function_name,
                       TypeSystemSwiftTypeRef &ts);
 
@@ -306,20 +315,31 @@ public:
   /// of the given type.
   ///
   /// \param instance_type
-  llvm::Optional<uint64_t> GetMemberVariableOffset(CompilerType instance_type,
+  std::optional<uint64_t> GetMemberVariableOffset(CompilerType instance_type,
                                                    ValueObject *instance,
                                                    llvm::StringRef member_name,
                                                    Status *error = nullptr);
 
   /// Ask Remote Mirrors about the children of a composite type.
-  llvm::Optional<unsigned> GetNumChildren(CompilerType type,
+  llvm::Expected<uint32_t> GetNumChildren(CompilerType type,
                                           ExecutionContextScope *exe_scope);
 
   /// Determine the enum case name for the \p data value of the enum \p type.
   /// This is performed using Swift reflection.
-  llvm::Optional<std::string> GetEnumCaseName(CompilerType type,
+  std::optional<std::string> GetEnumCaseName(CompilerType type,
                                               const DataExtractor &data,
                                               ExecutionContext *exe_ctx);
+
+  enum LookupResult {
+    /// Failed due to missing reflection meatadata or unimplemented
+    /// functionality. Should retry with SwiftASTContext.
+    eError = 0,
+    /// Success.
+    eFound,
+    /// Found complete type info, lookup unsuccessful.
+    /// Do not waste time retrying.
+    eNotFound
+  };
 
   /// Behaves like the CompilerType::GetIndexOfChildMemberWithName()
   /// except for the more nuanced return value.
@@ -331,12 +351,14 @@ public:
   ///                     don't have an index.
   ///
   /// \returns {true, {num_idexes}} on success.
-  std::pair<bool, llvm::Optional<size_t>> GetIndexOfChildMemberWithName(
-      CompilerType type, llvm::StringRef name, ExecutionContext *exe_ctx,
-      bool omit_empty_base_classes, std::vector<uint32_t> &child_indexes);
+  std::pair<LookupResult, std::optional<size_t>>
+  GetIndexOfChildMemberWithName(CompilerType type, llvm::StringRef name,
+                                ExecutionContext *exe_ctx,
+                                bool omit_empty_base_classes,
+                                std::vector<uint32_t> &child_indexes);
 
   /// Ask Remote Mirrors about a child of a composite type.
-  CompilerType GetChildCompilerTypeAtIndex(
+  llvm::Expected<CompilerType> GetChildCompilerTypeAtIndex(
       CompilerType type, size_t idx, bool transparent_pointers,
       bool omit_empty_base_classes, bool ignore_array_bounds,
       std::string &child_name, uint32_t &child_byte_size,
@@ -346,18 +368,18 @@ public:
       uint64_t &language_flags);
 
   /// Ask Remote Mirrors about the fields of a composite type.
-  llvm::Optional<unsigned> GetNumFields(CompilerType type,
+  std::optional<unsigned> GetNumFields(CompilerType type,
                                         ExecutionContext *exe_ctx);
 
   /// Ask Remote Mirrors for the size of a Swift type.
-  llvm::Optional<uint64_t> GetBitSize(CompilerType type,
+  std::optional<uint64_t> GetBitSize(CompilerType type,
                                       ExecutionContextScope *exe_scope);
 
   /// Ask Remote mirrors for the stride of a Swift type.
-  llvm::Optional<uint64_t> GetByteStride(CompilerType type);
+  std::optional<uint64_t> GetByteStride(CompilerType type);
 
   /// Ask Remote mirrors for the alignment of a Swift type.
-  llvm::Optional<size_t> GetBitAlignment(CompilerType type,
+  std::optional<size_t> GetBitAlignment(CompilerType type,
                                          ExecutionContextScope *exe_scope);
 
   /// Release the RemoteASTContext associated with the given swift::ASTContext.
@@ -412,10 +434,10 @@ public:
                                                          ConstString name,
                                                          bool persistent);
 
-  llvm::Optional<Value>
+  std::optional<Value>
   GetErrorReturnLocationAfterReturn(lldb::StackFrameSP frame_sp);
 
-  llvm::Optional<Value>
+  std::optional<Value>
   GetErrorReturnLocationBeforeReturn(lldb::StackFrameSP frame_sp,
                                      bool &need_to_check_after_return);
 
@@ -439,7 +461,6 @@ public:
   lldb::SyntheticChildrenSP
   GetBridgedSyntheticChildProvider(ValueObject &valobj);
 
-
   /// Expression Callbacks.
   /// \{
   void WillStartExecutingUserExpression(bool);
@@ -461,6 +482,21 @@ protected:
   bool GetTargetOfPartialApply(SymbolContext &curr_sc, ConstString &apply_name,
                                SymbolContext &sc);
   AppleObjCRuntimeV2 *GetObjCRuntime();
+
+private:
+  /// Creates an UnwindPlan for following the AsyncContext chain up the stack,
+  /// from a current AsyncContext frame.
+  lldb::UnwindPlanSP
+  GetFollowAsyncContextUnwindPlan(lldb::ProcessSP process_sp,
+                                  RegisterContext *regctx, ArchSpec &arch,
+                                  bool &behaves_like_zeroth_frame);
+
+  /// Given the async register of a funclet, extract its continuation pointer,
+  /// compute the prologue size of the continuation function, and return the
+  /// address of the first non-prologue instruction.
+  std::optional<lldb::addr_t>
+  TrySkipVirtualParentProlog(lldb::addr_t async_reg_val, Process &process,
+                             unsigned num_indirections);
 };
 
 } // namespace lldb_private

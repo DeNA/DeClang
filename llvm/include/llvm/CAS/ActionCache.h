@@ -10,7 +10,6 @@
 #define LLVM_CAS_CASACTIONCACHE_H
 
 #include "llvm/ADT/FunctionExtras.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CAS/CASID.h"
 #include "llvm/CAS/CASReference.h"
@@ -68,8 +67,8 @@ public:
   /// \param Globally if true it is a hint to the underlying implementation that
   /// the lookup is profitable to be done on a distributed caching level, not
   /// just locally. The implementation is free to ignore this flag.
-  Expected<Optional<CASID>> get(const CacheKey &ActionKey,
-                                bool Globally = false) const {
+  Expected<std::optional<CASID>> get(const CacheKey &ActionKey,
+                                     bool Globally = false) const {
     return getImpl(arrayRefFromStringRef(ActionKey.getKey()), Globally);
   }
 
@@ -78,11 +77,11 @@ public:
                                          bool Globally = false) const;
 
   /// Asynchronous version of \c get.
-  void getAsync(
-      const CacheKey &ActionKey, bool Globally,
-      unique_function<void(Expected<std::optional<CASID>>)> Callback) const {
+  void getAsync(const CacheKey &ActionKey, bool Globally,
+                unique_function<void(Expected<std::optional<CASID>>)> Callback,
+                std::unique_ptr<Cancellable> *CancelObj = nullptr) const {
     return getImplAsync(arrayRefFromStringRef(ActionKey.getKey()), Globally,
-                        std::move(Callback));
+                        std::move(Callback), CancelObj);
   }
 
   /// Cache \p Result for the \p ActionKey computation.
@@ -104,29 +103,33 @@ public:
                                          bool Globally = false);
 
   /// Asynchronous version of \c put.
+  /// \param[out] CancelObj Optional pointer to receive a cancellation object.
   void putAsync(const CacheKey &ActionKey, const CASID &Result, bool Globally,
-                unique_function<void(Error)> Callback) {
+                unique_function<void(Error)> Callback,
+                std::unique_ptr<Cancellable> *CancelObj = nullptr) {
     assert(Result.getContext().getHashSchemaIdentifier() ==
                getContext().getHashSchemaIdentifier() &&
            "Hash schema mismatch");
     return putImplAsync(arrayRefFromStringRef(ActionKey.getKey()), Result,
-                        Globally, std::move(Callback));
+                        Globally, std::move(Callback), CancelObj);
   }
 
   virtual ~ActionCache() = default;
 
 protected:
-  virtual Expected<Optional<CASID>> getImpl(ArrayRef<uint8_t> ResolvedKey,
-                                            bool Globally) const = 0;
-  virtual void getImplAsync(
-      ArrayRef<uint8_t> ResolvedKey, bool Globally,
-      unique_function<void(Expected<std::optional<CASID>>)> Callback) const;
+  virtual Expected<std::optional<CASID>> getImpl(ArrayRef<uint8_t> ResolvedKey,
+                                                 bool Globally) const = 0;
+  virtual void
+  getImplAsync(ArrayRef<uint8_t> ResolvedKey, bool Globally,
+               unique_function<void(Expected<std::optional<CASID>>)> Callback,
+               std::unique_ptr<Cancellable> *CancelObj) const;
 
   virtual Error putImpl(ArrayRef<uint8_t> ResolvedKey, const CASID &Result,
                         bool Globally) = 0;
   virtual void putImplAsync(ArrayRef<uint8_t> ResolvedKey, const CASID &Result,
                             bool Globally,
-                            unique_function<void(Error)> Callback);
+                            unique_function<void(Error)> Callback,
+                            std::unique_ptr<Cancellable> *CancelObj);
 
   ActionCache(const CASContext &Context) : Context(Context) {}
 

@@ -21,8 +21,6 @@ import unittest2
 
 
 class TestIndirectEnumVariables(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_indirect_cases_variables(self):
         """Tests that indirect Enum variables display correctly when cases are indirect"""
@@ -45,14 +43,13 @@ class TestIndirectEnumVariables(TestBase):
         return x
 
     def check_enum(
-        self,
-        enum,
-        value=None,
-        summary=None,
-        child_path=None,
-        child_value=None,
-        child_summary=None,
-    ):
+            self,
+            enum,
+            value=None,
+            summary=None,
+            child_path=None,
+            child_value=None,
+            child_summary=None):
         if value:
             self.assertEqual(
                 enum.GetValue(), value,
@@ -70,7 +67,10 @@ class TestIndirectEnumVariables(TestBase):
                 child = child.GetChildAtIndex(child_index)
                 child.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
                 child.SetPreferSyntheticValue(True)
-            self.assertTrue(child.IsValid(), "child at path %s valid" % (child_path))
+            self.assertTrue(
+                child.IsValid(),
+                "child at path %s valid" %
+                (child_path))
             if child_value:
                 self.assertEqual(
                     child.GetValue(), child_value,
@@ -100,57 +100,74 @@ class TestIndirectEnumVariables(TestBase):
         GP_Recursive = self.get_variable("GP_Recursive")
 
         self.check_enum(
-            GP_StructType, value="StructType", child_path=[0], child_value="12"
-        )
+            GP_StructType,
+            value='StructType',
+            child_path=[0],
+            child_value='12')
 
-        self.check_enum(
-            GP_TupleType, value="TupleType", child_path=[0, 0], child_value="12"
-        )
         self.check_enum(
             GP_TupleType,
-            value="TupleType",
-            child_path=[0, 1],
-            child_summary='"Hello World"',
-        )
+            value='TupleType',
+            child_path=[
+                0,
+                0],
+            child_value='12')
+        self.check_enum(
+            GP_TupleType, value='TupleType', child_path=[
+                0, 1], child_summary='"Hello World"')
 
         self.check_enum(
-            GP_ClassType,
-            value="ClassType",
-            child_path=[0, 0, 0],
-            child_summary='"Hello World"',
-        )
+            GP_ClassType, value='ClassType', child_path=[
+                0, 0, 0], child_summary='"Hello World"')
         self.check_enum(
-            GP_ClassType, value="ClassType", child_path=[0, 1], child_value="12"
-        )
+            GP_ClassType,
+            value='ClassType',
+            child_path=[
+                0,
+                1],
+            child_value='12')
 
         self.check_enum(
             GP_ProtocolType_Struct,
-            value="ProtocolType",
+            value='ProtocolType',
             child_path=[0],
-            child_value="12",
-        )
+            child_value='12')
 
         self.check_enum(
             GP_ProtocolType_Class,
-            value="ProtocolType",
-            child_path=[0, 0, 0],
-            child_summary='"Hello World"',
-        )
+            value='ProtocolType',
+            child_path=[
+                0,
+                0,
+                0],
+            child_summary='"Hello World"')
         self.check_enum(
             GP_ProtocolType_Class,
-            value="ProtocolType",
-            child_path=[0, 1],
-            child_value="12",
-        )
+            value='ProtocolType',
+            child_path=[
+                0,
+                1],
+            child_value='12')
 
         self.check_enum(
-            GP_CEnumType, value="CEnumType", child_path=[0], child_value="B"
-        )
+            GP_CEnumType,
+            value='CEnumType',
+            child_path=[0],
+            child_value='B')
 
         self.check_enum(
-            GP_ADTEnumType, value="ADTEnumType", child_path=[0, 0], child_value="12"
-        )
+            GP_ADTEnumType,
+            value='ADTEnumType',
+            child_path=[
+                0,
+                0],
+            child_value='12')
 
         self.check_enum(
-            GP_Recursive, value="Recursive", child_path=[0, 0], child_value="12"
-        )
+            GP_Recursive,
+            value='Recursive',
+            child_path=[
+                0,
+                0],
+            child_value='12')
+

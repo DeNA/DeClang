@@ -54,7 +54,7 @@ ParseInputs TestTU::inputs(MockFS &FS) const {
     Argv.push_back("-include");
     Argv.push_back(ImplicitHeaderGuard ? ImportThunk : FullHeaderName);
     // ms-compatibility changes the meaning of #import.
-    // The default is OS-dependent (on on windows), ensure it's off.
+    // The default is OS-dependent (on windows), ensure it's off.
     if (ImplicitHeaderGuard)
       Inputs.CompileCommand.CommandLine.push_back("-fno-ms-compatibility");
   }
@@ -64,7 +64,7 @@ ParseInputs TestTU::inputs(MockFS &FS) const {
   Argv.push_back(FullFilename);
 
   auto Mangler = CommandMangler::forTests();
-  Mangler.adjust(Inputs.CompileCommand.CommandLine, FullFilename);
+  Mangler(Inputs.CompileCommand, FullFilename);
   Inputs.CompileCommand.Filename = FullFilename;
   Inputs.CompileCommand.Directory = testRoot();
   Inputs.Contents = Code;
@@ -132,8 +132,6 @@ ParsedAST TestTU::build() const {
     llvm::errs() << "Failed to build code:\n" << Code;
     std::abort();
   }
-  assert(AST->getDiagnostics() &&
-         "TestTU should always build an AST with a fresh Preamble");
   // Check for error diagnostics and report gtest failures (unless expected).
   // This guards against accidental syntax errors silently subverting tests.
   // error-ok is awfully primitive - using clang -verify would be nicer.
@@ -150,7 +148,7 @@ ParsedAST TestTU::build() const {
   }();
   if (!ErrorOk) {
     // We always build AST with a fresh preamble in TestTU.
-    for (const auto &D : *AST->getDiagnostics())
+    for (const auto &D : AST->getDiagnostics())
       if (D.Severity >= DiagnosticsEngine::Error) {
         llvm::errs()
             << "TestTU failed to build (suppress with /*error-ok*/): \n"
@@ -164,9 +162,9 @@ ParsedAST TestTU::build() const {
 
 SymbolSlab TestTU::headerSymbols() const {
   auto AST = build();
-  return std::get<0>(indexHeaderSymbols(/*Version=*/"null", AST.getASTContext(),
-                                        AST.getPreprocessor(),
-                                        AST.getCanonicalIncludes()));
+  return std::get<0>(indexHeaderSymbols(
+      /*Version=*/"null", AST.getASTContext(), AST.getPreprocessor(),
+      *AST.getPragmaIncludes()));
 }
 
 RefSlab TestTU::headerRefs() const {
@@ -179,7 +177,7 @@ std::unique_ptr<SymbolIndex> TestTU::index() const {
   auto Idx = std::make_unique<FileIndex>();
   Idx->updatePreamble(testPath(Filename), /*Version=*/"null",
                       AST.getASTContext(), AST.getPreprocessor(),
-                      AST.getCanonicalIncludes());
+                      *AST.getPragmaIncludes());
   Idx->updateMain(testPath(Filename), AST);
   return std::move(Idx);
 }

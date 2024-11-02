@@ -56,7 +56,10 @@ class StdStringDataFormatterTestCase(TestBase):
         var_empty = self.frame().FindVariable("empty")
         var_q = self.frame().FindVariable("q")
         var_Q = self.frame().FindVariable("Q")
-        var_uchar = self.frame().FindVariable("uchar")
+        var_rq = self.frame().FindVariable("rq")
+        var_rQ = self.frame().FindVariable("rQ")
+        var_pq = self.frame().FindVariable("pq")
+        var_pQ = self.frame().FindVariable("pQ")
 
         self.assertEqual(var_wempty.GetSummary(), 'L""', "wempty summary wrong")
         self.assertEqual(
@@ -73,7 +76,18 @@ class StdStringDataFormatterTestCase(TestBase):
             '"quite a long std::strin with lots of info inside it"',
             "Q summary wrong",
         )
-        self.assertEqual(var_uchar.GetSummary(), '"aaaaa"', "u summary wrong")
+        self.assertEqual(var_rq.GetSummary(), '"hello world"', "rq summary wrong")
+        self.assertEqual(
+            var_rQ.GetSummary(),
+            '"quite a long std::strin with lots of info inside it"',
+            "rQ summary wrong",
+        )
+        self.assertEqual(var_pq.GetSummary(), '"hello world"', "pq summary wrong")
+        self.assertEqual(
+            var_pQ.GetSummary(),
+            '"quite a long std::strin with lots of info inside it"',
+            "pQ summary wrong",
+        )
 
         self.runCmd("next")
 

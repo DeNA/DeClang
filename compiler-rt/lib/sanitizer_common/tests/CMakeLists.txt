@@ -5,12 +5,14 @@ clang_compiler_add_cxx_check()
 # FIXME: use SANITIZER_COMMON_SUPPORTED_ARCH here
 filter_available_targets(SANITIZER_UNITTEST_SUPPORTED_ARCH x86_64 i386 mips64 mips64el riscv64 sparcv9 sparc)
 if(APPLE)
+  list(APPEND SANITIZER_UNITTEST_SUPPORTED_ARCH arm64)
   darwin_filter_host_archs(SANITIZER_UNITTEST_SUPPORTED_ARCH SANITIZER_UNITTEST_SUPPORTED_ARCH)
 endif()
 
 set(SANITIZER_UNITTESTS
   sanitizer_addrhashmap_test.cpp
   sanitizer_allocator_test.cpp
+  sanitizer_array_ref_test.cpp
   sanitizer_atomic_test.cpp
   sanitizer_bitvector_test.cpp
   sanitizer_bvgraph_test.cpp
@@ -36,6 +38,7 @@ set(SANITIZER_UNITTESTS
   sanitizer_printf_test.cpp
   sanitizer_procmaps_test.cpp
   sanitizer_procmaps_mac_test.cpp
+  sanitizer_range_test.cpp
   sanitizer_ring_buffer_test.cpp
   sanitizer_quarantine_test.cpp
   sanitizer_stack_store_test.cpp
@@ -46,6 +49,7 @@ set(SANITIZER_UNITTESTS
   sanitizer_suppressions_test.cpp
   sanitizer_symbolizer_test.cpp
   sanitizer_test_main.cpp
+  sanitizer_thread_arg_retval_test.cpp
   sanitizer_thread_registry_test.cpp
   sanitizer_type_traits_test.cpp
   sanitizer_vector_test.cpp
@@ -68,6 +72,7 @@ set(SANITIZER_TEST_CFLAGS_COMMON
   -I${COMPILER_RT_SOURCE_DIR}/include
   -I${COMPILER_RT_SOURCE_DIR}/lib
   -I${COMPILER_RT_SOURCE_DIR}/lib/sanitizer_common
+  -DSANITIZER_COMMON_NO_REDEFINE_BUILTINS
   -fno-rtti
   -O2
   -Werror=sign-compare
@@ -113,6 +118,8 @@ endif()
 # The default stack size for clang is 8M.
 if(MSVC)
   list(APPEND SANITIZER_TEST_LINK_FLAGS_COMMON -Wl,/STACK:0xC00000)
+elseif (MINGW)
+  list(APPEND SANITIZER_TEST_LINK_FLAGS_COMMON -Wl,--stack=0xC00000)
 endif()
 
 set(SANITIZER_TEST_LINK_LIBS)
@@ -158,7 +165,7 @@ set_target_properties(SanitizerUnitTests PROPERTIES FOLDER "Compiler-RT Tests")
 macro(add_sanitizer_tests_for_arch arch)
   set(extra_flags)
   if( CMAKE_SIZEOF_VOID_P EQUAL 4 )
-    list(APPEND extra_flags "-D_LARGEFILE_SOURCE")
+    list(APPEND extra_flags "-D_LARGEFILE_SOURCE=1")
     list(APPEND extra_flags "-D_FILE_OFFSET_BITS=64")
   endif()
   get_sanitizer_common_lib_for_arch(${arch} SANITIZER_COMMON_LIB)

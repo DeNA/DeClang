@@ -15,8 +15,8 @@
 #include "clang/Tooling/Refactor/RefactoringOptionSet.h"
 #include "clang/Tooling/Refactor/RefactoringReplacement.h"
 #include "clang/Tooling/Refactor/SymbolOperation.h"
-#include "llvm/ADT/None.h"
 #include "llvm/Support/Error.h"
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -137,7 +137,7 @@ struct RefactoringOperationResult {
   StringRef FailureReason;
 
   RefactoringOperationResult() : Initiated(false) {}
-  RefactoringOperationResult(llvm::NoneType) : Initiated(false) {}
+  RefactoringOperationResult(std::nullopt_t) : Initiated(false) {}
   explicit RefactoringOperationResult(StringRef FailureReason)
       : Initiated(false), FailureReason(FailureReason) {}
 };

@@ -21,14 +21,15 @@
 #include "clang/Driver/Types.h"
 #include "clang/Driver/Util.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/StringSaver.h"
 
-#include <list>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,9 @@ namespace llvm {
 class Triple;
 namespace vfs {
 class FileSystem;
+}
+namespace cl {
+class ExpansionContext;
 }
 } // namespace llvm
 
@@ -190,6 +194,9 @@ public:
   /// The file to log CC_PRINT_PROC_STAT_FILE output to, if enabled.
   std::string CCPrintStatReportFilename;
 
+  /// The file to log CC_PRINT_INTERNAL_STAT_FILE output to, if enabled.
+  std::string CCPrintInternalStatReportFilename;
+
   /// The file to log CC_PRINT_OPTIONS output to, if enabled.
   std::string CCPrintOptionsFilename;
 
@@ -254,11 +261,16 @@ public:
   /// performance report to CC_PRINT_PROC_STAT_FILE or to stdout.
   unsigned CCPrintProcessStats : 1;
 
+  /// Set CC_PRINT_INTERNAL_STAT mode, which causes the driver to dump internal
+  /// performance report to CC_PRINT_INTERNAL_STAT_FILE or to stdout.
+  unsigned CCPrintInternalStats : 1;
+
   /// Pointer to the ExecuteCC1Tool function, if available.
   /// When the clangDriver lib is used through clang.exe, this provides a
   /// shortcut for executing the -cc1 command-line directly, in the same
   /// process.
-  typedef int (*CC1ToolFunc)(SmallVectorImpl<const char *> &ArgV);
+  using CC1ToolFunc =
+      llvm::function_ref<int(SmallVectorImpl<const char *> &ArgV)>;
   CC1ToolFunc CC1Main = nullptr;
 
 private:
@@ -282,6 +294,12 @@ private:
 
   /// Arguments originated from command line.
   std::unique_ptr<llvm::opt::InputArgList> CLOptions;
+
+  /// If this is non-null, the driver will prepend this argument before
+  /// reinvoking clang. This is useful for the llvm-driver where clang's
+  /// realpath will be to the llvm binary and not clang, so it must pass
+  /// "clang" as it's first argument.
+  const char *PrependArg;
 
   /// Whether to check that input files exist when constructing compilation
   /// jobs.
@@ -379,6 +397,9 @@ public:
 
   bool getProbePrecompiled() const { return ProbePrecompiled; }
   void setProbePrecompiled(bool Value) { ProbePrecompiled = Value; }
+
+  const char *getPrependArg() const { return PrependArg; }
+  void setPrependArg(const char *Value) { PrependArg = Value; }
 
   void setTargetAndMode(const ParsedClangName &TM) { ClangNameParts = TM; }
 
@@ -478,10 +499,11 @@ public:
 
   /// Returns the set of bound architectures active for this offload kind.
   /// If there are no bound architctures we return a set containing only the
-  /// empty string.
+  /// empty string. The \p SuppressError option is used to suppress errors.
   llvm::DenseSet<StringRef>
   getOffloadArchs(Compilation &C, const llvm::opt::DerivedArgList &Args,
-                  Action::OffloadKind Kind, const ToolChain *TC) const;
+                  Action::OffloadKind Kind, const ToolChain *TC,
+                  bool SuppressError = false) const;
 
   /// Check that the file referenced by Value exists. If it doesn't,
   /// issue a diagnostic and return false.
@@ -612,10 +634,19 @@ public:
   /// Returns the default name for linked images (e.g., "a.out").
   const char *getDefaultImageName() const;
 
-  // Creates a temp file with $Prefix-%%%%%%.$Suffix
+  /// Creates a temp file.
+  /// 1. If \p MultipleArch is false or \p BoundArch is empty, the temp file is
+  ///    in the temporary directory with name $Prefix-%%%%%%.$Suffix.
+  /// 2. If \p MultipleArch is true and \p BoundArch is not empty,
+  ///    2a. If \p NeedUniqueDirectory is false, the temp file is in the
+  ///        temporary directory with name $Prefix-$BoundArch-%%%%%.$Suffix.
+  ///    2b. If \p NeedUniqueDirectory is true, the temp file is in a unique
+  ///        subdiretory with random name under the temporary directory, and
+  ///        the temp file itself has name $Prefix-$BoundArch.$Suffix.
   const char *CreateTempFile(Compilation &C, StringRef Prefix, StringRef Suffix,
                              bool MultipleArchs = false,
-                             StringRef BoundArch = {}) const;
+                             StringRef BoundArch = {},
+                             bool NeedUniqueDirectory = false) const;
 
   /// GetNamedOutputPath - Return the name to use for the output of
   /// the action \p JA. The result is appended to the compilation's
@@ -685,13 +716,13 @@ private:
   /// executable filename).
   ///
   /// \returns true if error occurred.
-  bool loadDefaultConfigFiles(ArrayRef<StringRef> CfgFileSearchDirs);
+  bool loadDefaultConfigFiles(llvm::cl::ExpansionContext &ExpCtx);
 
   /// Read options from the specified file.
   ///
   /// \param [in] FileName File to read.
   /// \returns true, if error occurred while reading.
-  bool readConfigFile(StringRef FileName);
+  bool readConfigFile(StringRef FileName, llvm::cl::ExpansionContext &ExpCtx);
 
   /// Set the driver mode (cl, gcc, etc) from the value of the `--driver-mode`
   /// option.
@@ -785,9 +816,6 @@ llvm::StringRef getDriverMode(StringRef ProgName, ArrayRef<const char *> Args);
 /// Checks whether the value produced by getDriverMode is for CL mode.
 bool IsClangCL(StringRef DriverMode);
 
-/// Checks whether the value produced by getDriverMode is for 'cache' mode.
-bool isClangCache(StringRef DriverMode);
-
 /// Expand response files from a clang driver or cc1 invocation.
 ///
 /// \param Args The arguments that will be expanded.
@@ -797,6 +825,16 @@ bool isClangCache(StringRef DriverMode);
 llvm::Error expandResponseFiles(SmallVectorImpl<const char *> &Args,
                                 bool ClangCLMode, llvm::BumpPtrAllocator &Alloc,
                                 llvm::vfs::FileSystem *FS = nullptr);
+
+/// Checks whether the value produced by getDriverMode is for 'cache' mode.
+bool isClangCache(StringRef DriverMode);
+
+/// Apply a space separated list of edits to the input argument lists.
+/// See applyOneOverrideOption.
+void applyOverrideOptions(SmallVectorImpl<const char *> &Args,
+                          const char *OverrideOpts,
+                          llvm::StringSet<> &SavedStrings,
+                          raw_ostream *OS = nullptr);
 
 } // end namespace driver
 } // end namespace clang

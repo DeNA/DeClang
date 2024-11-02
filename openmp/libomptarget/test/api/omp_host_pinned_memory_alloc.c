@@ -11,7 +11,7 @@ int main() {
   for (int i = 0; i < N; ++i)
     hst_ptr[i] = 2;
 
-#pragma omp target teams distribute parallel for map(tofrom : hst_ptr [0:N])
+#pragma omp target teams distribute parallel for map(tofrom : hst_ptr[0 : N])
   for (int i = 0; i < N; ++i)
     hst_ptr[i] -= 1;
 
@@ -19,7 +19,7 @@ int main() {
   for (int i = 0; i < N; ++i)
     sum += hst_ptr[i];
 
-  omp_free(hst_ptr, llvm_omp_target_shared_mem_alloc);
+  omp_free(hst_ptr, llvm_omp_target_host_mem_alloc);
   // CHECK: PASS
   if (sum == N)
     printf("PASS\n");

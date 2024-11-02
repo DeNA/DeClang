@@ -67,9 +67,8 @@ static std::unique_ptr<raw_fd_ostream> openLTOOutputFile(StringRef file) {
 }
 
 static std::string getThinLTOOutputFile(StringRef modulePath) {
-  return lto::getThinLTOOutputFile(
-      std::string(modulePath), std::string(config->thinLTOPrefixReplace.first),
-      std::string(config->thinLTOPrefixReplace.second));
+  return lto::getThinLTOOutputFile(modulePath, config->thinLTOPrefixReplaceOld,
+                                   config->thinLTOPrefixReplaceNew);
 }
 
 static lto::Config createConfig() {
@@ -77,7 +76,6 @@ static lto::Config createConfig() {
 
   // LLD supports the new relocations and address-significance tables.
   c.Options = initTargetOptionsFromCodeGenFlags();
-  c.Options.RelaxELFRelocations = true;
   c.Options.EmitAddrsig = true;
   for (StringRef C : config->mllvmOpts)
     c.MllvmArgs.emplace_back(C.str());
@@ -116,7 +114,7 @@ static lto::Config createConfig() {
   if (auto relocModel = getRelocModelFromCMModel())
     c.RelocModel = *relocModel;
   else if (config->relocatable)
-    c.RelocModel = None;
+    c.RelocModel = std::nullopt;
   else if (config->isPic)
     c.RelocModel = Reloc::PIC_;
   else
@@ -128,7 +126,7 @@ static lto::Config createConfig() {
   c.OptLevel = config->ltoo;
   c.CPU = getCPUStr();
   c.MAttrs = getMAttrs();
-  c.CGOptLevel = args::getCGOptLevel(config->ltoo);
+  c.CGOptLevel = config->ltoCgo;
 
   c.PTO.LoopVectorization = c.OptLevel > 1;
   c.PTO.SLPVectorization = c.OptLevel > 1;
@@ -166,8 +164,6 @@ static lto::Config createConfig() {
   c.RunCSIRInstr = config->ltoCSProfileGenerate;
   c.PGOWarnMismatch = config->ltoPGOWarnMismatch;
 
-  c.OpaquePointers = config->opaquePointers;
-
   if (config->emitLLVM) {
     c.PostInternalizeModuleHook = [](size_t task, const Module &m) {
       if (std::unique_ptr<raw_fd_ostream> os =
@@ -177,8 +173,10 @@ static lto::Config createConfig() {
     };
   }
 
-  if (config->ltoEmitAsm)
+  if (config->ltoEmitAsm) {
     c.CGFileType = CGFT_AssemblyFile;
+    c.Options.MCOptions.AsmVerbose = true;
+  }
 
   if (!config->saveTempsArgs.empty())
     checkError(c.addSaveTemps(config->outputFile.str() + ".",
@@ -197,8 +195,9 @@ BitcodeCompiler::BitcodeCompiler() {
   auto onIndexWrite = [&](StringRef s) { thinIndices.erase(s); };
   if (config->thinLTOIndexOnly) {
     backend = lto::createWriteIndexesThinBackend(
-        std::string(config->thinLTOPrefixReplace.first),
-        std::string(config->thinLTOPrefixReplace.second),
+        std::string(config->thinLTOPrefixReplaceOld),
+        std::string(config->thinLTOPrefixReplaceNew),
+        std::string(config->thinLTOPrefixReplaceNativeObject),
         config->thinLTOEmitImportsFiles, indexFile.get(), onIndexWrite);
   } else {
     backend = lto::createInProcessThinBackend(
@@ -207,8 +206,13 @@ BitcodeCompiler::BitcodeCompiler() {
         config->thinLTOEmitImportsFiles);
   }
 
-  ltoObj = std::make_unique<lto::LTO>(createConfig(), backend,
-                                       config->ltoPartitions);
+  constexpr llvm::lto::LTO::LTOKind ltoModes[3] =
+    {llvm::lto::LTO::LTOKind::LTOK_UnifiedThin,
+     llvm::lto::LTO::LTOKind::LTOK_UnifiedRegular,
+     llvm::lto::LTO::LTOKind::LTOK_Default};
+  ltoObj = std::make_unique<lto::LTO>(
+      createConfig(), backend, config->ltoPartitions,
+      ltoModes[config->ltoKind]);
 
   // Initialize usedStartStop.
   if (ctx.bitcodeFiles.empty())
@@ -218,7 +222,7 @@ BitcodeCompiler::BitcodeCompiler() {
       continue;
     StringRef s = sym->getName();
     for (StringRef prefix : {"__start_", "__stop_"})
-      if (s.startswith(prefix))
+      if (s.starts_with(prefix))
         usedStartStop.insert(s.substr(prefix.size()));
   }
 }
@@ -327,15 +331,15 @@ std::vector<InputFile *> BitcodeCompiler::compile() {
   // specified, configure LTO to use it as the cache directory.
   FileCache cache;
   if (!config->thinLTOCacheDir.empty())
-    cache =
-        check(localCache("ThinLTO", "Thin", config->thinLTOCacheDir,
-                         [&](size_t task, std::unique_ptr<MemoryBuffer> mb) {
-                           files[task] = std::move(mb);
-                         }));
+    cache = check(localCache("ThinLTO", "Thin", config->thinLTOCacheDir,
+                             [&](size_t task, const Twine &moduleName,
+                                 std::unique_ptr<MemoryBuffer> mb) {
+                               files[task] = std::move(mb);
+                             }));
 
   if (!ctx.bitcodeFiles.empty())
     checkError(ltoObj->run(
-        [&](size_t task) {
+        [&](size_t task, const Twine &moduleName) {
           return std::make_unique<CachedFileStream>(
               std::make_unique<raw_svector_ostream>(buf[task]));
         },
@@ -367,7 +371,7 @@ std::vector<InputFile *> BitcodeCompiler::compile() {
   }
 
   if (!config->thinLTOCacheDir.empty())
-    pruneCache(config->thinLTOCacheDir, config->thinLTOCachePolicy);
+    pruneCache(config->thinLTOCacheDir, config->thinLTOCachePolicy, files);
 
   if (!config->ltoObjPath.empty()) {
     saveBuffer(buf[0], config->ltoObjPath);

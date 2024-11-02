@@ -1,9 +1,3 @@
-# CMP0116: Ninja generators transform `DEPFILE`s from `add_custom_command()`
-# New in CMake 3.20. https://cmake.org/cmake/help/latest/policy/CMP0116.html
-if(POLICY CMP0116)
-  cmake_policy(SET CMP0116 OLD)
-endif()
-
 if(NOT DEFINED LLVM_COMMON_CMAKE_UTILS)
   set(LLVM_COMMON_CMAKE_UTILS ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
 endif()
@@ -104,27 +98,6 @@ include(CheckAtomic)
 include(LLVMDistributionSupport)
 
 set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
-set(LLVM_INCLUDE_TESTS ON CACHE INTERNAL "")
-
-# Build the gtest library needed for unittests, if we have LLVM sources
-# handy.
-if (EXISTS ${LLVM_MAIN_SRC_DIR}/utils/unittest AND NOT TARGET llvm_gtest)
-  add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/unittest utils/unittest)
-endif()
-# LLVMTestingSupport library is needed for Process/gdb-remote.
-if (EXISTS ${LLVM_MAIN_SRC_DIR}/lib/Testing/Support
-    AND NOT TARGET LLVMTestingSupport)
-  add_subdirectory(${LLVM_MAIN_SRC_DIR}/lib/Testing/Support
-    lib/Testing/Support)
-endif()
-
-option(LLVM_USE_FOLDERS "Enable solution folders in Visual Studio. Disable for Express versions." ON)
-if(LLVM_USE_FOLDERS)
-  set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-endif()
-
-set_target_properties(clang-tablegen-targets PROPERTIES FOLDER "lldb misc")
-set_target_properties(intrinsics_gen PROPERTIES FOLDER "lldb misc")
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 include_directories(
@@ -138,6 +111,28 @@ if(LLDB_ENABLE_SWIFT_SUPPORT)
     "${SWIFT_MAIN_SRC_DIR}/include")
 endif()
 
+if(LLDB_INCLUDE_TESTS)
+  # Build the gtest library needed for unittests, if we have LLVM sources
+  # handy.
+  if (EXISTS ${LLVM_THIRD_PARTY_DIR}/unittest AND NOT TARGET llvm_gtest)
+    add_subdirectory(${LLVM_THIRD_PARTY_DIR}/unittest third-party/unittest)
+  endif()
+  # LLVMTestingSupport library is needed for Process/gdb-remote.
+  if (EXISTS ${LLVM_MAIN_SRC_DIR}/lib/Testing/Support
+      AND NOT TARGET LLVMTestingSupport)
+    add_subdirectory(${LLVM_MAIN_SRC_DIR}/lib/Testing/Support
+      lib/Testing/Support)
+  endif()
+endif()
+
+option(LLVM_USE_FOLDERS "Enable solution folders in Visual Studio. Disable for Express versions." ON)
+if(LLVM_USE_FOLDERS)
+  set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+endif()
+
+set_target_properties(clang-tablegen-targets PROPERTIES FOLDER "lldb misc")
+set_target_properties(intrinsics_gen PROPERTIES FOLDER "lldb misc")
+
 if(NOT DEFINED LLVM_COMMON_CMAKE_UTILS)
   set(LLVM_COMMON_CMAKE_UTILS ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
 endif()
@@ -145,3 +140,16 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX})
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX})
+
+# If LLDB is building against a prebuilt Clang, then the Clang resource
+# directory that LLDB is using for its embedded Clang instance needs to point to
+# the resource directory of the used Clang installation.
+if (NOT TARGET clang-resource-headers)
+  include(GetClangResourceDir)
+  get_clang_resource_dir(LLDB_EXTERNAL_CLANG_RESOURCE_DIR
+    PREFIX "${Clang_DIR}/../../../")
+
+  if (NOT EXISTS ${LLDB_EXTERNAL_CLANG_RESOURCE_DIR})
+    message(FATAL_ERROR "Expected directory for clang-resource-headers not found: ${LLDB_EXTERNAL_CLANG_RESOURCE_DIR}")
+  endif()
+endif()

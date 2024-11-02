@@ -20,7 +20,7 @@
 
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
-
+#include <optional>
 
 namespace lldb_private {
 
@@ -87,7 +87,7 @@ public:
     return error;
   }
 
-  llvm::Optional<MinidumpParser> m_minidump_parser;
+  std::optional<MinidumpParser> m_minidump_parser;
 
 protected:
   void Clear();
@@ -107,13 +107,12 @@ protected:
   JITLoaderList &GetJITLoaders() override;
 
 private:
-  FileSpec m_core_file;
   lldb::DataBufferSP m_core_data;
   llvm::ArrayRef<minidump::Thread> m_thread_list;
   const minidump::ExceptionStream *m_active_exception;
   lldb::CommandObjectSP m_command_sp;
   bool m_is_wow64;
-  llvm::Optional<MemoryRegionInfos> m_memory_regions;
+  std::optional<MemoryRegionInfos> m_memory_regions;
 
   void BuildMemoryRegions();
 };

@@ -32,6 +32,7 @@
 #include <climits>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -124,7 +125,7 @@ FileManager::getDirectoryRef(StringRef DirName, bool CacheFailure) {
       DirName != llvm::sys::path::root_path(DirName) &&
       llvm::sys::path::is_separator(DirName.back()))
     DirName = DirName.substr(0, DirName.size()-1);
-  Optional<std::string> DirNameStr;
+  std::optional<std::string> DirNameStr;
   if (is_style_windows(llvm::sys::path::Style::native)) {
     // Fixing a problem with "clang C:test.c" on Windows.
     // Stat("C:") does not recognize "C:" as a valid directory
@@ -319,7 +320,7 @@ FileManager::getFileRef(StringRef Filename, bool openFile, bool CacheFailure) {
 
     // Cache the redirection in the previously-inserted entry, still available
     // in the tentative return value.
-    NamedFileEnt->second = FileEntryRef::MapValue(Redirection);
+    NamedFileEnt->second = FileEntryRef::MapValue(Redirection, DirInfo);
   }
 
   FileEntryRef ReturnedRef(*NamedFileEnt);
@@ -387,6 +388,13 @@ llvm::Expected<FileEntryRef> FileManager::getSTDIN() {
   return *STDIN;
 }
 
+void FileManager::trackVFSUsage(bool Active) {
+  FS->visit([Active](llvm::vfs::FileSystem &FileSys) {
+    if (auto *RFS = dyn_cast<llvm::vfs::RedirectingFileSystem>(&FileSys))
+      RFS->setUsageTrackingActive(Active);
+  });
+}
+
 const FileEntry *FileManager::getVirtualFile(StringRef Filename, off_t Size,
                                              time_t ModificationTime) {
   return &getVirtualFileRef(Filename, Size, ModificationTime).getFileEntry();
@@ -403,8 +411,7 @@ FileEntryRef FileManager::getVirtualFileRef(StringRef Filename, off_t Size,
     FileEntryRef::MapValue Value = *NamedFileEnt.second;
     if (LLVM_LIKELY(Value.V.is<FileEntry *>()))
       return FileEntryRef(NamedFileEnt);
-    return FileEntryRef(*reinterpret_cast<const FileEntryRef::MapEntry *>(
-        Value.V.get<const void *>()));
+    return FileEntryRef(*Value.V.get<const FileEntryRef::MapEntry *>());
   }
 
   // We've not seen this before, or the file is cached as non-existent.
@@ -471,11 +478,11 @@ FileEntryRef FileManager::getVirtualFileRef(StringRef Filename, off_t Size,
   return FileEntryRef(NamedFileEnt);
 }
 
-llvm::Optional<FileEntryRef> FileManager::getBypassFile(FileEntryRef VF) {
+OptionalFileEntryRef FileManager::getBypassFile(FileEntryRef VF) {
   // Stat of the file and return nullptr if it doesn't exist.
   llvm::vfs::Status Status;
   if (getStatValue(VF.getName(), Status, /*isFile=*/true, /*F=*/nullptr))
-    return None;
+    return std::nullopt;
 
   if (!SeenBypassFileEntries)
     SeenBypassFileEntries = std::make_unique<
@@ -483,7 +490,7 @@ llvm::Optional<FileEntryRef> FileManager::getBypassFile(FileEntryRef VF) {
 
   // If we've already bypassed just use the existing one.
   auto Insertion = SeenBypassFileEntries->insert(
-      {VF.getName(), std::errc::no_such_file_or_directory});
+      {VF.getNameAsRequested(), std::errc::no_such_file_or_directory});
   if (!Insertion.second)
     return FileEntryRef(*Insertion.first);
 
@@ -539,7 +546,7 @@ void FileManager::fillRealPathName(FileEntry *UFE, llvm::StringRef FileName) {
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
 FileManager::getBufferForFile(const FileEntry *Entry, bool isVolatile,
                               bool RequiresNullTerminator,
-                              Optional<cas::ObjectRef> *CASContents) {
+                              std::optional<cas::ObjectRef> *CASContents) {
   // If the content is living on the file entry, return a reference to it.
   if (Entry->Content)
     return llvm::MemoryBuffer::getMemBuffer(Entry->Content->getMemBufferRef());
@@ -573,7 +580,7 @@ FileManager::getBufferForFile(const FileEntry *Entry, bool isVolatile,
 llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
 FileManager::getBufferForFileImpl(StringRef Filename, int64_t FileSize,
                                   bool isVolatile, bool RequiresNullTerminator,
-                                  Optional<cas::ObjectRef> *CASContents) {
+                                  std::optional<cas::ObjectRef> *CASContents) {
   if (FileSystemOpts.WorkingDir.empty())
     return FS->getBufferForFile(Filename, FileSize, RequiresNullTerminator,
                                 isVolatile, CASContents);
@@ -584,7 +591,7 @@ FileManager::getBufferForFileImpl(StringRef Filename, int64_t FileSize,
                               isVolatile, CASContents);
 }
 
-llvm::ErrorOr<Optional<cas::ObjectRef>>
+llvm::ErrorOr<std::optional<cas::ObjectRef>>
 FileManager::getObjectRefForFileContent(const Twine &Filename) {
   if (FileSystemOpts.WorkingDir.empty())
     return FS->getObjectRefForFileContent(Filename);
@@ -650,8 +657,8 @@ void FileManager::GetUniqueIDMapping(
     UIDToFiles[VFE->getUID()] = VFE;
 }
 
-StringRef FileManager::getCanonicalName(const DirectoryEntry *Dir) {
-  return getCanonicalName(Dir, Dir->getName());
+StringRef FileManager::getCanonicalName(DirectoryEntryRef Dir) {
+  return getCanonicalName(Dir, Dir.getName());
 }
 
 StringRef FileManager::getCanonicalName(const FileEntry *File) {

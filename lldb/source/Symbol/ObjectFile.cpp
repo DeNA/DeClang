@@ -357,6 +357,8 @@ AddressClass ObjectFile::GetAddressClass(addr_t file_addr) {
           case eSectionTypeDWARFAppleObjC:
           case eSectionTypeSwiftModules:
           case eSectionTypeDWARFGNUDebugAltLink:
+          case eSectionTypeCTF:
+          case eSectionTypeLLDBTypeSummaries:
             return AddressClass::eDebug;
           case eSectionTypeEHFrame:
           case eSectionTypeARMexidx:
@@ -729,13 +731,6 @@ void llvm::format_provider<ObjectFile::Strata>::format(
     OS << "jit";
     break;
   }
-}
-
-llvm::StringRef ObjectFile::GetReflectionSectionIdentifier(
-    swift::ReflectionSectionKind section) {
-  assert(false &&
-         "Base class's GetReflectionSectionIdentifier should not be called");
-  return "";
 }
 
 Symtab *ObjectFile::GetSymtab() {

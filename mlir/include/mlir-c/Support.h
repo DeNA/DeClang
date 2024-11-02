@@ -56,6 +56,8 @@ extern "C" {
   };                                                                           \
   typedef struct name name
 
+/// Re-export llvm::ThreadPool so as to avoid including the LLVM C API directly.
+DEFINE_C_API_STRUCT(MlirLlvmThreadPool, void);
 DEFINE_C_API_STRUCT(MlirTypeID, const void);
 DEFINE_C_API_STRUCT(MlirTypeIDAllocator, void);
 
@@ -127,16 +129,27 @@ inline static bool mlirLogicalResultIsFailure(MlirLogicalResult res) {
 }
 
 /// Creates a logical result representing a success.
-inline static MlirLogicalResult mlirLogicalResultSuccess() {
+inline static MlirLogicalResult mlirLogicalResultSuccess(void) {
   MlirLogicalResult res = {1};
   return res;
 }
 
 /// Creates a logical result representing a failure.
-inline static MlirLogicalResult mlirLogicalResultFailure() {
+inline static MlirLogicalResult mlirLogicalResultFailure(void) {
   MlirLogicalResult res = {0};
   return res;
 }
+
+//===----------------------------------------------------------------------===//
+// MlirLlvmThreadPool.
+//===----------------------------------------------------------------------===//
+
+/// Create an LLVM thread pool. This is reexported here to avoid directly
+/// pulling in the LLVM headers directly.
+MLIR_CAPI_EXPORTED MlirLlvmThreadPool mlirLlvmThreadPoolCreate(void);
+
+/// Destroy an LLVM thread pool.
+MLIR_CAPI_EXPORTED void mlirLlvmThreadPoolDestroy(MlirLlvmThreadPool pool);
 
 //===----------------------------------------------------------------------===//
 // TypeID API.
@@ -160,7 +173,7 @@ MLIR_CAPI_EXPORTED size_t mlirTypeIDHashValue(MlirTypeID typeID);
 //===----------------------------------------------------------------------===//
 
 /// Creates a type id allocator for dynamic type id creation
-MLIR_CAPI_EXPORTED MlirTypeIDAllocator mlirTypeIDAllocatorCreate();
+MLIR_CAPI_EXPORTED MlirTypeIDAllocator mlirTypeIDAllocatorCreate(void);
 
 /// Deallocates the allocator and all allocated type ids
 MLIR_CAPI_EXPORTED void

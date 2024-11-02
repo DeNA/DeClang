@@ -1,3 +1,14 @@
+//===-- SwiftMetadataCache.h ------------------------------------*- C++ -*-===//
+//
+// This source file is part of the Swift.org open source project
+//
+// Copyright (c) 2014 - 2020 Apple Inc. and the Swift project authors
+// Licensed under Apache License v2.0 with Runtime Library Exception
+//
+// See https://swift.org/LICENSE.txt for license information
+// See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef liblldb_TypeRefCacher_h_
 #define liblldb_TypeRefCacher_h_
@@ -6,12 +17,13 @@
 
 #include "lldb/Core/DataFileCache.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Host/SafeMachO.h"
 
 #include "llvm/Support/DJB.h"
 #include "llvm/Support/OnDiskHashTable.h"
 
-#include "swift/RemoteInspection/ReflectionContext.h"
 #include "swift/Remote/ExternalTypeRefCache.h"
+#include "swift/RemoteInspection/ReflectionContext.h"
 
 namespace lldb_private {
 
@@ -128,7 +140,7 @@ public:
       const swift::reflection::FieldSection &field_descriptors,
       llvm::ArrayRef<std::string> mangled_names) override;
 
-  llvm::Optional<swift::remote::FieldDescriptorLocator>
+  std::optional<swift::remote::FieldDescriptorLocator>
   getFieldDescriptorLocator(const std::string &mangled_name) override;
 
   bool isReflectionInfoCached(uint64_t info_id) override;
@@ -136,7 +148,7 @@ public:
 private:
   /// Generate the on disk hash table data structure into a blob. Returns
   /// the start on the hash table's control structure and the blob itself.
-  llvm::Optional<std::pair<uint32_t, llvm::SmallString<32>>>
+  std::optional<std::pair<uint32_t, llvm::SmallString<32>>>
   generateHashTableBlob(
       uint64_t info_id,
       const swift::reflection::FieldSection &field_descriptors,
@@ -169,7 +181,7 @@ private:
 
   std::recursive_mutex m_mutex;
 
-  llvm::Optional<DataFileCache> m_data_file_cache;
+  std::optional<DataFileCache> m_data_file_cache;
 };
 } // namespace lldb_private
 #endif

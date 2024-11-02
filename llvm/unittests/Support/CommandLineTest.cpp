@@ -10,11 +10,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
@@ -22,6 +20,8 @@
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/Testing/Support/SupportHelpers.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -436,7 +436,7 @@ TEST(CommandLineTest, HideUnrelatedOptionsMulti) {
   const cl::OptionCategory *VisibleCategories[] = {&TestCategory,
                                                    &TestCategory2};
 
-  cl::HideUnrelatedOptions(makeArrayRef(VisibleCategories));
+  cl::HideUnrelatedOptions(ArrayRef(VisibleCategories));
 
   ASSERT_EQ(cl::ReallyHidden, TestOption1.getOptionHiddenFlag())
       << "Failed to hide extra option.";
@@ -740,7 +740,7 @@ TEST(CommandLineTest, DefaultOptions) {
   StackOption<std::string> SC2_Foo("foo", cl::sub(SC2));
 
   const char *args0[] = {"prog", "-b", "args0 bar string", "-f"};
-  EXPECT_TRUE(cl::ParseCommandLineOptions(sizeof(args0) / sizeof(char *), args0,
+  EXPECT_TRUE(cl::ParseCommandLineOptions(std::size(args0), args0,
                                           StringRef(), &llvm::nulls()));
   EXPECT_EQ(Bar, "args0 bar string");
   EXPECT_TRUE(Foo);
@@ -750,7 +750,7 @@ TEST(CommandLineTest, DefaultOptions) {
   cl::ResetAllOptionOccurrences();
 
   const char *args1[] = {"prog", "sc1", "-b", "-bar", "args1 bar string", "-f"};
-  EXPECT_TRUE(cl::ParseCommandLineOptions(sizeof(args1) / sizeof(char *), args1,
+  EXPECT_TRUE(cl::ParseCommandLineOptions(std::size(args1), args1,
                                           StringRef(), &llvm::nulls()));
   EXPECT_EQ(Bar, "args1 bar string");
   EXPECT_TRUE(Foo);
@@ -766,7 +766,7 @@ TEST(CommandLineTest, DefaultOptions) {
 
   const char *args2[] = {"prog", "sc2", "-b", "args2 bar string",
                          "-f", "-foo", "foo string"};
-  EXPECT_TRUE(cl::ParseCommandLineOptions(sizeof(args2) / sizeof(char *), args2,
+  EXPECT_TRUE(cl::ParseCommandLineOptions(std::size(args2), args2,
                                           StringRef(), &llvm::nulls()));
   EXPECT_EQ(Bar, "args2 bar string");
   EXPECT_TRUE(Foo);
@@ -871,7 +871,7 @@ TEST(CommandLineTest, ResponseFiles) {
   llvm::BumpPtrAllocator A;
   llvm::cl::ExpansionContext ECtx(A, llvm::cl::TokenizeGNUCommandLine);
   ECtx.setVFS(&FS).setCurrentDir(TestRoot).setRelativeNames(true);
-  ASSERT_TRUE(ECtx.expandResponseFiles(Argv));
+  ASSERT_FALSE((bool)ECtx.expandResponseFiles(Argv));
   EXPECT_THAT(Argv, testing::Pointwise(
                         StringEquality(),
                         {"test/test", "-flag_1", "-option_1", "-option_2",
@@ -933,7 +933,14 @@ TEST(CommandLineTest, RecursiveResponseFiles) {
 #endif
   llvm::cl::ExpansionContext ECtx(A, Tokenizer);
   ECtx.setVFS(&FS).setCurrentDir(TestRoot);
-  ASSERT_FALSE(ECtx.expandResponseFiles(Argv));
+  llvm::Error Err = ECtx.expandResponseFiles(Argv);
+  ASSERT_TRUE((bool)Err);
+  SmallString<128> FilePath = SelfFilePath;
+  std::error_code EC = FS.makeAbsolute(FilePath);
+  ASSERT_FALSE((bool)EC);
+  std::string ExpectedMessage =
+      std::string("recursive expansion of: '") + std::string(FilePath) + "'";
+  ASSERT_TRUE(toString(std::move(Err)) == ExpectedMessage);
 
   EXPECT_THAT(Argv,
               testing::Pointwise(StringEquality(),
@@ -971,7 +978,7 @@ TEST(CommandLineTest, ResponseFilesAtArguments) {
   BumpPtrAllocator A;
   llvm::cl::ExpansionContext ECtx(A, cl::TokenizeGNUCommandLine);
   ECtx.setVFS(&FS).setCurrentDir(TestRoot);
-  ASSERT_FALSE(ECtx.expandResponseFiles(Argv));
+  ASSERT_FALSE((bool)ECtx.expandResponseFiles(Argv));
 
   // ASSERT instead of EXPECT to prevent potential out-of-bounds access.
   ASSERT_EQ(Argv.size(), 1 + NON_RSP_AT_ARGS + 2);
@@ -1005,7 +1012,7 @@ TEST(CommandLineTest, ResponseFileRelativePath) {
   BumpPtrAllocator A;
   llvm::cl::ExpansionContext ECtx(A, cl::TokenizeGNUCommandLine);
   ECtx.setVFS(&FS).setCurrentDir(TestRoot).setRelativeNames(true);
-  ASSERT_TRUE(ECtx.expandResponseFiles(Argv));
+  ASSERT_FALSE((bool)ECtx.expandResponseFiles(Argv));
   EXPECT_THAT(Argv,
               testing::Pointwise(StringEquality(), {"test/test", "-flag"}));
 }
@@ -1025,7 +1032,7 @@ TEST(CommandLineTest, ResponseFileEOLs) {
   llvm::cl::ExpansionContext ECtx(A, cl::TokenizeWindowsCommandLine);
   ECtx.setVFS(&FS).setCurrentDir(TestRoot).setMarkEOLs(true).setRelativeNames(
       true);
-  ASSERT_TRUE(ECtx.expandResponseFiles(Argv));
+  ASSERT_FALSE((bool)ECtx.expandResponseFiles(Argv));
   const char *Expected[] = {"clang", "-Xclang", "-Wno-whatever", nullptr,
                             "input.cpp"};
   ASSERT_EQ(std::size(Expected), Argv.size());
@@ -1036,6 +1043,32 @@ TEST(CommandLineTest, ResponseFileEOLs) {
       ASSERT_STREQ(Expected[I], Argv[I]);
     }
   }
+}
+
+TEST(CommandLineTest, BadResponseFile) {
+  BumpPtrAllocator A;
+  StringSaver Saver(A);
+  TempDir ADir("dir", /*Unique*/ true);
+  SmallString<128> AFilePath = ADir.path();
+  llvm::sys::path::append(AFilePath, "file.rsp");
+  std::string AFileExp = std::string("@") + std::string(AFilePath.str());
+  SmallVector<const char *, 2> Argv = {"clang", AFileExp.c_str()};
+
+  bool Res = cl::ExpandResponseFiles(Saver, cl::TokenizeGNUCommandLine, Argv);
+  ASSERT_TRUE(Res);
+  ASSERT_EQ(2U, Argv.size());
+  ASSERT_STREQ(Argv[0], "clang");
+  ASSERT_STREQ(Argv[1], AFileExp.c_str());
+
+#if !defined(_AIX) && !defined(__MVS__)
+  std::string ADirExp = std::string("@") + std::string(ADir.path());
+  Argv = {"clang", ADirExp.c_str()};
+  Res = cl::ExpandResponseFiles(Saver, cl::TokenizeGNUCommandLine, Argv);
+  ASSERT_FALSE(Res);
+  ASSERT_EQ(2U, Argv.size());
+  ASSERT_STREQ(Argv[0], "clang");
+  ASSERT_STREQ(Argv[1], ADirExp.c_str());
+#endif
 }
 
 TEST(CommandLineTest, SetDefaultValue) {
@@ -1145,9 +1178,9 @@ TEST(CommandLineTest, ReadConfigFile) {
 
   llvm::BumpPtrAllocator A;
   llvm::cl::ExpansionContext ECtx(A, cl::tokenizeConfigFile);
-  bool Result = ECtx.readConfigFile(ConfigFile.path(), Argv);
+  llvm::Error Result = ECtx.readConfigFile(ConfigFile.path(), Argv);
 
-  EXPECT_TRUE(Result);
+  EXPECT_FALSE((bool)Result);
   EXPECT_EQ(Argv.size(), 13U);
   EXPECT_STREQ(Argv[0], "-option_1");
   EXPECT_STREQ(Argv[1],

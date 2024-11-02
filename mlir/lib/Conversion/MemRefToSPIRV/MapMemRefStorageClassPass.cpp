@@ -18,6 +18,7 @@
 #include "mlir/Dialect/SPIRV/IR/SPIRVDialect.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVEnums.h"
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/FunctionInterfaces.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -55,8 +56,19 @@ using namespace mlir;
   MAP_FN(spirv::StorageClass::Input, 9)                                        \
   MAP_FN(spirv::StorageClass::Output, 10)
 
-Optional<spirv::StorageClass>
-spirv::mapMemorySpaceToVulkanStorageClass(unsigned memorySpace) {
+std::optional<spirv::StorageClass>
+spirv::mapMemorySpaceToVulkanStorageClass(Attribute memorySpaceAttr) {
+  // Handle null memory space attribute specially.
+  if (!memorySpaceAttr)
+    return spirv::StorageClass::StorageBuffer;
+
+  // Unknown dialect custom attributes are not supported by default.
+  // Downstream callers should plug in more specialized ones.
+  auto intAttr = dyn_cast<IntegerAttr>(memorySpaceAttr);
+  if (!intAttr)
+    return std::nullopt;
+  unsigned memorySpace = intAttr.getInt();
+
 #define STORAGE_SPACE_MAP_FN(storage, space)                                   \
   case space:                                                                  \
     return storage;
@@ -66,12 +78,12 @@ spirv::mapMemorySpaceToVulkanStorageClass(unsigned memorySpace) {
   default:
     break;
   }
-  return llvm::None;
+  return std::nullopt;
 
 #undef STORAGE_SPACE_MAP_FN
 }
 
-Optional<unsigned>
+std::optional<unsigned>
 spirv::mapVulkanStorageClassToMemorySpace(spirv::StorageClass storageClass) {
 #define STORAGE_SPACE_MAP_FN(storage, space)                                   \
   case storage:                                                                \
@@ -82,7 +94,7 @@ spirv::mapVulkanStorageClassToMemorySpace(spirv::StorageClass storageClass) {
   default:
     break;
   }
-  return llvm::None;
+  return std::nullopt;
 
 #undef STORAGE_SPACE_MAP_FN
 }
@@ -98,8 +110,19 @@ spirv::mapVulkanStorageClassToMemorySpace(spirv::StorageClass storageClass) {
   MAP_FN(spirv::StorageClass::Function, 6)                                     \
   MAP_FN(spirv::StorageClass::Image, 7)
 
-Optional<spirv::StorageClass>
-spirv::mapMemorySpaceToOpenCLStorageClass(unsigned memorySpace) {
+std::optional<spirv::StorageClass>
+spirv::mapMemorySpaceToOpenCLStorageClass(Attribute memorySpaceAttr) {
+  // Handle null memory space attribute specially.
+  if (!memorySpaceAttr)
+    return spirv::StorageClass::CrossWorkgroup;
+
+  // Unknown dialect custom attributes are not supported by default.
+  // Downstream callers should plug in more specialized ones.
+  auto intAttr = dyn_cast<IntegerAttr>(memorySpaceAttr);
+  if (!intAttr)
+    return std::nullopt;
+  unsigned memorySpace = intAttr.getInt();
+
 #define STORAGE_SPACE_MAP_FN(storage, space)                                   \
   case space:                                                                  \
     return storage;
@@ -109,12 +132,12 @@ spirv::mapMemorySpaceToOpenCLStorageClass(unsigned memorySpace) {
   default:
     break;
   }
-  return llvm::None;
+  return std::nullopt;
 
 #undef STORAGE_SPACE_MAP_FN
 }
 
-Optional<unsigned>
+std::optional<unsigned>
 spirv::mapOpenCLStorageClassToMemorySpace(spirv::StorageClass storageClass) {
 #define STORAGE_SPACE_MAP_FN(storage, space)                                   \
   case storage:                                                                \
@@ -125,7 +148,7 @@ spirv::mapOpenCLStorageClassToMemorySpace(spirv::StorageClass storageClass) {
   default:
     break;
   }
-  return llvm::None;
+  return std::nullopt;
 
 #undef STORAGE_SPACE_MAP_FN
 }
@@ -142,28 +165,19 @@ spirv::MemorySpaceToStorageClassConverter::MemorySpaceToStorageClassConverter(
   // Pass through for all other types.
   addConversion([](Type type) { return type; });
 
-  addConversion([this](BaseMemRefType memRefType) -> Optional<Type> {
-    // Expect IntegerAttr memory spaces. The attribute can be missing for the
-    // case of memory space == 0.
-    Attribute spaceAttr = memRefType.getMemorySpace();
-    if (spaceAttr && !spaceAttr.isa<IntegerAttr>()) {
-      LLVM_DEBUG(llvm::dbgs() << "cannot convert " << memRefType
-                              << " due to non-IntegerAttr memory space\n");
-      return llvm::None;
-    }
-
-    unsigned space = memRefType.getMemorySpaceAsInt();
-    auto storage = this->memorySpaceMap(space);
+  addConversion([this](BaseMemRefType memRefType) -> std::optional<Type> {
+    std::optional<spirv::StorageClass> storage =
+        this->memorySpaceMap(memRefType.getMemorySpace());
     if (!storage) {
       LLVM_DEBUG(llvm::dbgs()
                  << "cannot convert " << memRefType
                  << " due to being unable to find memory space in map\n");
-      return llvm::None;
+      return std::nullopt;
     }
 
     auto storageAttr =
         spirv::StorageClassAttr::get(memRefType.getContext(), *storage);
-    if (auto rankedType = memRefType.dyn_cast<MemRefType>()) {
+    if (auto rankedType = dyn_cast<MemRefType>(memRefType)) {
       return MemRefType::get(memRefType.getShape(), memRefType.getElementType(),
                              rankedType.getLayout(), storageAttr);
     }
@@ -189,9 +203,9 @@ spirv::MemorySpaceToStorageClassConverter::MemorySpaceToStorageClassConverter(
 /// Returns true if the given `type` is considered as legal for SPIR-V
 /// conversion.
 static bool isLegalType(Type type) {
-  if (auto memRefType = type.dyn_cast<BaseMemRefType>()) {
+  if (auto memRefType = dyn_cast<BaseMemRefType>(type)) {
     Attribute spaceAttr = memRefType.getMemorySpace();
-    return spaceAttr && spaceAttr.isa<spirv::StorageClassAttr>();
+    return spaceAttr && isa<spirv::StorageClassAttr>(spaceAttr);
   }
   return true;
 }
@@ -199,7 +213,7 @@ static bool isLegalType(Type type) {
 /// Returns true if the given `attr` is considered as legal for SPIR-V
 /// conversion.
 static bool isLegalAttr(Attribute attr) {
-  if (auto typeAttr = attr.dyn_cast<TypeAttr>())
+  if (auto typeAttr = dyn_cast<TypeAttr>(attr))
     return isLegalType(typeAttr.getValue());
   return true;
 }
@@ -208,7 +222,9 @@ static bool isLegalAttr(Attribute attr) {
 static bool isLegalOp(Operation *op) {
   if (auto funcOp = dyn_cast<FunctionOpInterface>(op)) {
     return llvm::all_of(funcOp.getArgumentTypes(), isLegalType) &&
-           llvm::all_of(funcOp.getResultTypes(), isLegalType);
+           llvm::all_of(funcOp.getResultTypes(), isLegalType) &&
+           llvm::all_of(funcOp.getFunctionBody().getArgumentTypes(),
+                        isLegalType);
   }
 
   auto attrs = llvm::map_range(op->getAttrs(), [](const NamedAttribute &attr) {
@@ -250,7 +266,7 @@ LogicalResult MapMemRefStoragePattern::matchAndRewrite(
   llvm::SmallVector<NamedAttribute, 4> newAttrs;
   newAttrs.reserve(op->getAttrs().size());
   for (auto attr : op->getAttrs()) {
-    if (auto typeAttr = attr.getValue().dyn_cast<TypeAttr>()) {
+    if (auto typeAttr = dyn_cast<TypeAttr>(attr.getValue())) {
       auto newAttr = getTypeConverter()->convertType(typeAttr.getValue());
       newAttrs.emplace_back(attr.getName(), TypeAttr::get(newAttr));
     } else {

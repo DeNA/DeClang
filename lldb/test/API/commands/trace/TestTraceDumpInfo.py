@@ -52,11 +52,11 @@ class TestTraceDumpInfo(TraceIntelPTTestCaseBase):
 
   Trace technology: intel-pt
 
-  Total number of trace items: 24
+  Total number of trace items: 28
 
   Memory usage:
     Raw trace size: 4 KiB
-    Total approximate memory usage (excluding raw trace): 0.21 KiB
+    Total approximate memory usage (excluding raw trace): 0.25 KiB
     Average memory usage per item (excluding raw trace): 9.00 bytes
 
   Timing for this thread:
@@ -64,8 +64,9 @@ class TestTraceDumpInfo(TraceIntelPTTestCaseBase):
                 """
 
   Events:
-    Number of individual events: 3
+    Number of individual events: 7
       software disabled tracing: 2
+      hardware disabled tracing: 4
       trace synchronization point: 1""",
             ],
             patterns=["Decoding instructions: \d.\d\ds"],
@@ -85,9 +86,9 @@ class TestTraceDumpInfo(TraceIntelPTTestCaseBase):
   "traceTechnology": "intel-pt",
   "threadStats": {
     "tid": 3842849,
-    "traceItemsCount": 24,
+    "traceItemsCount": 28,
     "memoryUsage": {
-      "totalInBytes": "216",
+      "totalInBytes": "252",
       "avgPerItemInBytes": 9
     },
     "timingInSeconds": {
@@ -95,11 +96,18 @@ class TestTraceDumpInfo(TraceIntelPTTestCaseBase):
                 """
     },
     "events": {
-      "totalCount": 3,
+      "totalCount": 7,
       "individualCounts": {
         "software disabled tracing": 2,
+        "hardware disabled tracing": 4,
         "trace synchronization point": 1
       }
+    },
+    "errors": {
+      "totalCount": 0,
+      "libiptErrors": {},
+      "fatalErrors": 0,
+      "otherErrors": 0
     }
   },
   "globalStats": {

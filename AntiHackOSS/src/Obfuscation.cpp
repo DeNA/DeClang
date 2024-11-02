@@ -15,7 +15,6 @@
  */
 
 #include "llvm/InitializePasses.h"
-#include "llvm-c/Initialization.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/IR/Module.h"
@@ -89,7 +88,7 @@ namespace {
   {
     doObfuscation = true;
     llvm::json::Object *jsonObj = configJson->getAsObject();
-    int enable_obf = jsonObj->getInteger("enable_obfuscation").getValueOr(1);
+    int enable_obf = jsonObj->getInteger("enable_obfuscation").value_or(1);
     if (!enable_obf) {
       doObfuscation = false;
       (*logFile) << "[Frontend]: (Info) enable_obf is 0, all obfuscations will be disabled.\n";

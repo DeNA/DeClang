@@ -9,7 +9,6 @@
 #ifndef LLDB_SYMBOL_OBJECTFILE_H
 #define LLDB_SYMBOL_OBJECTFILE_H
 
-#include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/ModuleChild.h"
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Symbol/Symtab.h"
@@ -18,36 +17,14 @@
 #include "lldb/Utility/DataExtractor.h"
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/FileSpecList.h"
 #include "lldb/Utility/UUID.h"
 #include "lldb/lldb-private.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/VersionTuple.h"
+#include <optional>
 
-namespace swift {
-class SwiftObjectFileFormat;
-enum ReflectionSectionKind : uint8_t;
-}
 namespace lldb_private {
-
-class ObjectFileJITDelegate {
-public:
-  ObjectFileJITDelegate() = default;
-
-  virtual ~ObjectFileJITDelegate() = default;
-
-  virtual lldb::ByteOrder GetByteOrder() const = 0;
-
-  virtual uint32_t GetAddressByteSize() const = 0;
-
-  virtual void PopulateSymtab(lldb_private::ObjectFile *obj_file,
-                              lldb_private::Symtab &symtab) = 0;
-
-  virtual void PopulateSectionList(lldb_private::ObjectFile *obj_file,
-                                   lldb_private::SectionList &section_list) = 0;
-
-  virtual ArchSpec GetArchitecture() = 0;
-};
 
 /// \class ObjectFile ObjectFile.h "lldb/Symbol/ObjectFile.h"
 /// A plug-in interface definition class for object file parsers.
@@ -561,6 +538,30 @@ public:
     return false;
   }
 
+  /// Get metadata about threads from the corefile.
+  ///
+  /// The corefile may have metadata (e.g. a Mach-O "thread extrainfo"
+  /// LC_NOTE) which for the threads in the process; this method tries
+  /// to retrieve them.
+  ///
+  /// \param[out] tids
+  ///     Filled in with a vector of tid_t's that matches the number
+  ///     of threads in the corefile (ObjectFile::GetNumThreadContexts).
+  ///     If a tid is not specified for one of the corefile threads,
+  ///     that entry in the vector will have LLDB_INVALID_THREAD_ID and
+  ///     the caller should assign a tid to the thread that does not
+  ///     conflict with the ones provided in this array.
+  ///     As additional metadata are added, this method may return a
+  ///     \a tids vector with no thread id's specified at all; the
+  ///     corefile may only specify one of the other metadata.
+  ///
+  /// \return
+  ///     Returns true if thread metadata was found in this corefile.
+  ///
+  virtual bool GetCorefileThreadExtraInfos(std::vector<lldb::tid_t> &tids) {
+    return false;
+  }
+
   virtual lldb::RegisterContextSP
   GetThreadContextAtIndex(uint32_t idx, lldb_private::Thread &thread) {
     return lldb::RegisterContextSP();
@@ -696,6 +697,10 @@ public:
     return symbol_name;
   }
 
+  /// Can we trust the address ranges accelerator associated with this object
+  /// file to be complete.
+  virtual bool CanTrustAddressRanges() { return false; }
+
   static lldb::SymbolType GetSymbolTypeFromName(
       llvm::StringRef name,
       lldb::SymbolType symbol_type_hint = lldb::eSymbolTypeUndefined);
@@ -712,15 +717,6 @@ public:
 
   /// Creates a plugin-specific call frame info
   virtual std::unique_ptr<CallFrameInfo> CreateCallFrameInfo();
-
-  virtual llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section);
-
-#ifdef LLDB_ENABLE_SWIFT
-  virtual bool CanContainSwiftReflectionData(const Section &section) {
-    return false;
-  }
-#endif // LLDB_ENABLE_SWIFT
 
   /// Load binaries listed in a corefile
   ///
@@ -772,7 +768,7 @@ protected:
   /// need to use a std::unique_ptr to a llvm::once_flag so if we clear the
   /// symbol table, we can have a new once flag to use when it is created again.
   std::unique_ptr<llvm::once_flag> m_symtab_once_up;
-  llvm::Optional<uint32_t> m_cache_hash;
+  std::optional<uint32_t> m_cache_hash;
 
   /// Sets the architecture for a module.  At present the architecture can
   /// only be set if it is invalid.  It is not allowed to switch from one

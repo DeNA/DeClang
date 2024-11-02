@@ -54,7 +54,7 @@ declare i32 @"f\40o"(...)
 ; ASM-NEXT:    .vbyte  4, ._Renamed..24f_o     # @"f$o"
 ; ASM-NEXT:    .vbyte  4, TOC[TC0]
 ; ASM-NEXT:    .vbyte  4, 0
-; ASM-NEXT:    .csect .text[PR],5
+; ASM-NEXT:    .csect [PR],5
 ; ASM-NEXT:  ._Renamed..24f_o:
 ; ASM:         bl ._Renamed..40f_o[PR]
 ; ASM-NEXT:    nop
@@ -67,7 +67,7 @@ declare i32 @"f\40o"(...)
 ; ASM-NEXT:    .vbyte  4, ._Renamed..26f_o     # @"f&o"
 ; ASM-NEXT:    .vbyte  4, TOC[TC0]
 ; ASM-NEXT:    .vbyte  4, 0
-; ASM-NEXT:    .csect .text[PR],5
+; ASM-NEXT:    .csect [PR],5
 ; ASM-NEXT:  ._Renamed..26f_o:
 ; ASM:         bl ._Renamed..24f_o
 ; ASM:         .globl  _Renamed..265ff__o[DS] # -- Begin function f&_o
@@ -79,7 +79,7 @@ declare i32 @"f\40o"(...)
 ; ASM-NEXT:    .vbyte  4, ._Renamed..265ff__o  # @"f&_o"
 ; ASM-NEXT:    .vbyte  4, TOC[TC0]
 ; ASM-NEXT:    .vbyte  4, 0
-; ASM-NEXT:    .csect .text[PR],5
+; ASM-NEXT:    .csect [PR],5
 ; ASM-NEXT:  ._Renamed..265ff__o:
 ; ASM:         .csect .data[RW],2
 ; ASM-NEXT:    .globl  _Renamed..60f_o
@@ -107,8 +107,8 @@ declare i32 @"f\40o"(...)
 ; OBJ-EMPTY:
 ; OBJ-NEXT:  00000000 (idx: 7) .f$o:
 ; OBJ-NEXT:         0: 7c 08 02 a6   mflr 0
-; OBJ-NEXT:         4: 90 01 00 08   stw 0, 8(1)
-; OBJ-NEXT:         8: 94 21 ff c0   stwu 1, -64(1)
+; OBJ-NEXT:         4: 94 21 ff c0   stwu 1, -64(1)
+; OBJ-NEXT:         8: 90 01 00 48   stw 0, 72(1)
 ; OBJ-NEXT:         c: 4b ff ff f5   bl 0x0
 ; OBJ-NEXT:                          0000000c:  R_RBR        (idx: 1) .f@o[PR]
 ; OBJ-NEXT:        10: 60 00 00 00   nop
@@ -122,8 +122,8 @@ declare i32 @"f\40o"(...)
 ; OBJ-EMPTY:
 ; OBJ-NEXT:  00000030 (idx: 9) .f&o:
 ; OBJ-NEXT:        30: 7c 08 02 a6   mflr 0
-; OBJ-NEXT:        34: 90 01 00 08   stw 0, 8(1)
-; OBJ-NEXT:        38: 94 21 ff c0   stwu 1, -64(1)
+; OBJ-NEXT:        34: 94 21 ff c0   stwu 1, -64(1)
+; OBJ-NEXT:        38: 90 01 00 48   stw 0, 72(1)
 ; OBJ-NEXT:        3c: 4b ff ff c5   bl 0x0
 ; OBJ-NEXT:        40: 80 82 00 00   lwz 4, 0(2)
 ; OBJ-NEXT:                          00000042:  R_TOC        (idx: 25) f=o[TC]

@@ -25,15 +25,14 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 using namespace clang::ast_matchers;
 using namespace clang::tidy::matchers;
 
-namespace clang {
-namespace tidy {
-namespace misc {
+namespace clang::tidy::misc {
 namespace {
 using llvm::APSInt;
 
@@ -145,8 +144,9 @@ static bool areEquivalentExpr(const Expr *Left, const Expr *Right) {
     const auto *RightUnaryExpr =
         cast<UnaryExprOrTypeTraitExpr>(Right);
     if (LeftUnaryExpr->isArgumentType() && RightUnaryExpr->isArgumentType())
-      return LeftUnaryExpr->getArgumentType() ==
-             RightUnaryExpr->getArgumentType();
+      return LeftUnaryExpr->getKind() == RightUnaryExpr->getKind() &&
+             LeftUnaryExpr->getArgumentType() ==
+                 RightUnaryExpr->getArgumentType();
     if (!LeftUnaryExpr->isArgumentType() && !RightUnaryExpr->isArgumentType())
       return areEquivalentExpr(LeftUnaryExpr->getArgumentExpr(),
                                RightUnaryExpr->getArgumentExpr());
@@ -504,7 +504,8 @@ static bool retrieveIntegerConstantExpr(const MatchFinder::MatchResult &Result,
   ConstExpr = Result.Nodes.getNodeAs<Expr>(CstId);
   if (!ConstExpr)
     return false;
-  Optional<llvm::APSInt> R = ConstExpr->getIntegerConstantExpr(*Result.Context);
+  std::optional<llvm::APSInt> R =
+      ConstExpr->getIntegerConstantExpr(*Result.Context);
   if (!R)
     return false;
   Value = *R;
@@ -1308,7 +1309,7 @@ void RedundantExpressionCheck::check(const MatchFinder::MatchResult &Result) {
           "left-right-shift-confusion")) {
     const auto *ShiftingConst = Result.Nodes.getNodeAs<Expr>("shift-const");
     assert(ShiftingConst && "Expr* 'ShiftingConst' is nullptr!");
-    Optional<llvm::APSInt> ShiftingValue =
+    std::optional<llvm::APSInt> ShiftingValue =
         ShiftingConst->getIntegerConstantExpr(*Result.Context);
 
     if (!ShiftingValue)
@@ -1316,7 +1317,7 @@ void RedundantExpressionCheck::check(const MatchFinder::MatchResult &Result) {
 
     const auto *AndConst = Result.Nodes.getNodeAs<Expr>("and-const");
     assert(AndConst && "Expr* 'AndCont' is nullptr!");
-    Optional<llvm::APSInt> AndValue =
+    std::optional<llvm::APSInt> AndValue =
         AndConst->getIntegerConstantExpr(*Result.Context);
     if (!AndValue)
       return;
@@ -1355,6 +1356,4 @@ void RedundantExpressionCheck::check(const MatchFinder::MatchResult &Result) {
   checkRelationalExpr(Result);
 }
 
-} // namespace misc
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::misc

@@ -50,6 +50,30 @@ set(LLDB_TEST_MODULE_CACHE_CLANG "${LLDB_TEST_BUILD_DIRECTORY}/module-cache-clan
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_LLDB})
 file(MAKE_DIRECTORY ${LLDB_TEST_MODULE_CACHE_CLANG})
 
+# Windows and Linux have no built-in ObjC runtime. Turn this on in order to run tests with GNUstep.
+option(LLDB_TEST_OBJC_GNUSTEP "Enable ObjC tests with GNUstep libobjc2 on non-Apple platforms" Off)
+set(LLDB_TEST_OBJC_GNUSTEP_DIR "" CACHE PATH "Custom path to the GNUstep shared library")
+
+if (LLDB_TEST_OBJC_GNUSTEP)
+  if (LLDB_TEST_OBJC_GNUSTEP_DIR)
+    set(GNUstepObjC_DIR ${LLDB_TEST_OBJC_GNUSTEP_DIR})
+  endif()
+  find_package(GNUstepObjC)
+  if (NOT GNUstepObjC_FOUND)
+    if (LLDB_TEST_OBJC_GNUSTEP_DIR)
+      message(FATAL_ERROR "Failed to find GNUstep libobjc2 in ${LLDB_TEST_OBJC_GNUSTEP_DIR}. "
+                          "Please check LLDB_TEST_OBJC_GNUSTEP_DIR or turn off LLDB_TEST_OBJC_GNUSTEP.")
+    else()
+      message(FATAL_ERROR "Failed to find GNUstep libobjc2. "
+                          "Please set LLDB_TEST_OBJC_GNUSTEP_DIR or turn off LLDB_TEST_OBJC_GNUSTEP.")
+    endif()
+  endif()
+  set(LLDB_TEST_OBJC_GNUSTEP_DIR ${GNUstepObjC_DIR})
+elseif (LLDB_TEST_OBJC_GNUSTEP_DIR)
+  message(STATUS "Reset LLDB_TEST_OBJC_GNUSTEP_DIR since LLDB_TEST_OBJC_GNUSTEP is off")
+  set(LLDB_TEST_OBJC_GNUSTEP_DIR "" CACHE PATH "Custom path to the GNUstep shared library" FORCE)
+endif()
+
 # LLVM_BUILD_MODE is used in lit.site.cfg
 if (CMAKE_CFG_INTDIR STREQUAL ".")
   set(LLVM_BUILD_MODE ".")
@@ -90,8 +114,8 @@ if(TARGET lldb-server)
   add_lldb_test_dependency(lldb-server)
 endif()
 
-if(TARGET lldb-vscode)
-  add_lldb_test_dependency(lldb-vscode)
+if(TARGET lldb-dap)
+  add_lldb_test_dependency(lldb-dap)
 endif()
 
 if(TARGET liblldb)
@@ -115,10 +139,17 @@ if(NOT LLDB_BUILT_STANDALONE)
   )
 endif()
 
+if (LLVM_ENABLE_RUNTIMES)
+  add_lldb_test_dependency(runtimes)
+endif()
+
 # Add dependencies if we test with the in-tree clang.
 # This works with standalone builds as they import the clang target.
 if(TARGET clang)
   add_lldb_test_dependency(clang)
+
+  # TestFullLtoStepping depends on LTO, and only runs when the compiler is clang.
+  add_lldb_test_dependency(LTO)
 
   if (TARGET libcxx OR ("libcxx" IN_LIST LLVM_ENABLE_RUNTIMES))
     set(LLDB_HAS_LIBCXX ON)
@@ -130,12 +161,10 @@ if(TARGET clang)
       set(LIBCXX_LIBRARY_DIR ${CMAKE_BINARY_DIR}/lib${LIBCXX_LIBDIR_SUFFIX})
       set(LIBCXX_GENERATED_INCLUDE_DIR "${CMAKE_BINARY_DIR}/include/c++/v1")
     endif()
-    add_lldb_test_dependency(cxx)
   endif()
 
   if (TARGET compiler-rt OR "compiler-rt" IN_LIST LLVM_ENABLE_RUNTIMES)
     set(LLDB_HAS_COMPILER_RT ON)
-    add_lldb_test_dependency(compiler-rt)
   endif()
 
   if(APPLE AND NOT LLVM_TARGET_IS_CROSSCOMPILE_HOST)
@@ -217,6 +246,7 @@ llvm_canonicalize_cmake_booleans(
   LLVM_ENABLE_ZLIB
   LLVM_ENABLE_SHARED_LIBS
   LLDB_HAS_LIBCXX
+  LLDB_TOOL_LLDB_SERVER_BUILD
   LLDB_USE_SYSTEM_DEBUGSERVER
   LLDB_IS_64_BITS)
 
@@ -253,27 +283,6 @@ add_lit_testsuite(check-lldb-swift
   ARGS "--filter=[sS]wift"
   DEPENDS lldb-test-deps)
 # END SWIFT MOD
-
-# Add a lit test suite that runs the API & shell test while capturing a
-# reproducer.
-add_lit_testsuite(check-lldb-reproducers-capture
-  "Running lldb test suite with reproducer capture"
-  ${CMAKE_CURRENT_BINARY_DIR}/API
-  ${CMAKE_CURRENT_BINARY_DIR}/Shell
-  PARAMS "lldb-run-with-repro=capture"
-  EXCLUDE_FROM_CHECK_ALL
-  DEPENDS lldb-test-depends)
-
-# Add a lit test suite that runs the API & shell test by replaying a
-# reproducer.
-add_lit_testsuite(check-lldb-reproducers
-  "Running lldb test suite with reproducer replay"
-  ${CMAKE_CURRENT_BINARY_DIR}/API
-  ${CMAKE_CURRENT_BINARY_DIR}/Shell
-  PARAMS "lldb-run-with-repro=replay"
-  EXCLUDE_FROM_CHECK_ALL
-  DEPENDS lldb-test-depends)
-add_dependencies(check-lldb-reproducers check-lldb-reproducers-capture)
 
 if(LLDB_BUILT_STANDALONE)
   # This has to happen *AFTER* add_lit_testsuite.

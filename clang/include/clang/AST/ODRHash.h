@@ -59,6 +59,10 @@ public:
   // method compares more information than the AddDecl class.
   void AddRecordDecl(const RecordDecl *Record);
 
+  // Use this for ODR checking ObjC interfaces. This
+  // method compares more information than the AddDecl class.
+  void AddObjCInterfaceDecl(const ObjCInterfaceDecl *Record);
+
   // Use this for ODR checking functions between modules.  This method compares
   // more information than the AddDecl class.  SkipBody will process the
   // hash as if the function has no body.
@@ -67,6 +71,10 @@ public:
   // Use this for ODR checking enums between modules.  This method compares
   // more information than the AddDecl class.
   void AddEnumDecl(const EnumDecl *Enum);
+
+  // Use this for ODR checking ObjC protocols. This
+  // method compares more information than the AddDecl class.
+  void AddObjCProtocolDecl(const ObjCProtocolDecl *P);
 
   // Process SubDecls of the main Decl.  This method calls the DeclVisitor
   // while AddDecl does not.

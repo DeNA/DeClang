@@ -9,6 +9,7 @@
 #include "MCTargetDesc/AArch64FixupKinds.h"
 #include "MCTargetDesc/AArch64MCExpr.h"
 #include "MCTargetDesc/AArch64MCTargetDesc.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/MachO.h"
 #include "llvm/MC/MCAsmInfo.h"
@@ -140,13 +141,11 @@ static bool canUseLocalRelocation(const MCSectionMachO &Section,
     return false;
 
   if (RefSec.getSegmentName() == "__DATA" &&
-      RefSec.getName() == "__objc_classrefs")
+      (RefSec.getName() == "__cfstring" ||
+       RefSec.getName() == "__objc_classrefs"))
     return false;
 
-  // FIXME: ld64 currently handles internal pointer-sized relocations
-  // incorrectly (applying the addend twice). We should be able to return true
-  // unconditionally by this point when that's fixed.
-  return false;
+  return true;
 }
 
 void AArch64MachObjectWriter::recordRelocation(

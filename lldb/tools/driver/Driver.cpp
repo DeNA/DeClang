@@ -32,6 +32,7 @@
 #include <bitset>
 #include <clocale>
 #include <csignal>
+#include <future>
 #include <string>
 #include <thread>
 #include <utility>
@@ -52,30 +53,27 @@ using namespace llvm;
 namespace {
 enum ID {
   OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_MAKE_OPT_ID(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,   \
-                   FLAGS, PARAM, HELP, METAVAR, VALUES),
+#define OPTION(...) LLVM_MAKE_OPT_ID(__VA_ARGS__),
 #include "Options.inc"
 #undef OPTION
 };
 
-#define PREFIX(NAME, VALUE) const char *const NAME[] = VALUE;
+#define PREFIX(NAME, VALUE)                                                    \
+  static constexpr StringLiteral NAME##_init[] = VALUE;                        \
+  static constexpr ArrayRef<StringLiteral> NAME(NAME##_init,                   \
+                                                std::size(NAME##_init) - 1);
 #include "Options.inc"
 #undef PREFIX
 
-const opt::OptTable::Info InfoTable[] = {
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_CONSTRUCT_OPT_INFO(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS,       \
-                          ALIASARGS, FLAGS, PARAM, HELP, METAVAR, VALUES),
+static constexpr opt::OptTable::Info InfoTable[] = {
+#define OPTION(...) LLVM_CONSTRUCT_OPT_INFO(__VA_ARGS__),
 #include "Options.inc"
 #undef OPTION
 };
 
-class LLDBOptTable : public opt::OptTable {
+class LLDBOptTable : public opt::GenericOptTable {
 public:
-  LLDBOptTable() : OptTable(InfoTable) {}
+  LLDBOptTable() : opt::GenericOptTable(InfoTable) {}
 };
 } // namespace
 
@@ -762,7 +760,7 @@ int main(int argc, char const *argv[]) {
   LLDBOptTable T;
   unsigned MissingArgIndex;
   unsigned MissingArgCount;
-  ArrayRef<const char *> arg_arr = makeArrayRef(argv + 1, argc - 1);
+  ArrayRef<const char *> arg_arr = ArrayRef(argv + 1, argc - 1);
   opt::InputArgList input_args =
       T.ParseArgs(arg_arr, MissingArgIndex, MissingArgCount);
   llvm::StringRef argv0 = llvm::sys::path::filename(argv[0]);
@@ -796,7 +794,9 @@ int main(int argc, char const *argv[]) {
                        << '\n';
     return 1;
   }
-  SBHostOS::ThreadCreated("<lldb.driver.main-thread>");
+
+  // Setup LLDB signal handlers once the debugger has been initialized.
+  SBDebugger::PrintDiagnosticsOnError();
 
   signal(SIGINT, sigint_handler);
 #if !defined(_WIN32)
@@ -822,6 +822,18 @@ int main(int argc, char const *argv[]) {
     }
   }
 
-  SBDebugger::Terminate();
+  // When terminating the debugger we have to wait on all the background tasks
+  // to complete, which can take a while. Print a message when this takes longer
+  // than 1 second.
+  {
+    std::future<void> future =
+        std::async(std::launch::async, []() { SBDebugger::Terminate(); });
+
+    if (future.wait_for(std::chrono::seconds(1)) == std::future_status::timeout)
+      fprintf(stderr, "Waiting for background tasks to complete...\n");
+
+    future.wait();
+  }
+
   return exit_code;
 }

@@ -1,3 +1,7 @@
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${LIBC_TARGET_OS})
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/${LIBC_TARGET_OS})
+endif()
+
 add_header_library(
   file_actions
   HDRS
@@ -26,6 +30,7 @@ add_entrypoint_object(
     .file_actions
     libc.include.errno
     libc.include.spawn
+    libc.src.__support.CPP.new
 )
 
 add_entrypoint_object(
@@ -38,6 +43,7 @@ add_entrypoint_object(
     .file_actions
     libc.include.errno
     libc.include.spawn
+    libc.src.__support.CPP.new
 )
 
 add_entrypoint_object(
@@ -50,6 +56,7 @@ add_entrypoint_object(
     .file_actions
     libc.include.errno
     libc.include.spawn
+    libc.src.__support.CPP.new
 )
 
 add_entrypoint_object(
@@ -62,4 +69,12 @@ add_entrypoint_object(
     .file_actions
     libc.include.errno
     libc.include.spawn
+    libc.src.__support.CPP.new
+)
+
+add_entrypoint_object(
+  posix_spawn
+  ALIAS
+  DEPENDS
+    .${LIBC_TARGET_OS}.posix_spawn
 )

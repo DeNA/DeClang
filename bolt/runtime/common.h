@@ -6,7 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if !defined(__APPLE__)
+#if !defined(__x86_64__)
+#error "For x86_64 only"
+#endif
+
+#if defined(__linux__)
 
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +21,7 @@
 #include <elf.h>
 #endif
 
-#else
+#elif defined(__APPLE__)
 
 typedef __SIZE_TYPE__ size_t;
 #define __SSIZE_TYPE__                                                         \
@@ -36,6 +40,8 @@ typedef unsigned char uint8_t;
 typedef long long int64_t;
 typedef int int32_t;
 
+#else
+#error "For Linux or MacOS only"
 #endif
 
 // Save all registers while keeping 16B stack alignment
@@ -75,6 +81,41 @@ typedef int int32_t;
   "pop %%rcx\n"                                                                \
   "pop %%rbx\n"                                                                \
   "pop %%rax\n"
+
+#define PROT_READ 0x1  /* Page can be read.  */
+#define PROT_WRITE 0x2 /* Page can be written.  */
+#define PROT_EXEC 0x4  /* Page can be executed.  */
+#define PROT_NONE 0x0  /* Page can not be accessed.  */
+#define PROT_GROWSDOWN                                                         \
+  0x01000000 /* Extend change to start of                                      \
+                growsdown vma (mprotect only).  */
+#define PROT_GROWSUP                                                           \
+  0x02000000 /* Extend change to start of                                      \
+                growsup vma (mprotect only).  */
+
+/* Sharing types (must choose one and only one of these).  */
+#define MAP_SHARED 0x01  /* Share changes.  */
+#define MAP_PRIVATE 0x02 /* Changes are private.  */
+#define MAP_FIXED 0x10   /* Interpret addr exactly.  */
+
+#if defined(__APPLE__)
+#define MAP_ANONYMOUS 0x1000
+#else
+#define MAP_ANONYMOUS 0x20
+#endif
+
+#define MAP_FAILED ((void *)-1)
+
+#define SEEK_SET 0 /* Seek from beginning of file.  */
+#define SEEK_CUR 1 /* Seek from current position.  */
+#define SEEK_END 2 /* Seek from end of file.  */
+
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR 2
+#define O_CREAT 64
+#define O_TRUNC 512
+#define O_APPEND 1024
 
 // Functions that are required by freestanding environment. Compiler may
 // generate calls to these implicitly.
@@ -123,6 +164,20 @@ int memcmp(const void *s1, const void *s2, size_t n) {
 
 // Anonymous namespace covering everything but our library entry point
 namespace {
+
+// Get the difference between runtime addrress of .text section and
+// static address in section header table. Can be extracted from arbitrary
+// pc value recorded at runtime to get the corresponding static address, which
+// in turn can be used to search for indirect call description. Needed because
+// indirect call descriptions are read-only non-relocatable data.
+uint64_t getTextBaseAddress() {
+  uint64_t DynAddr;
+  uint64_t StaticAddr;
+  __asm__ volatile("leaq __hot_end(%%rip), %0\n\t"
+                   "movabsq $__hot_end, %1\n\t"
+                   : "=r"(DynAddr), "=r"(StaticAddr));
+  return DynAddr - StaticAddr;
+}
 
 constexpr uint32_t BufSize = 10240;
 
@@ -216,6 +271,21 @@ uint64_t __sigprocmask(int how, const void *set, void *oldset) {
   return ret;
 }
 
+uint64_t __getpid() {
+  uint64_t ret;
+#if defined(__APPLE__)
+#define GETPID_SYSCALL 20
+#else
+#define GETPID_SYSCALL 39
+#endif
+  __asm__ __volatile__("movq $" STRINGIFY(GETPID_SYSCALL) ", %%rax\n"
+                                                          "syscall\n"
+                       : "=a"(ret)
+                       :
+                       : "cc", "rcx", "r11", "memory");
+  return ret;
+}
+
 uint64_t __exit(uint64_t code) {
 #if defined(__APPLE__)
 #define EXIT_SYSCALL 0x2000001
@@ -283,6 +353,22 @@ uint32_t strLen(const char *Str) {
   return Size;
 }
 
+void *strStr(const char *const Haystack, const char *const Needle) {
+  int j = 0;
+
+  for (int i = 0; i < strLen(Haystack); i++) {
+    if (Haystack[i] == Needle[0]) {
+      for (j = 1; j < strLen(Needle); j++) {
+        if (Haystack[i + j] != Needle[j])
+          break;
+      }
+      if (j == strLen(Needle))
+        return (void *)&Haystack[i];
+    }
+  }
+  return nullptr;
+}
+
 void reportNumber(const char *Msg, uint64_t Num, uint32_t Base) {
   char Buf[BufSize];
   char *Ptr = Buf;
@@ -308,6 +394,25 @@ unsigned long hexToLong(const char *Str, char Terminator = '\0') {
       return 0;
   }
   return Res;
+}
+
+/// Starting from character at \p buf, find the longest consecutive sequence
+/// of digits (0-9) and convert it to uint32_t. The converted value
+/// is put into \p ret. \p end marks the end of the buffer to avoid buffer
+/// overflow. The function \returns whether a valid uint32_t value is found.
+/// \p buf will be updated to the next character right after the digits.
+static bool scanUInt32(const char *&Buf, const char *End, uint32_t &Ret) {
+  uint64_t Result = 0;
+  const char *OldBuf = Buf;
+  while (Buf < End && ((*Buf) >= '0' && (*Buf) <= '9')) {
+    Result = Result * 10 + (*Buf) - '0';
+    ++Buf;
+  }
+  if (OldBuf != Buf && Result <= 0xFFFFFFFFu) {
+    Ret = static_cast<uint32_t>(Result);
+    return true;
+  }
+  return false;
 }
 
 #if !defined(__APPLE__)
@@ -367,6 +472,16 @@ uint64_t __lseek(uint64_t fd, uint64_t pos, uint64_t whence) {
   return ret;
 }
 
+int __ftruncate(uint64_t fd, uint64_t length) {
+  int ret;
+  __asm__ __volatile__("movq $77, %%rax\n"
+                       "syscall\n"
+                       : "=a"(ret)
+                       : "D"(fd), "S"(length)
+                       : "cc", "rcx", "r11", "memory");
+  return ret;
+}
+
 int __close(uint64_t fd) {
   uint64_t ret;
   __asm__ __volatile__("movq $3, %%rax\n"
@@ -385,6 +500,28 @@ int __madvise(void *addr, size_t length, int advice) {
                        : "D"(addr), "S"(length), "d"(advice)
                        : "cc", "rcx", "r11", "memory");
   return ret;
+}
+
+#define _UTSNAME_LENGTH 65
+
+struct UtsNameTy {
+  char sysname[_UTSNAME_LENGTH];  /* Operating system name (e.g., "Linux") */
+  char nodename[_UTSNAME_LENGTH]; /* Name within "some implementation-defined
+                      network" */
+  char release[_UTSNAME_LENGTH]; /* Operating system release (e.g., "2.6.28") */
+  char version[_UTSNAME_LENGTH]; /* Operating system version */
+  char machine[_UTSNAME_LENGTH]; /* Hardware identifier */
+  char domainname[_UTSNAME_LENGTH]; /* NIS or YP domain name */
+};
+
+int __uname(struct UtsNameTy *Buf) {
+  int Ret;
+  __asm__ __volatile__("movq $63, %%rax\n"
+                       "syscall\n"
+                       : "=a"(Ret)
+                       : "D"(Buf)
+                       : "cc", "rcx", "r11", "memory");
+  return Ret;
 }
 
 struct timespec {
@@ -418,16 +555,6 @@ int __mprotect(void *addr, size_t len, int prot) {
                        "syscall\n"
                        : "=a"(ret)
                        : "D"(addr), "S"(len), "d"(prot)
-                       : "cc", "rcx", "r11", "memory");
-  return ret;
-}
-
-uint64_t __getpid() {
-  uint64_t ret;
-  __asm__ __volatile__("movq $39, %%rax\n"
-                       "syscall\n"
-                       : "=a"(ret)
-                       :
                        : "cc", "rcx", "r11", "memory");
   return ret;
 }
@@ -480,6 +607,23 @@ int __fsync(int fd) {
                        : "D"(fd)
                        : "cc", "rcx", "r11", "memory");
   return ret;
+}
+
+//              %rdi      %rsi         %rdx        %r10         %r8
+// sys_prctl  int option  unsigned    unsigned    unsigned    unsigned
+//                        long arg2   long arg3   long arg4   long arg5
+int __prctl(int Option, unsigned long Arg2, unsigned long Arg3,
+            unsigned long Arg4, unsigned long Arg5) {
+  int Ret;
+  register long rdx asm("rdx") = Arg3;
+  register long r8 asm("r8") = Arg5;
+  register long r10 asm("r10") = Arg4;
+  __asm__ __volatile__("movq $157, %%rax\n"
+                       "syscall\n"
+                       : "=a"(Ret)
+                       : "D"(Option), "S"(Arg2), "d"(rdx), "r"(r10), "r"(r8)
+                       :);
+  return Ret;
 }
 
 #endif

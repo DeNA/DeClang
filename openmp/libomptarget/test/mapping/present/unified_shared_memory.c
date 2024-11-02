@@ -1,9 +1,8 @@
-// RUN: %libomptarget-compile-generic -fopenmp-version=51
+// RUN: %libomptarget-compile-generic
 // RUN: %libomptarget-run-generic 2>&1 \
 // RUN: | %fcheck-generic
 
 // REQUIRES: unified_shared_memory
-
 
 #include <stdio.h>
 
@@ -14,15 +13,15 @@ int main() {
   int i;
 
   // CHECK-NOT: Libomptarget
-#pragma omp target data map(alloc: i)
-#pragma omp target map(present, alloc: i)
+#pragma omp target data map(alloc : i)
+#pragma omp target map(present, alloc : i)
   ;
 
   // CHECK: i is present
   fprintf(stderr, "i is present\n");
 
   // CHECK-NOT: Libomptarget
-#pragma omp target map(present, alloc: i)
+#pragma omp target map(present, alloc : i)
   ;
 
   // CHECK: is present

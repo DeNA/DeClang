@@ -498,8 +498,9 @@ void DNBArchMachARM64::ThreadWillResume() {
       }
 
       DisableHardwareWatchpoint(m_watchpoint_hw_index, false);
-      DNBLogThreadedIf(LOG_WATCHPOINTS, "DNBArchMachARM::ThreadWillResume() "
-                                        "DisableHardwareWatchpoint(%d) called",
+      DNBLogThreadedIf(LOG_WATCHPOINTS,
+                       "DNBArchMachARM64::ThreadWillResume() "
+                       "DisableHardwareWatchpoint(%d) called",
                        m_watchpoint_hw_index);
 
       // Enable hardware single step to move past the watchpoint-triggering
@@ -517,12 +518,12 @@ void DNBArchMachARM64::ThreadWillResume() {
         // Reset the two watchpoint member variables.
         m_watchpoint_did_occur = false;
         m_watchpoint_hw_index = -1;
-        DNBLogThreadedIf(
-            LOG_WATCHPOINTS,
-            "DNBArchMachARM::ThreadWillResume() failed to enable single step");
+        DNBLogThreadedIf(LOG_WATCHPOINTS, "DNBArchMachARM64::ThreadWillResume()"
+                                          " failed to enable single step");
       } else
-        DNBLogThreadedIf(LOG_WATCHPOINTS, "DNBArchMachARM::ThreadWillResume() "
-                                          "succeeded to enable single step");
+        DNBLogThreadedIf(LOG_WATCHPOINTS,
+                         "DNBArchMachARM64::ThreadWillResume() "
+                         "succeeded to enable single step");
     }
   }
 }
@@ -544,18 +545,20 @@ bool DNBArchMachARM64::NotifyException(MachException::Data &exc) {
       // it was too big.  If the watchpoint exception is indicating the 2nd half
       // of the two-parter, find the address of the 1st half and report that --
       // that's what lldb is going to expect to see.
-      DNBLogThreadedIf(LOG_WATCHPOINTS, "DNBArchMachARM::NotifyException "
-                                        "watchpoint %d was hit on address "
-                                        "0x%llx",
+      DNBLogThreadedIf(LOG_WATCHPOINTS,
+                       "DNBArchMachARM64::NotifyException "
+                       "watchpoint %d was hit on address "
+                       "0x%llx",
                        hw_index, (uint64_t)addr);
       const uint32_t num_watchpoints = NumSupportedHardwareWatchpoints();
       for (uint32_t i = 0; i < num_watchpoints; i++) {
         if (LoHi[i] != 0 && LoHi[i] == hw_index && LoHi[i] != i &&
             GetWatchpointAddressByIndex(i) != INVALID_NUB_ADDRESS) {
           addr = GetWatchpointAddressByIndex(i);
-          DNBLogThreadedIf(LOG_WATCHPOINTS, "DNBArchMachARM::NotifyException "
-                                            "It is a linked watchpoint; "
-                                            "rewritten to index %d addr 0x%llx",
+          DNBLogThreadedIf(LOG_WATCHPOINTS,
+                           "DNBArchMachARM64::NotifyException "
+                           "It is a linked watchpoint; "
+                           "rewritten to index %d addr 0x%llx",
                            LoHi[i], (uint64_t)addr);
         }
       }
@@ -837,6 +840,16 @@ uint32_t DNBArchMachARM64::EnableHardwareBreakpoint(nub_addr_t addr,
   return INVALID_NUB_HW_INDEX;
 }
 
+// This should be `std::bit_ceil(aligned_size)` but
+// that requires C++20.
+// Calculates the smallest integral power of two that is not smaller than x.
+static uint64_t bit_ceil(uint64_t input) {
+  if (input <= 1 || __builtin_popcount(input) == 1)
+    return input;
+
+  return 1ULL << (64 - __builtin_clzll(input));
+}
+
 std::vector<DNBArchMachARM64::WatchpointSpec>
 DNBArchMachARM64::AlignRequestedWatchpoint(nub_addr_t requested_addr,
                                            nub_size_t requested_size) {
@@ -849,18 +862,11 @@ DNBArchMachARM64::AlignRequestedWatchpoint(nub_addr_t requested_addr,
   constexpr nub_size_t min_watchpoint_alignment = 8;
   nub_size_t aligned_size = std::max(requested_size, min_watchpoint_alignment);
 
-  // AArch64 addresses are 8 bytes.
-  constexpr int addr_byte_size = 8;
-  constexpr int addr_bit_size = addr_byte_size * 8;
-
   /// Round up \a requested_size to the next power-of-2 size, at least 8
   /// bytes
   /// requested_size == 8   -> aligned_size == 8
   /// requested_size == 9   -> aligned_size == 16
-  /// requested_size == 15  -> aligned_size == 16
-  /// requested_size == 192 -> aligned_size == 256
-  /// Could be `std::bit_ceil(aligned_size)` when we build with C++20?
-  aligned_size = 1ULL << (addr_bit_size - __builtin_clzll(aligned_size - 1));
+  aligned_size = aligned_size = bit_ceil(aligned_size);
 
   nub_addr_t aligned_start = requested_addr & ~(aligned_size - 1);
   // Does this power-of-2 memory range, aligned to power-of-2, completely
@@ -1255,7 +1261,8 @@ uint32_t DNBArchMachARM64::GetHardwareWatchpointHit(nub_addr_t &addr) {
     for (i = 0; i < num; ++i) {
       nub_addr_t wp_addr = GetWatchAddress(debug_state, i);
 
-      DNBLogThreadedIf(LOG_WATCHPOINTS, "DNBArchImplX86_64::"
+      DNBLogThreadedIf(LOG_WATCHPOINTS,
+                       "DNBArchImplARM64::"
                        "GetHardwareWatchpointHit() slot: %u "
                        "(addr = 0x%llx, WCR = 0x%llx)",
                        i, wp_addr, debug_state.__wcr[i]);

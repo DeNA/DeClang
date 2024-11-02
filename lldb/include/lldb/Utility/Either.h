@@ -9,7 +9,7 @@
 #ifndef liblldb_Either_h_
 #define liblldb_Either_h_
 
-#include "llvm/ADT/Optional.h"
+#include <optional>
 
 #include <functional>
 
@@ -39,11 +39,11 @@ public:
   Either(const Either<T1, T2> &rhs) {
     switch (rhs.m_selected) {
     case Selected::One:
-      m_t1 = rhs.GetAs<T1>().getValue();
+      m_t1 = rhs.GetAs<T1>().value();
       m_selected = Selected::One;
       break;
     case Selected::Two:
-      m_t2 = rhs.GetAs<T2>().getValue();
+      m_t2 = rhs.GetAs<T2>().value();
       m_selected = Selected::Two;
       break;
     }
@@ -51,23 +51,23 @@ public:
 
   template <class X, typename std::enable_if<std::is_same<T1, X>::value>::type
                          * = nullptr>
-  llvm::Optional<T1> GetAs() const {
+  std::optional<T1> GetAs() const {
     switch (m_selected) {
     case Selected::One:
       return m_t1;
     default:
-      return llvm::Optional<T1>();
+      return std::optional<T1>();
     }
   }
 
   template <class X, typename std::enable_if<std::is_same<T2, X>::value>::type
                          * = nullptr>
-  llvm::Optional<T2> GetAs() const {
+  std::optional<T2> GetAs() const {
     switch (m_selected) {
     case Selected::Two:
       return m_t2;
     default:
-      return llvm::Optional<T2>();
+      return std::optional<T2>();
     }
   }
 
@@ -102,11 +102,11 @@ public:
   Either<T1, T2> &operator=(const Either<T1, T2> &rhs) {
     switch (rhs.m_selected) {
     case Selected::One:
-      m_t1 = rhs.GetAs<T1>().getValue();
+      m_t1 = rhs.GetAs<T1>().value();
       m_selected = Selected::One;
       break;
     case Selected::Two:
-      m_t2 = rhs.GetAs<T2>().getValue();
+      m_t2 = rhs.GetAs<T2>().value();
       m_selected = Selected::Two;
       break;
     }

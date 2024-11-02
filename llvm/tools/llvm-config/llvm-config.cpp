@@ -20,13 +20,13 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/TargetParser/Triple.h"
 #include <cstdlib>
 #include <set>
 #include <unordered_set>
@@ -234,7 +234,6 @@ Options:\n\
   --obj-root        Print the object root used to build LLVM.\n\
   --prefix          Print the installation prefix.\n\
   --shared-mode     Print how the provided components can be collectively linked (`shared` or `static`).\n\
-  --src-root        Print the source root LLVM was built from.\n\
   --system-libs     System Libraries needed to link against LLVM components.\n\
   --targets-built   List of all targets currently built.\n\
   --version         Print LLVM version.\n\
@@ -592,8 +591,6 @@ int main(int argc, char **argv) {
         PrintSharedMode = true;
       } else if (Arg == "--obj-root") {
         OS << ActivePrefix << '\n';
-      } else if (Arg == "--src-root") {
-        OS << LLVM_SRC_ROOT << '\n';
       } else if (Arg == "--ignore-libllvm") {
         LinkDyLib = false;
         LinkMode = BuiltSharedLibs ? LinkModeShared : LinkModeAuto;

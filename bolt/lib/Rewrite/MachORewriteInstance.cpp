@@ -17,6 +17,7 @@
 #include "bolt/Profile/DataReader.h"
 #include "bolt/Rewrite/BinaryPassManager.h"
 #include "bolt/Rewrite/ExecutableFileMemoryManager.h"
+#include "bolt/Rewrite/JITLinkLinker.h"
 #include "bolt/RuntimeLibs/InstrumentationRuntimeLibrary.h"
 #include "bolt/Utils/Utils.h"
 #include "llvm/MC/MCAsmLayout.h"
@@ -25,6 +26,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include <memory>
+#include <optional>
 
 namespace opts {
 
@@ -84,8 +86,8 @@ MCPlusBuilder *createMCPlusBuilder(const Triple::ArchType Arch,
 #define DEBUG_TYPE "bolt"
 
 Expected<std::unique_ptr<MachORewriteInstance>>
-MachORewriteInstance::createMachORewriteInstance(
-    object::MachOObjectFile *InputFile, StringRef ToolPath) {
+MachORewriteInstance::create(object::MachOObjectFile *InputFile,
+                             StringRef ToolPath) {
   Error Err = Error::success();
   auto MachORI =
       std::make_unique<MachORewriteInstance>(InputFile, ToolPath, Err);
@@ -197,9 +199,9 @@ std::vector<DataInCodeRegion> readDataInCode(const MachOObjectFile &O) {
   return DataInCode;
 }
 
-Optional<uint64_t> readStartAddress(const MachOObjectFile &O) {
-  Optional<uint64_t> StartOffset;
-  Optional<uint64_t> TextVMAddr;
+std::optional<uint64_t> readStartAddress(const MachOObjectFile &O) {
+  std::optional<uint64_t> StartOffset;
+  std::optional<uint64_t> TextVMAddr;
   for (const object::MachOObjectFile::LoadCommandInfo &LC : O.load_commands()) {
     switch (LC.C.cmd) {
     case MachO::LC_MAIN: {
@@ -228,8 +230,8 @@ Optional<uint64_t> readStartAddress(const MachOObjectFile &O) {
     }
   }
   return (TextVMAddr && StartOffset)
-             ? Optional<uint64_t>(*TextVMAddr + *StartOffset)
-             : llvm::None;
+             ? std::optional<uint64_t>(*TextVMAddr + *StartOffset)
+             : std::nullopt;
 }
 
 } // anonymous namespace
@@ -334,7 +336,7 @@ void MachORewriteInstance::disassembleFunctions() {
       continue;
     Function.disassemble();
     if (opts::PrintDisasm)
-      Function.print(outs(), "after disassembly", true);
+      Function.print(outs(), "after disassembly");
   }
 }
 
@@ -357,7 +359,7 @@ void MachORewriteInstance::postProcessFunctions() {
       continue;
     Function.postProcessCFG();
     if (opts::PrintCFG)
-      Function.print(outs(), "after building cfg", true);
+      Function.print(outs(), "after building cfg");
   }
 }
 
@@ -385,7 +387,8 @@ void MachORewriteInstance::runOptimizationPasses() {
   Manager.runPasses();
 }
 
-void MachORewriteInstance::mapInstrumentationSection(StringRef SectionName) {
+void MachORewriteInstance::mapInstrumentationSection(
+    StringRef SectionName, BOLTLinker::SectionMapper MapSection) {
   if (!opts::Instrument)
     return;
   ErrorOr<BinarySection &> Section = BC->getUniqueSectionByName(SectionName);
@@ -395,11 +398,11 @@ void MachORewriteInstance::mapInstrumentationSection(StringRef SectionName) {
   }
   if (!Section->hasValidSectionID())
     return;
-  RTDyld->reassignSectionAddress(Section->getSectionID(),
-                                 Section->getAddress());
+  MapSection(*Section, Section->getAddress());
 }
 
-void MachORewriteInstance::mapCodeSections() {
+void MachORewriteInstance::mapCodeSections(
+    BOLTLinker::SectionMapper MapSection) {
   for (BinaryFunction *Function : BC->getAllBinaryFunctions()) {
     if (!Function->isEmitted())
       continue;
@@ -416,8 +419,7 @@ void MachORewriteInstance::mapCodeSections() {
     LLVM_DEBUG(dbgs() << "BOLT: mapping 0x"
                  << Twine::utohexstr(FuncSection->getAllocAddress()) << " to 0x"
                  << Twine::utohexstr(Function->getOutputAddress()) << '\n');
-    RTDyld->reassignSectionAddress(FuncSection->getSectionID(),
-                                   Function->getOutputAddress());
+    MapSection(*FuncSection, Function->getOutputAddress());
     Function->setImageAddress(FuncSection->getAllocAddress());
     Function->setImageSize(FuncSection->getOutputSize());
   }
@@ -438,7 +440,7 @@ void MachORewriteInstance::mapCodeSections() {
       assert(FuncSection && "cannot find section for function");
       Addr = llvm::alignTo(Addr, 4);
       FuncSection->setOutputAddress(Addr);
-      RTDyld->reassignSectionAddress(FuncSection->getSectionID(), Addr);
+      MapSection(*FuncSection, Addr);
       Function->setFileOffset(Addr - BOLT->getAddress() +
                               BOLT->getInputFileOffset());
       Function->setImageAddress(FuncSection->getAllocAddress());
@@ -448,34 +450,6 @@ void MachORewriteInstance::mapCodeSections() {
     }
   }
 }
-
-namespace {
-
-class BOLTSymbolResolver : public LegacyJITSymbolResolver {
-  BinaryContext &BC;
-public:
-  BOLTSymbolResolver(BinaryContext &BC) : BC(BC) {}
-
-  JITSymbol findSymbolInLogicalDylib(const std::string &Name) override {
-    return JITSymbol(nullptr);
-  }
-
-  JITSymbol findSymbol(const std::string &Name) override {
-    LLVM_DEBUG(dbgs() << "BOLT: looking for " << Name << "\n");
-    if (BinaryData *I = BC.getBinaryDataByName(Name)) {
-      const uint64_t Address = I->isMoved() && !I->isJumpTable()
-                                   ? I->getOutputAddress()
-                                   : I->getAddress();
-      LLVM_DEBUG(dbgs() << "Resolved to address 0x" << Twine::utohexstr(Address)
-                        << "\n");
-      return JITSymbol(Address, JITSymbolFlags());
-    }
-    LLVM_DEBUG(dbgs() << "Resolved to address 0x0\n");
-    return JITSymbol(nullptr);
-  }
-};
-
-} // end anonymous namespace
 
 void MachORewriteInstance::emitAndLink() {
   std::error_code EC;
@@ -502,42 +476,38 @@ void MachORewriteInstance::emitAndLink() {
       "error creating in-memory object");
   assert(Obj && "createObjectFile cannot return nullptr");
 
-  BOLTSymbolResolver Resolver = BOLTSymbolResolver(*BC);
-
   MCAsmLayout FinalLayout(
       static_cast<MCObjectStreamer *>(Streamer.get())->getAssembler());
 
-  BC->EFMM.reset(new ExecutableFileMemoryManager(*BC, /*AllowStubs*/ false));
+  auto EFMM = std::make_unique<ExecutableFileMemoryManager>(*BC);
+  EFMM->setNewSecPrefix(getNewSecPrefix());
+  EFMM->setOrgSecPrefix(getOrgSecPrefix());
 
-  RTDyld.reset(new decltype(RTDyld)::element_type(*BC->EFMM, Resolver));
-  RTDyld->setProcessAllSections(true);
-  RTDyld->loadObject(*Obj);
-  if (RTDyld->hasError()) {
-    outs() << "BOLT-ERROR: RTDyld failed.\n";
-    exit(1);
-  }
+  Linker = std::make_unique<JITLinkLinker>(*BC, std::move(EFMM));
+  Linker->loadObject(ObjectMemBuffer->getMemBufferRef(),
+                     [this](auto MapSection) {
+                       // Assign addresses to all sections. If key corresponds
+                       // to the object created by ourselves, call our regular
+                       // mapping function. If we are loading additional objects
+                       // as part of runtime libraries for instrumentation,
+                       // treat them as extra sections.
+                       mapCodeSections(MapSection);
+                       mapInstrumentationSection("__counters", MapSection);
+                       mapInstrumentationSection("__tables", MapSection);
+                     });
 
-  // Assign addresses to all sections. If key corresponds to the object
-  // created by ourselves, call our regular mapping function. If we are
-  // loading additional objects as part of runtime libraries for
-  // instrumentation, treat them as extra sections.
-  mapCodeSections();
-  mapInstrumentationSection("__counters");
-  mapInstrumentationSection("__tables");
-
-          // TODO: Refactor addRuntimeLibSections to work properly on Mach-O
-          // and use it here.
-  //FIXME! Put this in RtLibrary->link
-//          mapInstrumentationSection("I__setup");
-//          mapInstrumentationSection("I__fini");
-//          mapInstrumentationSection("I__data");
-//          mapInstrumentationSection("I__text");
-//          mapInstrumentationSection("I__cstring");
-//          mapInstrumentationSection("I__literal16");
-
-//  if (auto *RtLibrary = BC->getRuntimeLibrary()) {
-//    RtLibrary->link(*BC, ToolPath, *ES, *OLT);
-//  }
+  // TODO: Refactor addRuntimeLibSections to work properly on Mach-O
+  // and use it here.
+  // if (auto *RtLibrary = BC->getRuntimeLibrary()) {
+  //   RtLibrary->link(*BC, ToolPath, *Linker, [this](auto MapSection) {
+  //     mapInstrumentationSection("I__setup", MapSection);
+  //     mapInstrumentationSection("I__fini", MapSection);
+  //     mapInstrumentationSection("I__data", MapSection);
+  //     mapInstrumentationSection("I__text", MapSection);
+  //     mapInstrumentationSection("I__cstring", MapSection);
+  //     mapInstrumentationSection("I__literal16", MapSection);
+  //   });
+  // }
 }
 
 void MachORewriteInstance::writeInstrumentationSection(StringRef SectionName,

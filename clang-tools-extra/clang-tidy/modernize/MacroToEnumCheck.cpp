@@ -18,9 +18,7 @@
 #include <cctype>
 #include <string>
 
-namespace clang {
-namespace tidy {
-namespace modernize {
+namespace clang::tidy::modernize {
 
 static bool hasOnlyComments(SourceLocation Loc, const LangOptions &Options,
                             StringRef Text) {
@@ -95,12 +93,11 @@ using MacroList = SmallVector<EnumMacro>;
 enum class IncludeGuard { None, FileChanged, IfGuard, DefineGuard };
 
 struct FileState {
-  FileState()
-      : ConditionScopes(0), LastLine(0), GuardScanner(IncludeGuard::None) {}
+  FileState() = default;
 
-  int ConditionScopes;
-  unsigned int LastLine;
-  IncludeGuard GuardScanner;
+  int ConditionScopes = 0;
+  unsigned int LastLine = 0;
+  IncludeGuard GuardScanner = IncludeGuard::None;
   SourceLocation LastMacroLocation;
 };
 
@@ -119,8 +116,9 @@ public:
   void InclusionDirective(SourceLocation HashLoc, const Token &IncludeTok,
                           StringRef FileName, bool IsAngled,
                           CharSourceRange FilenameRange,
-                          Optional<FileEntryRef> File, StringRef SearchPath,
-                          StringRef RelativePath, const Module *Imported,
+                          OptionalFileEntryRef File, StringRef SearchPath,
+                          StringRef RelativePath, const Module *SuggestedModule,
+                          bool ModuleImported,
                           SrcMgr::CharacteristicKind FileType) override {
     clearCurrentEnum(HashLoc);
   }
@@ -556,6 +554,4 @@ void MacroToEnumCheck::check(
     PPCallback->invalidateRange(Range);
 }
 
-} // namespace modernize
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy::modernize

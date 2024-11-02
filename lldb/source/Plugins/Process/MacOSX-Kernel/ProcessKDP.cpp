@@ -27,7 +27,6 @@
 #include "lldb/Interpreter/OptionGroupString.h"
 #include "lldb/Interpreter/OptionGroupUInt64.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
-#include "lldb/Symbol/LocateSymbolFile.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Target.h"
@@ -78,17 +77,17 @@ public:
 
   uint64_t GetPacketTimeout() {
     const uint32_t idx = ePropertyKDPPacketTimeout;
-    return m_collection_sp->GetPropertyAtIndexAsUInt64(
-        NULL, idx, g_processkdp_properties[idx].default_uint_value);
+    return GetPropertyAtIndexAs<uint64_t>(
+        idx, g_processkdp_properties[idx].default_uint_value);
   }
 };
+
+} // namespace
 
 static PluginProperties &GetGlobalPluginProperties() {
   static PluginProperties g_settings;
   return g_settings;
 }
-
-} // anonymous namespace end
 
 static const lldb::tid_t g_kernel_tid = 1;
 
@@ -126,6 +125,7 @@ bool ProcessKDP::CanDebug(TargetSP target_sp, bool plugin_specified_by_name) {
     case llvm::Triple::IOS:    // For arm targets
     case llvm::Triple::TvOS:
     case llvm::Triple::WatchOS:
+    case llvm::Triple::XROS:
       if (triple_ref.getVendor() == llvm::Triple::Apple) {
         ObjectFile *exe_objfile = exe_module->GetObjectFile();
         if (exe_objfile->GetType() == ObjectFile::eTypeExecutable &&
@@ -278,11 +278,11 @@ Status ProcessKDP::DoConnectRemote(llvm::StringRef remote_url) {
               FileSpecList search_paths =
                   Target::GetDefaultDebugFileSearchPaths();
               module_spec.GetSymbolFileSpec() =
-                  Symbols::LocateExecutableSymbolFile(module_spec,
-                                                      search_paths);
+                  PluginManager::LocateExecutableSymbolFile(module_spec,
+                                                            search_paths);
               if (module_spec.GetSymbolFileSpec()) {
                 ModuleSpec executable_module_spec =
-                    Symbols::LocateExecutableObjectFile(module_spec);
+                    PluginManager::LocateExecutableObjectFile(module_spec);
                 if (FileSystem::Instance().Exists(
                         executable_module_spec.GetFileSpec())) {
                   module_spec.GetFileSpec() =
@@ -292,8 +292,8 @@ Status ProcessKDP::DoConnectRemote(llvm::StringRef remote_url) {
               if (!module_spec.GetSymbolFileSpec() ||
                   !module_spec.GetSymbolFileSpec()) {
                 Status symbl_error;
-                Symbols::DownloadObjectAndSymbolFile(module_spec, symbl_error,
-                                                     true);
+                PluginManager::DownloadObjectAndSymbolFile(module_spec,
+                                                           symbl_error, true);
               }
 
               if (FileSystem::Instance().Exists(module_spec.GetFileSpec())) {
@@ -672,20 +672,6 @@ Status ProcessKDP::DisableBreakpointSite(BreakpointSite *bp_site) {
   return DisableSoftwareBreakpoint(bp_site);
 }
 
-Status ProcessKDP::EnableWatchpoint(Watchpoint *wp, bool notify) {
-  Status error;
-  error.SetErrorString(
-      "watchpoints are not supported in kdp remote debugging");
-  return error;
-}
-
-Status ProcessKDP::DisableWatchpoint(Watchpoint *wp, bool notify) {
-  Status error;
-  error.SetErrorString(
-      "watchpoints are not supported in kdp remote debugging");
-  return error;
-}
-
 void ProcessKDP::Clear() { m_thread_list.Clear(); }
 
 Status ProcessKDP::DoSignal(int signo) {
@@ -713,8 +699,7 @@ void ProcessKDP::DebuggerInitialize(lldb_private::Debugger &debugger) {
     const bool is_global_setting = true;
     PluginManager::CreateSettingForProcessPlugin(
         debugger, GetGlobalPluginProperties().GetValueProperties(),
-        ConstString("Properties for the kdp-remote process plug-in."),
-        is_global_setting);
+        "Properties for the kdp-remote process plug-in.", is_global_setting);
   }
 }
 
@@ -770,7 +755,7 @@ void *ProcessKDP::AsyncThread() {
                 "ProcessKDP::AsyncThread (pid = %" PRIu64
                 ") listener.WaitForEvent (NULL, event_sp)...",
                 pid);
-      if (listener_sp->GetEvent(event_sp, llvm::None)) {
+      if (listener_sp->GetEvent(event_sp, std::nullopt)) {
         uint32_t event_type = event_sp->GetType();
         LLDB_LOGF(log,
                   "ProcessKDP::AsyncThread (pid = %" PRIu64
@@ -882,13 +867,13 @@ public:
 
   ~CommandObjectProcessKDPPacketSend() override = default;
 
-  bool DoExecute(Args &command, CommandReturnObject &result) override {
+  void DoExecute(Args &command, CommandReturnObject &result) override {
     if (!m_command_byte.GetOptionValue().OptionWasSet()) {
       result.AppendError(
           "the --command option must be set to a valid command byte");
     } else {
       const uint64_t command_byte =
-          m_command_byte.GetOptionValue().GetUInt64Value(0);
+          m_command_byte.GetOptionValue().GetValueAs<uint64_t>().value_or(0);
       if (command_byte > 0 && command_byte <= UINT8_MAX) {
         ProcessKDP *process =
             (ProcessKDP *)m_interpreter.GetExecutionContext().GetProcessPtr();
@@ -908,7 +893,7 @@ public:
                                              "even number of ASCII hex "
                                              "characters: '%s'",
                                              ascii_hex_bytes_cstr);
-                return false;
+                return;
               }
               payload_bytes.resize(ascii_hex_bytes_cstr_len / 2);
               if (extractor.GetHexBytes(payload_bytes, '\xdd') !=
@@ -917,7 +902,7 @@ public:
                                              "ASCII hex characters (no "
                                              "spaces or hex prefixes): '%s'",
                                              ascii_hex_bytes_cstr);
-                return false;
+                return;
               }
             }
             Status error;
@@ -935,7 +920,7 @@ public:
                   endian::InlHostByteOrder(), endian::InlHostByteOrder());
               result.AppendMessage(packet.GetString());
               result.SetStatus(eReturnStatusSuccessFinishResult);
-              return true;
+              return;
             } else {
               const char *error_cstr = error.AsCString();
               if (error_cstr && error_cstr[0])
@@ -943,7 +928,7 @@ public:
               else
                 result.AppendErrorWithFormat("unknown error 0x%8.8x",
                                              error.GetError());
-              return false;
+              return;
             }
           } else {
             result.AppendErrorWithFormat("process must be stopped in order "
@@ -959,7 +944,6 @@ public:
                                      command_byte);
       }
     }
-    return false;
   }
 };
 

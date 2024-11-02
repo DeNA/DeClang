@@ -80,8 +80,8 @@ public:
   ExtractOperation(const Stmt *S, const Stmt *ParentStmt,
                    const Decl *FunctionLikeParentDecl,
                    std::vector<std::string> Candidates,
-                   Optional<CompoundStatementRange> ExtractedStmtRange,
-                   Optional<CandidateInfo> FirstCandidateInfo,
+                   std::optional<CompoundStatementRange> ExtractedStmtRange,
+                   std::optional<CandidateInfo> FirstCandidateInfo,
                    ExtractionKind Kind)
       : S(S), ParentStmt(ParentStmt),
         FunctionLikeParentDecl(FunctionLikeParentDecl),
@@ -135,7 +135,7 @@ public:
   std::vector<std::string> Candidates;
   /// A set of extraction candidates that correspond to the extracted code.
   SmallVector<CandidateInfo, 2> CandidateExtractionInfo;
-  Optional<CompoundStatementRange> ExtractedStmtRange;
+  std::optional<CompoundStatementRange> ExtractedStmtRange;
   ExtractionKind Kind;
 };
 
@@ -178,20 +178,20 @@ findSelectedStmt(CompoundStmt::body_const_range Statements,
 
 /// Returns the first and the last statements that should be extracted from a
 /// compound statement.
-Optional<CompoundStatementRange> getExtractedStatements(const CompoundStmt *CS,
-                                                        const Stmt *Begin,
-                                                        const Stmt *End) {
+std::optional<CompoundStatementRange>
+getExtractedStatements(const CompoundStmt *CS, const Stmt *Begin,
+                       const Stmt *End) {
   if (CS->body_empty())
-    return None;
+    return std::nullopt;
   assert(Begin && End);
   CompoundStatementRange Result;
   Result.First = findSelectedStmt(CS->body(), Begin);
   if (Result.First == CS->body_end())
-    return None;
+    return std::nullopt;
   Result.Last = findSelectedStmt(
       CompoundStmt::body_const_range(Result.First, CS->body_end()), End);
   if (Result.Last == CS->body_end())
-    return None;
+    return std::nullopt;
   return Result;
 }
 
@@ -202,7 +202,7 @@ initiateAnyExtractOperation(ASTSlice &Slice, ASTContext &Context,
                             ExtractionKind Kind = ExtractionKind::Function) {
   auto SelectedStmtsOpt = Slice.getSelectedStmtSet();
   if (!SelectedStmtsOpt)
-    return None;
+    return std::nullopt;
   SelectedStmtSet Stmts = *SelectedStmtsOpt;
   // The selection range is contained entirely within this statement (without
   // taking leading/trailing comments and whitespace into account).
@@ -211,7 +211,7 @@ initiateAnyExtractOperation(ASTSlice &Slice, ASTContext &Context,
   // We only want to perform the extraction if the selection range is entirely
   // within a body of a function or method.
   if (!Selected)
-    return None;
+    return std::nullopt;
   const Decl *ParentDecl =
       Slice.parentDeclForIndex(*Stmts.containsSelectionRangeIndex);
 
@@ -232,18 +232,18 @@ initiateAnyExtractOperation(ASTSlice &Slice, ASTContext &Context,
       Slice.parentStmtForIndex(*Stmts.containsSelectionRangeIndex);
   if (Kind == ExtractionKind::Expression &&
       !isLexicalExpression(Selected, ParentStmt))
-    return None;
+    return std::nullopt;
 
   RefactoringOperationResult Result;
   Result.Initiated = true;
   if (!CreateOperation)
     return Result;
 
-  Optional<CompoundStatementRange> ExtractedStmtRange;
+  std::optional<CompoundStatementRange> ExtractedStmtRange;
 
   // Check if there are multiple candidates that can be extracted.
   std::vector<std::string> Candidates;
-  Optional<ExtractOperation::CandidateInfo> FirstCandidateInfo;
+  std::optional<ExtractOperation::CandidateInfo> FirstCandidateInfo;
   if (const auto *BinOp = dyn_cast<BinaryOperator>(Selected)) {
     // Binary '+' and '-' operators allow multiple candidates when the
     // selection range starts after the LHS expression but still overlaps
@@ -1488,7 +1488,7 @@ ExtractOperation::performExpressionExtraction(ASTContext &Context,
                                                E->getType(), PP, Context);
   StringRef VarName = "extractedExpr";
   auto CreatedSymbol = std::make_unique<RefactoringResultAssociatedSymbol>(
-      OldSymbolName(VarName));
+      SymbolName(VarName, /*IsObjectiveCSelector=*/false));
 
   SourceRange ExtractedTokenRange = CandidateExtractionInfo[0].Range;
   SourceRange ExtractedCharRange = SourceRange(
@@ -1515,11 +1515,11 @@ ExtractOperation::performExpressionExtraction(ASTContext &Context,
   Replacements.push_back(RefactoringReplacement(
       SourceRange(InsertionLoc, InsertionLoc), OS.str(), CreatedSymbol.get(),
       RefactoringReplacement::AssociatedSymbolLocation(
-          llvm::makeArrayRef(NameOffset), /*IsDeclaration=*/true)));
+          ArrayRef(NameOffset), /*IsDeclaration=*/true)));
   // Replace the expression with the variable.
   Replacements.push_back(
       RefactoringReplacement(ExtractedCharRange, VarName, CreatedSymbol.get(),
-                             /*NameOffset=*/llvm::makeArrayRef(unsigned(0))));
+                             /*NameOffset=*/ArrayRef(unsigned(0))));
 
   RefactoringResult Result(std::move(Replacements));
   Result.AssociatedSymbols.push_back(std::move(CreatedSymbol));
@@ -1803,12 +1803,12 @@ llvm::Expected<RefactoringResult> ExtractOperation::perform(
   ExtractedNamePieces.push_back(ExtractedName);
   if (isMethodExtraction() && EnclosingObjCMethod &&
       !CapturedVariables.empty()) {
-    for (const auto &Var : llvm::makeArrayRef(CapturedVariables).drop_front())
+    for (const auto &Var : ArrayRef(CapturedVariables).drop_front())
       ExtractedNamePieces.push_back(Var.getName());
   }
   std::unique_ptr<RefactoringResultAssociatedSymbol> CreatedSymbol =
       std::make_unique<RefactoringResultAssociatedSymbol>(
-          OldSymbolName(ExtractedNamePieces));
+          SymbolName(ExtractedNamePieces));
 
   SourceLocation FunctionExtractionLoc = computeFunctionExtractionLocation(
       FunctionLikeParentDecl, isMethodExtraction());
@@ -2009,7 +2009,7 @@ llvm::Expected<RefactoringResult> ExtractOperation::perform(
       getPreciseTokenLocEnd(ExtractedTokenRange.getEnd(), SM, LangOpts));
   Replacements.push_back(RefactoringReplacement(
       ExtractedCharRange, std::move(InsertedOS.str()), CreatedSymbol.get(),
-      llvm::makeArrayRef(NameOffsets)));
+      ArrayRef(NameOffsets)));
 
   RefactoringResult Result(std::move(Replacements));
   Result.AssociatedSymbols.push_back(std::move(CreatedSymbol));

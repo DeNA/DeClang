@@ -56,7 +56,7 @@ protected:
     }
   };
 
-  llvm::Optional<TestAnalyses> Analyses;
+  std::optional<TestAnalyses> Analyses;
 
   TestAnalyses &setupAnalyses() {
     assert(F);
@@ -66,9 +66,7 @@ protected:
 
 public:
   BasicAATest()
-      : M("BasicAATest", C), B(C), DL(DLString), TLI(TLII), F(nullptr) {
-    C.setOpaquePointers(true);
-  }
+      : M("BasicAATest", C), B(C), DL(DLString), TLI(TLII), F(nullptr) {}
 };
 
 // Check that a function arg can't trivially alias a global when we're accessing
@@ -96,12 +94,14 @@ TEST_F(BasicAATest, AliasInstWithObjectOfImpreciseSize) {
   AAQueryInfo &AAQI = AllAnalyses.AAQI;
   ASSERT_EQ(
       BasicAA.alias(MemoryLocation(IncomingI32Ptr, LocationSize::precise(4)),
-                    MemoryLocation(GlobalPtr, LocationSize::precise(1)), AAQI),
+                    MemoryLocation(GlobalPtr, LocationSize::precise(1)), AAQI,
+                    nullptr),
       AliasResult::NoAlias);
 
   ASSERT_EQ(
       BasicAA.alias(MemoryLocation(IncomingI32Ptr, LocationSize::upperBound(4)),
-                    MemoryLocation(GlobalPtr, LocationSize::precise(1)), AAQI),
+                    MemoryLocation(GlobalPtr, LocationSize::precise(1)), AAQI,
+                    nullptr),
       AliasResult::MayAlias);
 }
 
@@ -126,13 +126,13 @@ TEST_F(BasicAATest, AliasInstWithFullObjectOfImpreciseSize) {
   ASSERT_EQ(BasicAA.alias(
                 MemoryLocation(I8, LocationSize::precise(2)),
                 MemoryLocation(I8AtUncertainOffset, LocationSize::precise(1)),
-                AAQI),
+                AAQI, nullptr),
             AliasResult::PartialAlias);
 
   ASSERT_EQ(BasicAA.alias(
                 MemoryLocation(I8, LocationSize::upperBound(2)),
                 MemoryLocation(I8AtUncertainOffset, LocationSize::precise(1)),
-                AAQI),
+                AAQI, nullptr),
             AliasResult::MayAlias);
 }
 
@@ -171,9 +171,9 @@ TEST_F(BasicAATest, PartialAliasOffsetPhi) {
   auto &AllAnalyses = setupAnalyses();
   BasicAAResult &BasicAA = AllAnalyses.BAA;
   AAQueryInfo &AAQI = AllAnalyses.AAQI;
-  AliasResult AR =
-      BasicAA.alias(MemoryLocation(Ptr, LocationSize::precise(2)),
-                    MemoryLocation(Phi, LocationSize::precise(1)), AAQI);
+  AliasResult AR = BasicAA.alias(MemoryLocation(Ptr, LocationSize::precise(2)),
+                                 MemoryLocation(Phi, LocationSize::precise(1)),
+                                 AAQI, nullptr);
   ASSERT_EQ(AR.getOffset(), 1);
 }
 
@@ -198,8 +198,8 @@ TEST_F(BasicAATest, PartialAliasOffsetSelect) {
   auto &AllAnalyses = setupAnalyses();
   BasicAAResult &BasicAA = AllAnalyses.BAA;
   AAQueryInfo &AAQI = AllAnalyses.AAQI;
-  AliasResult AR =
-      BasicAA.alias(MemoryLocation(Ptr, LocationSize::precise(2)),
-                    MemoryLocation(Select, LocationSize::precise(1)), AAQI);
+  AliasResult AR = BasicAA.alias(
+      MemoryLocation(Ptr, LocationSize::precise(2)),
+      MemoryLocation(Select, LocationSize::precise(1)), AAQI, nullptr);
   ASSERT_EQ(AR.getOffset(), 1);
 }

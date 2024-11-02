@@ -64,7 +64,7 @@ public:
     };
 
     llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
-      return llvm::makeArrayRef(g_trace_save_options);
+      return llvm::ArrayRef(g_trace_save_options);
     };
 
     bool m_compact;
@@ -103,11 +103,11 @@ public:
   ~CommandObjectTraceSave() override = default;
 
 protected:
-  bool DoExecute(Args &command, CommandReturnObject &result) override {
+  void DoExecute(Args &command, CommandReturnObject &result) override {
     if (command.size() != 1) {
       result.AppendError("a single path to a directory where the trace bundle "
                          "will be created is required");
-      return false;
+      return;
     }
 
     FileSpec bundle_dir(command[0].ref());
@@ -125,8 +125,6 @@ protected:
     } else {
       result.AppendError(toString(desc_file.takeError()));
     }
-
-    return result.Succeeded();
   }
 
   CommandOptions m_options;
@@ -167,7 +165,7 @@ public:
     }
 
     ArrayRef<OptionDefinition> GetDefinitions() override {
-      return makeArrayRef(g_trace_load_options);
+      return ArrayRef(g_trace_load_options);
     }
 
     bool m_verbose; // Enable verbose logging for debugging purposes.
@@ -194,11 +192,11 @@ public:
   Options *GetOptions() override { return &m_options; }
 
 protected:
-  bool DoExecute(Args &command, CommandReturnObject &result) override {
+  void DoExecute(Args &command, CommandReturnObject &result) override {
     if (command.size() != 1) {
       result.AppendError("a single path to a JSON file containing a the "
                          "description of the trace bundle is required");
-      return false;
+      return;
     }
 
     const FileSpec trace_description_file(command[0].ref());
@@ -210,7 +208,7 @@ protected:
     if (!trace_or_err) {
       result.AppendErrorWithFormat(
           "%s\n", llvm::toString(trace_or_err.takeError()).c_str());
-      return false;
+      return;
     }
 
     if (m_options.m_verbose) {
@@ -219,7 +217,6 @@ protected:
     }
 
     result.SetStatus(eReturnStatusSuccessFinishResult);
-    return true;
   }
 
   CommandOptions m_options;
@@ -260,7 +257,7 @@ public:
     }
 
     llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
-      return llvm::makeArrayRef(g_trace_dump_options);
+      return llvm::ArrayRef(g_trace_dump_options);
     }
 
     bool m_verbose; // Enable verbose logging for debugging purposes.
@@ -276,7 +273,7 @@ public:
   Options *GetOptions() override { return &m_options; }
 
 protected:
-  bool DoExecute(Args &command, CommandReturnObject &result) override {
+  void DoExecute(Args &command, CommandReturnObject &result) override {
     Status error;
     // TODO: fill in the dumping code here!
     if (error.Success()) {
@@ -284,7 +281,6 @@ protected:
     } else {
       result.AppendErrorWithFormat("%s\n", error.AsCString());
     }
-    return result.Succeeded();
   }
 
   CommandOptions m_options;
@@ -325,7 +321,7 @@ public:
     }
 
     llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
-      return llvm::makeArrayRef(g_trace_schema_options);
+      return llvm::ArrayRef(g_trace_schema_options);
     }
 
     bool m_verbose; // Enable verbose logging for debugging purposes.
@@ -345,12 +341,12 @@ public:
   Options *GetOptions() override { return &m_options; }
 
 protected:
-  bool DoExecute(Args &command, CommandReturnObject &result) override {
+  void DoExecute(Args &command, CommandReturnObject &result) override {
     Status error;
     if (command.empty()) {
       result.AppendError(
           "trace schema cannot be invoked without a plug-in as argument");
-      return false;
+      return;
     }
 
     StringRef plugin_name(command[0].c_str());
@@ -376,7 +372,6 @@ protected:
     } else {
       result.AppendErrorWithFormat("%s\n", error.AsCString());
     }
-    return result.Succeeded();
   }
 
   CommandOptions m_options;

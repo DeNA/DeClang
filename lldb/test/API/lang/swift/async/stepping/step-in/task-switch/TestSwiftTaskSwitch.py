@@ -15,12 +15,9 @@ class TestCase(lldbtest.TestBase):
         target, _, thread, _ = lldbutil.run_to_source_breakpoint(self, "await f()", src)
         self.assertEqual(thread.frame[0].function.mangled, "$s1a5entryO4mainyyYaFZ")
 
-        sym_ctx_list = target.FindFunctions("$s1a5entryO4mainyyYaFZTQ0_")
-        self.assertEqual(sym_ctx_list.GetSize(), 1)
-        function = sym_ctx_list[0].function
-        self.assertIsNotNone(function)
+        function = target.FindFunctions("$s1a5entryO4mainyyYaFZTQ0_")[0].function
         instructions = list(function.GetInstructions(target))
-
+        self.assertGreater(len(instructions), 0)
         # Expected to be a trampoline that tail calls `swift_task_switch`.
         self.assertIn("swift_task_switch", instructions[-1].GetComment(target))
 
@@ -31,9 +28,7 @@ class TestCase(lldbtest.TestBase):
         self.assertEqual(lines, {3})
 
         # Required for builds that have debug info.
-        self.runCmd(
-            "settings set target.process.thread.step-avoid-libraries libswift_Concurrency.dylib"
-        )
+        self.runCmd("settings set target.process.thread.step-avoid-libraries libswift_Concurrency.dylib")
         thread.StepInto()
         frame = thread.frame[0]
         # Step in from `main` should progress through to `f`.

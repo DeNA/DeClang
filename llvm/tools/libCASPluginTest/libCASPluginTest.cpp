@@ -46,6 +46,28 @@ void llcas_string_dispose(char *str) { free(str); }
 
 namespace {
 
+struct CancellableState {
+  std::atomic<bool> Cancelled{false};
+};
+
+struct CancellableWrap {
+  std::shared_ptr<CancellableState> State;
+};
+
+DEFINE_SIMPLE_CONVERSION_FUNCTIONS(CancellableWrap, llcas_cancellable_t)
+
+} // namespace
+
+void llcas_cancellable_cancel(llcas_cancellable_t c_cancellable) {
+  unwrap(c_cancellable)->State->Cancelled = true;
+}
+
+void llcas_cancellable_dispose(llcas_cancellable_t c_cancellable) {
+  delete unwrap(c_cancellable);
+}
+
+namespace {
+
 struct CASPluginOptions {
   std::string OnDiskPath;
   std::string UpstreamPath;
@@ -291,6 +313,33 @@ llcas_cas_t llcas_cas_create(llcas_cas_options_t c_opts, char **error) {
 
 void llcas_cas_dispose(llcas_cas_t c_cas) { delete unwrap(c_cas); }
 
+int64_t llcas_cas_get_ondisk_size(llcas_cas_t c_cas, char **error) {
+  return unwrap(c_cas)->DB->getStorageSize();
+}
+
+bool llcas_cas_set_ondisk_size_limit(llcas_cas_t c_cas, int64_t size_limit,
+                                     char **error) {
+  std::optional<uint64_t> SizeLimit;
+  if (size_limit < 0) {
+    return reportError(
+        llvm::createStringError(
+            llvm::inconvertibleErrorCode(),
+            "invalid size limit passed to llcas_cas_set_ondisk_size_limit"),
+        error, true);
+  }
+  if (size_limit > 0) {
+    SizeLimit = size_limit;
+  }
+  unwrap(c_cas)->DB->setSizeLimit(SizeLimit);
+  return false;
+}
+
+bool llcas_cas_prune_ondisk_data(llcas_cas_t c_cas, char **error) {
+  if (Error E = unwrap(c_cas)->DB->collectGarbage())
+    return reportError(std::move(E), error, true);
+  return false;
+}
+
 void llcas_cas_options_set_client_version(llcas_cas_options_t, unsigned major,
                                           unsigned minor) {
   // Ignore for now.
@@ -378,7 +427,13 @@ llcas_lookup_result_t llcas_cas_load_object(llcas_cas_t c_cas,
 }
 
 void llcas_cas_load_object_async(llcas_cas_t c_cas, llcas_objectid_t c_id,
-                                 void *ctx_cb, llcas_cas_load_object_cb cb) {
+                                 void *ctx_cb, llcas_cas_load_object_cb cb,
+                                 llcas_cancellable_t *c_cancellable) {
+  auto CancelState = std::make_shared<CancellableState>();
+  if (c_cancellable) {
+    *c_cancellable = wrap(new CancellableWrap{CancelState});
+  }
+
   std::string PrintedDigest;
   {
     llcas_digest_t c_digest = llcas_objectid_get_digest(c_cas, c_id);
@@ -426,6 +481,12 @@ void llcas_cas_load_object_async(llcas_cas_t c_cas, llcas_objectid_t c_id,
     // Wait a bit for the caller to proceed.
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     auto &Wrap = *unwrap(c_cas);
+    if (CancelState->Cancelled) {
+      Wrap.syncErrs([&](raw_ostream &OS) {
+        OS << "load_object_async cancelled: " << PrintedDigest << '\n';
+      });
+      return passObject(std::nullopt);
+    }
     Wrap.syncErrs([&](raw_ostream &OS) {
       OS << "load_object_async downstream end: " << PrintedDigest << '\n';
     });
@@ -514,14 +575,31 @@ llcas_actioncache_get_for_digest(llcas_cas_t c_cas, llcas_digest_t c_key,
   return LLCAS_LOOKUP_RESULT_SUCCESS;
 }
 
-void llcas_actioncache_get_for_digest_async(llcas_cas_t c_cas,
-                                            llcas_digest_t c_key, bool globally,
-                                            void *ctx_cb,
-                                            llcas_actioncache_get_cb cb) {
+void llcas_actioncache_get_for_digest_async(
+    llcas_cas_t c_cas, llcas_digest_t c_key, bool globally, void *ctx_cb,
+    llcas_actioncache_get_cb cb, llcas_cancellable_t *c_cancellable) {
+  auto CancelState = std::make_shared<CancellableState>();
+  if (c_cancellable) {
+    *c_cancellable = wrap(new CancellableWrap{CancelState});
+  }
+  bool IsCancellable = c_cancellable != nullptr;
+
   ArrayRef Key(c_key.data, c_key.size);
   SmallVector<uint8_t, 32> KeyBuf(Key);
 
   unwrap(c_cas)->Pool.async([=] {
+    if (IsCancellable) {
+      // Wait a bit for the caller to have a chance to cancel.
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    auto &Wrap = *unwrap(c_cas);
+    if (CancelState->Cancelled) {
+      Wrap.syncErrs([&](raw_ostream &OS) {
+        OS << "actioncache_get_for_digest_async cancelled\n";
+      });
+      return cb(ctx_cb, LLCAS_LOOKUP_RESULT_NOTFOUND, llcas_objectid_t(),
+                nullptr);
+    }
     llcas_objectid_t c_value;
     char *c_err;
     llcas_lookup_result_t result = llcas_actioncache_get_for_digest(
@@ -554,15 +632,31 @@ bool llcas_actioncache_put_for_digest(llcas_cas_t c_cas, llcas_digest_t c_key,
   return false;
 }
 
-void llcas_actioncache_put_for_digest_async(llcas_cas_t c_cas,
-                                            llcas_digest_t c_key,
-                                            llcas_objectid_t c_value,
-                                            bool globally, void *ctx_cb,
-                                            llcas_actioncache_put_cb cb) {
+void llcas_actioncache_put_for_digest_async(
+    llcas_cas_t c_cas, llcas_digest_t c_key, llcas_objectid_t c_value,
+    bool globally, void *ctx_cb, llcas_actioncache_put_cb cb,
+    llcas_cancellable_t *c_cancellable) {
+  auto CancelState = std::make_shared<CancellableState>();
+  if (c_cancellable) {
+    *c_cancellable = wrap(new CancellableWrap{CancelState});
+  }
+  bool IsCancellable = c_cancellable != nullptr;
+
   ArrayRef Key(c_key.data, c_key.size);
   SmallVector<uint8_t, 32> KeyBuf(Key);
 
   unwrap(c_cas)->Pool.async([=] {
+    if (IsCancellable) {
+      // Wait a bit for the caller to have a chance to cancel.
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    auto &Wrap = *unwrap(c_cas);
+    if (CancelState->Cancelled) {
+      Wrap.syncErrs([&](raw_ostream &OS) {
+        OS << "actioncache_put_for_digest_async cancelled\n";
+      });
+      return cb(ctx_cb, false, nullptr);
+    }
     char *c_err;
     bool failed = llcas_actioncache_put_for_digest(
         c_cas, llcas_digest_t{KeyBuf.data(), KeyBuf.size()}, c_value, globally,

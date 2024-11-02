@@ -21,11 +21,6 @@ import unittest2
 
 
 class TestSwiftHideRuntimeSupport(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @swiftTest
     def test_swift_hide_runtime_support(self):
         """Test that we hide runtime support values"""
@@ -34,8 +29,8 @@ class TestSwiftHideRuntimeSupport(TestBase):
         # clean slate for the next test case.
         def cleanup():
             self.runCmd(
-                "settings set target.display-runtime-support-values true", check=False
-            )
+                'settings set target.display-runtime-support-values true',
+                check=False)
 
         # Execute the cleanup function during test case tear down.
         self.addTearDownHook(cleanup)
@@ -44,11 +39,13 @@ class TestSwiftHideRuntimeSupport(TestBase):
 
         self.build()
         lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("main.swift")
-        )
+            self, 'break here', lldb.SBFileSpec('main.swift'))
 
-        self.expect("frame variable -d run", substrs=["_0_0"], matching=False)
-        self.expect("frame variable -d run", substrs=["193627"], matching=True)
+        self.expect(
+            'frame variable -d run',
+            substrs=['_0_0'],
+            matching=False)
+        self.expect('frame variable -d run', substrs=['193627'], matching=True)
 
         var_opts = lldb.SBVariablesOptions()
         var_opts.SetIncludeArguments(True)
@@ -61,9 +58,9 @@ class TestSwiftHideRuntimeSupport(TestBase):
         values = self.frame().GetVariables(var_opts)
         found = False
         for value in values:
-            if "_0_0" in value.name:
+            if '_0_0' in value.name:
                 found = True
-            if "$" in value.name:
+            if '$' in value.name:
                 found = True
         self.assertFalse(found, "found the thing I was not expecting")
 
@@ -71,12 +68,18 @@ class TestSwiftHideRuntimeSupport(TestBase):
         values = self.frame().GetVariables(var_opts)
         found = False
         for value in values:
-            if "_0_0" in value.name:
+            if '_0_0' in value.name:
                 found = True
         self.assertTrue(found, "not found the thing I was expecting")
 
         self.runCmd("settings set target.display-runtime-support-values true")
-        self.expect("frame variable -d run", substrs=["_0_0"], matching=True)
+        self.expect(
+            'frame variable -d run',
+            substrs=['_0_0'],
+            matching=True)
 
         self.runCmd("settings set target.display-runtime-support-values false")
-        self.expect("frame variable -d run", substrs=["_0_0"], matching=False)
+        self.expect(
+            'frame variable -d run',
+            substrs=['_0_0'],
+            matching=False)

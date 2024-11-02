@@ -9,7 +9,7 @@
 #include "ABISysV_ppc64.h"
 
 #include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Utility/PPC64LE_DWARF_Registers.h"
@@ -44,6 +44,7 @@
 #define DECLARE_REGISTER_INFOS_PPC64LE_STRUCT
 #include "Plugins/Process/Utility/RegisterInfos_ppc64le.h"
 #undef DECLARE_REGISTER_INFOS_PPC64LE_STRUCT
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -271,7 +272,7 @@ bool ABISysV_ppc64::GetArgumentValues(Thread &thread, ValueList &values) const {
     // We currently only support extracting values with Clang QualTypes. Do we
     // care about others?
     CompilerType compiler_type = value->GetCompilerType();
-    llvm::Optional<uint64_t> bit_size = compiler_type.GetBitSize(&thread);
+    std::optional<uint64_t> bit_size = compiler_type.GetBitSize(&thread);
     if (!bit_size)
       return false;
     bool is_signed;
@@ -341,7 +342,7 @@ Status ABISysV_ppc64::SetReturnValueObject(lldb::StackFrameSP &frame_sp,
       error.SetErrorString(
           "We don't support returning complex values at present");
     else {
-      llvm::Optional<uint64_t> bit_width =
+      std::optional<uint64_t> bit_width =
           compiler_type.GetBitSize(frame_sp.get());
       if (!bit_width) {
         error.SetErrorString("can't get size of type");
@@ -500,14 +501,12 @@ public:
                                                      CompilerType &type) {
     RegisterContext *reg_ctx = thread.GetRegisterContext().get();
     if (!reg_ctx)
-      return llvm::make_error<llvm::StringError>(
-          LOG_PREFIX "Failed to get RegisterContext",
-          llvm::inconvertibleErrorCode());
+      return llvm::createStringError(LOG_PREFIX
+                                     "Failed to get RegisterContext");
 
     ProcessSP process_sp = thread.GetProcess();
     if (!process_sp)
-      return llvm::make_error<llvm::StringError>(
-          LOG_PREFIX "GetProcess() failed", llvm::inconvertibleErrorCode());
+      return llvm::createStringError(LOG_PREFIX "GetProcess() failed");
 
     return ReturnValueExtractor(thread, type, reg_ctx, process_sp);
   }
@@ -643,7 +642,7 @@ private:
     DataExtractor de(&raw_data, sizeof(raw_data), m_byte_order, m_addr_size);
 
     offset_t offset = 0;
-    llvm::Optional<uint64_t> byte_size = type.GetByteSize(m_process_sp.get());
+    std::optional<uint64_t> byte_size = type.GetByteSize(m_process_sp.get());
     if (!byte_size)
       return {};
     switch (*byte_size) {
@@ -767,7 +766,12 @@ private:
 
     // get number of children
     const bool omit_empty_base_classes = true;
-    uint32_t n = m_type.GetNumChildren(omit_empty_base_classes, nullptr);
+    auto n_or_err = m_type.GetNumChildren(omit_empty_base_classes, nullptr);
+    if (!n_or_err) {
+      LLDB_LOG_ERROR(m_log, n_or_err.takeError(), LOG_PREFIX "{0}");
+      return {};
+    }
+    uint32_t n = *n_or_err;
     if (!n) {
       LLDB_LOG(m_log, LOG_PREFIX "No children found in struct");
       return {};
@@ -777,7 +781,7 @@ private:
     CompilerType elem_type;
     if (m_type.IsHomogeneousAggregate(&elem_type)) {
       uint32_t type_flags = elem_type.GetTypeInfo();
-      llvm::Optional<uint64_t> elem_size =
+      std::optional<uint64_t> elem_size =
           elem_type.GetByteSize(m_process_sp.get());
       if (!elem_size)
         return {};
@@ -897,7 +901,8 @@ private:
   }
 
   // get child
-  CompilerType GetChildType(uint32_t i, std::string &name, uint32_t &size) {
+  llvm::Expected<CompilerType> GetChildType(uint32_t i, std::string &name,
+                                            uint32_t &size) {
     // GetChild constant inputs
     const bool transparent_pointers = false;
     const bool omit_empty_base_classes = true;

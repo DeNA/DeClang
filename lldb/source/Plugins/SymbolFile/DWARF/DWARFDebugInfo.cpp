@@ -27,10 +27,10 @@
 
 using namespace lldb;
 using namespace lldb_private;
+using namespace lldb_private::plugin::dwarf;
 
 // Constructor
-DWARFDebugInfo::DWARFDebugInfo(SymbolFileDWARF &dwarf,
-                               lldb_private::DWARFContext &context)
+DWARFDebugInfo::DWARFDebugInfo(SymbolFileDWARF &dwarf, DWARFContext &context)
     : m_dwarf(dwarf), m_context(context), m_units(), m_cu_aranges_up() {}
 
 const DWARFDebugAranges &DWARFDebugInfo::GetCompileUnitAranges() {
@@ -53,13 +53,21 @@ const DWARFDebugAranges &DWARFDebugInfo::GetCompileUnitAranges() {
   }
 
   // Manually build arange data for everything that wasn't in .debug_aranges.
-  const size_t num_units = GetNumUnits();
-  for (size_t idx = 0; idx < num_units; ++idx) {
-    DWARFUnit *cu = GetUnitAtIndex(idx);
+  // The .debug_aranges accelerator is not guaranteed to be complete.
+  // Tools such as dsymutil can provide stronger guarantees than required by the
+  // standard. Without that guarantee, we have to iterate over every CU in the
+  // .debug_info and make sure there's a corresponding entry in the table and if
+  // not, add one for every subprogram.
+  ObjectFile *OF = m_dwarf.GetObjectFile();
+  if (!OF || !OF->CanTrustAddressRanges()) {
+    const size_t num_units = GetNumUnits();
+    for (size_t idx = 0; idx < num_units; ++idx) {
+      DWARFUnit *cu = GetUnitAtIndex(idx);
 
-    dw_offset_t offset = cu->GetOffset();
-    if (cus_with_data.find(offset) == cus_with_data.end())
-      cu->BuildAddressRangeTable(m_cu_aranges_up.get());
+      dw_offset_t offset = cu->GetOffset();
+      if (cus_with_data.find(offset) == cus_with_data.end())
+        cu->BuildAddressRangeTable(m_cu_aranges_up.get());
+    }
   }
 
   const bool minimize = true;
@@ -128,7 +136,7 @@ uint32_t DWARFDebugInfo::FindUnitIndex(DIERef::Section section,
       });
   uint32_t idx = std::distance(m_units.begin(), pos);
   if (idx == 0)
-    return DW_INVALID_OFFSET;
+    return DW_INVALID_INDEX;
   return idx - 1;
 }
 
@@ -182,4 +190,10 @@ DWARFDebugInfo::GetDIE(const DIERef &die_ref) {
   if (cu)
     return cu->GetNonSkeletonUnit().GetDIE(die_ref.die_offset());
   return DWARFDIE(); // Not found
+}
+
+llvm::StringRef DWARFDebugInfo::PeekDIEName(const DIERef &die_ref) {
+  if (DWARFUnit *cu = GetUnit(die_ref))
+    return cu->GetNonSkeletonUnit().PeekDIEName(die_ref.die_offset());
+  return llvm::StringRef();
 }

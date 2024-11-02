@@ -16,6 +16,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
+#include "clang/AST/ODRHash.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/Type.h"
 #include "clang/AST/TypeLoc.h"
@@ -23,7 +24,6 @@
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/SourceLocation.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
@@ -624,6 +624,17 @@ void ObjCInterfaceDecl::startDefinition() {
   }
 }
 
+void ObjCInterfaceDecl::startDuplicateDefinitionForComparison() {
+  Data.setPointer(nullptr);
+  allocateDefinitionData();
+  // Don't propagate data to other redeclarations.
+}
+
+void ObjCInterfaceDecl::mergeDuplicateDefinitionWithCommon(
+    const ObjCInterfaceDecl *Definition) {
+  Data = Definition->Data;
+}
+
 ObjCIvarDecl *ObjCInterfaceDecl::lookupInstanceVariable(IdentifierInfo *ID,
                                               ObjCInterfaceDecl *&clsDeclared) {
   // FIXME: Should make sure no callers ever do this.
@@ -778,6 +789,33 @@ ObjCMethodDecl *ObjCInterfaceDecl::lookupPrivateMethod(
   return Method;
 }
 
+unsigned ObjCInterfaceDecl::getODRHash() {
+  assert(hasDefinition() && "ODRHash only for records with definitions");
+
+  // Previously calculated hash is stored in DefinitionData.
+  if (hasODRHash())
+    return data().ODRHash;
+
+  // Only calculate hash on first call of getODRHash per record.
+  ODRHash Hasher;
+  Hasher.AddObjCInterfaceDecl(getDefinition());
+  data().ODRHash = Hasher.CalculateHash();
+  setHasODRHash(true);
+
+  return data().ODRHash;
+}
+
+bool ObjCInterfaceDecl::hasODRHash() const {
+  if (!hasDefinition())
+    return false;
+  return data().HasODRHash;
+}
+
+void ObjCInterfaceDecl::setHasODRHash(bool HasHash) {
+  assert(hasDefinition() && "Cannot set ODRHash without definition");
+  data().HasODRHash = HasHash;
+}
+
 //===----------------------------------------------------------------------===//
 // ObjCMethodDecl
 //===----------------------------------------------------------------------===//
@@ -909,12 +947,12 @@ void ObjCMethodDecl::setMethodParams(ASTContext &C,
   assert((!SelLocs.empty() || isImplicit()) &&
          "No selector locs for non-implicit method");
   if (isImplicit())
-    return setParamsAndSelLocs(C, Params, llvm::None);
+    return setParamsAndSelLocs(C, Params, std::nullopt);
 
   setSelLocsKind(hasStandardSelectorLocs(getSelector(), SelLocs, Params,
                                         DeclEndLoc));
   if (getSelLocsKind() != SelLoc_NonStandard)
-    return setParamsAndSelLocs(C, Params, llvm::None);
+    return setParamsAndSelLocs(C, Params, std::nullopt);
 
   setParamsAndSelLocs(C, Params, SelLocs);
 }
@@ -1508,7 +1546,7 @@ ObjCInterfaceDecl *ObjCInterfaceDecl::Create(const ASTContext &C,
   auto *Result = new (C, DC)
       ObjCInterfaceDecl(C, DC, atLoc, Id, typeParamList, ClassLoc, PrevDecl,
                         isInternal);
-  Result->Data.setInt(!C.getLangOpts().Modules);
+  Result->Data.setInt(!C.getExternalSource());
   C.getObjCInterfaceType(Result, PrevDecl);
   return Result;
 }
@@ -1518,7 +1556,7 @@ ObjCInterfaceDecl *ObjCInterfaceDecl::CreateDeserialized(const ASTContext &C,
   auto *Result = new (C, ID)
       ObjCInterfaceDecl(C, nullptr, SourceLocation(), nullptr, nullptr,
                         SourceLocation(), nullptr, false);
-  Result->Data.setInt(!C.getLangOpts().Modules);
+  Result->Data.setInt(!C.getExternalSource());
   return Result;
 }
 
@@ -1909,7 +1947,7 @@ ObjCProtocolDecl *ObjCProtocolDecl::Create(ASTContext &C, DeclContext *DC,
                                            ObjCProtocolDecl *PrevDecl) {
   auto *Result =
       new (C, DC) ObjCProtocolDecl(C, DC, Id, nameLoc, atStartLoc, PrevDecl);
-  Result->Data.setInt(!C.getLangOpts().Modules);
+  Result->Data.setInt(!C.getExternalSource());
   return Result;
 }
 
@@ -1918,7 +1956,7 @@ ObjCProtocolDecl *ObjCProtocolDecl::CreateDeserialized(ASTContext &C,
   ObjCProtocolDecl *Result =
       new (C, ID) ObjCProtocolDecl(C, nullptr, nullptr, SourceLocation(),
                                    SourceLocation(), nullptr);
-  Result->Data.setInt(!C.getLangOpts().Modules);
+  Result->Data.setInt(!C.getExternalSource());
   return Result;
 }
 
@@ -1981,6 +2019,7 @@ void ObjCProtocolDecl::allocateDefinitionData() {
   assert(!Data.getPointer() && "Protocol already has a definition!");
   Data.setPointer(new (getASTContext()) DefinitionData);
   Data.getPointer()->Definition = this;
+  Data.getPointer()->HasODRHash = false;
 }
 
 void ObjCProtocolDecl::startDefinition() {
@@ -1989,6 +2028,17 @@ void ObjCProtocolDecl::startDefinition() {
   // Update all of the declarations with a pointer to the definition.
   for (auto *RD : redecls())
     RD->Data = this->Data;
+}
+
+void ObjCProtocolDecl::startDuplicateDefinitionForComparison() {
+  Data.setPointer(nullptr);
+  allocateDefinitionData();
+  // Don't propagate data to other redeclarations.
+}
+
+void ObjCProtocolDecl::mergeDuplicateDefinitionWithCommon(
+    const ObjCProtocolDecl *Definition) {
+  Data = Definition->Data;
 }
 
 void ObjCProtocolDecl::collectPropertiesToImplement(PropertyMap &PM) const {
@@ -2031,6 +2081,33 @@ ObjCProtocolDecl::getObjCRuntimeNameAsString() const {
     return ObjCRTName->getMetadataName();
 
   return getName();
+}
+
+unsigned ObjCProtocolDecl::getODRHash() {
+  assert(hasDefinition() && "ODRHash only for records with definitions");
+
+  // Previously calculated hash is stored in DefinitionData.
+  if (hasODRHash())
+    return data().ODRHash;
+
+  // Only calculate hash on first call of getODRHash per record.
+  ODRHash Hasher;
+  Hasher.AddObjCProtocolDecl(getDefinition());
+  data().ODRHash = Hasher.CalculateHash();
+  setHasODRHash(true);
+
+  return data().ODRHash;
+}
+
+bool ObjCProtocolDecl::hasODRHash() const {
+  if (!hasDefinition())
+    return false;
+  return data().HasODRHash;
+}
+
+void ObjCProtocolDecl::setHasODRHash(bool HasHash) {
+  assert(hasDefinition() && "Cannot set ODRHash without definition");
+  data().HasODRHash = HasHash;
 }
 
 //===----------------------------------------------------------------------===//

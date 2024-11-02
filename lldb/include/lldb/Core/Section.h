@@ -102,9 +102,9 @@ protected:
 
 struct JSONSection {
   std::string name;
-  llvm::Optional<lldb::SectionType> type;
-  llvm::Optional<uint64_t> address;
-  llvm::Optional<uint64_t> size;
+  std::optional<lldb::SectionType> type;
+  std::optional<uint64_t> address;
+  std::optional<uint64_t> size;
 };
 
 class Section : public std::enable_shared_from_this<Section>,
@@ -208,8 +208,6 @@ public:
 
   ObjectFile *GetObjectFile() { return m_obj_file; }
   const ObjectFile *GetObjectFile() const { return m_obj_file; }
-
-  bool CanContainSwiftReflectionData() const;
 
   /// Read the section data from the object file that the section
   /// resides in.

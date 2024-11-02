@@ -10,7 +10,6 @@
 #include "llvm/CAS/ObjectStore.h"
 #include "llvm/CAS/TreeSchema.h"
 #include "llvm/Support/Errc.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/PrefixMapper.h"
@@ -365,12 +364,12 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccesses) {
 
     // Track accesses and access files from I to the end (different subset in
     // each iteration).
-    auto Files = makeArrayRef(Temps.begin() + I, Temps.end());
+    auto Files = ArrayRef(Temps.begin() + I, Temps.end());
     FS->trackNewAccesses();
     for (const auto &F : Files)
       EXPECT_FALSE(FS->getRealPath(F.path(), Path));
 
-    Optional<cas::ObjectProxy> Tree;
+    std::optional<cas::ObjectProxy> Tree;
     ASSERT_THAT_ERROR(FS->createTreeFromNewAccesses(
                             [&](const vfs::CachedDirectoryEntry &Entry,
                                 SmallVectorImpl<char> &Storage) {
@@ -380,7 +379,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccesses) {
                       Succeeded());
 
     llvm::cas::TreeSchema Schema(FS->getCAS());
-    Optional<llvm::cas::TreeProxy> TreeNode;
+    std::optional<llvm::cas::TreeProxy> TreeNode;
     ASSERT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                       Succeeded());
 
@@ -420,7 +419,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesStack) {
 
   // Pop inner accesses.
   {
-    Optional<cas::ObjectProxy> Tree;
+    std::optional<cas::ObjectProxy> Tree;
     ASSERT_THAT_ERROR(FS->createTreeFromNewAccesses(
                             [&](const vfs::CachedDirectoryEntry &Entry,
                                 SmallVectorImpl<char> &Storage) {
@@ -429,7 +428,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesStack) {
                           .moveInto(Tree),
                       Succeeded());
     llvm::cas::TreeSchema Schema(FS->getCAS());
-    Optional<llvm::cas::TreeProxy> TreeNode;
+    std::optional<llvm::cas::TreeProxy> TreeNode;
     ASSERT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                       Succeeded());
     ASSERT_EQ(TreeNode->size(), 2u);
@@ -441,7 +440,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesStack) {
 
   // Pop outer accesses.
   {
-    Optional<cas::ObjectProxy> Tree;
+    std::optional<cas::ObjectProxy> Tree;
     ASSERT_THAT_ERROR(FS->createTreeFromNewAccesses(
                             [&](const vfs::CachedDirectoryEntry &Entry,
                                 SmallVectorImpl<char> &Storage) {
@@ -450,7 +449,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesStack) {
                           .moveInto(Tree),
                       Succeeded());
     llvm::cas::TreeSchema Schema(FS->getCAS());
-    Optional<llvm::cas::TreeProxy> TreeNode;
+    std::optional<llvm::cas::TreeProxy> TreeNode;
     ASSERT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                       Succeeded());
     ASSERT_EQ(TreeNode->size(), 2u);
@@ -502,7 +501,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesExists) {
 
   // Pop level 2 accesses.
   {
-    Optional<cas::ObjectProxy> Tree;
+    std::optional<cas::ObjectProxy> Tree;
     ASSERT_THAT_ERROR(FS->createTreeFromNewAccesses(
                             [&](const vfs::CachedDirectoryEntry &Entry,
                                 SmallVectorImpl<char> &Storage) {
@@ -511,7 +510,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesExists) {
                           .moveInto(Tree),
                       Succeeded());
     llvm::cas::TreeSchema Schema(FS->getCAS());
-    Optional<llvm::cas::TreeProxy> TreeNode;
+    std::optional<llvm::cas::TreeProxy> TreeNode;
     ASSERT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                       Succeeded());
     auto Node0 = TreeNode->lookup(sys::path::filename(Temps[0].path()));
@@ -526,7 +525,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesExists) {
 
   // Pop level 1 accesses.
   {
-    Optional<cas::ObjectProxy> Tree;
+    std::optional<cas::ObjectProxy> Tree;
     ASSERT_THAT_ERROR(FS->createTreeFromNewAccesses(
                             [&](const vfs::CachedDirectoryEntry &Entry,
                                 SmallVectorImpl<char> &Storage) {
@@ -535,7 +534,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesExists) {
                           .moveInto(Tree),
                       Succeeded());
     llvm::cas::TreeSchema Schema(FS->getCAS());
-    Optional<llvm::cas::TreeProxy> TreeNode;
+    std::optional<llvm::cas::TreeProxy> TreeNode;
     ASSERT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                       Succeeded());
     auto Node0 = TreeNode->lookup(sys::path::filename(Temps[0].path()));
@@ -550,7 +549,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesExists) {
 
   // Pop level 0 accesses.
   {
-    Optional<cas::ObjectProxy> Tree;
+    std::optional<cas::ObjectProxy> Tree;
     ASSERT_THAT_ERROR(FS->createTreeFromNewAccesses(
                             [&](const vfs::CachedDirectoryEntry &Entry,
                                 SmallVectorImpl<char> &Storage) {
@@ -559,7 +558,7 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesExists) {
                           .moveInto(Tree),
                       Succeeded());
     llvm::cas::TreeSchema Schema(FS->getCAS());
-    Optional<llvm::cas::TreeProxy> TreeNode;
+    std::optional<llvm::cas::TreeProxy> TreeNode;
     ASSERT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                       Succeeded());
     auto Node0 = TreeNode->lookup(sys::path::filename(Temps[0].path()));
@@ -573,18 +572,18 @@ TEST(CachingOnDiskFileSystemTest, TrackNewAccessesExists) {
   }
 
   // Full tree, always contains contents.
-  Optional<cas::ObjectProxy> Tree;
+  std::optional<cas::ObjectProxy> Tree;
   ASSERT_THAT_ERROR(FS->createTreeFromAllAccesses().moveInto(Tree),
                     Succeeded());
   llvm::cas::TreeSchema Schema(FS->getCAS());
-  Optional<llvm::cas::TreeProxy> TreeNode;
+  std::optional<llvm::cas::TreeProxy> TreeNode;
   ASSERT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                     Succeeded());
 
   unsigned FileCount = 0;
   cantFail(Schema.walkFileTreeRecursively(
       FS->getCAS(), Tree->getRef(),
-      [&](const cas::NamedTreeEntry &Entry, Optional<cas::TreeProxy>) {
+      [&](const cas::NamedTreeEntry &Entry, std::optional<cas::TreeProxy>) {
         if (Entry.isFile()) {
           FileCount++;
           EXPECT_EQ(Entry.getRef(), ContentRef)
@@ -618,8 +617,9 @@ TEST(CachingOnDiskFileSystemTest, ExcludeFromTacking) {
 
   llvm::cas::TreeSchema Schema(FS->getCAS());
 
-  auto CreateTreeFromNewAccesses = [&]() -> Optional<llvm::cas::TreeProxy> {
-    Optional<cas::ObjectProxy> Tree;
+  auto CreateTreeFromNewAccesses =
+      [&]() -> std::optional<llvm::cas::TreeProxy> {
+    std::optional<cas::ObjectProxy> Tree;
     EXPECT_THAT_ERROR(FS->createTreeFromNewAccesses(
                             [&](const vfs::CachedDirectoryEntry &Entry,
                                 SmallVectorImpl<char> &Storage) {
@@ -628,8 +628,8 @@ TEST(CachingOnDiskFileSystemTest, ExcludeFromTacking) {
                           .moveInto(Tree),
                       Succeeded());
     if (!Tree)
-      return None;
-    Optional<llvm::cas::TreeProxy> TreeNode;
+      return std::nullopt;
+    std::optional<llvm::cas::TreeProxy> TreeNode;
     EXPECT_THAT_ERROR(Schema.load(Tree->getRef()).moveInto(TreeNode),
                       Succeeded());
     return TreeNode;
@@ -651,7 +651,7 @@ TEST(CachingOnDiskFileSystemTest, ExcludeFromTacking) {
     EXPECT_EQ(FS->excludeFromTracking(D1.path()), std::error_code());
     EXPECT_EQ(FS->excludeFromTracking(F21.path()), std::error_code());
     auto Tree = CreateTreeFromNewAccesses();
-    ASSERT_NE(Tree, None);
+    ASSERT_NE(Tree, std::nullopt);
     EXPECT_EQ(Tree->size(), 0u);
   }
 
@@ -662,7 +662,7 @@ TEST(CachingOnDiskFileSystemTest, ExcludeFromTacking) {
     EXPECT_EQ(FS->excludeFromTracking(F21.path()), std::error_code());
     AccessAllFiles();
     auto Tree = CreateTreeFromNewAccesses();
-    ASSERT_NE(Tree, None);
+    ASSERT_NE(Tree, std::nullopt);
     EXPECT_EQ(Tree->size(), 1u);
     EXPECT_FALSE(Tree->lookup("d1"));
     auto D2Node = Tree->lookup("d2");
@@ -680,7 +680,7 @@ TEST(CachingOnDiskFileSystemTest, ExcludeFromTacking) {
     EXPECT_EQ(FS->excludeFromTracking(D1.path()), std::error_code());
     EXPECT_EQ(FS->excludeFromTracking(F21.path()), std::error_code());
     auto Tree = CreateTreeFromNewAccesses();
-    ASSERT_NE(Tree, None);
+    ASSERT_NE(Tree, std::nullopt);
     EXPECT_EQ(Tree->size(), 1u);
     EXPECT_FALSE(Tree->lookup("d1"));
     auto D2Node = Tree->lookup("d2");
@@ -698,7 +698,7 @@ TEST(CachingOnDiskFileSystemTest, ExcludeFromTacking) {
     EXPECT_EQ(FS->excludeFromTracking(D1Sub.path()), std::error_code());
     EXPECT_EQ(FS->excludeFromTracking(D2.path()), std::error_code());
     auto Tree = CreateTreeFromNewAccesses();
-    ASSERT_NE(Tree, None);
+    ASSERT_NE(Tree, std::nullopt);
     EXPECT_EQ(Tree->size(), 1u);
     EXPECT_FALSE(Tree->lookup("d2"));
     auto D1Node = Tree->lookup("d1");

@@ -392,7 +392,7 @@ static BasicBlock *insertUniqueBackedgeBlock(Loop *L, BasicBlock *Preheader,
 
   // Move the new backedge block to right after the last backedge block.
   Function::iterator InsertPos = ++BackedgeBlocks.back()->getIterator();
-  F->getBasicBlockList().splice(InsertPos, F->getBasicBlockList(), BEBlock);
+  F->splice(InsertPos, F, BEBlock->getIterator());
 
   // Now that the block has been inserted into the function, create PHI nodes in
   // the backedge block which correspond to any PHI nodes in the header block.
@@ -440,7 +440,7 @@ static BasicBlock *insertUniqueBackedgeBlock(Loop *L, BasicBlock *Preheader,
     // eliminate the PHI Node.
     if (HasUniqueIncomingValue) {
       NewPN->replaceAllUsesWith(UniqueValue);
-      BEBlock->getInstList().erase(NewPN);
+      NewPN->eraseFromParent();
     }
   }
 
@@ -448,16 +448,15 @@ static BasicBlock *insertUniqueBackedgeBlock(Loop *L, BasicBlock *Preheader,
   // backedge blocks to jump to the BEBlock instead of the header.
   // If one of the backedges has llvm.loop metadata attached, we remove
   // it from the backedge and add it to BEBlock.
-  unsigned LoopMDKind = BEBlock->getContext().getMDKindID("llvm.loop");
   MDNode *LoopMD = nullptr;
   for (BasicBlock *BB : BackedgeBlocks) {
     Instruction *TI = BB->getTerminator();
     if (!LoopMD)
-      LoopMD = TI->getMetadata(LoopMDKind);
-    TI->setMetadata(LoopMDKind, nullptr);
+      LoopMD = TI->getMetadata(LLVMContext::MD_loop);
+    TI->setMetadata(LLVMContext::MD_loop, nullptr);
     TI->replaceSuccessorWith(Header, BEBlock);
   }
-  BEBlock->getTerminator()->setMetadata(LoopMDKind, LoopMD);
+  BEBlock->getTerminator()->setMetadata(LLVMContext::MD_loop, LoopMD);
 
   //===--- Update all analyses which we must preserve now -----------------===//
 
@@ -647,19 +646,12 @@ ReprocessLoop:
         Instruction *Inst = &*I++;
         if (Inst == CI)
           continue;
-        bool InstInvariant = false;
         if (!L->makeLoopInvariant(
-                Inst, InstInvariant,
-                Preheader ? Preheader->getTerminator() : nullptr, MSSAU)) {
+                Inst, AnyInvariant,
+                Preheader ? Preheader->getTerminator() : nullptr, MSSAU, SE)) {
           AllInvariant = false;
           break;
         }
-        if (InstInvariant && SE) {
-          // The loop disposition of all SCEV expressions that depend on any
-          // hoisted values have also changed.
-          SE->forgetBlockAndLoopDispositions(Inst);
-        }
-        AnyInvariant |= InstInvariant;
       }
       if (AnyInvariant)
         Changed = true;
@@ -700,12 +692,6 @@ ReprocessLoop:
     }
   }
 
-  // Changing exit conditions for blocks may affect exit counts of this loop and
-  // any of its paretns, so we must invalidate the entire subtree if we've made
-  // any changes.
-  if (Changed && SE)
-    SE->forgetTopmostLoop(L);
-
   if (MSSAU && VerifyMemorySSA)
     MSSAU->getMemorySSA()->verifyMemorySSA();
 
@@ -743,6 +729,13 @@ bool llvm::simplifyLoop(Loop *L, DominatorTree *DT, LoopInfo *LI,
   while (!Worklist.empty())
     Changed |= simplifyOneLoop(Worklist.pop_back_val(), Worklist, DT, LI, SE,
                                AC, MSSAU, PreserveLCSSA);
+
+  // Changing exit conditions for blocks may affect exit counts of this loop and
+  // any of its parents, so we must invalidate the entire subtree if we've made
+  // any changes. Do this here rather than in simplifyOneLoop() as the top-most
+  // loop is going to be the same for all child loops.
+  if (Changed && SE)
+    SE->forgetTopmostLoop(L);
 
   return Changed;
 }

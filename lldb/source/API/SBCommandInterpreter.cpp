@@ -28,6 +28,7 @@
 #include "lldb/API/SBTarget.h"
 
 #include <memory>
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -46,8 +47,8 @@ public:
         m_backend(backend) {
     m_auto_repeat_command =
         auto_repeat_command == nullptr
-            ? llvm::None
-            : llvm::Optional<std::string>(auto_repeat_command);
+            ? std::nullopt
+            : std::optional<std::string>(auto_repeat_command);
     // We don't know whether any given command coming from this interface takes
     // arguments or not so here we're just disabling the basic args check.
     CommandArgumentData none_arg{eArgTypeNone, eArgRepeatStar};
@@ -57,28 +58,26 @@ public:
   bool IsRemovable() const override { return true; }
 
   /// More documentation is available in lldb::CommandObject::GetRepeatCommand,
-  /// but in short, if llvm::None is returned, the previous command will be
+  /// but in short, if std::nullopt is returned, the previous command will be
   /// repeated, and if an empty string is returned, no commands will be
   /// executed.
-  llvm::Optional<std::string> GetRepeatCommand(Args &current_command_args,
-                                               uint32_t index) override {
+  std::optional<std::string> GetRepeatCommand(Args &current_command_args,
+                                              uint32_t index) override {
     if (!m_auto_repeat_command)
-      return llvm::None;
+      return std::nullopt;
     else
       return m_auto_repeat_command;
   }
 
 protected:
-  bool DoExecute(Args &command, CommandReturnObject &result) override {
+  void DoExecute(Args &command, CommandReturnObject &result) override {
     SBCommandReturnObject sb_return(result);
     SBCommandInterpreter sb_interpreter(&m_interpreter);
     SBDebugger debugger_sb(m_interpreter.GetDebugger().shared_from_this());
-    bool ret = m_backend->DoExecute(debugger_sb, command.GetArgumentVector(),
-                                    sb_return);
-    return ret;
+    m_backend->DoExecute(debugger_sb, command.GetArgumentVector(), sb_return);
   }
   std::shared_ptr<lldb::SBCommandPluginInterface> m_backend;
-  llvm::Optional<std::string> m_auto_repeat_command;
+  std::optional<std::string> m_auto_repeat_command;
 };
 } // namespace lldb_private
 
@@ -158,11 +157,12 @@ bool SBCommandInterpreter::InterruptCommand() {
 const char *SBCommandInterpreter::GetIOHandlerControlSequence(char ch) {
   LLDB_INSTRUMENT_VA(this, ch);
 
-  return (IsValid()
-              ? m_opaque_ptr->GetDebugger()
-                    .GetTopIOHandlerControlSequence(ch)
-                    .GetCString()
-              : nullptr);
+  if (!IsValid())
+    return nullptr;
+
+  return ConstString(
+             m_opaque_ptr->GetDebugger().GetTopIOHandlerControlSequence(ch))
+      .GetCString();
 }
 
 lldb::ReturnStatus
@@ -519,14 +519,16 @@ const char *SBCommandInterpreter::GetArgumentTypeAsCString(
     const lldb::CommandArgumentType arg_type) {
   LLDB_INSTRUMENT_VA(arg_type);
 
-  return CommandObject::GetArgumentTypeAsCString(arg_type);
+  return ConstString(CommandObject::GetArgumentTypeAsCString(arg_type))
+      .GetCString();
 }
 
 const char *SBCommandInterpreter::GetArgumentDescriptionAsCString(
     const lldb::CommandArgumentType arg_type) {
   LLDB_INSTRUMENT_VA(arg_type);
 
-  return CommandObject::GetArgumentDescriptionAsCString(arg_type);
+  return ConstString(CommandObject::GetArgumentDescriptionAsCString(arg_type))
+      .GetCString();
 }
 
 bool SBCommandInterpreter::EventIsCommandInterpreterEvent(

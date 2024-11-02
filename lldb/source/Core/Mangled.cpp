@@ -19,6 +19,7 @@
 #include "lldb/Utility/Stream.h"
 #include "lldb/lldb-enumerations.h"
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/Support/Compiler.h"
@@ -29,11 +30,12 @@
 #include "swift/Demangling/Demangle.h"
 #endif // LLDB_ENABLE_SWIFT
 // BEGIN SWIFT
-#include "lldb/Core/ThreadSafeDenseMap.h"
+#include "lldb/Utility/ThreadSafeDenseMap.h"
 // END SWIFT
 
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <cstdlib>
@@ -43,23 +45,6 @@ using namespace lldb_private;
 static inline bool cstring_is_mangled(llvm::StringRef s) {
   return Mangled::GetManglingScheme(s) != Mangled::eManglingSchemeNone;
 }
-
-// BEGIN SWIFT
-#pragma mark DisplayDemangledNamesCache
-
-// make the key type be a const char* because that gives us usable
-// DenseMapInfo for free making DenseMap work for ConstString requires
-// us to provide two "invalid" values: the empty key and the tombstone
-// key; but for ConstString, we really don't have any well-known
-// invalid value other than ConstString(nullptr) so, just use const
-// char* as the key as LLVM knows how to do proper DenseMapInfo for
-// pointers
-static ThreadSafeDenseMap<const char *, ConstString>&
-GetDisplayDemangledNamesCache() {
-  static ThreadSafeDenseMap<const char *, ConstString> g_cache;
-  return g_cache;
-}
-// END SWIFT
 
 #pragma mark Mangled
 
@@ -73,8 +58,15 @@ Mangled::ManglingScheme Mangled::GetManglingScheme(llvm::StringRef const name) {
   if (name.startswith("_R"))
     return Mangled::eManglingSchemeRustV0;
 
-  if (name.startswith("_D"))
-    return Mangled::eManglingSchemeD;
+  if (name.startswith("_D")) {
+    // A dlang mangled name begins with `_D`, followed by a numeric length. One
+    // known exception is the symbol `_Dmain`.
+    // See `SymbolName` and `LName` in
+    // https://dlang.org/spec/abi.html#name_mangling
+    llvm::StringRef buf = name.drop_front(2);
+    if (!buf.empty() && (llvm::isDigit(buf.front()) || name == "_Dmain"))
+      return Mangled::eManglingSchemeD;
+  }
 
   if (name.startswith("_Z"))
     return Mangled::eManglingSchemeItanium;
@@ -121,23 +113,6 @@ int Mangled::Compare(const Mangled &a, const Mangled &b) {
                               b.GetName(ePreferMangled));
 }
 
-// Set the string value in this objects. If "mangled" is true, then the mangled
-// named is set with the new value in "s", else the demangled name is set.
-void Mangled::SetValue(ConstString s, bool mangled) {
-  if (s) {
-    if (mangled) {
-      m_demangled.Clear();
-      m_mangled = s;
-    } else {
-      m_demangled = s;
-      m_mangled.Clear();
-    }
-  } else {
-    m_demangled.Clear();
-    m_mangled.Clear();
-  }
-}
-
 void Mangled::SetValue(ConstString name) {
   if (name) {
     if (cstring_is_mangled(name.GetStringRef())) {
@@ -154,18 +129,18 @@ void Mangled::SetValue(ConstString name) {
 }
 
 // Local helpers for different demangling implementations.
-static char *GetMSVCDemangledStr(const char *M) {
+static char *GetMSVCDemangledStr(std::string_view M) {
   char *demangled_cstr = llvm::microsoftDemangle(
-      M, nullptr, nullptr, nullptr, nullptr,
+      M, nullptr, nullptr,
       llvm::MSDemangleFlags(
           llvm::MSDF_NoAccessSpecifier | llvm::MSDF_NoCallingConvention |
           llvm::MSDF_NoMemberType | llvm::MSDF_NoVariableType));
 
   if (Log *log = GetLog(LLDBLog::Demangle)) {
     if (demangled_cstr && demangled_cstr[0])
-      LLDB_LOGF(log, "demangled msvc: %s -> \"%s\"", M, demangled_cstr);
+      LLDB_LOGF(log, "demangled msvc: %s -> \"%s\"", M.data(), demangled_cstr);
     else
-      LLDB_LOGF(log, "demangled msvc: %s -> error", M);
+      LLDB_LOGF(log, "demangled msvc: %s -> error", M.data());
   }
 
   return demangled_cstr;
@@ -198,7 +173,7 @@ static char *GetItaniumDemangledStr(const char *M) {
   return demangled_cstr;
 }
 
-static char *GetRustV0DemangledStr(const char *M) {
+static char *GetRustV0DemangledStr(std::string_view M) {
   char *demangled_cstr = llvm::rustDemangle(M);
 
   if (Log *log = GetLog(LLDBLog::Demangle)) {
@@ -211,7 +186,7 @@ static char *GetRustV0DemangledStr(const char *M) {
   return demangled_cstr;
 }
 
-static char *GetDLangDemangledStr(const char *M) {
+static char *GetDLangDemangledStr(std::string_view M) {
   char *demangled_cstr = llvm::dlangDemangle(M);
 
   if (Log *log = GetLog(LLDBLog::Demangle)) {
@@ -251,7 +226,7 @@ bool Mangled::GetRichManglingInfo(RichManglingContext &context,
     // We have no rich mangling for MSVC-mangled names yet, so first try to
     // demangle it if necessary.
     if (!m_demangled && !m_mangled.GetMangledCounterpart(m_demangled)) {
-      if (char *d = GetMSVCDemangledStr(m_mangled.GetCString())) {
+      if (char *d = GetMSVCDemangledStr(m_mangled)) {
         // Without the rich mangling info we have to demangle the full name.
         // Copy it to string pool and connect the counterparts to accelerate
         // later access in GetDemangledName().
@@ -313,10 +288,10 @@ ConstString Mangled::GetDemangledName(// BEGIN SWIFT
         break;
       }
       case eManglingSchemeRustV0:
-        demangled_name = GetRustV0DemangledStr(mangled_name);
+        demangled_name = GetRustV0DemangledStr(m_mangled);
         break;
       case eManglingSchemeD:
-        demangled_name = GetDLangDemangledStr(mangled_name);
+        demangled_name = GetDLangDemangledStr(m_mangled);
         break;
 #ifdef LLDB_ENABLE_SWIFT
       case eManglingSchemeSwift: {
@@ -362,39 +337,18 @@ ConstString Mangled::GetDemangledName(// BEGIN SWIFT
 
 ConstString Mangled::GetDisplayDemangledName(
 // BEGIN SWIFT
-                                             const SymbolContext *sc
-                                             ) const {
-  ConstString demangled;
+    const SymbolContext *sc) const {
 #ifdef LLDB_ENABLE_SWIFT
-  if (m_mangled) {
-    do {
-      const char *mangled = m_mangled.GetCString();
-
-      if (mangled) {
-        if (SwiftLanguageRuntime::IsSwiftMangledName(m_mangled.GetStringRef())) {
-          auto& display_cache = ::GetDisplayDemangledNamesCache();
-          if (display_cache.Lookup(mangled, demangled) &&
-              demangled)
-            break;
-
-          std::string demangled_std =
-              SwiftLanguageRuntime::DemangleSymbolAsString(
-                  m_mangled.GetStringRef(), SwiftLanguageRuntime::eSimplified,
-                  sc);
-          if (!demangled_std.empty()) {
-            demangled.SetCString(demangled_std.c_str());
-            display_cache.Insert(mangled, demangled);
-            break;
-          }
-        }
-      }
-    } while (0);
-  }
+  if (m_mangled &&
+      SwiftLanguageRuntime::IsSwiftMangledName(m_mangled.GetStringRef()))
+    return ConstString(SwiftLanguageRuntime::DemangleSymbolAsString(
+        m_mangled.GetStringRef(), SwiftLanguageRuntime::eSimplified, sc));
 #endif // LLDB_ENABLE_SWIFT
-  if (!demangled)
-    demangled = GetDemangledName();
-  return demangled ? demangled : m_mangled;
 // END SWIFT
+  if (Language *lang = Language::FindPlugin(GuessLanguage()))
+    if (ConstString display_name = lang->GetDisplayDemangledName(*this))
+      return display_name;
+  return GetDemangledName();
 }
 
 bool Mangled::NameMatches(const RegularExpression &regex) const {

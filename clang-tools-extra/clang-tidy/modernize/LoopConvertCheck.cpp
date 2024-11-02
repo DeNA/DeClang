@@ -17,18 +17,17 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 using namespace clang::ast_matchers;
 using namespace llvm;
 
-namespace clang {
-namespace tidy {
+namespace clang::tidy {
 
 template <> struct OptionEnumMapping<modernize::Confidence::Level> {
   static llvm::ArrayRef<std::pair<modernize::Confidence::Level, StringRef>>
@@ -37,7 +36,7 @@ template <> struct OptionEnumMapping<modernize::Confidence::Level> {
         Mapping[] = {{modernize::Confidence::CL_Reasonable, "reasonable"},
                      {modernize::Confidence::CL_Safe, "safe"},
                      {modernize::Confidence::CL_Risky, "risky"}};
-    return makeArrayRef(Mapping);
+    return ArrayRef(Mapping);
   }
 };
 
@@ -50,7 +49,7 @@ template <> struct OptionEnumMapping<modernize::VariableNamer::NamingStyle> {
                      {modernize::VariableNamer::NS_CamelBack, "camelBack"},
                      {modernize::VariableNamer::NS_LowerCase, "lower_case"},
                      {modernize::VariableNamer::NS_UpperCase, "UPPER_CASE"}};
-    return makeArrayRef(Mapping);
+    return ArrayRef(Mapping);
   }
 };
 
@@ -252,17 +251,18 @@ StatementMatcher makePseudoArrayLoopMatcher() {
   // functions called begin() and end() taking the container as an argument
   // are also allowed.
   TypeMatcher RecordWithBeginEnd = qualType(anyOf(
-      qualType(
-          isConstQualified(),
-          hasUnqualifiedDesugaredType(recordType(hasDeclaration(cxxRecordDecl(
-              hasMethod(cxxMethodDecl(hasName("begin"), isConst())),
-              hasMethod(cxxMethodDecl(hasName("end"),
-                                      isConst()))))   // hasDeclaration
-                                                 ))), // qualType
+      qualType(isConstQualified(),
+               hasUnqualifiedDesugaredType(recordType(hasDeclaration(
+                   cxxRecordDecl(isSameOrDerivedFrom(cxxRecordDecl(
+                       hasMethod(cxxMethodDecl(hasName("begin"), isConst())),
+                       hasMethod(cxxMethodDecl(hasName("end"),
+                                               isConst())))))) // hasDeclaration
+                                                      ))),     // qualType
       qualType(unless(isConstQualified()),
                hasUnqualifiedDesugaredType(recordType(hasDeclaration(
-                   cxxRecordDecl(hasMethod(hasName("begin")),
-                                 hasMethod(hasName("end"))))))) // qualType
+                   cxxRecordDecl(isSameOrDerivedFrom(cxxRecordDecl(
+                       hasMethod(hasName("begin")),
+                       hasMethod(hasName("end"))))))))) // qualType
       ));
 
   StatementMatcher SizeCallMatcher = cxxMemberCallExpr(
@@ -453,10 +453,6 @@ static bool containerIsConst(const Expr *ContainerExpr, bool Dereference) {
   return false;
 }
 
-LoopConvertCheck::RangeDescriptor::RangeDescriptor()
-    : ContainerNeedsDereference(false), DerefByConstRef(false),
-      DerefByValue(false), NeedsReverseCall(false) {}
-
 LoopConvertCheck::LoopConvertCheck(StringRef Name, ClangTidyContext *Context)
     : ClangTidyCheck(Name, Context), TUInfo(new TUTrackingInfo),
       MaxCopySize(Options.get("MaxCopySize", 16ULL)),
@@ -537,32 +533,48 @@ void LoopConvertCheck::doConversion(
     const ValueDecl *MaybeContainer, const UsageResult &Usages,
     const DeclStmt *AliasDecl, bool AliasUseRequired, bool AliasFromForInit,
     const ForStmt *Loop, RangeDescriptor Descriptor) {
-  std::string VarName;
+  std::string VarNameOrStructuredBinding;
   bool VarNameFromAlias = (Usages.size() == 1) && AliasDecl;
   bool AliasVarIsRef = false;
   bool CanCopy = true;
   std::vector<FixItHint> FixIts;
   if (VarNameFromAlias) {
     const auto *AliasVar = cast<VarDecl>(AliasDecl->getSingleDecl());
-    VarName = AliasVar->getName().str();
 
-    // Use the type of the alias if it's not the same
-    QualType AliasVarType = AliasVar->getType();
-    assert(!AliasVarType.isNull() && "Type in VarDecl is null");
-    if (AliasVarType->isReferenceType()) {
-      AliasVarType = AliasVarType.getNonReferenceType();
-      AliasVarIsRef = true;
+    // Handle structured bindings
+    if (const auto *AliasDecompositionDecl =
+            dyn_cast<DecompositionDecl>(AliasDecl->getSingleDecl())) {
+      VarNameOrStructuredBinding = "[";
+
+      assert(!AliasDecompositionDecl->bindings().empty() && "No bindings");
+      for (const BindingDecl *Binding : AliasDecompositionDecl->bindings()) {
+        VarNameOrStructuredBinding += Binding->getName().str() + ", ";
+      }
+
+      VarNameOrStructuredBinding.erase(VarNameOrStructuredBinding.size() - 2,
+                                       2);
+      VarNameOrStructuredBinding += "]";
+    } else {
+      VarNameOrStructuredBinding = AliasVar->getName().str();
+
+      // Use the type of the alias if it's not the same
+      QualType AliasVarType = AliasVar->getType();
+      assert(!AliasVarType.isNull() && "Type in VarDecl is null");
+      if (AliasVarType->isReferenceType()) {
+        AliasVarType = AliasVarType.getNonReferenceType();
+        AliasVarIsRef = true;
+      }
+      if (Descriptor.ElemType.isNull() ||
+          !Context->hasSameUnqualifiedType(AliasVarType, Descriptor.ElemType))
+        Descriptor.ElemType = AliasVarType;
     }
-    if (Descriptor.ElemType.isNull() ||
-        !Context->hasSameUnqualifiedType(AliasVarType, Descriptor.ElemType))
-      Descriptor.ElemType = AliasVarType;
 
     // We keep along the entire DeclStmt to keep the correct range here.
     SourceRange ReplaceRange = AliasDecl->getSourceRange();
 
     std::string ReplacementText;
     if (AliasUseRequired) {
-      ReplacementText = VarName;
+      ReplacementText = VarNameOrStructuredBinding;
     } else if (AliasFromForInit) {
       // FIXME: Clang includes the location of the ';' but only for DeclStmt's
       // in a for loop's init clause. Need to put this ';' back while removing
@@ -581,7 +593,7 @@ void LoopConvertCheck::doConversion(
     VariableNamer Namer(&TUInfo->getGeneratedDecls(),
                         &TUInfo->getParentFinder().getStmtToParentStmtMap(),
                         Loop, IndexVar, MaybeContainer, Context, NamingStyle);
-    VarName = Namer.createIndexName();
+    VarNameOrStructuredBinding = Namer.createIndexName();
     // First, replace all usages of the array subscript expression with our new
     // variable.
     for (const auto &Usage : Usages) {
@@ -590,8 +602,9 @@ void LoopConvertCheck::doConversion(
       if (Usage.Expression) {
         // If this is an access to a member through the arrow operator, after
         // the replacement it must be accessed through the '.' operator.
-        ReplaceText = Usage.Kind == Usage::UK_MemberThroughArrow ? VarName + "."
-                                                                 : VarName;
+        ReplaceText = Usage.Kind == Usage::UK_MemberThroughArrow
+                          ? VarNameOrStructuredBinding + "."
+                          : VarNameOrStructuredBinding;
         auto Parents = Context->getParents(*Usage.Expression);
         if (Parents.size() == 1) {
           if (const auto *Paren = Parents[0].get<ParenExpr>()) {
@@ -615,8 +628,9 @@ void LoopConvertCheck::doConversion(
         // The Usage expression is only null in case of lambda captures (which
         // are VarDecl). If the index is captured by value, add '&' to capture
         // by reference instead.
-        ReplaceText =
-            Usage.Kind == Usage::UK_CaptureByCopy ? "&" + VarName : VarName;
+        ReplaceText = Usage.Kind == Usage::UK_CaptureByCopy
+                          ? "&" + VarNameOrStructuredBinding
+                          : VarNameOrStructuredBinding;
       }
       TUInfo->getReplacedVars().insert(std::make_pair(Loop, IndexVar));
       FixIts.push_back(FixItHint::CreateReplacement(
@@ -658,7 +672,7 @@ void LoopConvertCheck::doConversion(
   llvm::raw_svector_ostream Output(Range);
   Output << '(';
   Type.print(Output, getLangOpts());
-  Output << ' ' << VarName << " : ";
+  Output << ' ' << VarNameOrStructuredBinding << " : ";
   if (Descriptor.NeedsReverseCall)
     Output << getReverseFunction() << '(';
   if (Descriptor.ContainerNeedsDereference)
@@ -672,13 +686,14 @@ void LoopConvertCheck::doConversion(
       CharSourceRange::getTokenRange(ParenRange), Range));
 
   if (Descriptor.NeedsReverseCall && !getReverseHeader().empty()) {
-    if (Optional<FixItHint> Insertion = Inserter.createIncludeInsertion(
+    if (std::optional<FixItHint> Insertion = Inserter.createIncludeInsertion(
             Context->getSourceManager().getFileID(Loop->getBeginLoc()),
             getReverseHeader()))
       FixIts.push_back(*Insertion);
   }
   diag(Loop->getForLoc(), "use range-based for loop instead") << FixIts;
-  TUInfo->getGeneratedDecls().insert(make_pair(Loop, VarName));
+  TUInfo->getGeneratedDecls().insert(
+      make_pair(Loop, VarNameOrStructuredBinding));
 }
 
 /// Returns a string which refers to the container iterated over.
@@ -692,7 +707,7 @@ StringRef LoopConvertCheck::getContainerString(ASTContext *Context,
   } else {
     // For CXXOperatorCallExpr such as vector_ptr->size() we want the class
     // object vector_ptr, but for vector[2] we need the whole expression.
-    if (const auto* E = dyn_cast<CXXOperatorCallExpr>(ContainerExpr))
+    if (const auto *E = dyn_cast<CXXOperatorCallExpr>(ContainerExpr))
       if (E->getOperator() != OO_Subscript)
         ContainerExpr = E->getArg(0);
     ContainerString =
@@ -969,5 +984,4 @@ llvm::StringRef LoopConvertCheck::getReverseHeader() const {
 }
 
 } // namespace modernize
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy

@@ -58,6 +58,8 @@ class TestCase(TestBase):
 
         # Test an unscoped enum.
         self.expect_expr("A::enum_val", result_value="enum_case2")
+        # Test an unscoped enum with bool as the underlying type.
+        self.expect_expr("A::enum_bool_val", result_value="enum_bool_case1")
 
         # Test a scoped enum.
         self.expect_expr("A::scoped_enum_val", result_value="scoped_enum_case2")
@@ -88,7 +90,7 @@ class TestCase(TestBase):
             self.expect(
                 "expr const int *i = &A::int_val; *i",
                 error=True,
-                substrs=["Couldn't lookup symbols:"],
+                substrs=["Couldn't look up symbols:"],
             )
 
         # This should work on all platforms.

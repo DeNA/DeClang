@@ -92,7 +92,7 @@ std::string MakeAbsolutePath(const SourceManager &SM, StringRef Path) {
                  << '\n';
   // Handle symbolic link path cases.
   // We are trying to get the real file path of the symlink.
-  auto Dir = SM.getFileManager().getDirectory(
+  auto Dir = SM.getFileManager().getOptionalDirectoryRef(
       llvm::sys::path::parent_path(AbsolutePath.str()));
   if (Dir) {
     StringRef DirName = SM.getFileManager().getCanonicalName(*Dir);
@@ -131,9 +131,10 @@ public:
   void InclusionDirective(SourceLocation HashLoc, const Token & /*IncludeTok*/,
                           StringRef FileName, bool IsAngled,
                           CharSourceRange FilenameRange,
-                          Optional<FileEntryRef> /*File*/, StringRef SearchPath,
+                          OptionalFileEntryRef /*File*/, StringRef SearchPath,
                           StringRef /*RelativePath*/,
-                          const Module * /*Imported*/,
+                          const Module * /*SuggestedModule*/,
+                          bool /*ModuleImported*/,
                           SrcMgr::CharacteristicKind /*FileType*/) override {
     if (const auto *FileEntry = SM.getFileEntryForID(SM.getFileID(HashLoc)))
       MoveTool->addIncludes(FileName, IsAngled, SearchPath,

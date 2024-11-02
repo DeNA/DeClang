@@ -50,6 +50,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CAS/UnifiedOnDiskCache.h"
+#include "OnDiskCommon.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/CAS/OnDiskKeyValueDB.h"
 #include "llvm/Support/Errc.h"
@@ -182,7 +183,7 @@ UnifiedOnDiskCache::open(StringRef RootPath, std::optional<uint64_t> SizeLimit,
   // from creating a new chain (essentially while a \p UnifiedOnDiskCache
   // instance holds a shared lock the storage for the primary directory will
   // grow unrestricted).
-  if (std::error_code EC = sys::fs::lockFile(LockFD, /*Exclusive=*/false))
+  if (std::error_code EC = lockFileThreadSafe(LockFD, /*Exclusive=*/false))
     return createFileError(PathBuf, EC);
 
   SmallVector<std::string, 4> DBDirs;
@@ -234,7 +235,7 @@ UnifiedOnDiskCache::open(StringRef RootPath, std::optional<uint64_t> SizeLimit,
 
   auto UniDB = std::unique_ptr<UnifiedOnDiskCache>(new UnifiedOnDiskCache());
   UniDB->RootPath = RootPath;
-  UniDB->SizeLimit = SizeLimit;
+  UniDB->SizeLimit = SizeLimit.value_or(0);
   UniDB->LockFD = LockFD;
   UniDB->NeedsGarbageCollection = DBDirs.size() > 2;
   UniDB->PrimaryDBDir = PrimaryDir;
@@ -246,8 +247,26 @@ UnifiedOnDiskCache::open(StringRef RootPath, std::optional<uint64_t> SizeLimit,
   return std::move(UniDB);
 }
 
+void UnifiedOnDiskCache::setSizeLimit(std::optional<uint64_t> SizeLimit) {
+  this->SizeLimit = SizeLimit.value_or(0);
+}
+
+uint64_t UnifiedOnDiskCache::getStorageSize() const {
+  uint64_t TotalSize = getPrimaryStorageSize();
+  if (UpstreamGraphDB)
+    TotalSize += UpstreamGraphDB->getStorageSize();
+  if (UpstreamKVDB)
+    TotalSize += UpstreamKVDB->getStorageSize();
+  return TotalSize;
+}
+
+uint64_t UnifiedOnDiskCache::getPrimaryStorageSize() const {
+  return PrimaryGraphDB->getStorageSize() + PrimaryKVDB->getStorageSize();
+}
+
 bool UnifiedOnDiskCache::hasExceededSizeLimit() const {
-  if (!SizeLimit)
+  uint64_t CurSizeLimit = SizeLimit;
+  if (!CurSizeLimit)
     return false;
   // We allow each of the directories in the chain to reach up to half the
   // intended size limit. Check whether the primary directory has exceeded half
@@ -259,8 +278,7 @@ bool UnifiedOnDiskCache::hasExceededSizeLimit() const {
   // the primary has reached its own limit. Essentially in such situation we
   // prefer reclaiming the storage later in order to have more consistent cache
   // hits behavior.
-  return (*SizeLimit / 2) <
-         (PrimaryGraphDB->getStorageSize() + PrimaryKVDB->getStorageSize());
+  return (CurSizeLimit / 2) < getPrimaryStorageSize();
 }
 
 Error UnifiedOnDiskCache::close(bool CheckSizeLimit) {
@@ -278,7 +296,7 @@ Error UnifiedOnDiskCache::close(bool CheckSizeLimit) {
   UpstreamKVDB.reset();
   PrimaryGraphDB.reset();
   UpstreamGraphDB = nullptr;
-  if (std::error_code EC = sys::fs::unlockFile(LockFD))
+  if (std::error_code EC = unlockFileThreadSafe(LockFD))
     return createFileError(RootPath, EC);
 
   if (!ExceededSizeLimit)
@@ -288,13 +306,13 @@ Error UnifiedOnDiskCache::close(bool CheckSizeLimit) {
   // exclusive lock in order to create a new primary directory for next time
   // this \p UnifiedOnDiskCache path is opened.
 
-  if (std::error_code EC = sys::fs::tryLockFile(
+  if (std::error_code EC = tryLockFileThreadSafe(
           LockFD, std::chrono::milliseconds(0), /*Exclusive=*/true)) {
     if (EC == errc::no_lock_available)
       return Error::success(); // couldn't get exclusive lock, give up.
     return createFileError(RootPath, EC);
   }
-  auto _2 = make_scope_exit([&]() { sys::fs::unlockFile(LockFD); });
+  auto _2 = make_scope_exit([&]() { unlockFileThreadSafe(LockFD); });
 
   // Managed to get an exclusive lock which means there are no other open
   // \p UnifiedOnDiskCache instances for the same path, so we can safely start a
@@ -337,3 +355,5 @@ Error UnifiedOnDiskCache::collectGarbage(StringRef Path) {
   }
   return Error::success();
 }
+
+Error UnifiedOnDiskCache::collectGarbage() { return collectGarbage(RootPath); }

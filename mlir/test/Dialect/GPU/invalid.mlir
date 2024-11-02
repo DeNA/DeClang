@@ -4,7 +4,7 @@ func.func @not_enough_sizes(%sz : index) {
   // expected-error@+1 {{expected 6 or more operands, but found 5}}
   "gpu.launch"(%sz, %sz, %sz, %sz, %sz) ({
     gpu.return
-  }) {operand_segment_sizes = array<i32: 0, 1, 1, 1, 1, 1, 1, 0>} : (index, index, index, index, index) -> ()
+  }) {operandSegmentSizes = array<i32: 0, 1, 1, 1, 1, 1, 1, 0>} : (index, index, index, index, index) -> ()
   return
 }
 
@@ -16,7 +16,7 @@ func.func @no_region_attrs(%sz : index) {
   ^bb1(%bx: index, %by: index, %bz: index,
        %tx: index, %ty: index, %tz: index):
     gpu.terminator
-  }) {operand_segment_sizes = array<i32: 0, 1, 1, 1, 1, 1, 1, 0>} : (index, index, index, index, index, index) -> ()
+  }) {operandSegmentSizes = array<i32: 0, 1, 1, 1, 1, 1, 1, 0>} : (index, index, index, index, index, index) -> ()
   return
 }
 
@@ -38,7 +38,7 @@ func.func @launch_requires_gpu_return(%sz : index) {
 func.func @launch_func_too_few_operands(%sz : index) {
   // expected-error@+1 {{expected 6 or more operands}}
   "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz)
-      {operand_segment_sizes = array<i32: 0, 1, 1, 1, 1, 1, 0, 0>}
+      {operandSegmentSizes = array<i32: 0, 1, 1, 1, 1, 1, 0, 0>}
       : (index, index, index, index, index) -> ()
   return
 }
@@ -57,7 +57,7 @@ module attributes {gpu.container_module} {
   func.func @launch_func_missing_callee_attribute(%sz : index) {
     // expected-error@+1 {{'gpu.launch_func' op requires attribute 'kernel'}}
     "gpu.launch_func"(%sz, %sz, %sz, %sz, %sz, %sz)
-        {operand_segment_sizes = array<i32: 0, 1, 1, 1, 1, 1, 1, 0, 0>}
+        {operandSegmentSizes = array<i32: 0, 1, 1, 1, 1, 1, 1, 0, 0>}
         : (index, index, index, index, index, index) -> ()
     return
   }
@@ -318,7 +318,7 @@ func.func @shuffle_mismatching_type(%arg0 : f32, %arg1 : i32, %arg2 : i32) {
 // -----
 
 func.func @shuffle_unsupported_type(%arg0 : index, %arg1 : i32, %arg2 : i32) {
-  // expected-error@+1 {{operand #0 must be i32 or f32}}
+  // expected-error@+1 {{operand #0 must be i32, i64, f32 or f64}}
   %shfl, %pred = gpu.shuffle xor %arg0, %arg1, %arg2 : index
   return
 }
@@ -350,7 +350,7 @@ module {
 
 module {
   gpu.module @gpu_funcs {
-    // expected-error @+1 {{expected memref type in attribution}}
+    // expected-error @below {{'gpu.func' op expected memref type in attribution}}
     gpu.func @kernel() workgroup(%0: i32) {
       gpu.return
     }
@@ -361,8 +361,8 @@ module {
 
 module {
   gpu.module @gpu_funcs {
-    // expected-error @+1 {{expected memory space 3 in attribution}}
-    gpu.func @kernel() workgroup(%0: memref<4xf32>) {
+    // expected-error @below {{'gpu.func' op expected memory space workgroup in attribution}}
+    gpu.func @kernel() workgroup(%0: memref<4xf32, #gpu.address_space<private>>) {
       gpu.return
     }
   }
@@ -372,19 +372,8 @@ module {
 
 module {
   gpu.module @gpu_funcs {
-    // expected-error @+1 {{expected memory space 5 in attribution}}
-    gpu.func @kernel() private(%0: memref<4xf32>) {
-      gpu.return
-    }
-  }
-}
-
-// -----
-
-module {
-  gpu.module @gpu_funcs {
-    // expected-error @+1 {{expected memory space 5 in attribution}}
-    gpu.func @kernel() private(%0: memref<4xf32>) {
+    // expected-error @below {{'gpu.func' op expected memory space private in attribution}}
+    gpu.func @kernel() private(%0: memref<4xf32, #gpu.address_space<workgroup>>) {
       gpu.return
     }
   }
@@ -496,8 +485,8 @@ func.func @mmamatrix_operand_type(){
 func.func @mmamatrix_invalid_element_type(){
     %wg = memref.alloca() {alignment = 32} : memref<32x32xf16, 3>
     %i = arith.constant 16 : index
-    // expected-error @+1 {{MMAMatrixType elements must be F16 or F32}}
-    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, 3> -> !gpu.mma_matrix<16x16xi32, "AOp">
+    // expected-error @+1 {{MMAMatrixType elements must be SI8, UI8, I32, F16, or F32}}
+    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, 3> -> !gpu.mma_matrix<16x16xbf16, "AOp">
     return
 }
 
@@ -515,11 +504,9 @@ func.func @mmaLoadOp_identity_layout(){
 
 // -----
 
-func.func @mmaLoadOp_invalid_mem_space(){
-    %wg = memref.alloca() {alignment = 32} : memref<32x32xf16, 5>
-    %i = arith.constant 16 : index
-    // expected-error @+1 {{source memorySpace kGenericMemorySpace, kSharedMemorySpace or kGlobalMemorySpace only allowed}}
-    %0 = gpu.subgroup_mma_load_matrix %wg[%i, %i] {leadDimension = 32 : index} : memref<32x32xf16, 5> -> !gpu.mma_matrix<16x16xf16, "AOp">
+func.func @mma_invalid_memref_type(%src: memref<32x4xvector<4x8xf32>>, %i: index) {
+    // expected-error @+1 {{operand #0 must be memref of 8-bit signless integer or 32-bit signless integer or 16-bit float or 32-bit float or vector of 8-bit signless integer or 32-bit signless integer or 16-bit float or 32-bit float values of ranks 1 values}}
+    %0 = gpu.subgroup_mma_load_matrix %src[%i, %i] {leadDimension = 4 : index} : memref<32x4xvector<4x8xf32>> -> !gpu.mma_matrix<16x16xf16, "AOp">
     return
 }
 
@@ -533,17 +520,6 @@ func.func @wmmaStoreOp_invalid_map(%arg0 : !gpu.mma_matrix<16x16xf16, "COp">) ->
     %j = arith.constant 16 : index
     // expected-error @+1 {{expected destination memref most minor dim must have unit stride}}
     gpu.subgroup_mma_store_matrix %arg0, %sg[%i,%j] {leadDimension= 32 : index} : !gpu.mma_matrix<16x16xf16, "COp">, memref<32x32xf16,#layout_map_col_major, 3>
-    return
-}
-
-// -----
-
-func.func @wmmaStoreOp_invalid_mem_space(%arg0 : !gpu.mma_matrix<16x16xf16, "COp">) -> () {
-    %sg = memref.alloca(){alignment = 32} : memref<32x32xf16, 5>
-    %i = arith.constant 16 : index
-    %j = arith.constant 16 : index
-    // expected-error @+1 {{destination memorySpace of kGenericMemorySpace, kGlobalMemorySpace or kSharedMemorySpace only allowed}}
-    gpu.subgroup_mma_store_matrix %arg0, %sg[%i,%j] {leadDimension= 32 : index} : !gpu.mma_matrix<16x16xf16, "COp">, memref<32x32xf16, 5>
     return
 }
 
@@ -611,4 +587,26 @@ func.func @alloc() {
    // expected-error@+1 {{dimension operand count does not equal memref dynamic dimension count}}
    %1 = gpu.alloc(%0) : memref<2x?x?xf32, 1>
    return
+}
+
+// -----
+
+module attributes {gpu.container_module} {
+  gpu.module @kernel {
+    // expected-error@+1 {{'gpu.func' op gpu.known_block_size must be a dense i32 array}}
+    gpu.func @kernel() kernel attributes {gpu.known_block_size = 32 : i32} {
+      gpu.return
+    }
+  }
+}
+
+// -----
+
+module attributes {gpu.container_module} {
+  gpu.module @kernel {
+    // expected-error@+1 {{'gpu.func' op gpu.known_block_size must contain exactly 3 elements}}
+    gpu.func @kernel() kernel attributes {gpu.known_block_size = array<i32: 2, 1>} {
+      gpu.return
+    }
+  }
 }

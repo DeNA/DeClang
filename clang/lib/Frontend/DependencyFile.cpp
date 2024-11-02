@@ -21,11 +21,11 @@
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Serialization/ASTReader.h"
 #include "llvm/ADT/StringSet.h"
-#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/VirtualOutputBackends.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 using namespace clang;
 
@@ -45,7 +45,7 @@ struct DepCollectorPPCallbacks : public PPCallbacks {
     // Dependency generation really does want to go all the way to the
     // file entry for a source location to find out what is depended on.
     // We do not want #line markers to affect dependency generation!
-    if (Optional<StringRef> Filename =
+    if (std::optional<StringRef> Filename =
             PP.getSourceManager().getNonBuiltinFilenameForID(FID))
       DepCollector.maybeAddDependency(
           llvm::sys::path::remove_leading_dotslash(*Filename),
@@ -66,18 +66,20 @@ struct DepCollectorPPCallbacks : public PPCallbacks {
   void InclusionDirective(SourceLocation HashLoc, const Token &IncludeTok,
                           StringRef FileName, bool IsAngled,
                           CharSourceRange FilenameRange,
-                          Optional<FileEntryRef> File, StringRef SearchPath,
-                          StringRef RelativePath, const Module *Imported,
+                          OptionalFileEntryRef File, StringRef SearchPath,
+                          StringRef RelativePath, const Module *SuggestedModule,
+                          bool ModuleImported,
                           SrcMgr::CharacteristicKind FileType) override {
     if (!File)
-      DepCollector.maybeAddDependency(FileName, /*FromModule*/false,
-                                     /*IsSystem*/false, /*IsModuleFile*/false,
-                                     /*IsMissing*/true);
+      DepCollector.maybeAddDependency(FileName, /*FromModule*/ false,
+                                      /*IsSystem*/ false,
+                                      /*IsModuleFile*/ false,
+                                      /*IsMissing*/ true);
     // Files that actually exist are handled by FileChanged.
   }
 
   void HasInclude(SourceLocation Loc, StringRef SpelledFilename, bool IsAngled,
-                  Optional<FileEntryRef> File,
+                  OptionalFileEntryRef File,
                   SrcMgr::CharacteristicKind FileType) override {
     if (!File)
       return;
@@ -101,10 +103,10 @@ struct DepCollectorMMCallbacks : public ModuleMapCallbacks {
   void moduleMapFileRead(SourceLocation Loc, const FileEntry &Entry,
                          bool IsSystem) override {
     StringRef Filename = Entry.getName();
-    DepCollector.maybeAddDependency(Filename, /*FromModule*/false,
-                                    /*IsSystem*/IsSystem,
-                                    /*IsModuleFile*/false,
-                                    /*IsMissing*/false);
+    DepCollector.maybeAddDependency(Filename, /*FromModule*/ false,
+                                    /*IsSystem*/ IsSystem,
+                                    /*IsModuleFile*/ false,
+                                    /*IsMissing*/ false);
   }
 };
 
@@ -149,9 +151,9 @@ struct DepCollectorASTListener : public ASTReaderListener {
   }
   void visitModuleFile(StringRef Filename,
                        serialization::ModuleKind Kind) override {
-    DepCollector.maybeAddDependency(Filename, /*FromModule*/true,
-                                   /*IsSystem*/false, /*IsModuleFile*/true,
-                                   /*IsMissing*/false);
+    DepCollector.maybeAddDependency(Filename, /*FromModule*/ true,
+                                    /*IsSystem*/ false, /*IsModuleFile*/ true,
+                                    /*IsMissing*/ false);
   }
   bool visitInputFile(StringRef Filename, bool IsSystem,
                       bool IsOverridden, bool IsExplicitModule) override {
@@ -163,8 +165,9 @@ struct DepCollectorASTListener : public ASTReaderListener {
     if (auto FE = FileMgr.getOptionalFileRef(Filename))
       Filename = FE->getName();
 
-    DepCollector.maybeAddDependency(Filename, /*FromModule*/true, IsSystem,
-                                   /*IsModuleFile*/false, /*IsMissing*/false);
+    DepCollector.maybeAddDependency(Filename, /*FromModule*/ true, IsSystem,
+                                    /*IsModuleFile*/ false,
+                                    /*IsMissing*/ false);
     return true;
   }
 };
@@ -198,10 +201,7 @@ bool DependencyCollector::addDependency(StringRef Filename) {
 }
 
 static bool isSpecialFilename(StringRef Filename) {
-  return llvm::StringSwitch<bool>(Filename)
-      .Case("<built-in>", true)
-      .Case("<stdin>", true)
-      .Default(false);
+  return Filename == "<built-in>";
 }
 
 bool DependencyCollector::sawDependency(StringRef Filename, bool FromModule,
@@ -390,7 +390,7 @@ void DependencyFileGenerator::outputDependencyFile(DiagnosticsEngine &Diags) {
 void DependencyFileGenerator::outputDependencyFile(llvm::raw_ostream &OS) {
   // Write out the dependency targets, trying to avoid overly long
   // lines when possible. We try our best to emit exactly the same
-  // dependency file as GCC (4.2), assuming the included files are the
+  // dependency file as GCC>=10, assuming the included files are the
   // same.
   const unsigned MaxColumns = 75;
   unsigned Columns = 0;
@@ -417,6 +417,8 @@ void DependencyFileGenerator::outputDependencyFile(llvm::raw_ostream &OS) {
   // duplicates.
   ArrayRef<std::string> Files = getDependencies();
   for (StringRef File : Files) {
+    if (File == "<stdin>")
+      continue;
     // Start a new line if this would exceed the column limit. Make
     // sure to leave space for a trailing " \" in case we need to
     // break the line on the next iteration.
@@ -437,7 +439,6 @@ void DependencyFileGenerator::outputDependencyFile(llvm::raw_ostream &OS) {
     for (auto I = Files.begin(), E = Files.end(); I != E; ++I) {
       if (Index++ == InputFileIndex)
         continue;
-      OS << '\n';
       PrintFilename(OS, *I, OutputFormat);
       OS << ":\n";
     }

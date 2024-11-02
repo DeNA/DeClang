@@ -66,8 +66,6 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
     return std::make_unique<GenerateModuleFromModuleMapAction>();
   case GenerateModuleInterface:
     return std::make_unique<GenerateModuleInterfaceAction>();
-  case GenerateHeaderModule:
-    return std::make_unique<GenerateHeaderModuleAction>();
   case GenerateHeaderUnit:
     return std::make_unique<GenerateHeaderUnitAction>();
   case GeneratePCH:            return std::make_unique<GeneratePCHAction>();
@@ -186,6 +184,17 @@ CreateFrontendAction(CompilerInstance &CI) {
     Act = index::createIndexDataRecordingAction(FEOpts, std::move(Act));
     CI.setGenModuleActionWrapper(&index::createIndexDataRecordingAction);
   }
+  // Wrap the base FE action in an extract api action to generate
+  // symbol graph as a biproduct of compilation (enabled with
+  // --emit-symbol-graph option)
+  if (FEOpts.EmitSymbolGraph) {
+    if (FEOpts.SymbolGraphOutputDir.empty()) {
+      CI.getDiagnostics().Report(diag::warn_missing_symbol_graph_dir);
+      CI.getFrontendOpts().SymbolGraphOutputDir = ".";
+    }
+    CI.getCodeGenOpts().ClearASTBeforeBackend = false;
+    Act = std::make_unique<WrappingExtractAPIAction>(std::move(Act));
+  }
 
   // If there are any AST files to merge, create a frontend action
   // adaptor to perform the merge.
@@ -234,7 +243,7 @@ bool ExecuteCompilerInvocation(CompilerInstance *Clang) {
 #if CLANG_ENABLE_STATIC_ANALYZER
   // These should happen AFTER plugins have been loaded!
 
-  AnalyzerOptions &AnOpts = *Clang->getAnalyzerOpts();
+  AnalyzerOptions &AnOpts = Clang->getAnalyzerOpts();
 
   // Honor -analyzer-checker-help and -analyzer-checker-help-hidden.
   if (AnOpts.ShowCheckerHelp || AnOpts.ShowCheckerHelpAlpha ||

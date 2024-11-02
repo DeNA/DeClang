@@ -22,6 +22,7 @@
 
 // FIXME: we should not need this
 #include "Plugins/Language/ObjC/Cocoa.h"
+#include "lldb/lldb-enumerations.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -113,13 +114,13 @@ SwiftArrayNativeBufferHandler::SwiftArrayNativeBufferHandler(
 }
 
 bool SwiftArrayNativeBufferHandler::IsValid() {
-  return m_metadata_ptr != LLDB_INVALID_ADDRESS &&
+  return m_metadata_ptr != LLDB_INVALID_ADDRESS && m_metadata_ptr &&
          m_first_elem_ptr != LLDB_INVALID_ADDRESS && m_capacity >= m_size &&
          m_elem_type.IsValid();
 }
 
 size_t SwiftArrayBridgedBufferHandler::GetCount() {
-  return m_frontend->CalculateNumChildren();
+  return m_frontend->CalculateNumChildrenIgnoringErrors();
 }
 
 size_t SwiftArrayBridgedBufferHandler::GetCapacity() { return GetCount(); }
@@ -138,7 +139,7 @@ SwiftArrayBridgedBufferHandler::SwiftArrayBridgedBufferHandler(
     : SwiftArrayBufferHandler(), m_elem_type(), m_synth_array_sp(),
       m_frontend(nullptr) {
   TypeSystemClangSP clang_ts_sp =
-        ScratchTypeSystemClang::GetForTarget(process_sp->GetTarget());
+      ScratchTypeSystemClang::GetForTarget(process_sp->GetTarget());
   if (!clang_ts_sp)
     return;
   m_elem_type = clang_ts_sp->GetBasicType(lldb::eBasicTypeObjCID);
@@ -247,11 +248,11 @@ bool SwiftArraySliceBufferHandler::IsValid() {
 }
 
 size_t SwiftSyntheticFrontEndBufferHandler::GetCount() {
-  return m_frontend->CalculateNumChildren();
+  return m_frontend->CalculateNumChildrenIgnoringErrors();
 }
 
 size_t SwiftSyntheticFrontEndBufferHandler::GetCapacity() {
-  return m_frontend->CalculateNumChildren();
+  return m_frontend->CalculateNumChildrenIgnoringErrors();
 }
 
 lldb_private::CompilerType
@@ -436,10 +437,7 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &static_valobj) {
         handler.reset(new SwiftArrayBridgedBufferHandler(
             process_sp, masked_storage_location));
       }
-
-      if (handler && handler->IsValid())
-        return handler;
-      return nullptr;
+      return handler;
     } else {
       CompilerType elem_type(
           valobj.GetCompilerType().GetArrayElementType(exe_scope));
@@ -456,6 +454,12 @@ bool lldb_private::formatters::swift::Array_SummaryProvider(
   if (!handler)
     return false;
 
+  if (!handler->IsValid()) {
+    // FIXME: This should be an out-of-band llvm::Error return value.
+    stream << "<uninitialized>";
+    return true;
+  }
+
   auto count = handler->GetCount();
 
   stream.Printf("%zu value%s", count, (count == 1 ? "" : "s"));
@@ -470,14 +474,16 @@ lldb_private::formatters::swift::ArraySyntheticFrontEnd::ArraySyntheticFrontEnd(
     Update();
 }
 
-size_t lldb_private::formatters::swift::ArraySyntheticFrontEnd::
-    CalculateNumChildren() {
-  return m_array_buffer ? m_array_buffer->GetCount() : 0;
+llvm::Expected<uint32_t> lldb_private::formatters::swift::
+    ArraySyntheticFrontEnd::CalculateNumChildren() {
+  if (m_array_buffer)
+    return m_array_buffer->GetCount();
+  return llvm::createStringError("failed to update array data");
 }
 
 lldb::ValueObjectSP
 lldb_private::formatters::swift::ArraySyntheticFrontEnd::GetChildAtIndex(
-    size_t idx) {
+    uint32_t idx) {
   if (!m_array_buffer)
     return ValueObjectSP();
 
@@ -488,9 +494,9 @@ lldb_private::formatters::swift::ArraySyntheticFrontEnd::GetChildAtIndex(
   return child_sp;
 }
 
-bool lldb_private::formatters::swift::ArraySyntheticFrontEnd::Update() {
+lldb::ChildCacheState lldb_private::formatters::swift::ArraySyntheticFrontEnd::Update() {
   m_array_buffer = SwiftArrayBufferHandler::CreateBufferHandler(m_backend);
-  return false;
+  return ChildCacheState::eRefetch;
 }
 
 bool lldb_private::formatters::swift::ArraySyntheticFrontEnd::IsValid() {
@@ -510,7 +516,7 @@ size_t lldb_private::formatters::swift::ArraySyntheticFrontEnd::
     return UINT32_MAX;
   const char *item_name = name.GetCString();
   uint32_t idx = ExtractIndexFromString(item_name);
-  if (idx < UINT32_MAX && idx >= CalculateNumChildren())
+  if (idx < UINT32_MAX && idx >= CalculateNumChildrenIgnoringErrors())
     return UINT32_MAX;
   return idx;
 }

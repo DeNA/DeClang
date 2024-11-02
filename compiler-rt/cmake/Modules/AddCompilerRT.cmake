@@ -2,6 +2,12 @@ include(ExternalProject)
 include(CompilerRTUtils)
 include(HandleCompilerRT)
 
+# CMP0114: ExternalProject step targets fully adopt their steps.
+# New in CMake 3.19: https://cmake.org/cmake/help/latest/policy/CMP0114.html
+if(POLICY CMP0114)
+  cmake_policy(SET CMP0114 OLD)
+endif()
+
 function(set_target_output_directories target output_dir)
   # For RUNTIME_OUTPUT_DIRECTORY variable, Multi-configuration generators
   # append a per-configuration subdirectory to the specified directory.
@@ -115,17 +121,6 @@ function(add_compiler_rt_component name)
     runtime_register_component(${name})
   endif()
   add_dependencies(compiler-rt ${name})
-endfunction()
-
-function(add_asm_sources output)
-  set(${output} ${ARGN} PARENT_SCOPE)
-  # CMake doesn't pass the correct architecture for Apple prior to CMake 3.19. https://gitlab.kitware.com/cmake/cmake/-/issues/20771
-  # MinGW didn't work correctly with assembly prior to CMake 3.17. https://gitlab.kitware.com/cmake/cmake/-/merge_requests/4287 and https://reviews.llvm.org/rGb780df052dd2b246a760d00e00f7de9ebdab9d09
-  # Workaround these two issues by compiling as C.
-  # Same workaround used in libunwind. Also update there if changed here.
-  if((APPLE AND CMAKE_VERSION VERSION_LESS 3.19) OR (MINGW AND CMAKE_VERSION VERSION_LESS 3.17))
-    set_source_files_properties(${ARGN} PROPERTIES LANGUAGE C)
-  endif()
 endfunction()
 
 macro(set_output_name output name arch)
@@ -502,7 +497,7 @@ function(add_compiler_rt_test test_suite test_name arch)
   set(output_dir "${output_dir}/${CMAKE_CFG_INTDIR}")
   file(MAKE_DIRECTORY "${output_dir}")
   set(output_bin "${output_dir}/${test_name}")
-  if(MSVC)
+  if(WIN32)
     set(output_bin "${output_bin}.exe")
   endif()
 

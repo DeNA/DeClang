@@ -547,8 +547,8 @@ define float @test_dtos(double %a) #0 {
 ; EFPU2-LABEL: test_dtos:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __truncdfsf2
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -612,15 +612,13 @@ define double @test_ddiv(double %a, double %b) #0 {
 ; SPE-NEXT:    evmergelo 3, 3, 4
 ; SPE-NEXT:    efddiv 4, 3, 5
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_ddiv:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __divdf3
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -639,15 +637,13 @@ define double @test_dmul(double %a, double %b) #0 {
 ; SPE-NEXT:    evmergelo 3, 3, 4
 ; SPE-NEXT:    efdmul 4, 3, 5
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_dmul:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __muldf3
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -665,15 +661,13 @@ define double @test_dadd(double %a, double %b) #0 {
 ; SPE-NEXT:    evmergelo 3, 3, 4
 ; SPE-NEXT:    efdadd 4, 3, 5
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_dadd:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __adddf3
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -691,15 +685,13 @@ define double @test_dsub(double %a, double %b) #0 {
 ; SPE-NEXT:    evmergelo 3, 3, 4
 ; SPE-NEXT:    efdsub 4, 3, 5
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_dsub:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __subdf3
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -716,8 +708,6 @@ define double @test_dneg(double %a) #0 {
 ; SPE-NEXT:    evmergelo 3, 3, 4
 ; SPE-NEXT:    efdneg 4, 3
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_dneg:
@@ -734,15 +724,13 @@ define double @test_stod(float %a) #0 {
 ; SPE:       # %bb.0: # %entry
 ; SPE-NEXT:    efdcfs 4, 3
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_stod:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __extendsfdf2
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -774,8 +762,8 @@ define i1 @test_dcmpuno(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpuno:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __unorddf2
 ; EFPU2-NEXT:    cntlzw 3, 3
 ; EFPU2-NEXT:    not 3, 3
@@ -809,8 +797,8 @@ define i1 @test_dcmpord(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpord:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __unorddf2
 ; EFPU2-NEXT:    cntlzw 3, 3
 ; EFPU2-NEXT:    rlwinm 3, 3, 27, 31, 31
@@ -845,8 +833,8 @@ define i32 @test_dcmpgt(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpgt:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __gtdf2
 ; EFPU2-NEXT:    cmpwi 3, 0
 ; EFPU2-NEXT:    ble 0, .LBB37_2
@@ -905,8 +893,8 @@ define i32 @test_dcmpugt(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpugt:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __ledf2
 ; EFPU2-NEXT:    cmpwi 3, 0
 ; EFPU2-NEXT:    ble 0, .LBB38_2
@@ -959,8 +947,8 @@ define i32 @test_dcmple(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmple:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __gtdf2
 ; EFPU2-NEXT:    cmpwi 3, 0
 ; EFPU2-NEXT:    bgt 0, .LBB39_2
@@ -1013,8 +1001,8 @@ define i32 @test_dcmpule(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpule:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __gtdf2
 ; EFPU2-NEXT:    cmpwi 3, 0
 ; EFPU2-NEXT:    bgt 0, .LBB40_2
@@ -1068,8 +1056,8 @@ define i32 @test_dcmpeq(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpeq:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __nedf2
 ; EFPU2-NEXT:    cmplwi 3, 0
 ; EFPU2-NEXT:    bne 0, .LBB41_2
@@ -1125,17 +1113,17 @@ define i32 @test_dcmpueq(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpueq:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
-; EFPU2-NEXT:    stwu 1, -80(1)
+; EFPU2-NEXT:    stwu 1, -48(1)
 ; EFPU2-NEXT:    mfcr 12
-; EFPU2-NEXT:    stw 12, 76(1)
-; EFPU2-NEXT:    evstdd 27, 24(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 0, 52(1)
+; EFPU2-NEXT:    stw 12, 24(1)
+; EFPU2-NEXT:    stw 27, 28(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 27, 3
-; EFPU2-NEXT:    evstdd 28, 32(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 28, 32(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 28, 4
-; EFPU2-NEXT:    evstdd 29, 40(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 29, 36(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 29, 5
-; EFPU2-NEXT:    evstdd 30, 48(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 30, 40(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 30, 6
 ; EFPU2-NEXT:    bl __eqdf2
 ; EFPU2-NEXT:    cmpwi 2, 3, 0
@@ -1156,14 +1144,14 @@ define i32 @test_dcmpueq(double %a, double %b) #0 {
 ; EFPU2-NEXT:  .LBB42_4: # %ret
 ; EFPU2-NEXT:    stw 3, 20(1)
 ; EFPU2-NEXT:    lwz 3, 20(1)
-; EFPU2-NEXT:    evldd 30, 48(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 29, 40(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 28, 32(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    lwz 12, 76(1)
-; EFPU2-NEXT:    evldd 27, 24(1) # 8-byte Folded Reload
+; EFPU2-NEXT:    lwz 30, 40(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 29, 36(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 28, 32(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 12, 24(1)
+; EFPU2-NEXT:    lwz 27, 28(1) # 4-byte Folded Reload
 ; EFPU2-NEXT:    mtcrf 32, 12 # cr2
-; EFPU2-NEXT:    lwz 0, 84(1)
-; EFPU2-NEXT:    addi 1, 1, 80
+; EFPU2-NEXT:    lwz 0, 52(1)
+; EFPU2-NEXT:    addi 1, 1, 48
 ; EFPU2-NEXT:    mtlr 0
 ; EFPU2-NEXT:    blr
   entry:
@@ -1201,17 +1189,17 @@ define i1 @test_dcmpne(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpne:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
-; EFPU2-NEXT:    stwu 1, -80(1)
+; EFPU2-NEXT:    stwu 1, -48(1)
 ; EFPU2-NEXT:    mfcr 12
-; EFPU2-NEXT:    stw 12, 76(1)
-; EFPU2-NEXT:    evstdd 27, 24(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 0, 52(1)
+; EFPU2-NEXT:    stw 12, 24(1)
+; EFPU2-NEXT:    stw 27, 28(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 27, 3
-; EFPU2-NEXT:    evstdd 28, 32(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 28, 32(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 28, 4
-; EFPU2-NEXT:    evstdd 29, 40(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 29, 36(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 29, 5
-; EFPU2-NEXT:    evstdd 30, 48(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 30, 40(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 30, 6
 ; EFPU2-NEXT:    bl __unorddf2
 ; EFPU2-NEXT:    cmpwi 2, 3, 0
@@ -1220,13 +1208,13 @@ define i1 @test_dcmpne(double %a, double %b) #0 {
 ; EFPU2-NEXT:    mr 5, 29
 ; EFPU2-NEXT:    mr 6, 30
 ; EFPU2-NEXT:    bl __eqdf2
-; EFPU2-NEXT:    evldd 30, 48(1) # 8-byte Folded Reload
+; EFPU2-NEXT:    lwz 30, 40(1) # 4-byte Folded Reload
 ; EFPU2-NEXT:    cmpwi 3, 0
-; EFPU2-NEXT:    evldd 29, 40(1) # 8-byte Folded Reload
+; EFPU2-NEXT:    lwz 29, 36(1) # 4-byte Folded Reload
 ; EFPU2-NEXT:    li 4, 1
-; EFPU2-NEXT:    evldd 28, 32(1) # 8-byte Folded Reload
+; EFPU2-NEXT:    lwz 28, 32(1) # 4-byte Folded Reload
 ; EFPU2-NEXT:    crorc 20, 2, 10
-; EFPU2-NEXT:    lwz 12, 76(1)
+; EFPU2-NEXT:    lwz 12, 24(1)
 ; EFPU2-NEXT:    bc 12, 20, .LBB43_2
 ; EFPU2-NEXT:  # %bb.1: # %entry
 ; EFPU2-NEXT:    ori 3, 4, 0
@@ -1234,10 +1222,10 @@ define i1 @test_dcmpne(double %a, double %b) #0 {
 ; EFPU2-NEXT:  .LBB43_2: # %entry
 ; EFPU2-NEXT:    li 3, 0
 ; EFPU2-NEXT:  .LBB43_3: # %entry
-; EFPU2-NEXT:    evldd 27, 24(1) # 8-byte Folded Reload
+; EFPU2-NEXT:    lwz 27, 28(1) # 4-byte Folded Reload
 ; EFPU2-NEXT:    mtcrf 32, 12 # cr2
-; EFPU2-NEXT:    lwz 0, 84(1)
-; EFPU2-NEXT:    addi 1, 1, 80
+; EFPU2-NEXT:    lwz 0, 52(1)
+; EFPU2-NEXT:    addi 1, 1, 48
 ; EFPU2-NEXT:    mtlr 0
 ; EFPU2-NEXT:    blr
   entry:
@@ -1267,8 +1255,8 @@ define i32 @test_dcmpune(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpune:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __eqdf2
 ; EFPU2-NEXT:    cmplwi 3, 0
 ; EFPU2-NEXT:    beq 0, .LBB44_2
@@ -1321,8 +1309,8 @@ define i32 @test_dcmplt(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmplt:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __ltdf2
 ; EFPU2-NEXT:    cmpwi 3, 0
 ; EFPU2-NEXT:    bge 0, .LBB45_2
@@ -1381,8 +1369,8 @@ define i32 @test_dcmpult(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpult:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __gedf2
 ; EFPU2-NEXT:    cmpwi 3, 0
 ; EFPU2-NEXT:    bge 0, .LBB46_2
@@ -1422,8 +1410,8 @@ define i1 @test_dcmpge(double %a, double %b) #0 {
 ; SPE-NEXT:    efdcmpeq 0, 4, 4
 ; SPE-NEXT:    efdcmpeq 1, 3, 3
 ; SPE-NEXT:    efdcmplt 5, 3, 4
-; SPE-NEXT:    crand 24, 5, 1
-; SPE-NEXT:    crorc 20, 21, 24
+; SPE-NEXT:    crand 20, 5, 1
+; SPE-NEXT:    crorc 20, 21, 20
 ; SPE-NEXT:    bc 12, 20, .LBB47_2
 ; SPE-NEXT:  # %bb.1: # %entry
 ; SPE-NEXT:    ori 3, 7, 0
@@ -1435,8 +1423,8 @@ define i1 @test_dcmpge(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpge:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __gedf2
 ; EFPU2-NEXT:    not 3, 3
 ; EFPU2-NEXT:    srwi 3, 3, 31
@@ -1471,8 +1459,8 @@ define i32 @test_dcmpuge(double %a, double %b) #0 {
 ; EFPU2-LABEL: test_dcmpuge:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __ltdf2
 ; EFPU2-NEXT:    cmpwi 3, 0
 ; EFPU2-NEXT:    blt 0, .LBB48_2
@@ -1514,8 +1502,6 @@ define double @test_dselect(double %a, double %b, i1 %c) #0 {
 ; SPE-NEXT:    evor 4, 5, 5
 ; SPE-NEXT:  .LBB49_2: # %entry
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_dselect:
@@ -1541,8 +1527,8 @@ define i32 @test_dtoui(double %a) #0 {
 ; EFPU2-LABEL: test_dtoui:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __fixunsdfsi
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -1563,8 +1549,8 @@ define i32 @test_dtosi(double %a) #0 {
 ; EFPU2-LABEL: test_dtosi:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __fixdfsi
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -1580,15 +1566,13 @@ define double @test_dfromui(i32 %a) #0 {
 ; SPE:       # %bb.0: # %entry
 ; SPE-NEXT:    efdcfui 4, 3
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_dfromui:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __floatunsidf
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -1604,15 +1588,13 @@ define double @test_dfromsi(i32 %a) #0 {
 ; SPE:       # %bb.0: # %entry
 ; SPE-NEXT:    efdcfsi 4, 3
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    blr
 ;
 ; EFPU2-LABEL: test_dfromsi:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
 ; EFPU2-NEXT:    stwu 1, -16(1)
+; EFPU2-NEXT:    stw 0, 20(1)
 ; EFPU2-NEXT:    bl __floatsidf
 ; EFPU2-NEXT:    lwz 0, 20(1)
 ; EFPU2-NEXT:    addi 1, 1, 16
@@ -1638,14 +1620,14 @@ define double @test_spill(double %a, i32 %a1, i64 %a2, ptr %a3, ptr %a4, ptr %a5
 ; SPE-LABEL: test_spill:
 ; SPE:       # %bb.0: # %entry
 ; SPE-NEXT:    mflr 0
-; SPE-NEXT:    stw 0, 4(1)
 ; SPE-NEXT:    stwu 1, -288(1)
 ; SPE-NEXT:    li 5, 256
-; SPE-NEXT:    evstddx 30, 1, 5  # 8-byte Folded Spill
-; SPE-NEXT:    li 5, .LCPI55_0@
+; SPE-NEXT:    stw 0, 292(1)
 ; SPE-NEXT:    lis 6, .LCPI55_0@ha
+; SPE-NEXT:    evstddx 30, 1, 5 # 8-byte Folded Spill
+; SPE-NEXT:    li 5, .LCPI55_0@l
 ; SPE-NEXT:    evlddx 5, 6, 5
-; SPE-NEXT:    stw 31, 284(1)    # 4-byte Folded Spill
+; SPE-NEXT:    stw 31, 284(1) # 4-byte Folded Spill
 ; SPE-NEXT:    evstdd 14, 128(1) # 8-byte Folded Spill
 ; SPE-NEXT:    evstdd 15, 136(1) # 8-byte Folded Spill
 ; SPE-NEXT:    evstdd 16, 144(1) # 8-byte Folded Spill
@@ -1687,9 +1669,7 @@ define double @test_spill(double %a, i32 %a1, i64 %a2, ptr %a3, ptr %a4, ptr %a5
 ; SPE-NEXT:    evldd 4, 24(1) # 8-byte Folded Reload
 ; SPE-NEXT:    li 5, 256
 ; SPE-NEXT:    evmergehi 3, 4, 4
-; SPE-NEXT:    # kill: def $r4 killed $r4 killed $s4
 ; SPE-NEXT:    evlddx 30, 1, 5 # 8-byte Folded Reload
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    evldd 29, 248(1) # 8-byte Folded Reload
 ; SPE-NEXT:    evldd 28, 240(1) # 8-byte Folded Reload
 ; SPE-NEXT:    evldd 27, 232(1) # 8-byte Folded Reload
@@ -1706,7 +1686,7 @@ define double @test_spill(double %a, i32 %a1, i64 %a2, ptr %a3, ptr %a4, ptr %a5
 ; SPE-NEXT:    evldd 16, 144(1) # 8-byte Folded Reload
 ; SPE-NEXT:    evldd 15, 136(1) # 8-byte Folded Reload
 ; SPE-NEXT:    evldd 14, 128(1) # 8-byte Folded Reload
-; SPE-NEXT:    lwz 31, 284(1)   # 4-byte Folded Reload
+; SPE-NEXT:    lwz 31, 284(1) # 4-byte Folded Reload
 ; SPE-NEXT:    lwz 0, 292(1)
 ; SPE-NEXT:    addi 1, 1, 288
 ; SPE-NEXT:    mtlr 0
@@ -1715,15 +1695,15 @@ define double @test_spill(double %a, i32 %a1, i64 %a2, ptr %a3, ptr %a4, ptr %a5
 ; EFPU2-LABEL: test_spill:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
-; EFPU2-NEXT:    stwu 1, -144(1)
+; EFPU2-NEXT:    stwu 1, -128(1)
 ; EFPU2-NEXT:    mr 5, 3
 ; EFPU2-NEXT:    mr 6, 4
-; EFPU2-NEXT:    evstdd 27, 104(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    evstdd 28, 112(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    evstdd 29, 120(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    evstdd 30, 128(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    lwz 28, 152(1)
+; EFPU2-NEXT:    stw 0, 132(1)
+; EFPU2-NEXT:    stw 27, 108(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    stw 28, 112(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    stw 29, 116(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    stw 30, 120(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    lwz 28, 136(1)
 ; EFPU2-NEXT:    bl __adddf3
 ; EFPU2-NEXT:    lis 5, 16393
 ; EFPU2-NEXT:    lis 6, -4069
@@ -1734,7 +1714,7 @@ define double @test_spill(double %a, i32 %a1, i64 %a2, ptr %a3, ptr %a4, ptr %a5
 ; EFPU2-NEXT:    bl __adddf3
 ; EFPU2-NEXT:    mr 30, 3
 ; EFPU2-NEXT:    mr 29, 4
-; EFPU2-NEXT:    addi 3, 1, 52
+; EFPU2-NEXT:    addi 3, 1, 56
 ; EFPU2-NEXT:    li 4, 0
 ; EFPU2-NEXT:    li 5, 24
 ; EFPU2-NEXT:    li 6, 1
@@ -1742,19 +1722,19 @@ define double @test_spill(double %a, i32 %a1, i64 %a2, ptr %a3, ptr %a4, ptr %a5
 ; EFPU2-NEXT:    bl test_memset
 ; EFPU2-NEXT:    stw 27, 0(28)
 ; EFPU2-NEXT:    bl test_func2
-; EFPU2-NEXT:    addi 3, 1, 8
+; EFPU2-NEXT:    addi 3, 1, 12
 ; EFPU2-NEXT:    li 4, 0
 ; EFPU2-NEXT:    li 5, 20
 ; EFPU2-NEXT:    li 6, 1
 ; EFPU2-NEXT:    bl test_memset
 ; EFPU2-NEXT:    mr 3, 30
 ; EFPU2-NEXT:    mr 4, 29
-; EFPU2-NEXT:    evldd 30, 128(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 29, 120(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 28, 112(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 27, 104(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    lwz 0, 148(1)
-; EFPU2-NEXT:    addi 1, 1, 144
+; EFPU2-NEXT:    lwz 30, 120(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 29, 116(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 28, 112(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 27, 108(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 0, 132(1)
+; EFPU2-NEXT:    addi 1, 1, 128
 ; EFPU2-NEXT:    mtlr 0
 ; EFPU2-NEXT:    blr
 entry:
@@ -1778,11 +1758,11 @@ define dso_local float @test_fma(i32 %d) local_unnamed_addr #0 {
 ; CHECK-LABEL: test_fma:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    mflr 0
-; CHECK-NEXT:    stw 0, 4(1)
 ; CHECK-NEXT:    stwu 1, -32(1)
 ; CHECK-NEXT:    cmpwi 3, 0
-; CHECK-NEXT:    evstdd 29, 8(1) # 8-byte Folded Spill
-; CHECK-NEXT:    evstdd 30, 16(1) # 8-byte Folded Spill
+; CHECK-NEXT:    stw 0, 36(1)
+; CHECK-NEXT:    stw 29, 20(1) # 4-byte Folded Spill
+; CHECK-NEXT:    stw 30, 24(1) # 4-byte Folded Spill
 ; CHECK-NEXT:    ble 0, .LBB56_3
 ; CHECK-NEXT:  # %bb.1: # %for.body.preheader
 ; CHECK-NEXT:    mr 30, 3
@@ -1793,17 +1773,18 @@ define dso_local float @test_fma(i32 %d) local_unnamed_addr #0 {
 ; CHECK-NEXT:    efscfsi 3, 29
 ; CHECK-NEXT:    mr 4, 3
 ; CHECK-NEXT:    bl fmaf
-; CHECK-NEXT:    addi 29, 29, 1
-; CHECK-NEXT:    cmplw 30, 29
+; CHECK-NEXT:    addi 30, 30, -1
 ; CHECK-NEXT:    mr 5, 3
-; CHECK-NEXT:    bne 0, .LBB56_2
+; CHECK-NEXT:    cmplwi 30, 0
+; CHECK-NEXT:    addi 29, 29, 1
+; CHECK-NEXT:    bc 12, 1, .LBB56_2
 ; CHECK-NEXT:    b .LBB56_4
 ; CHECK-NEXT:  .LBB56_3:
 ; CHECK-NEXT:    # implicit-def: $r5
 ; CHECK-NEXT:  .LBB56_4: # %for.cond.cleanup
 ; CHECK-NEXT:    mr 3, 5
-; CHECK-NEXT:    evldd 30, 16(1) # 8-byte Folded Reload
-; CHECK-NEXT:    evldd 29, 8(1) # 8-byte Folded Reload
+; CHECK-NEXT:    lwz 30, 24(1) # 4-byte Folded Reload
+; CHECK-NEXT:    lwz 29, 20(1) # 4-byte Folded Reload
 ; CHECK-NEXT:    lwz 0, 36(1)
 ; CHECK-NEXT:    addi 1, 1, 32
 ; CHECK-NEXT:    mtlr 0
@@ -1839,31 +1820,29 @@ define void @d(ptr %e, ptr %f) #0 {
 ; SPE-LABEL: d:
 ; SPE:       # %bb.0: # %entry
 ; SPE-NEXT:    mflr 0
-; SPE-NEXT:    stw 0, 4(1)
 ; SPE-NEXT:    stwu 1, -48(1)
+; SPE-NEXT:    stw 0, 52(1)
 ; SPE-NEXT:    lwz 4, 0(4)
 ; SPE-NEXT:    lwz 3, 0(3)
-; SPE-NEXT:    evstdd 29, 24(1) # 8-byte Folded Spill
+; SPE-NEXT:    evstdd 29, 8(1) # 8-byte Folded Spill
 ; SPE-NEXT:    efdcfs 29, 4
-; SPE-NEXT:    evstdd 28, 16(1) # 8-byte Folded Spill
+; SPE-NEXT:    stw 28, 32(1) # 4-byte Folded Spill
 ; SPE-NEXT:    mr 4, 29
-; SPE-NEXT:    evstdd 30, 32(1) # 8-byte Folded Spill
+; SPE-NEXT:    evstdd 30, 16(1) # 8-byte Folded Spill
 ; SPE-NEXT:    efdcfs 30, 3
 ; SPE-NEXT:    evmergehi 3, 29, 29
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    bl foo
 ; SPE-NEXT:    mr 28, 3
 ; SPE-NEXT:    evmergehi 3, 30, 30
 ; SPE-NEXT:    mr 4, 30
-; SPE-NEXT:    # kill: def $r3 killed $r3 killed $s3
 ; SPE-NEXT:    bl foo
 ; SPE-NEXT:    efdcfsi 3, 28
-; SPE-NEXT:    evldd 30, 32(1) # 8-byte Folded Reload
+; SPE-NEXT:    evldd 30, 16(1) # 8-byte Folded Reload
 ; SPE-NEXT:    efdmul 3, 29, 3
 ; SPE-NEXT:    efscfd 3, 3
-; SPE-NEXT:    evldd 29, 24(1) # 8-byte Folded Reload
+; SPE-NEXT:    evldd 29, 8(1) # 8-byte Folded Reload
 ; SPE-NEXT:    stw 3, 0(3)
-; SPE-NEXT:    evldd 28, 16(1) # 8-byte Folded Reload
+; SPE-NEXT:    lwz 28, 32(1) # 4-byte Folded Reload
 ; SPE-NEXT:    lwz 0, 52(1)
 ; SPE-NEXT:    addi 1, 1, 48
 ; SPE-NEXT:    mtlr 0
@@ -1872,14 +1851,14 @@ define void @d(ptr %e, ptr %f) #0 {
 ; EFPU2-LABEL: d:
 ; EFPU2:       # %bb.0: # %entry
 ; EFPU2-NEXT:    mflr 0
-; EFPU2-NEXT:    stw 0, 4(1)
-; EFPU2-NEXT:    stwu 1, -64(1)
+; EFPU2-NEXT:    stwu 1, -32(1)
+; EFPU2-NEXT:    stw 0, 36(1)
 ; EFPU2-NEXT:    lwz 3, 0(3)
-; EFPU2-NEXT:    evstdd 26, 16(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    evstdd 27, 24(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    evstdd 28, 32(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    evstdd 29, 40(1) # 8-byte Folded Spill
-; EFPU2-NEXT:    evstdd 30, 48(1) # 8-byte Folded Spill
+; EFPU2-NEXT:    stw 26, 8(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    stw 27, 12(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    stw 28, 16(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    stw 29, 20(1) # 4-byte Folded Spill
+; EFPU2-NEXT:    stw 30, 24(1) # 4-byte Folded Spill
 ; EFPU2-NEXT:    mr 30, 4
 ; EFPU2-NEXT:    bl __extendsfdf2
 ; EFPU2-NEXT:    mr 28, 3
@@ -1902,13 +1881,13 @@ define void @d(ptr %e, ptr %f) #0 {
 ; EFPU2-NEXT:    bl __muldf3
 ; EFPU2-NEXT:    bl __truncdfsf2
 ; EFPU2-NEXT:    stw 3, 0(3)
-; EFPU2-NEXT:    evldd 30, 48(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 29, 40(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 28, 32(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 27, 24(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    evldd 26, 16(1) # 8-byte Folded Reload
-; EFPU2-NEXT:    lwz 0, 68(1)
-; EFPU2-NEXT:    addi 1, 1, 64
+; EFPU2-NEXT:    lwz 30, 24(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 29, 20(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 28, 16(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 27, 12(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 26, 8(1) # 4-byte Folded Reload
+; EFPU2-NEXT:    lwz 0, 36(1)
+; EFPU2-NEXT:    addi 1, 1, 32
 ; EFPU2-NEXT:    mtlr 0
 ; EFPU2-NEXT:    blr
 entry:

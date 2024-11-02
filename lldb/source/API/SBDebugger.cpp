@@ -51,6 +51,7 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/TargetList.h"
 #include "lldb/Utility/Args.h"
+#include "lldb/Utility/Diagnostics.h"
 #include "lldb/Utility/State.h"
 #include "lldb/Version/Version.h"
 
@@ -152,19 +153,14 @@ lldb::SBStructuredData
 SBDebugger::GetDiagnosticFromEvent(const lldb::SBEvent &event) {
   LLDB_INSTRUMENT_VA(event);
 
-  const DiagnosticEventData *diagnostic_data =
-      DiagnosticEventData::GetEventDataFromEvent(event.get());
-  if (!diagnostic_data)
+  StructuredData::DictionarySP dictionary_sp =
+      DiagnosticEventData::GetAsStructuredData(event.get());
+
+  if (!dictionary_sp)
     return {};
 
-  auto dictionary = std::make_unique<StructuredData::Dictionary>();
-  dictionary->AddStringItem("message", diagnostic_data->GetMessage());
-  dictionary->AddStringItem("type", diagnostic_data->GetPrefix());
-  dictionary->AddBooleanItem("debugger_specific",
-                             diagnostic_data->IsDebuggerSpecific());
-
   SBStructuredData data;
-  data.m_impl_up->SetObjectSP(std::move(dictionary));
+  data.m_impl_up->SetObjectSP(std::move(dictionary_sp));
   return data;
 }
 
@@ -233,6 +229,16 @@ void SBDebugger::PrintStackTraceOnError() {
   static std::string executable =
       llvm::sys::fs::getMainExecutable(nullptr, nullptr);
   llvm::sys::PrintStackTraceOnErrorSignal(executable);
+}
+
+static void DumpDiagnostics(void *cookie) {
+  Diagnostics::Instance().Dump(llvm::errs());
+}
+
+void SBDebugger::PrintDiagnosticsOnError() {
+  LLDB_INSTRUMENT();
+
+  llvm::sys::AddSignalHandler(&DumpDiagnostics, nullptr);
 }
 
 void SBDebugger::Terminate() {
@@ -475,8 +481,7 @@ lldb::SBStructuredData SBDebugger::GetSetting(const char *setting) {
     m_opaque_sp->DumpAllPropertyValues(&exe_ctx, json_strm, /*dump_mask*/ 0,
                                        /*is_json*/ true);
 
-  data.m_impl_up->SetObjectSP(
-      StructuredData::ParseJSON(json_strm.GetString().str()));
+  data.m_impl_up->SetObjectSP(StructuredData::ParseJSON(json_strm.GetString()));
   return data;
 }
 
@@ -776,6 +781,9 @@ SBStructuredData SBDebugger::GetBuildConfiguration() {
   AddBoolConfigEntry(
       *config_up, "editline", LLDB_ENABLE_LIBEDIT,
       "A boolean value that indicates if editline support is enabled in LLDB");
+  AddBoolConfigEntry(*config_up, "editline_wchar", LLDB_EDITLINE_USE_WCHAR,
+                     "A boolean value that indicates if editline wide "
+                     "characters support is enabled in LLDB");
   AddBoolConfigEntry(
       *config_up, "lzma", LLDB_ENABLE_LZMA,
       "A boolean value that indicates if lzma support is enabled in LLDB");
@@ -1327,7 +1335,10 @@ SBDebugger SBDebugger::FindDebuggerWithID(int id) {
 const char *SBDebugger::GetInstanceName() {
   LLDB_INSTRUMENT_VA(this);
 
-  return (m_opaque_sp ? m_opaque_sp->GetInstanceName().AsCString() : nullptr);
+  if (!m_opaque_sp)
+    return nullptr;
+
+  return ConstString(m_opaque_sp->GetInstanceName()).AsCString();
 }
 
 SBError SBDebugger::SetInternalVariable(const char *var_name, const char *value,
@@ -1335,8 +1346,8 @@ SBError SBDebugger::SetInternalVariable(const char *var_name, const char *value,
   LLDB_INSTRUMENT_VA(var_name, value, debugger_instance_name);
 
   SBError sb_error;
-  DebuggerSP debugger_sp(Debugger::FindDebuggerWithInstanceName(
-      ConstString(debugger_instance_name)));
+  DebuggerSP debugger_sp(
+      Debugger::FindDebuggerWithInstanceName(debugger_instance_name));
   Status error;
   if (debugger_sp) {
     ExecutionContext exe_ctx(
@@ -1357,14 +1368,14 @@ SBDebugger::GetInternalVariableValue(const char *var_name,
                                      const char *debugger_instance_name) {
   LLDB_INSTRUMENT_VA(var_name, debugger_instance_name);
 
-  DebuggerSP debugger_sp(Debugger::FindDebuggerWithInstanceName(
-      ConstString(debugger_instance_name)));
+  DebuggerSP debugger_sp(
+      Debugger::FindDebuggerWithInstanceName(debugger_instance_name));
   Status error;
   if (debugger_sp) {
     ExecutionContext exe_ctx(
         debugger_sp->GetCommandInterpreter().GetExecutionContext());
     lldb::OptionValueSP value_sp(
-        debugger_sp->GetPropertyValue(&exe_ctx, var_name, false, error));
+        debugger_sp->GetPropertyValue(&exe_ctx, var_name, error));
     if (value_sp) {
       StreamString value_strm;
       value_sp->DumpValue(&exe_ctx, value_strm, OptionValue::eDumpOptionValue);
@@ -1397,9 +1408,9 @@ const char *SBDebugger::GetPrompt() const {
 
   Log *log = GetLog(LLDBLog::API);
 
-  LLDB_LOGF(log, "SBDebugger(%p)::GetPrompt () => \"%s\"",
-            static_cast<void *>(m_opaque_sp.get()),
-            (m_opaque_sp ? m_opaque_sp->GetPrompt().str().c_str() : ""));
+  LLDB_LOG(log, "SBDebugger({0:x})::GetPrompt () => \"{1}\"",
+           static_cast<void *>(m_opaque_sp.get()),
+           (m_opaque_sp ? m_opaque_sp->GetPrompt() : ""));
 
   return (m_opaque_sp ? ConstString(m_opaque_sp->GetPrompt()).GetCString()
                       : nullptr);
@@ -1488,7 +1499,7 @@ bool SBDebugger::GetDescription(SBStream &description) {
   Stream &strm = description.ref();
 
   if (m_opaque_sp) {
-    const char *name = m_opaque_sp->GetInstanceName().AsCString();
+    const char *name = m_opaque_sp->GetInstanceName().c_str();
     user_id_t id = m_opaque_sp->GetID();
     strm.Printf("Debugger (instance: \"%s\", id: %" PRIu64 ")", name, id);
   } else
@@ -1657,7 +1668,7 @@ static llvm::ArrayRef<const char *> GetCategoryArray(const char **categories) {
   size_t len = 0;
   while (categories[len] != nullptr)
     ++len;
-  return llvm::makeArrayRef(categories, len);
+  return llvm::ArrayRef(categories, len);
 }
 
 bool SBDebugger::EnableLog(const char *channel, const char **categories) {

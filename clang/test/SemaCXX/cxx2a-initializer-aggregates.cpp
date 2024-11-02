@@ -157,6 +157,27 @@ namespace deduction {
   }
 }
 
+namespace no_unwrap {
+  template<typename T> struct X {
+    static_assert(false, "should not be instantiated");
+  };
+  struct Q {
+    template<typename T, typename U = typename X<T>::type> Q(T&&);
+  };
+
+  // Ensure that we do not try to call 'Q::Q(.a = 1)' here.
+  void g() { Q q = {.a = 1}; } // expected-error {{initialization of non-aggregate type 'Q' with a designated initializer list}}
+
+  struct S { int a; };
+  void h(Q q);
+  void h(S s);
+
+  // OK, does not instantiate X<void&> (!).
+  void i() {
+    h({.a = 1});
+  }
+}
+
 namespace GH63605 {
 struct A  {
   unsigned x;

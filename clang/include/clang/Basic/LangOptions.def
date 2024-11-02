@@ -97,7 +97,8 @@ LANGOPT(CPlusPlus11       , 1, 0, "C++11")
 LANGOPT(CPlusPlus14       , 1, 0, "C++14")
 LANGOPT(CPlusPlus17       , 1, 0, "C++17")
 LANGOPT(CPlusPlus20       , 1, 0, "C++20")
-LANGOPT(CPlusPlus2b       , 1, 0, "C++2b")
+LANGOPT(CPlusPlus23       , 1, 0, "C++23")
+LANGOPT(CPlusPlus26       , 1, 0, "C++26")
 LANGOPT(ObjC              , 1, 0, "Objective-C")
 BENIGN_LANGOPT(ObjCDefaultSynthProperties , 1, 0,
                "Objective-C auto-synthesized properties")
@@ -182,8 +183,8 @@ BENIGN_LANGOPT(EmitAllDecls      , 1, 0, "emitting all declarations")
 LANGOPT(MathErrno         , 1, 1, "errno in math functions")
 BENIGN_LANGOPT(HeinousExtensions , 1, 0, "extensions that we really don't like and may be ripped out at any time")
 LANGOPT(Modules           , 1, 0, "modules semantics")
-COMPATIBLE_LANGOPT(ModulesTS  , 1, 0, "C++ Modules TS syntax")
 COMPATIBLE_LANGOPT(CPlusPlusModules, 1, 0, "C++ modules syntax")
+LANGOPT(BuiltinHeadersInSystemModules, 1, 0, "builtin headers belong to system modules, and _Builtin_ modules are ignored for cstdlib headers")
 BENIGN_ENUM_LANGOPT(CompilingModule, CompilingModuleKind, 3, CMK_None,
                     "compiling a module interface")
 BENIGN_LANGOPT(CompilingPCH, 1, 0, "building a pch")
@@ -255,7 +256,7 @@ LANGOPT(OpenMP            , 32, 0, "OpenMP support and version of OpenMP (31, 40
 LANGOPT(OpenMPExtensions  , 1, 1, "Enable all Clang extensions for OpenMP directives and clauses")
 LANGOPT(OpenMPSimd        , 1, 0, "Use SIMD only OpenMP support.")
 LANGOPT(OpenMPUseTLS      , 1, 0, "Use TLS for threadprivates or runtime calls")
-LANGOPT(OpenMPIsDevice    , 1, 0, "Generate code only for OpenMP target device")
+LANGOPT(OpenMPIsTargetDevice    , 1, 0, "Generate code only for OpenMP target device")
 LANGOPT(OpenMPCUDAMode    , 1, 0, "Generate code for OpenMP pragmas in SIMT/SPMD mode")
 LANGOPT(OpenMPIRBuilder   , 1, 0, "Use the experimental OpenMP-IR-Builder codegen path.")
 LANGOPT(OpenMPCUDANumSMs  , 32, 0, "Number of SMs for CUDA devices.")
@@ -329,6 +330,8 @@ COMPATIBLE_LANGOPT(ExpStrictFP, 1, false, "Enable experimental strict floating p
 BENIGN_LANGOPT(RoundingMath, 1, false, "Do not assume default floating-point rounding behavior")
 BENIGN_ENUM_LANGOPT(FPExceptionMode, FPExceptionModeKind, 2, FPE_Default, "FP Exception Behavior Mode type")
 BENIGN_ENUM_LANGOPT(FPEvalMethod, FPEvalMethodKind, 2, FEM_UnsetOnCommandLine, "FP type used for floating point arithmetic")
+ENUM_LANGOPT(Float16ExcessPrecision, ExcessPrecisionKind, 2, FPP_Standard, "Intermediate truncation behavior for Float16 arithmetic")
+ENUM_LANGOPT(BFloat16ExcessPrecision, ExcessPrecisionKind, 2, FPP_Standard, "Intermediate truncation behavior for BFloat16 arithmetic")
 LANGOPT(NoBitFieldTypeAlign , 1, 0, "bit-field type alignment")
 LANGOPT(HexagonQdsp6Compat , 1, 0, "hexagon-qdsp6 backward compatibility")
 LANGOPT(ObjCAutoRefCount , 1, 0, "Objective-C automated reference counting")
@@ -353,9 +356,9 @@ LANGOPT(
     "type's inheritance model would be determined under the Microsoft ABI")
 
 ENUM_LANGOPT(GC, GCMode, 2, NonGC, "Objective-C Garbage Collection mode")
-ENUM_LANGOPT(ValueVisibilityMode, Visibility, 3, DefaultVisibility,
+BENIGN_ENUM_LANGOPT(ValueVisibilityMode, Visibility, 3, DefaultVisibility,
              "default visibility for functions and variables [-fvisibility]")
-ENUM_LANGOPT(TypeVisibilityMode, Visibility, 3, DefaultVisibility,
+BENIGN_ENUM_LANGOPT(TypeVisibilityMode, Visibility, 3, DefaultVisibility,
              "default visibility for types [-ftype-visibility]")
 LANGOPT(SetVisibilityForExternDecls, 1, 0,
         "apply global symbol visibility to external declarations without an explicit visibility")
@@ -475,6 +478,13 @@ VALUE_LANGOPT(FuchsiaAPILevel, 32, 0, "Fuchsia API level")
 BENIGN_VALUE_LANGOPT(MaxBitIntWidth, 32, 128, "Maximum width of a _BitInt")
 
 LANGOPT(IgnoreConflictingTypes, 1, 0, "Suppress conflicting type errors from mismatching declarations")
+
+LANGOPT(IncrementalExtensions, 1, 0, " True if we want to process statements"
+        "on the global scope, ignore EOF token and continue later on (thus "
+        "avoid tearing the Lexer and etc. down). Controlled by "
+        "-fincremental-extensions.")
+
+BENIGN_LANGOPT(CheckNew, 1, 0, "Do not assume C++ operator new may not return NULL")
 
 #undef LANGOPT
 #undef COMPATIBLE_LANGOPT

@@ -6,7 +6,6 @@ import unittest2
 import os
 
 class TestSwiftMissingVFSOverlay(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
 
     NO_DEBUG_INFO_TESTCASE = True
 
@@ -21,7 +20,6 @@ class TestSwiftMissingVFSOverlay(TestBase):
         """This used to be a test for a diagnostic, however,
         this is no longer an unrecoverable error"""
         self.build()
-        os.unlink(self.getBuildArtifact("header.pch"))
         lldbutil.run_to_source_breakpoint(
             self, "break here", lldb.SBFileSpec("main.swift"),
             extra_images=["Foo"]

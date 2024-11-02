@@ -81,8 +81,8 @@ public:
   bool IsEnabled(common::LanguageFeature feature) const {
     return languageFeatures_.IsEnabled(feature);
   }
-  bool ShouldWarn(common::LanguageFeature feature) const {
-    return languageFeatures_.ShouldWarn(feature);
+  template <typename A> bool ShouldWarn(A x) const {
+    return languageFeatures_.ShouldWarn(x);
   }
   const std::optional<parser::CharBlock> &location() const { return location_; }
   const std::vector<std::string> &searchDirectories() const {
@@ -93,7 +93,6 @@ public:
   }
   const std::string &moduleDirectory() const { return moduleDirectory_; }
   const std::string &moduleFileSuffix() const { return moduleFileSuffix_; }
-  bool warnOnNonstandardUsage() const { return warnOnNonstandardUsage_; }
   bool warningsAreErrors() const { return warningsAreErrors_; }
   bool debugModuleWriter() const { return debugModuleWriter_; }
   const evaluate::IntrinsicProcTable &intrinsics() const { return intrinsics_; }
@@ -145,6 +144,14 @@ public:
     return *this;
   }
 
+  bool anyDefinedIntrinsicOperator() const {
+    return anyDefinedIntrinsicOperator_;
+  }
+  SemanticsContext &set_anyDefinedIntrinsicOperator(bool yes = true) {
+    anyDefinedIntrinsicOperator_ = yes;
+    return *this;
+  }
+
   const DeclTypeSpec &MakeNumericType(TypeCategory, int kind = 0);
   const DeclTypeSpec &MakeLogicalType(int kind = 0);
 
@@ -168,10 +175,12 @@ public:
     return messages_.Say(std::move(msg));
   }
   template <typename... A>
-  void SayWithDecl(const Symbol &symbol, const parser::CharBlock &at,
-      parser::MessageFixedText &&msg, A &&...args) {
+  parser::Message &SayWithDecl(const Symbol &symbol,
+      const parser::CharBlock &at, parser::MessageFixedText &&msg,
+      A &&...args) {
     auto &message{Say(at, std::move(msg), args...)};
     evaluate::AttachDeclaration(&message, symbol);
+    return message;
   }
 
   const Scope &FindScope(parser::CharBlock) const;
@@ -205,6 +214,12 @@ public:
   // Defines builtinsScope_ from the __Fortran_builtins module
   void UseFortranBuiltinsModule();
   const Scope *GetBuiltinsScope() const { return builtinsScope_; }
+
+  void UsePPCBuiltinTypesModule();
+  const Scope &GetCUDABuiltinsScope();
+  void UsePPCBuiltinsModule();
+  Scope *GetPPCBuiltinTypesScope() { return ppcBuiltinTypesScope_; }
+  const Scope *GetPPCBuiltinsScope() const { return ppcBuiltinsScope_; }
 
   // Saves a module file's parse tree so that it remains available
   // during semantics.
@@ -240,7 +255,7 @@ private:
   void CheckError(const Symbol &);
 
   const common::IntrinsicTypeDefaultKinds &defaultKinds_;
-  const common::LanguageFeatureControl languageFeatures_;
+  const common::LanguageFeatureControl &languageFeatures_;
   parser::AllCookedSources &allCookedSources_;
   std::optional<parser::CharBlock> location_;
   std::vector<std::string> searchDirectories_;
@@ -266,8 +281,12 @@ private:
   UnorderedSymbolSet errorSymbols_;
   std::set<std::string> tempNames_;
   const Scope *builtinsScope_{nullptr}; // module __Fortran_builtins
+  Scope *ppcBuiltinTypesScope_{nullptr}; // module __Fortran_PPC_types
+  std::optional<const Scope *> cudaBuiltinsScope_; // module __CUDA_builtins
+  const Scope *ppcBuiltinsScope_{nullptr}; // module __ppc_intrinsics
   std::list<parser::Program> modFileParseTrees_;
   std::unique_ptr<CommonBlockMap> commonBlockMap_;
+  bool anyDefinedIntrinsicOperator_{false};
 };
 
 class Semantics {

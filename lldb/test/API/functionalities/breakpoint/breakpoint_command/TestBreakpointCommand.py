@@ -102,11 +102,52 @@ class BreakpointCommandTestCase(TestBase):
         self.runCmd("settings clear target.source-map")
         for path in invalid_paths:
             bkpt = target.BreakpointCreateByLocation(path, 2)
-            self.assertTrue(
-                bkpt.GetNumLocations() == 0,
+            self.assertEqual(
+                bkpt.GetNumLocations(),
+                0,
                 'Incorrectly resolved a breakpoint using full path "%s" with '
                 "debug info that has relative path with matching suffix" % (path),
             )
+
+    @no_debug_info_test
+    def test_breakpoints_with_bad_aranges(self):
+        """
+        Test that we can set breakpoints in a file that has an invalid
+        .debug_aranges. Older versions of LLDB would find a line entry
+        in the line table and then would use the start address of the line
+        entry to do an address lookup on the entry from the line table. If
+        this address to symbol context lookup would fail, due to a bad
+        .debug_aranges, it would cause the breakpoint to not get resolved.
+        Verify that even in these conditions we are able to resolve a
+        breakpoint.
+
+        The "bad_aranges.yaml" contains a line table that is:
+
+        Line table for /tmp/ab/main.cpp in `a.out
+        0x0000000100003f94: /tmp/ab/main.cpp:1
+        0x0000000100003fb0: /tmp/ab/main.cpp:2:3
+        0x0000000100003fb8: /tmp/ab/main.cpp:2:3
+
+        The .debug_aranges has one range for this compile unit that is
+        invalid: [0x0000000200003f94-0x0000000200003fb8). This will cause
+        the resolving of the addresses to fail.
+        """
+        src_dir = self.getSourceDir()
+        yaml_path = os.path.join(src_dir, "bad_aranges.yaml")
+        yaml_base, ext = os.path.splitext(yaml_path)
+        obj_path = self.getBuildArtifact("a.out")
+        self.yaml2obj(yaml_path, obj_path)
+
+        # Create a target with the object file we just created from YAML
+        target = self.dbg.CreateTarget(obj_path)
+        src_path = "/tmp/ab/main.cpp"
+        bkpt = target.BreakpointCreateByLocation(src_path, 2)
+        self.assertTrue(
+            bkpt.GetNumLocations() > 0,
+            'Couldn\'t resolve breakpoint using "%s" in executate "%s" with '
+            "debug info that has a bad .debug_aranges section"
+            % (src_path, self.getBuildArtifact("a.out")),
+        )
 
     def setUp(self):
         # Call super's setUp().
@@ -320,8 +361,8 @@ class BreakpointCommandTestCase(TestBase):
         self.runCmd("run", RUN_SUCCEEDED)
 
         # Check the value of canary variables.
-        self.assertEquals("one liner was here", side_effect.one_liner)
-        self.assertEquals("function was here", side_effect.bktptcmd)
+        self.assertEqual("one liner was here", side_effect.one_liner)
+        self.assertEqual("function was here", side_effect.bktptcmd)
 
         # Finish the program.
         self.runCmd("process continue")
@@ -517,10 +558,10 @@ class BreakpointCommandTestCase(TestBase):
         return json.loads(stream.GetData())
 
     def verify_source_map_entry_pair(self, entry, original, replacement):
-        self.assertEquals(
+        self.assertEqual(
             entry[0], original, "source map entry 'original' does not match"
         )
-        self.assertEquals(
+        self.assertEqual(
             entry[1], replacement, "source map entry 'replacement' does not match"
         )
 
@@ -563,7 +604,7 @@ class BreakpointCommandTestCase(TestBase):
         # "./a/b/c/main.cpp".
 
         source_map_json = self.get_source_map_json()
-        self.assertEquals(
+        self.assertEqual(
             len(source_map_json), 0, "source map should be empty initially"
         )
         self.verify_source_map_deduce_statistics(target, 0)
@@ -580,7 +621,7 @@ class BreakpointCommandTestCase(TestBase):
         )
 
         source_map_json = self.get_source_map_json()
-        self.assertEquals(len(source_map_json), 1, "source map should not be empty")
+        self.assertEqual(len(source_map_json), 1, "source map should not be empty")
         self.verify_source_map_entry_pair(source_map_json[0], ".", "/x/y")
         self.verify_source_map_deduce_statistics(target, 1)
 
@@ -599,4 +640,30 @@ class BreakpointCommandTestCase(TestBase):
         )
 
         source_map_json = self.get_source_map_json()
-        self.assertEquals(len(source_map_json), 0, "source map should not be deduced")
+        self.assertEqual(len(source_map_json), 0, "source map should not be deduced")
+
+    def test_breakpoint_statistics_hitcount(self):
+        """Test breakpoints statistics have hitCount field."""
+        self.build()
+        target = self.createTestTarget()
+
+        lldbutil.run_break_set_by_file_and_line(
+            self, "main.c", self.line, num_expected_locations=1, loc_exact=True
+        )
+
+        stream = lldb.SBStream()
+        res = target.GetStatistics().GetAsJSON(stream)
+        self.assertTrue(res.Success())
+        debug_stats = json.loads(stream.GetData())
+        self.assertEqual(
+            "targets" in debug_stats,
+            True,
+            'Make sure the "targets" key in in target.GetStatistics()',
+        )
+        target_stats = debug_stats["targets"][0]
+        self.assertNotEqual(target_stats, None)
+
+        breakpoints_stats = target_stats["breakpoints"]
+        self.assertNotEqual(breakpoints_stats, None)
+        for breakpoint_stats in breakpoints_stats:
+            self.assertIn("hitCount", breakpoint_stats)

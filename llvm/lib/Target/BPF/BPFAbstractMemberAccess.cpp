@@ -107,7 +107,7 @@ Instruction *BPFCoreSharedInfo::insertPassThrough(Module *M, BasicBlock *BB,
                                          BPFCoreSharedInfo::SeqNum++);
 
   auto *NewInst = CallInst::Create(Fn, {SeqNumVal, Input});
-  BB->getInstList().insert(Before->getIterator(), NewInst);
+  NewInst->insertBefore(Before);
   return NewInst;
 }
 } // namespace llvm
@@ -126,7 +126,7 @@ public:
     uint32_t AccessIndex;
     MaybeAlign RecordAlignment;
     MDNode *Metadata;
-    Value *Base;
+    WeakTrackingVH Base;
   };
   typedef std::stack<std::pair<CallInst *, CallInfo>> CallInfoStack;
 
@@ -188,34 +188,7 @@ private:
 };
 
 std::map<std::string, GlobalVariable *> BPFAbstractMemberAccess::GEPGlobals;
-
-class BPFAbstractMemberAccessLegacyPass final : public FunctionPass {
-  BPFTargetMachine *TM;
-
-  bool runOnFunction(Function &F) override {
-    return BPFAbstractMemberAccess(TM).run(F);
-  }
-
-public:
-  static char ID;
-
-  // Add optional BPFTargetMachine parameter so that BPF backend can add the
-  // phase with target machine to find out the endianness. The default
-  // constructor (without parameters) is used by the pass manager for managing
-  // purposes.
-  BPFAbstractMemberAccessLegacyPass(BPFTargetMachine *TM = nullptr)
-      : FunctionPass(ID), TM(TM) {}
-};
-
 } // End anonymous namespace
-
-char BPFAbstractMemberAccessLegacyPass::ID = 0;
-INITIALIZE_PASS(BPFAbstractMemberAccessLegacyPass, DEBUG_TYPE,
-                "BPF Abstract Member Access", false, false)
-
-FunctionPass *llvm::createBPFAbstractMemberAccess(BPFTargetMachine *TM) {
-  return new BPFAbstractMemberAccessLegacyPass(TM);
-}
 
 bool BPFAbstractMemberAccess::run(Function &F) {
   LLVM_DEBUG(dbgs() << "********** Abstract Member Accesses **********\n");
@@ -1135,16 +1108,16 @@ bool BPFAbstractMemberAccess::transformGEPChain(CallInst *Call,
 
   // Generate a BitCast
   auto *BCInst = new BitCastInst(Base, Type::getInt8PtrTy(BB->getContext()));
-  BB->getInstList().insert(Call->getIterator(), BCInst);
+  BCInst->insertBefore(Call);
 
   // Generate a GetElementPtr
   auto *GEP = GetElementPtrInst::Create(Type::getInt8Ty(BB->getContext()),
                                         BCInst, LDInst);
-  BB->getInstList().insert(Call->getIterator(), GEP);
+  GEP->insertBefore(Call);
 
   // Generate a BitCast
   auto *BCInst2 = new BitCastInst(GEP, Call->getType());
-  BB->getInstList().insert(Call->getIterator(), BCInst2);
+  BCInst2->insertBefore(Call);
 
   // For the following code,
   //    Block0:

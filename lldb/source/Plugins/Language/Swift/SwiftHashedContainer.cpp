@@ -22,6 +22,7 @@
 #include "lldb/Utility/DataBufferHeap.h"
 
 #include "Plugins/Language/ObjC/NSDictionary.h"
+#include "lldb/lldb-enumerations.h"
 
 #include "llvm/ADT/StringRef.h"
 
@@ -152,7 +153,7 @@ public:
     : m_cocoaObject_sp(cocoaObject_sp), m_frontend(frontend) {}
 
   virtual size_t GetCount() override {
-    return m_frontend->CalculateNumChildren();
+    return m_frontend->CalculateNumChildrenIgnoringErrors();
   }
 
   virtual CompilerType GetElementType() override {
@@ -290,7 +291,7 @@ HashedCollectionConfig::StorageObjectAtAddress(
   // same address.
   Status error;
   ExecutionContextScope *exe_scope = exe_ctx.GetBestExecutionContextScope();
-  llvm::Optional<SwiftScratchContextReader> reader =
+  std::optional<SwiftScratchContextReader> reader =
     process_sp->GetTarget().GetSwiftScratchContext(error, *exe_scope);
   if (!reader)
     return nullptr;
@@ -322,7 +323,7 @@ HashedCollectionConfig::CocoaObjectAtAddress(
   if (!process_sp)
     return nullptr;
   TypeSystemClangSP clang_ts_sp =
-      ScratchTypeSystemClang::GetForTarget(process_sp->GetTarget());
+        ScratchTypeSystemClang::GetForTarget(process_sp->GetTarget());
   if (!clang_ts_sp)
     return nullptr;
   CompilerType id = clang_ts_sp->GetBasicType(lldb::eBasicTypeObjCID);
@@ -701,13 +702,15 @@ HashedSyntheticChildrenFrontEnd::HashedSyntheticChildrenFrontEnd(
     m_buffer()
 {}
 
-size_t
+llvm::Expected<uint32_t>
 HashedSyntheticChildrenFrontEnd::CalculateNumChildren() {
-  return m_buffer ? m_buffer->GetCount() : 0;
+  if (m_buffer)
+    return m_buffer->GetCount();
+  return llvm::make_error<llvm::StringError>(
+      "failed to update hashed container", llvm::inconvertibleErrorCode());
 }
 
-ValueObjectSP
-HashedSyntheticChildrenFrontEnd::GetChildAtIndex(size_t idx) {
+ValueObjectSP HashedSyntheticChildrenFrontEnd::GetChildAtIndex(uint32_t idx) {
   if (!m_buffer)
     return ValueObjectSP();
 
@@ -719,10 +722,10 @@ HashedSyntheticChildrenFrontEnd::GetChildAtIndex(size_t idx) {
   return child_sp;
 }
 
-bool
+lldb::ChildCacheState
 HashedSyntheticChildrenFrontEnd::Update() {
   m_buffer = m_config.CreateHandler(m_backend);
-  return false;
+  return ChildCacheState::eRefetch;
 }
 
 bool
@@ -736,7 +739,7 @@ HashedSyntheticChildrenFrontEnd::GetIndexOfChildWithName(ConstString name) {
     return UINT32_MAX;
   const char *item_name = name.GetCString();
   uint32_t idx = ExtractIndexFromString(item_name);
-  if (idx < UINT32_MAX && idx >= CalculateNumChildren())
+  if (idx < UINT32_MAX && idx >= CalculateNumChildrenIgnoringErrors())
     return UINT32_MAX;
   return idx;
 }

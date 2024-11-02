@@ -133,12 +133,12 @@ BB2:
   ret i32 %B
 }
 
-define i32 @test7(i32 %A, i1 %b) {
-; CHECK-LABEL: @test7(
+define i32 @test_dead_cycle(i32 %A, i1 %cond) {
+; CHECK-LABEL: @test_dead_cycle(
 ; CHECK-NEXT:  BB0:
 ; CHECK-NEXT:    br label [[LOOP:%.*]]
 ; CHECK:       Loop:
-; CHECK-NEXT:    br i1 [[B:%.*]], label [[LOOP]], label [[EXIT:%.*]]
+; CHECK-NEXT:    br i1 [[COND:%.*]], label [[LOOP]], label [[EXIT:%.*]]
 ; CHECK:       Exit:
 ; CHECK-NEXT:    ret i32 0
 ;
@@ -146,10 +146,59 @@ BB0:
   br label %Loop
 
 Loop:           ; preds = %Loop, %BB0
-  ; PHI is dead.
   %B = phi i32 [ %A, %BB0 ], [ %C, %Loop ]
   %C = add i32 %B, 123
-  br i1 %b, label %Loop, label %Exit
+  br i1 %cond, label %Loop, label %Exit
+
+Exit:           ; preds = %Loop
+  ret i32 0
+}
+
+define i32 @test_dead_cycle_two_insts(i32 %A, i1 %cond) {
+; CHECK-LABEL: @test_dead_cycle_two_insts(
+; CHECK-NEXT:  BB0:
+; CHECK-NEXT:    br label [[LOOP:%.*]]
+; CHECK:       Loop:
+; CHECK-NEXT:    [[B:%.*]] = phi i32 [ [[A:%.*]], [[BB0:%.*]] ], [ [[D:%.*]], [[LOOP]] ]
+; CHECK-NEXT:    [[C:%.*]] = add i32 [[B]], 123
+; CHECK-NEXT:    [[D]] = lshr i32 [[C]], 1
+; CHECK-NEXT:    br i1 [[COND:%.*]], label [[LOOP]], label [[EXIT:%.*]]
+; CHECK:       Exit:
+; CHECK-NEXT:    ret i32 0
+;
+BB0:
+  br label %Loop
+
+Loop:           ; preds = %Loop, %BB0
+  %B = phi i32 [ %A, %BB0 ], [ %D, %Loop ]
+  %C = add i32 %B, 123
+  %D = lshr i32 %C, 1
+  br i1 %cond, label %Loop, label %Exit
+
+Exit:           ; preds = %Loop
+  ret i32 0
+}
+
+declare i32 @llvm.uadd.sat.i32(i32, i32)
+
+define i32 @test_dead_cycle_intrin(i32 %A, i1 %cond) {
+; CHECK-LABEL: @test_dead_cycle_intrin(
+; CHECK-NEXT:  BB0:
+; CHECK-NEXT:    br label [[LOOP:%.*]]
+; CHECK:       Loop:
+; CHECK-NEXT:    [[B:%.*]] = phi i32 [ [[A:%.*]], [[BB0:%.*]] ], [ [[C:%.*]], [[LOOP]] ]
+; CHECK-NEXT:    [[C]] = call i32 @llvm.uadd.sat.i32(i32 [[B]], i32 123)
+; CHECK-NEXT:    br i1 [[COND:%.*]], label [[LOOP]], label [[EXIT:%.*]]
+; CHECK:       Exit:
+; CHECK-NEXT:    ret i32 0
+;
+BB0:
+  br label %Loop
+
+Loop:           ; preds = %Loop, %BB0
+  %B = phi i32 [ %A, %BB0 ], [ %C, %Loop ]
+  %C = call i32 @llvm.uadd.sat.i32(i32 %B, i32 123)
+  br i1 %cond, label %Loop, label %Exit
 
 Exit:           ; preds = %Loop
   ret i32 0
@@ -330,8 +379,8 @@ define void @test13(i1 %cond, i32 %V1, double %Vald) {
 ; CHECK:       two:
 ; CHECK-NEXT:    br label [[END]]
 ; CHECK:       end:
-; CHECK-NEXT:    [[TMP0:%.*]] = phi double [ 0.000000e+00, [[ENTRY:%.*]] ], [ [[VALD:%.*]], [[TWO]] ]
-; CHECK-NEXT:    call void @test13f(double [[TMP0]], i32 [[V1:%.*]])
+; CHECK-NEXT:    [[T31:%.*]] = phi double [ 0.000000e+00, [[ENTRY:%.*]] ], [ [[VALD:%.*]], [[TWO]] ]
+; CHECK-NEXT:    call void @test13f(double [[T31]], i32 [[V1:%.*]])
 ; CHECK-NEXT:    ret void
 ;
 entry:
@@ -1252,6 +1301,7 @@ define void @main(i1 %cond, i16 %x) {
 ; CHECK:       g.exit:
 ; CHECK-NEXT:    br label [[FOR_COND]]
 ; CHECK:       for.end:
+; CHECK-NEXT:    store double undef, ptr undef, align 8
 ; CHECK-NEXT:    ret void
 ;
 entry:
@@ -1315,6 +1365,7 @@ exit:
 }
 
 declare void @use(i32)
+declare i1 @get.i1()
 
 define i32 @phi_op_self_simplify() {
 ; CHECK-LABEL: @phi_op_self_simplify(
@@ -1336,6 +1387,38 @@ loop:
   call void @use(i32 %iv.add)
   %iv.add2 = xor i32 %iv, -1
   br label %loop
+}
+
+define i32 @phi_op_self_simplify_2(i32 %x) {
+; CHECK-LABEL: @phi_op_self_simplify_2(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[TMP0:%.*]] = or i32 [[X:%.*]], 1
+; CHECK-NEXT:    br label [[LOOP:%.*]]
+; CHECK:       loop:
+; CHECK-NEXT:    [[PHI:%.*]] = phi i32 [ [[TMP0]], [[ENTRY:%.*]] ], [ [[PHI]], [[LOOP]] ], [ 11, [[LOOP_LATCH:%.*]] ]
+; CHECK-NEXT:    [[C1:%.*]] = call i1 @get.i1()
+; CHECK-NEXT:    br i1 [[C1]], label [[LOOP_LATCH]], label [[LOOP]]
+; CHECK:       loop.latch:
+; CHECK-NEXT:    [[C2:%.*]] = call i1 @get.i1()
+; CHECK-NEXT:    br i1 [[C2]], label [[EXIT:%.*]], label [[LOOP]]
+; CHECK:       exit:
+; CHECK-NEXT:    ret i32 [[PHI]]
+;
+entry:
+  br label %loop
+
+loop:
+  %phi = phi i32 [ %x, %entry ], [ %or, %loop ], [ 10, %loop.latch ]
+  %or = or i32 %phi, 1
+  %c1 = call i1 @get.i1()
+  br i1 %c1, label %loop.latch, label %loop
+
+loop.latch:
+  %c2 = call i1 @get.i1()
+  br i1 %c2, label %exit, label %loop
+
+exit:
+  ret i32 %or
 }
 
 ; Caused an infinite loop with D134954.
@@ -1417,4 +1500,169 @@ latch:
 
 exit:
   ret void
+}
+
+define i32 @add_two_phi_node_can_fold(i1 %c, i32 %i, i32 %j)  {
+; CHECK-LABEL: @add_two_phi_node_can_fold(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    [[ADD:%.*]] = phi i32 [ [[I:%.*]], [[IF_THEN]] ], [ [[J:%.*]], [[ENTRY:%.*]] ]
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+entry:
+  br i1 %c, label %if.then, label %if.end
+
+if.then:
+  br label %if.end
+
+if.end:
+  %x = phi i32 [ 0, %if.then ], [ %j, %entry ]
+  %y = phi i32 [ %i, %if.then ], [ 0, %entry ]
+  %add = add i32 %y, %x
+  ret i32 %add
+}
+
+define i32 @add_two_phi_node_cannt_fold(i1 %c, i32 %i, i32 %j)  {
+; CHECK-LABEL: @add_two_phi_node_cannt_fold(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    [[X:%.*]] = phi i32 [ 0, [[IF_THEN]] ], [ [[J:%.*]], [[ENTRY:%.*]] ]
+; CHECK-NEXT:    [[Y:%.*]] = phi i32 [ [[I:%.*]], [[IF_THEN]] ], [ 1, [[ENTRY]] ]
+; CHECK-NEXT:    [[ADD:%.*]] = add i32 [[Y]], [[X]]
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+entry:
+  br i1 %c, label %if.then, label %if.end
+
+if.then:
+  br label %if.end
+
+if.end:
+  %x = phi i32 [ 0, %if.then ], [ %j, %entry ]
+  %y = phi i32 [ %i, %if.then ], [ 1, %entry ]
+  %add = add i32 %y, %x
+  ret i32 %add
+}
+
+define i32 @or_two_phi_node_can_fold(i1 %c, i32 %i, i32 %j)  {
+; CHECK-LABEL: @or_two_phi_node_can_fold(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    [[ADD:%.*]] = phi i32 [ [[I:%.*]], [[IF_THEN]] ], [ [[J:%.*]], [[ENTRY:%.*]] ]
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+entry:
+  br i1 %c, label %if.then, label %if.end
+
+if.then:
+  br label %if.end
+
+if.end:
+  %x = phi i32 [ 0, %if.then ], [ %j, %entry ]
+  %y = phi i32 [ %i, %if.then ], [ 0, %entry ]
+  %add = or i32 %y, %x
+  ret i32 %add
+}
+
+define i32 @and_two_phi_node_can_fold(i1 %c, i32 %i, i32 %j)  {
+; CHECK-LABEL: @and_two_phi_node_can_fold(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    [[ADD:%.*]] = phi i32 [ [[I:%.*]], [[IF_THEN]] ], [ [[J:%.*]], [[ENTRY:%.*]] ]
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+entry:
+  br i1 %c, label %if.then, label %if.end
+
+if.then:
+  br label %if.end
+
+if.end:
+  %x = phi i32 [ -1, %if.then ], [ %j, %entry ]
+  %y = phi i32 [ %i, %if.then ], [ -1, %entry ]
+  %add = and i32 %y, %x
+  ret i32 %add
+}
+
+define i32 @mul_two_phi_node_can_fold(i1 %c, i32 %i, i32 %j)  {
+; CHECK-LABEL: @mul_two_phi_node_can_fold(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    [[ADD:%.*]] = phi i32 [ [[I:%.*]], [[IF_THEN]] ], [ [[J:%.*]], [[ENTRY:%.*]] ]
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+entry:
+  br i1 %c, label %if.then, label %if.end
+
+if.then:
+  br label %if.end
+
+if.end:
+  %x = phi i32 [ 1, %if.then ], [ %j, %entry ]
+  %y = phi i32 [ %i, %if.then ], [ 1, %entry ]
+  %add = mul i32 %y, %x
+  ret i32 %add
+}
+
+define i32 @xor_two_phi_node_can_fold(i1 %c, i32 %i, i32 %j)  {
+; CHECK-LABEL: @xor_two_phi_node_can_fold(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    [[ADD:%.*]] = phi i32 [ [[I:%.*]], [[IF_THEN]] ], [ [[J:%.*]], [[ENTRY:%.*]] ]
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+entry:
+  br i1 %c, label %if.then, label %if.end
+
+if.then:
+  br label %if.end
+
+if.end:
+  %x = phi i32 [ 0, %if.then ], [ %j, %entry ]
+  %y = phi i32 [ %i, %if.then ], [ 0, %entry ]
+  %add = xor i32 %y, %x
+  ret i32 %add
+}
+
+define i32 @sub_two_phi_node_cant_fold(i1 %c, i32 %i, i32 %j)  {
+; CHECK-LABEL: @sub_two_phi_node_cant_fold(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF_THEN:%.*]], label [[IF_END:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    [[X:%.*]] = phi i32 [ 0, [[IF_THEN]] ], [ [[J:%.*]], [[ENTRY:%.*]] ]
+; CHECK-NEXT:    [[Y:%.*]] = phi i32 [ [[I:%.*]], [[IF_THEN]] ], [ 0, [[ENTRY]] ]
+; CHECK-NEXT:    [[ADD:%.*]] = sub i32 [[Y]], [[X]]
+; CHECK-NEXT:    ret i32 [[ADD]]
+;
+entry:
+  br i1 %c, label %if.then, label %if.end
+
+if.then:
+  br label %if.end
+
+if.end:
+  %x = phi i32 [ 0, %if.then ], [ %j, %entry ]
+  %y = phi i32 [ %i, %if.then ], [ 0, %entry ]
+  %add = sub i32 %y, %x
+  ret i32 %add
 }

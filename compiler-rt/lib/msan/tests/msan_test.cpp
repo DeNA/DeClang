@@ -1687,6 +1687,21 @@ TEST(MemorySanitizer, stpcpy) {
   EXPECT_NOT_POISONED(y[2]);
 }
 
+TEST(MemorySanitizer, stpncpy) {
+  char *x = new char[3];
+  char *y = new char[5];
+  x[0] = 'a';
+  x[1] = *GetPoisoned<char>(1, 1);
+  x[2] = '\0';
+  char *res = stpncpy(y, x, 4);
+  ASSERT_EQ(res, y + 2);
+  EXPECT_NOT_POISONED(y[0]);
+  EXPECT_POISONED(y[1]);
+  EXPECT_NOT_POISONED(y[2]);
+  EXPECT_NOT_POISONED(y[3]);
+  EXPECT_POISONED(y[4]);
+}
+
 TEST(MemorySanitizer, strcat) {
   char a[10];
   char b[] = "def";
@@ -3155,19 +3170,21 @@ static void GetPathToLoadable(char *buf, size_t sz) {
   const char *last_slash = strrchr(program_path, '/');
   ASSERT_NE(nullptr, last_slash);
   size_t dir_len = (size_t)(last_slash - program_path);
-#if defined(__x86_64__)
+#  if defined(__x86_64__)
   static const char basename[] = "libmsan_loadable.x86_64.so";
-#elif defined(__MIPSEB__) || defined(MIPSEB)
+#  elif defined(__MIPSEB__) || defined(MIPSEB)
   static const char basename[] = "libmsan_loadable.mips64.so";
-#elif defined(__mips64)
+#  elif defined(__mips64)
   static const char basename[] = "libmsan_loadable.mips64el.so";
-#elif defined(__aarch64__)
+#  elif defined(__aarch64__)
   static const char basename[] = "libmsan_loadable.aarch64.so";
-#elif defined(__powerpc64__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#  elif defined(__loongarch_lp64)
+  static const char basename[] = "libmsan_loadable.loongarch64.so";
+#  elif defined(__powerpc64__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
   static const char basename[] = "libmsan_loadable.powerpc64.so";
-#elif defined(__powerpc64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#  elif defined(__powerpc64__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
   static const char basename[] = "libmsan_loadable.powerpc64le.so";
-#endif
+#  endif
   int res = snprintf(buf, sz, "%.*s/%s",
                      (int)dir_len, program_path, basename);
   ASSERT_GE(res, 0);

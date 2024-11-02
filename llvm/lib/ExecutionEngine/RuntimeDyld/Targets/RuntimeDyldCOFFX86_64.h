@@ -59,7 +59,7 @@ public:
       : RuntimeDyldCOFF(MM, Resolver, 8, COFF::IMAGE_REL_AMD64_ADDR64),
         ImageBase(0) {}
 
-  unsigned getStubAlignment() override { return 1; }
+  Align getStubAlignment() override { return Align(1); }
 
   // 2-byte jmp instruction + 32-bit relative address + 64-bit absolute jump
   unsigned getMaxStubSize() const override { return 14; }
@@ -131,13 +131,6 @@ public:
       assert(static_cast<int64_t>(RE.Addend) <= INT32_MAX && "Relocation overflow");
       assert(static_cast<int64_t>(RE.Addend) >= INT32_MIN && "Relocation underflow");
       writeBytesUnaligned(RE.Addend, Target, 4);
-      break;
-    }
-
-    case COFF::IMAGE_REL_AMD64_SECTION: {
-      assert(static_cast<int16_t>(RE.SectionID) <= INT16_MAX && "Relocation overflow");
-      assert(static_cast<int16_t>(RE.SectionID) >= INT16_MIN && "Relocation underflow");
-      writeBytesUnaligned(RE.SectionID, Target, 2);
       break;
     }
 

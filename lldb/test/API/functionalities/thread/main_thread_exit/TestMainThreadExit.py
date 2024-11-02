@@ -21,10 +21,11 @@ class ThreadExitTestCase(TestBase):
         )
 
         # There should be one (non-main) thread left
-        self.assertEquals(self.process().GetNumThreads(), 1)
+        self.assertEqual(self.process().GetNumThreads(), 1)
 
         # Ensure we can evaluate_expressions in this state
         self.expect_expr("call_me()", result_value="12345")
 
         self.runCmd("continue")
-        self.assertEquals(self.process().GetExitStatus(), 47)
+        # Exit code depends on the version of the linux kernel
+        self.assertIn(self.process().GetExitStatus(), [42, 47])

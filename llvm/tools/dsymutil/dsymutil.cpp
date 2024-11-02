@@ -14,6 +14,7 @@
 #include "BinaryHolder.h"
 #include "CFBundle.h"
 #include "DebugMap.h"
+#include "DwarfLinkerForBinary.h"
 #include "LinkUtils.h"
 #include "MachOUtils.h"
 #include "Reproducer.h"
@@ -22,7 +23,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFVerifier.h"
@@ -38,12 +38,14 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/LLVMDriver.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/thread.h"
+#include "llvm/TargetParser/Triple.h"
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -53,34 +55,32 @@
 using namespace llvm;
 using namespace llvm::dsymutil;
 using namespace object;
+using namespace llvm::dwarf_linker;
 
 namespace {
 enum ID {
   OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_MAKE_OPT_ID(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,   \
-                   FLAGS, PARAM, HELP, METAVAR, VALUES),
+#define OPTION(...) LLVM_MAKE_OPT_ID(__VA_ARGS__),
 #include "Options.inc"
 #undef OPTION
 };
 
-#define PREFIX(NAME, VALUE) const char *const NAME[] = VALUE;
+#define PREFIX(NAME, VALUE)                                                    \
+  static constexpr StringLiteral NAME##_init[] = VALUE;                        \
+  static constexpr ArrayRef<StringLiteral> NAME(NAME##_init,                   \
+                                                std::size(NAME##_init) - 1);
 #include "Options.inc"
 #undef PREFIX
 
-const opt::OptTable::Info InfoTable[] = {
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_CONSTRUCT_OPT_INFO(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS,       \
-                          ALIASARGS, FLAGS, PARAM, HELP, METAVAR, VALUES),
+static constexpr opt::OptTable::Info InfoTable[] = {
+#define OPTION(...) LLVM_CONSTRUCT_OPT_INFO(__VA_ARGS__),
 #include "Options.inc"
 #undef OPTION
 };
 
-class DsymutilOptTable : public opt::OptTable {
+class DsymutilOptTable : public opt::GenericOptTable {
 public:
-  DsymutilOptTable() : OptTable(InfoTable) {}
+  DsymutilOptTable() : opt::GenericOptTable(InfoTable) {}
 };
 } // namespace
 
@@ -88,7 +88,14 @@ enum class DWARFVerify : uint8_t {
   None = 0,
   Input = 1 << 0,
   Output = 1 << 1,
+  OutputOnValidInput = 1 << 2,
   All = Input | Output,
+  Auto = Input | OutputOnValidInput,
+#if !defined(NDEBUG) || defined(EXPENSIVE_CHECKS)
+  Default = Auto
+#else
+  Default = None
+#endif
 };
 
 inline bool flagIsSet(DWARFVerify Flags, DWARFVerify SingleFlag) {
@@ -108,7 +115,7 @@ struct DsymutilOptions {
   std::vector<std::string> Archs;
   std::vector<std::string> InputFiles;
   unsigned NumThreads;
-  DWARFVerify Verify = DWARFVerify::None;
+  DWARFVerify Verify = DWARFVerify::Default;
   ReproducerMode ReproMode = ReproducerMode::GenerateOnCrash;
   dsymutil::LinkOptions LinkOpts;
 };
@@ -163,6 +170,12 @@ static Expected<std::vector<std::string>> getInputs(opt::InputArgList &Args,
 
 // Verify that the given combination of options makes sense.
 static Error verifyOptions(const DsymutilOptions &Options) {
+  if (Options.LinkOpts.Verbose && Options.LinkOpts.Quiet) {
+    return make_error<StringError>(
+        "--quiet and --verbose cannot be specified together",
+        errc::invalid_argument);
+  }
+
   if (Options.InputFiles.empty()) {
     return make_error<StringError>("no input files specified",
                                    errc::invalid_argument);
@@ -199,26 +212,44 @@ static Error verifyOptions(const DsymutilOptions &Options) {
   return Error::success();
 }
 
-static Expected<DwarfLinkerAccelTableKind>
+static Expected<DsymutilAccelTableKind>
 getAccelTableKind(opt::InputArgList &Args) {
   if (opt::Arg *Accelerator = Args.getLastArg(OPT_accelerator)) {
     StringRef S = Accelerator->getValue();
     if (S == "Apple")
-      return DwarfLinkerAccelTableKind::Apple;
+      return DsymutilAccelTableKind::Apple;
     if (S == "Dwarf")
-      return DwarfLinkerAccelTableKind::Dwarf;
+      return DsymutilAccelTableKind::Dwarf;
     if (S == "Pub")
-      return DwarfLinkerAccelTableKind::Pub;
+      return DsymutilAccelTableKind::Pub;
     if (S == "Default")
-      return DwarfLinkerAccelTableKind::Default;
+      return DsymutilAccelTableKind::Default;
     if (S == "None")
-      return DwarfLinkerAccelTableKind::None;
+      return DsymutilAccelTableKind::None;
     return make_error<StringError>("invalid accelerator type specified: '" + S +
                                        "'. Supported values are 'Apple', "
                                        "'Dwarf', 'Pub', 'Default' and 'None'.",
                                    inconvertibleErrorCode());
   }
-  return DwarfLinkerAccelTableKind::Default;
+  return DsymutilAccelTableKind::Default;
+}
+
+static Expected<DsymutilDWARFLinkerType>
+getDWARFLinkerType(opt::InputArgList &Args) {
+  if (opt::Arg *LinkerType = Args.getLastArg(OPT_linker)) {
+    StringRef S = LinkerType->getValue();
+    if (S == "classic")
+      return DsymutilDWARFLinkerType::Classic;
+    if (S == "parallel")
+      return DsymutilDWARFLinkerType::Parallel;
+    return make_error<StringError>("invalid DWARF linker type specified: '" +
+                                       S +
+                                       "'. Supported values are 'classic', "
+                                       "'parallel'.",
+                                   inconvertibleErrorCode());
+  }
+
+  return DsymutilDWARFLinkerType::Classic;
 }
 
 static Expected<ReproducerMode> getReproducerMode(opt::InputArgList &Args) {
@@ -230,14 +261,12 @@ static Expected<ReproducerMode> getReproducerMode(opt::InputArgList &Args) {
       return ReproducerMode::GenerateOnExit;
     if (S == "GenerateOnCrash")
       return ReproducerMode::GenerateOnCrash;
-    if (S == "Use")
-      return ReproducerMode::Use;
     if (S == "Off")
       return ReproducerMode::Off;
     return make_error<StringError>(
         "invalid reproducer mode: '" + S +
             "'. Supported values are 'GenerateOnExit', 'GenerateOnCrash', "
-            "'Use', 'Off'.",
+            "'Off'.",
         inconvertibleErrorCode());
   }
   return ReproducerMode::GenerateOnCrash;
@@ -254,14 +283,16 @@ static Expected<DWARFVerify> getVerifyKind(opt::InputArgList &Args) {
       return DWARFVerify::Output;
     if (S == "all")
       return DWARFVerify::All;
+    if (S == "auto")
+      return DWARFVerify::Auto;
     if (S == "none")
       return DWARFVerify::None;
-    return make_error<StringError>(
-        "invalid verify type specified: '" + S +
-            "'. Supported values are 'input', 'output', 'all' and 'none'.",
-        inconvertibleErrorCode());
+    return make_error<StringError>("invalid verify type specified: '" + S +
+                                       "'. Supported values are 'none', "
+                                       "'input', 'output', 'all' and 'auto'.",
+                                   inconvertibleErrorCode());
   }
-  return DWARFVerify::None;
+  return DWARFVerify::Default;
 }
 
 /// Parses the command line options into the LinkOptions struct and performs
@@ -287,6 +318,7 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
   Options.LinkOpts.NoTimestamp = Args.hasArg(OPT_no_swiftmodule_timestamp);
   Options.LinkOpts.Update = Args.hasArg(OPT_update);
   Options.LinkOpts.Verbose = Args.hasArg(OPT_verbose);
+  Options.LinkOpts.Quiet = Args.hasArg(OPT_quiet);
   Options.LinkOpts.Statistics = Args.hasArg(OPT_statistics);
   Options.LinkOpts.Fat64 = Args.hasArg(OPT_fat64);
   Options.LinkOpts.KeepFunctionForStatic =
@@ -303,10 +335,17 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
     }
   }
 
-  if (Expected<DwarfLinkerAccelTableKind> AccelKind = getAccelTableKind(Args)) {
+  if (Expected<DsymutilAccelTableKind> AccelKind = getAccelTableKind(Args)) {
     Options.LinkOpts.TheAccelTableKind = *AccelKind;
   } else {
     return AccelKind.takeError();
+  }
+
+  if (Expected<DsymutilDWARFLinkerType> DWARFLinkerType =
+          getDWARFLinkerType(Args)) {
+    Options.LinkOpts.DWARFLinkerType = *DWARFLinkerType;
+  } else {
+    return DWARFLinkerType.takeError();
   }
 
   if (opt::Arg *SymbolMap = Args.getLastArg(OPT_symbolmap))
@@ -341,7 +380,7 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
     Options.Toolchain = Toolchain->getValue();
 
   if (Args.hasArg(OPT_assembly))
-    Options.LinkOpts.FileType = OutputFileType::Assembly;
+    Options.LinkOpts.FileType = DWARFLinkerBase::OutputFileType::Assembly;
 
   if (opt::Arg *NumThreads = Args.getLastArg(OPT_threads))
     Options.LinkOpts.Threads = atoi(NumThreads->getValue());
@@ -362,6 +401,15 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
     else
       return FormatOrErr.takeError();
   }
+
+  Options.LinkOpts.RemarksKeepAll =
+      !Args.hasArg(OPT_remarks_drop_without_debug);
+
+  if (opt::Arg *BuildVariantSuffix = Args.getLastArg(OPT_build_variant_suffix))
+    Options.LinkOpts.BuildVariantSuffix = BuildVariantSuffix->getValue();
+
+  for (auto *SearchPath : Args.filtered(OPT_dsym_search_path))
+    Options.LinkOpts.DSYMSearchPaths.push_back(SearchPath->getValue());
 
   if (Error E = verifyOptions(Options))
     return std::move(E);
@@ -445,28 +493,62 @@ static Error createBundleDir(StringRef BundleBase) {
   return Error::success();
 }
 
-static bool verifyOutput(StringRef OutputFile, StringRef Arch, bool Verbose) {
+static bool verifyOutput(StringRef OutputFile, StringRef Arch,
+                         DsymutilOptions Options, std::mutex &Mutex) {
+
   if (OutputFile == "-") {
-    WithColor::warning() << "verification skipped for " << Arch
-                         << "because writing to stdout.\n";
+    if (!Options.LinkOpts.Quiet) {
+      std::lock_guard<std::mutex> Guard(Mutex);
+      WithColor::warning() << "verification skipped for " << Arch
+                           << " because writing to stdout.\n";
+    }
+    return true;
+  }
+
+  if (Options.LinkOpts.NoOutput) {
+    if (!Options.LinkOpts.Quiet) {
+      std::lock_guard<std::mutex> Guard(Mutex);
+      WithColor::warning() << "verification skipped for " << Arch
+                           << " because --no-output was passed.\n";
+    }
     return true;
   }
 
   Expected<OwningBinary<Binary>> BinOrErr = createBinary(OutputFile);
   if (!BinOrErr) {
+    std::lock_guard<std::mutex> Guard(Mutex);
     WithColor::error() << OutputFile << ": " << toString(BinOrErr.takeError());
     return false;
   }
 
   Binary &Binary = *BinOrErr.get().getBinary();
   if (auto *Obj = dyn_cast<MachOObjectFile>(&Binary)) {
-    raw_ostream &os = Verbose ? errs() : nulls();
-    os << "Verifying DWARF for architecture: " << Arch << "\n";
     std::unique_ptr<DWARFContext> DICtx = DWARFContext::create(*Obj);
+    if (DICtx->getMaxVersion() > 5) {
+      if (!Options.LinkOpts.Quiet) {
+        std::lock_guard<std::mutex> Guard(Mutex);
+        WithColor::warning() << "verification skipped for " << Arch
+                             << " because DWARF standard greater than v5 is "
+                                "not supported yet.\n";
+      }
+      return true;
+    }
+
+    if (Options.LinkOpts.Verbose) {
+      std::lock_guard<std::mutex> Guard(Mutex);
+      errs() << "Verifying DWARF for architecture: " << Arch << "\n";
+    }
+
+    std::string Buffer;
+    raw_string_ostream OS(Buffer);
+
     DIDumpOptions DumpOpts;
-    bool success = DICtx->verify(os, DumpOpts.noImplicitRecursion());
-    if (!success)
+    bool success = DICtx->verify(OS, DumpOpts.noImplicitRecursion());
+    if (!success) {
+      std::lock_guard<std::mutex> Guard(Mutex);
+      errs() << OS.str();
       WithColor::error() << "output verification failed for " << Arch << '\n';
+    }
     return success;
   }
 
@@ -475,12 +557,13 @@ static bool verifyOutput(StringRef OutputFile, StringRef Arch, bool Verbose) {
 
 namespace {
 struct OutputLocation {
-  OutputLocation(std::string DWARFFile, Optional<std::string> ResourceDir = {})
+  OutputLocation(std::string DWARFFile,
+                 std::optional<std::string> ResourceDir = {})
       : DWARFFile(DWARFFile), ResourceDir(ResourceDir) {}
   /// This method is a workaround for older compilers.
-  Optional<std::string> getResourceDir() const { return ResourceDir; }
+  std::optional<std::string> getResourceDir() const { return ResourceDir; }
   std::string DWARFFile;
-  Optional<std::string> ResourceDir;
+  std::optional<std::string> ResourceDir;
 };
 } // namespace
 
@@ -536,14 +619,14 @@ getOutputFileName(StringRef InputFile, const DsymutilOptions &Options) {
   return OutputLocation(std::string(Path.str()), ResourceDir);
 }
 
-int dsymutil_main(int argc, char **argv) {
+int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
 
   // Parse arguments.
   DsymutilOptTable T;
   unsigned MAI;
   unsigned MAC;
-  ArrayRef<const char *> ArgsArr = makeArrayRef(argv + 1, argc - 1);
+  ArrayRef<const char *> ArgsArr = ArrayRef(argv + 1, argc - 1);
   opt::InputArgList Args = T.ParseArgs(ArgsArr, MAI, MAC);
 
   void *P = (void *)(intptr_t)getOutputFileName;
@@ -573,7 +656,7 @@ int dsymutil_main(int argc, char **argv) {
 
   auto OptionsOrErr = getOptions(Args);
   if (!OptionsOrErr) {
-    WithColor::error() << toString(OptionsOrErr.takeError());
+    WithColor::error() << toString(OptionsOrErr.takeError()) << '\n';
     return EXIT_FAILURE;
   }
 
@@ -587,7 +670,7 @@ int dsymutil_main(int argc, char **argv) {
   auto Repro = Reproducer::createReproducer(Options.ReproMode,
                                             Options.ReproducerPath, argc, argv);
   if (!Repro) {
-    WithColor::error() << toString(Repro.takeError());
+    WithColor::error() << toString(Repro.takeError()) << '\n';
     return EXIT_FAILURE;
   }
 
@@ -606,15 +689,18 @@ int dsymutil_main(int argc, char **argv) {
     // Dump the symbol table for each input file and requested arch
     if (Options.DumpStab) {
       if (!dumpStab(Options.LinkOpts.VFS, InputFile, Options.Archs,
-                    Options.LinkOpts.PrependPath))
+                    Options.LinkOpts.DSYMSearchPaths,
+                    Options.LinkOpts.PrependPath,
+                    Options.LinkOpts.BuildVariantSuffix))
         return EXIT_FAILURE;
       continue;
     }
 
-    auto DebugMapPtrsOrErr =
-        parseDebugMap(Options.LinkOpts.VFS, InputFile, Options.Archs,
-                      Options.LinkOpts.PrependPath, Options.LinkOpts.Verbose,
-                      Options.InputIsYAMLDebugMap);
+    auto DebugMapPtrsOrErr = parseDebugMap(
+        Options.LinkOpts.VFS, InputFile, Options.Archs,
+        Options.LinkOpts.DSYMSearchPaths, Options.LinkOpts.PrependPath,
+        Options.LinkOpts.BuildVariantSuffix, Options.LinkOpts.Verbose,
+        Options.InputIsYAMLDebugMap);
 
     if (auto EC = DebugMapPtrsOrErr.getError()) {
       WithColor::error() << "cannot parse the debug map for '" << InputFile
@@ -670,20 +756,16 @@ int dsymutil_main(int argc, char **argv) {
     const bool NeedsTempFiles =
         !Options.DumpDebugMap && (Options.OutputFile != "-") &&
         (DebugMapPtrsOrErr->size() != 1 || Options.LinkOpts.Update);
-    bool VerifyOutput = flagIsSet(Options.Verify, DWARFVerify::Output);
-    if (VerifyOutput && Options.LinkOpts.NoOutput) {
-      WithColor::warning()
-          << "skipping output verification because --no-output was passed\n";
-      VerifyOutput = false;
-    }
+
+    std::atomic_char AllOK(1);
+    SmallVector<MachOUtils::ArchAndFile, 4> TempFiles;
+
+    std::mutex ErrorHandlerMutex;
 
     // Set up a crash recovery context.
     CrashRecoveryContext::Enable();
     CrashRecoveryContext CRC;
     CRC.DumpStackAndCleanupOnFailure = true;
-
-    std::atomic_char AllOK(1);
-    SmallVector<MachOUtils::ArchAndFile, 4> TempFiles;
 
     const bool Crashed = !CRC.RunSafely([&]() {
       for (auto &Map : *DebugMapPtrsOrErr) {
@@ -696,11 +778,15 @@ int dsymutil_main(int argc, char **argv) {
         if (!Options.SymbolMap.empty())
           Options.LinkOpts.Translator = SymMapLoader.Load(InputFile, *Map);
 
-        if (Map->begin() == Map->end())
-          WithColor::warning()
-              << "no debug symbols in executable (-arch "
-              << MachOUtils::getArchName(Map->getTriple().getArchName())
-              << ")\n";
+        if (Map->begin() == Map->end()) {
+          if (!Options.LinkOpts.Quiet) {
+            std::lock_guard<std::mutex> Guard(ErrorHandlerMutex);
+            WithColor::warning()
+                << "no debug symbols in executable (-arch "
+                << MachOUtils::getArchName(Map->getTriple().getArchName())
+                << ")\n";
+          }
+        }
 
         // Using a std::shared_ptr rather than std::unique_ptr because move-only
         // types don't work with std::bind in the ThreadPool implementation.
@@ -712,15 +798,16 @@ int dsymutil_main(int argc, char **argv) {
 
           auto E = TempFiles.back().createTempFile();
           if (E) {
+            std::lock_guard<std::mutex> Guard(ErrorHandlerMutex);
             WithColor::error() << toString(std::move(E));
             AllOK.fetch_and(false);
             return;
           }
 
-          auto &TempFile = *(TempFiles.back().File);
-          OS = std::make_shared<raw_fd_ostream>(TempFile.FD,
+          MachOUtils::ArchAndFile &AF = TempFiles.back();
+          OS = std::make_shared<raw_fd_ostream>(AF.getFD(),
                                                 /*shouldClose*/ false);
-          OutputFile = TempFile.TmpName;
+          OutputFile = AF.getPath();
         } else {
           std::error_code EC;
           OS = std::make_shared<raw_fd_ostream>(
@@ -734,14 +821,17 @@ int dsymutil_main(int argc, char **argv) {
         }
 
         auto LinkLambda = [&,
-                           OutputFile](std::shared_ptr<raw_fd_ostream> Stream,
-                                       LinkOptions Options) {
-          AllOK.fetch_and(
-              linkDwarf(*Stream, BinHolder, *Map, std::move(Options)));
+                           OutputFile](std::shared_ptr<raw_fd_ostream> Stream) {
+          DwarfLinkerForBinary Linker(*Stream, BinHolder, Options.LinkOpts,
+                                      ErrorHandlerMutex);
+          AllOK.fetch_and(Linker.link(*Map));
           Stream->flush();
-          if (VerifyOutput) {
-            AllOK.fetch_and(verifyOutput(
-                OutputFile, Map->getTriple().getArchName(), Options.Verbose));
+          if (flagIsSet(Options.Verify, DWARFVerify::Output) ||
+              (flagIsSet(Options.Verify, DWARFVerify::OutputOnValidInput) &&
+               !Linker.InputVerificationFailed())) {
+            AllOK.fetch_and(verifyOutput(OutputFile,
+                                         Map->getTriple().getArchName(),
+                                         Options, ErrorHandlerMutex));
           }
         };
 
@@ -749,9 +839,9 @@ int dsymutil_main(int argc, char **argv) {
         // out the (significantly smaller) stack when using threads. We don't
         // want this limitation when we only have a single thread.
         if (S.ThreadsRequested == 1)
-          LinkLambda(OS, Options.LinkOpts);
+          LinkLambda(OS);
         else
-          Threads.async(LinkLambda, OS, Options.LinkOpts);
+          Threads.async(LinkLambda, OS);
       }
 
       Threads.wait();
@@ -786,7 +876,8 @@ int dsymutil_main(int argc, char **argv) {
         uint64_t FileOffset =
             MagicAndCountSize + UniversalArchInfoSize * TempFiles.size();
         for (const auto &File : TempFiles) {
-          ErrorOr<vfs::Status> stat = Options.LinkOpts.VFS->status(File.path());
+          ErrorOr<vfs::Status> stat =
+              Options.LinkOpts.VFS->status(File.getPath());
           if (!stat)
             break;
           if (FileOffset > UINT32_MAX) {

@@ -1,4 +1,10 @@
-cmake_minimum_required(VERSION 3.13.4)
+cmake_minimum_required(VERSION 3.20.0)
+
+if(NOT DEFINED LLVM_COMMON_CMAKE_UTILS)
+  set(LLVM_COMMON_CMAKE_UTILS ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
+endif()
+include(${LLVM_COMMON_CMAKE_UTILS}/Modules/CMakePolicy.cmake
+  NO_POLICY_SCOPE)
 
 # Add path for custom modules.
 set(CMAKE_MODULE_PATH
@@ -12,21 +18,28 @@ set(CMAKE_MODULE_PATH
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   project(lldb)
   set(LLDB_BUILT_STANDALONE TRUE)
+  set(LLVM_INCLUDE_TESTS ON CACHE INTERNAL "")
 endif()
 
 # Must go below project(..)
 include(GNUInstallDirs)
 
+option(LLDB_INCLUDE_TESTS "Generate build targets for the LLDB unit tests." ${LLVM_INCLUDE_TESTS})
+
 # BEGIN SWIFT MOD
-option(LLDB_ENABLE_SWIFT_SUPPORT "Enable swift support" ON)
+set(DEFAULT_LLDB_SWIFT_SUPPORT ON)
+if (LLVM_TARGET_IS_CROSSCOMPILE_HOST)
+  set(DEFAULT_LLDB_SWIFT_SUPPORT OFF)
+endif()
+option(LLDB_ENABLE_SWIFT_SUPPORT "Enable swift support" ${DEFAULT_LLDB_SWIFT_SUPPORT})
 # END SWIFT MOD
 
 if(LLDB_BUILT_STANDALONE)
-  include(LLDBStandalone)
-
   set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
   set(CMAKE_CXX_STANDARD_REQUIRED YES)
   set(CMAKE_CXX_EXTENSIONS NO)
+
+  include(LLDBStandalone)
 else()
   set(SWIFT_BINARY_DIR ${CMAKE_BINARY_DIR})
   set(SWIFT_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
@@ -153,7 +166,6 @@ if (NOT TARGET llvm_gtest)
   set(LLDB_INCLUDE_UNITTESTS OFF)
 endif()
 
-option(LLDB_INCLUDE_TESTS "Generate build targets for the LLDB unit tests." ${LLVM_INCLUDE_TESTS})
 if(LLDB_INCLUDE_TESTS)
   add_subdirectory(test)
   if (LLDB_INCLUDE_UNITTESTS)

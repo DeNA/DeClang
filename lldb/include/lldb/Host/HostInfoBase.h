@@ -20,6 +20,7 @@
 
 #include <cstdint>
 
+#include <optional>
 #include <string>
 
 namespace lldb_private {
@@ -82,7 +83,8 @@ public:
   static const ArchSpec &
   GetArchitecture(ArchitectureKind arch_kind = eArchKindDefault);
 
-  static llvm::Optional<ArchitectureKind> ParseArchitectureKind(llvm::StringRef kind);
+  static std::optional<ArchitectureKind>
+  ParseArchitectureKind(llvm::StringRef kind);
 
   /// Returns the directory containing the lldb shared library. Only the
   /// directory member of the FileSpec is filled in.
@@ -124,9 +126,22 @@ public:
 
   static FileSpec GetXcodeContentsDirectory() { return {}; }
   static FileSpec GetXcodeDeveloperDirectory() { return {}; }
+#ifdef LLDB_ENABLE_SWIFT
+  static FileSpec GetSwiftResourceDir() { return {}; }
+  static FileSpec GetSwiftResourceDir(llvm::Triple triple) { return {}; }
+  static bool ComputeSwiftResourceDirectory(
+      FileSpec &lldb_shlib_spec, FileSpec &file_spec, bool verify) {
+    return false;
+  }
+
+  /// Return the default set of library paths to search in.  This allows a
+  /// platform specific extension for system libraries that may need to be
+  /// resolved (e.g. `/usr/lib` on Unicies and `Path` on Windows).
+  static std::vector<std::string> GetSwiftLibrarySearchPaths() { return {}; }
+#endif
 
   struct SDKOptions {
-    std::optional<XcodeSDK> XcodeSDK;
+    std::optional<XcodeSDK> XcodeSDKSelection;
   };
 
   /// Return the directory containing something like a SDK (reused for Swift).
@@ -147,19 +162,13 @@ public:
     return {};
   }
 
-#ifdef LLDB_ENABLE_SWIFT
-  static FileSpec GetSwiftResourceDir() { return {}; }
-  static FileSpec GetSwiftResourceDir(llvm::Triple triple) { return {}; }
-  static bool ComputeSwiftResourceDirectory(
-      FileSpec &lldb_shlib_spec, FileSpec &file_spec, bool verify) {
-    return false;
-  }
-
-  /// Return the default set of library paths to search in.  This allows a
-  /// platform specific extension for system libraries that may need to be
-  /// resolved (e.g. `/usr/lib` on Unicies and `Path` on Windows).
-  static std::vector<std::string> GetSwiftLibrarySearchPaths() { return {}; }
-#endif
+  /// Returns the distribution id of the host
+  ///
+  /// This will be something like "ubuntu", "fedora", etc. on Linux.
+  ///
+  /// \return Returns either std::nullopt or a reference to a const std::string
+  /// containing the distribution id
+  static llvm::StringRef GetDistributionId() { return llvm::StringRef(); }
 
 protected:
   static bool ComputeSharedLibraryDirectory(FileSpec &file_spec);

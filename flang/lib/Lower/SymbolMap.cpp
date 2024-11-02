@@ -11,8 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "flang/Lower/SymbolMap.h"
+#include "flang/Optimizer/Builder/Todo.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/Support/Debug.h"
+#include <optional>
 
 #define DEBUG_TYPE "flang-lower-symbol-map"
 
@@ -25,6 +27,7 @@ void Fortran::lower::SymMap::addSymbol(Fortran::semantics::SymbolRef sym,
             [&](const fir::CharArrayBoxValue &v) { makeSym(sym, v, force); },
             [&](const fir::BoxValue &v) { makeSym(sym, v, force); },
             [&](const fir::MutableBoxValue &v) { makeSym(sym, v, force); },
+            [&](const fir::PolymorphicValue &v) { makeSym(sym, v, force); },
             [](auto) {
               llvm::report_fatal_error("value not added to symbol table");
             });
@@ -98,9 +101,11 @@ Fortran::lower::operator<<(llvm::raw_ostream &os,
   os << "Symbol map:\n";
   for (auto i : llvm::enumerate(symMap.symbolMapStack)) {
     os << " level " << i.index() << "<{\n";
-    for (auto iter : i.value())
+    for (auto iter : i.value()) {
       os << "  symbol @" << static_cast<const void *>(iter.first) << " ["
-         << *iter.first << "] ->\n    " << iter.second;
+         << *iter.first << "] ->\n    ";
+      os << iter.second;
+    }
     os << " }>\n";
   }
   return os;

@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/ODRDiagsEmitter.h"
 #include "clang/AST/PrettyDeclStackTrace.h"
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/TargetInfo.h"
@@ -152,6 +153,11 @@ Parser::ParseObjCAtClassDeclaration(SourceLocation atLoc) {
 
   while (true) {
     MaybeSkipAttributes(tok::objc_class);
+    if (Tok.is(tok::code_completion)) {
+      cutOffParsing();
+      Actions.CodeCompleteObjCClassForwardDecl(getCurScope());
+      return Actions.ConvertDeclToDeclGroup(nullptr);
+    }
     if (expectIdentifier()) {
       SkipUntil(tok::semi);
       return Actions.ConvertDeclToDeclGroup(nullptr);
@@ -371,16 +377,29 @@ Decl *Parser::ParseObjCAtInterfaceDeclaration(SourceLocation AtLoc,
     Actions.ActOnTypedefedProtocols(protocols, protocolLocs,
                                     superClassId, superClassLoc);
 
+  Sema::SkipBodyInfo SkipBody;
   ObjCInterfaceDecl *ClsType = Actions.ActOnStartClassInterface(
       getCurScope(), AtLoc, nameId, nameLoc, typeParameterList, superClassId,
       superClassLoc, typeArgs,
       SourceRange(typeArgsLAngleLoc, typeArgsRAngleLoc), protocols.data(),
-      protocols.size(), protocolLocs.data(), EndProtoLoc, attrs);
+      protocols.size(), protocolLocs.data(), EndProtoLoc, attrs, &SkipBody);
 
   if (Tok.is(tok::l_brace))
     ParseObjCClassInstanceVariables(ClsType, tok::objc_protected, AtLoc);
 
   ParseObjCInterfaceDeclList(tok::objc_interface, ClsType);
+
+  if (SkipBody.CheckSameAsPrevious) {
+    auto *PreviousDef = cast<ObjCInterfaceDecl>(SkipBody.Previous);
+    if (Actions.ActOnDuplicateODRHashDefinition(ClsType, PreviousDef)) {
+      ClsType->mergeDuplicateDefinitionWithCommon(PreviousDef->getDefinition());
+    } else {
+      ODRDiagsEmitter DiagsEmitter(Diags, Actions.getASTContext(),
+                                   getPreprocessor().getLangOpts());
+      DiagsEmitter.diagnoseMismatch(PreviousDef, ClsType);
+      ClsType->setInvalidDecl();
+    }
+  }
 
   return ClsType;
 }
@@ -396,7 +415,7 @@ static void addContextSensitiveTypeNullability(Parser &P,
   auto getNullabilityAttr = [&](AttributePool &Pool) -> ParsedAttr * {
     return Pool.create(P.getNullabilityKeyword(nullability),
                        SourceRange(nullabilityLoc), nullptr, SourceLocation(),
-                       nullptr, 0, ParsedAttr::AS_ContextSensitiveKeyword);
+                       nullptr, 0, ParsedAttr::Form::ContextSensitiveKeyword());
   };
 
   if (D.getNumTypeObjects() > 0) {
@@ -2108,11 +2127,23 @@ Parser::ParseObjCAtProtocolDeclaration(SourceLocation AtLoc,
                                   /*consumeLastToken=*/true))
     return nullptr;
 
-  Decl *ProtoType = Actions.ActOnStartProtocolInterface(
+  Sema::SkipBodyInfo SkipBody;
+  ObjCProtocolDecl *ProtoType = Actions.ActOnStartProtocolInterface(
       AtLoc, protocolName, nameLoc, ProtocolRefs.data(), ProtocolRefs.size(),
-      ProtocolLocs.data(), EndProtoLoc, attrs);
+      ProtocolLocs.data(), EndProtoLoc, attrs, &SkipBody);
 
   ParseObjCInterfaceDeclList(tok::objc_protocol, ProtoType);
+  if (SkipBody.CheckSameAsPrevious) {
+    auto *PreviousDef = cast<ObjCProtocolDecl>(SkipBody.Previous);
+    if (Actions.ActOnDuplicateODRHashDefinition(ProtoType, PreviousDef)) {
+      ProtoType->mergeDuplicateDefinitionWithCommon(
+          PreviousDef->getDefinition());
+    } else {
+      ODRDiagsEmitter DiagsEmitter(Diags, Actions.getASTContext(),
+                                   getPreprocessor().getLangOpts());
+      DiagsEmitter.diagnoseMismatch(PreviousDef, ProtoType);
+    }
+  }
   return Actions.ConvertDeclToDeclGroup(ProtoType);
 }
 
@@ -3190,14 +3221,14 @@ Parser::ParseObjCMessageExpressionBody(SourceLocation LBracLoc,
   if (Tok.is(tok::code_completion)) {
     cutOffParsing();
     if (SuperLoc.isValid())
-      Actions.CodeCompleteObjCSuperMessage(getCurScope(), SuperLoc, None,
-                                           false);
+      Actions.CodeCompleteObjCSuperMessage(getCurScope(), SuperLoc,
+                                           std::nullopt, false);
     else if (ReceiverType)
-      Actions.CodeCompleteObjCClassMessage(getCurScope(), ReceiverType, None,
-                                           false);
+      Actions.CodeCompleteObjCClassMessage(getCurScope(), ReceiverType,
+                                           std::nullopt, false);
     else
       Actions.CodeCompleteObjCInstanceMessage(getCurScope(), ReceiverExpr,
-                                              None, false);
+                                              std::nullopt, false);
     return ExprError();
   }
 
@@ -3529,9 +3560,8 @@ ExprResult Parser::ParseObjCDictionaryLiteral(SourceLocation AtLoc) {
 
     // We have a valid expression. Collect it in a vector so we can
     // build the argument list.
-    ObjCDictionaryElement Element = {
-      KeyExpr.get(), ValueExpr.get(), EllipsisLoc, None
-    };
+    ObjCDictionaryElement Element = {KeyExpr.get(), ValueExpr.get(),
+                                     EllipsisLoc, std::nullopt};
     Elements.push_back(Element);
 
     if (!TryConsumeToken(tok::comma) && Tok.isNot(tok::r_brace))

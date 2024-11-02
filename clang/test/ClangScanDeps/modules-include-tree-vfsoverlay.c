@@ -31,6 +31,7 @@
 // CHECK:   Submodule: A
 // CHECK: Module Map:
 // CHECK: A (framework)
+// CHECK:   link A (framework)
 // CHECK: Files:
 // CHECK-NOT: modulemap
 // CHECK: [[PREFIX]]/elsewhere2/A.h llvmcas://

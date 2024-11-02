@@ -16,6 +16,7 @@
 #include "llvm/ADT/SmallString.h"
 
 #include <climits>
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -200,7 +201,7 @@ void ProcessInstanceInfo::DumpAsTableRow(Stream &s, UserIDResolver &resolver,
 
     auto print = [&](bool (ProcessInstanceInfo::*isValid)() const,
                      uint32_t (ProcessInstanceInfo::*getID)() const,
-                     llvm::Optional<llvm::StringRef> (UserIDResolver::*getName)(
+                     std::optional<llvm::StringRef> (UserIDResolver::*getName)(
                          UserIDResolver::id_t id)) {
       const char *format = "{0,-10} ";
       if (!(this->*isValid)()) {

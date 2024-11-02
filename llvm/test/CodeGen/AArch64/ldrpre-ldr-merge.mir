@@ -1,4 +1,4 @@
-# RUN: llc -o - %s -mtriple=aarch64-none-eabi -mcpu=cortex-a55 -lsr-preferred-addressing-mode=preindexed -stop-after=aarch64-ldst-opt | FileCheck %s
+# RUN: llc -o - %s -mtriple=aarch64 -mcpu=cortex-a55 -lsr-preferred-addressing-mode=preindexed -stop-after=aarch64-ldst-opt | FileCheck %s
 
 ---
 name:            1-ldrwpre-ldrwui-merge
@@ -65,8 +65,7 @@ body:             |
     ; CHECK-LABEL: name: 3-ldrspre-ldrsui-merge
     ; CHECK: liveins: $s0, $s1, $x1
     ; CHECK: early-clobber $x1, renamable $s0, renamable $s1 = LDPSpre renamable $x1, 3 :: (load (s32))
-    ; CHECK: STRSui renamable $s0, renamable $x1, 0 :: (store (s32))
-    ; CHECK: STRSui renamable $s1, renamable $x1, 1 :: ("aarch64-suppress-pair" store (s32))
+    ; CHECK: STPSi renamable $s0, renamable $s1, renamable $x1, 0 :: (store (s32))
     ; CHECK: RET undef $lr
     early-clobber renamable $x1, renamable $s0 = LDRSpre killed renamable $x1, 12 :: (load (s32))
     renamable $s1 = LDRSui renamable $x1, 1 :: (load (s32))
@@ -91,8 +90,7 @@ body:             |
     ; CHECK-LABEL: name: 4-ldrqdre-ldrdui-merge
     ; CHECK: liveins: $d0, $d1, $x1
     ; CHECK: early-clobber $x1, renamable $d0, renamable $d1 = LDPDpre renamable $x1, 16 :: (load (s64))
-    ; CHECK: STRDui renamable $d0, renamable $x1, 0 :: (store (s64))
-    ; CHECK: STRDui renamable $d1, renamable $x1, 1 :: ("aarch64-suppress-pair" store (s64))
+    ; CHECK: STPDi renamable $d0, renamable $d1, renamable $x1, 0 :: (store (s64))
     ; CHECK: RET undef $lr
     early-clobber renamable $x1, renamable $d0 = LDRDpre killed renamable $x1, 128 :: (load (s64))
     renamable $d1 = LDRDui renamable $x1, 1 :: (load (s64))
@@ -275,8 +273,7 @@ body:             |
     ; CHECK: renamable $x0 = LDRXui renamable $x1, 1 :: (load (s64))
     ; CHECK: STRXui renamable $x0, renamable $x0, 1 :: (store (s64))
     ; CHECK: renamable $s1 = LDRSui renamable $x1, 1 :: (load (s32))
-    ; CHECK: STRSui renamable $s0, renamable $x1, 0 :: (store (s32))
-    ; CHECK: STRSui renamable $s1, renamable $x1, 1 :: ("aarch64-suppress-pair" store (s32))
+    ; CHECK: STPSi renamable $s0, renamable $s1, renamable $x1, 0 :: (store (s32))
     ; CHECK: RET undef $lr
     early-clobber renamable $x1, renamable $s0 = LDRSpre killed renamable $x1, 12 :: (load (s32))
     renamable $x0 = LDRXui renamable $x1, 1 :: (load (s64))
@@ -346,8 +343,7 @@ body:             |
     ; CHECK: liveins: $s0, $s1, $x1
     ; CHECK: early-clobber renamable $x1, renamable $s0 = LDRSpre renamable $x1, 12, implicit $w1 :: (load (s32))
     ; CHECK: renamable $s1 = LDRSui renamable $x1, 2 :: (load (s32))
-    ; CHECK: STRSui renamable $s0, renamable $x1, 0 :: (store (s32))
-    ; CHECK: STRSui renamable $s1, renamable $x1, 1 :: ("aarch64-suppress-pair" store (s32))
+    ; CHECK: STPSi renamable $s0, renamable $s1, renamable $x1, 0 :: (store (s32))
     ; CHECK: RET undef $lr
     early-clobber renamable $x1, renamable $s0 = LDRSpre killed renamable $x1, 12 :: (load (s32))
     renamable $s1 = LDRSui renamable $x1, 2 :: (load (s32))
@@ -549,8 +545,7 @@ body:             |
     ; CHECK-LABEL: name: 19-ldrspre-ldrsui-max-merge
     ; CHECK: liveins: $s0, $s1, $x1
     ; CHECK: early-clobber $x1, renamable $s0, renamable $s1 = LDPSpre renamable $x1, 63 :: (load (s32))
-    ; CHECK: STRSui renamable $s0, renamable $x1, 0 :: (store (s32))
-    ; CHECK: STRSui renamable $s1, renamable $x1, 1 :: ("aarch64-suppress-pair" store (s32))
+    ; CHECK: STPSi renamable $s0, renamable $s1, renamable $x1, 0 :: (store (s32))
     ; CHECK: RET undef $lr
     early-clobber renamable $x1, renamable $s0 = LDRSpre killed renamable $x1, 252 :: (load (s32))
     renamable $s1 = LDRSui renamable $x1, 1 :: (load (s32))
@@ -576,12 +571,201 @@ body:             |
     ; CHECK: liveins: $s0, $s1, $x1
     ; CHECK: early-clobber renamable $x1, renamable $s0 = LDRSpre renamable $x1, 251, implicit $w1 :: (load (s32))
     ; CHECK: renamable $s1 = LDRSui renamable $x1, 1 :: (load (s32))
-    ; CHECK: STRSui renamable $s0, renamable $x1, 0 :: (store (s32))
-    ; CHECK: STRSui renamable $s1, renamable $x1, 1 :: ("aarch64-suppress-pair" store (s32))
+    ; CHECK: STPSi renamable $s0, renamable $s1, renamable $x1, 0 :: (store (s32))
     ; CHECK: RET undef $lr
     early-clobber renamable $x1, renamable $s0 = LDRSpre killed renamable $x1, 251 :: (load (s32))
     renamable $s1 = LDRSui renamable $x1, 1 :: (load (s32))
     STRSui killed renamable $s0, renamable $x1, 0 :: (store (s32))
     STRSui killed renamable $s1, renamable $x1, 1 :: (store (s32))
+    RET undef $lr
+...
+
+
+---
+name:            21-ldrswpre-ldrswui-no-merge
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x0' }
+  - { reg: '$x1' }
+  - { reg: '$x2' }
+machineFunctionInfo:
+  hasRedZone:      false
+body:             |
+  bb.0:
+    liveins: $x0, $x1, $x2
+    ; CHECK-LABEL: name: 21-ldrswpre-ldrswui-no-merge
+    ; CHECK: liveins: $x0, $x1, $x2
+    ; CHECK: early-clobber renamable $x1, renamable $x0 = LDRSWpre renamable $x1, 40, implicit $w1 :: (load (s32))
+    ; CHECK: renamable $x2 = LDRSWui renamable $x1, 1 :: (load (s32))
+    ; CHECK: STPXi renamable $x0, renamable $x2, renamable $x1, 0 :: (store (s64))
+    ; CHECK: RET undef $lr
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 40 :: (load (s32))
+    renamable $x2 = LDRSWui renamable $x1, 1 :: (load (s32))
+    STRXui killed renamable $x0, renamable $x1, 0 :: (store (s64))
+    STRXui killed renamable $x2, renamable $x1, 1 :: (store (s64))
+    RET undef $lr
+...
+
+
+---
+name:            22-ldrswpre-ldurswi-no-merge
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x0' }
+  - { reg: '$x1' }
+  - { reg: '$x2' }
+machineFunctionInfo:
+  hasRedZone:      false
+body:             |
+  bb.0:
+    liveins: $x0, $x1, $x2
+    ; CHECK-LABEL: name: 22-ldrswpre-ldurswi-no-merge
+    ; CHECK: liveins: $x0, $x1, $x2
+    ; CHECK: early-clobber renamable $x1, renamable $x0 = LDRSWpre renamable $x1, 40, implicit $w1 :: (load (s32))
+    ; CHECK: renamable $x2 = LDURSWi renamable $x1, 4 :: (load (s32))
+    ; CHECK: STPXi renamable $x0, renamable $x2, renamable $x1, 0 :: (store (s64))
+    ; CHECK: RET undef $lr
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 40 :: (load (s32))
+    renamable $x2 = LDURSWi renamable $x1, 4 :: (load (s32))
+    STRXui killed renamable $x0, renamable $x1, 0 :: (store (s64))
+    STRXui killed renamable $x2, renamable $x1, 1 :: (store (s64))
+    RET undef $lr
+...
+
+
+---
+name:            23-ldrswui-ldrswpre-no-merge
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x0' }
+  - { reg: '$x1' }
+  - { reg: '$x2' }
+machineFunctionInfo:
+  hasRedZone:      false
+body:             |
+  bb.0:
+    liveins: $x0, $x1, $x2
+    ; CHECK-LABEL: name: 23-ldrswui-ldrswpre-no-merge
+    ; CHECK: liveins: $x0, $x1, $x2
+    ; CHECK: renamable $x2 = LDRSWui renamable $x1, 1 :: (load (s32))
+    ; CHECK: early-clobber renamable $x1, renamable $x0 = LDRSWpre renamable $x1, 40, implicit $w1 :: (load (s32))
+    ; CHECK: STPXi renamable $x0, renamable $x2, renamable $x1, 0 :: (store (s64))
+    ; CHECK: RET undef $lr
+    renamable $x2 = LDRSWui renamable $x1, 1 :: (load (s32))
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 40 :: (load (s32))
+    STRXui killed renamable $x0, renamable $x1, 0 :: (store (s64))
+    STRXui killed renamable $x2, renamable $x1, 1 :: (store (s64))
+    RET undef $lr
+...
+
+
+---
+name:            24-ldurswi-ldrswpre-no-merge
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x0' }
+  - { reg: '$x1' }
+  - { reg: '$x2' }
+machineFunctionInfo:
+  hasRedZone:      false
+body:             |
+  bb.0:
+    liveins: $x0, $x1, $x2
+    ; CHECK-LABEL: name: 24-ldurswi-ldrswpre-no-merge
+    ; CHECK: liveins: $x0, $x1, $x2
+    ; CHECK: renamable $x2 = LDURSWi renamable $x1, 4 :: (load (s32))
+    ; CHECK: early-clobber renamable $x1, renamable $x0 = LDRSWpre renamable $x1, 40, implicit $w1 :: (load (s32))
+    ; CHECK: STPXi renamable $x0, renamable $x2, renamable $x1, 0 :: (store (s64))
+    ; CHECK: RET undef $lr
+    renamable $x2 = LDURSWi renamable $x1, 4 :: (load (s32))
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 40 :: (load (s32))
+    STRXui killed renamable $x0, renamable $x1, 0 :: (store (s64))
+    STRXui killed renamable $x2, renamable $x1, 1 :: (store (s64))
+    RET undef $lr
+...
+
+
+---
+name:            25-ldrswpre-ldrswpre-no-merge
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x0' }
+  - { reg: '$x1' }
+  - { reg: '$x2' }
+machineFunctionInfo:
+  hasRedZone:      false
+body:             |
+  bb.0:
+    liveins: $x0, $x1, $x2
+    ; CHECK-LABEL: name: 25-ldrswpre-ldrswpre-no-merge
+    ; CHECK: liveins: $x0, $x1, $x2
+    ; CHECK: early-clobber renamable $x1, dead renamable $x0 = LDRSWpre renamable $x1, 48, implicit $w1 :: (load (s32))
+    ; CHECK: early-clobber renamable $x1, dead renamable $x2 = LDRSWpre renamable $x1, 1, implicit $w1 :: (load (s32))
+    ; CHECK: early-clobber renamable $x1, dead renamable $x0 = LDRSWpre renamable $x1, 16, implicit $w1 :: (load (s32))
+    ; CHECK: early-clobber renamable $x1, dead renamable $x2 = LDRSWpre renamable $x1, 12, implicit $w1 :: (load (s32))
+    ; CHECK: early-clobber renamable $x1, renamable $x0 = LDRSWpre renamable $x1, 16, implicit $w1 :: (load (s32))
+    ; CHECK: early-clobber renamable $x1, renamable $x2 = LDRSWpre renamable $x1, 16, implicit $w1 :: (load (s32))
+    ; CHECK: STPXi renamable $x0, renamable $x2, renamable $x1, 0 :: (store (s64))
+    ; CHECK: RET undef $lr
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 48 :: (load (s32))
+    early-clobber renamable $x1, renamable $x2 = LDRSWpre killed renamable $x1, 1 :: (load (s32))
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 16 :: (load (s32))
+    early-clobber renamable $x1, renamable $x2 = LDRSWpre killed renamable $x1, 12 :: (load (s32))
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 16 :: (load (s32))
+    early-clobber renamable $x1, renamable $x2 = LDRSWpre killed renamable $x1, 16 :: (load (s32))
+    STRXui killed renamable $x0, renamable $x1, 0 :: (store (s64))
+    STRXui killed renamable $x2, renamable $x1, 1 :: (store (s64))
+    RET undef $lr
+...
+
+
+---
+name:            26-ldrswpre-ldrwui-no-merge
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x0' }
+  - { reg: '$x1' }
+  - { reg: '$x2' }
+machineFunctionInfo:
+  hasRedZone:      false
+body:             |
+  bb.0:
+    liveins: $x0, $x1, $x2
+    ; CHECK-LABEL: name: 26-ldrswpre-ldrwui-no-merge
+    ; CHECK: liveins: $x0, $x1, $x2
+    ; CHECK: early-clobber renamable $x1, renamable $x0 = LDRSWpre renamable $x1, 40, implicit $w1 :: (load (s32))
+    ; CHECK: renamable $w2 = LDRWui renamable $x1, 1, implicit-def $x2 :: (load (s32))
+    ; CHECK: STPXi renamable $x0, renamable $x2, renamable $x1, 0 :: (store (s64))
+    ; CHECK: RET undef $lr
+    early-clobber renamable $x1, renamable $x0 = LDRSWpre killed renamable $x1, 40 :: (load (s32))
+    renamable $w2 = LDRWui renamable $x1, 1 :: (load (s32))
+    STRXui killed renamable $x0, renamable $x1, 0 :: (store (s64))
+    STRXui killed renamable $x2, renamable $x1, 1 :: (store (s64))
+    RET undef $lr
+...
+
+
+---
+name:            27-ldrwpre-ldrswui-no-merge
+tracksRegLiveness: true
+liveins:
+  - { reg: '$x0' }
+  - { reg: '$x1' }
+  - { reg: '$x2' }
+machineFunctionInfo:
+  hasRedZone:      false
+body:             |
+  bb.0:
+    liveins: $x0, $x1, $x2
+    ; CHECK-LABEL: name: 27-ldrwpre-ldrswui-no-merge
+    ; CHECK: liveins: $x0, $x1, $x2
+    ; CHECK: early-clobber renamable $x1, renamable $w0 = LDRWpre renamable $x1, 40, implicit $w1 :: (load (s32))
+    ; CHECK: renamable $x2 = LDRSWui renamable $x1, 1 :: (load (s32))
+    ; CHECK: STPXi renamable $x0, renamable $x2, renamable $x1, 0 :: (store (s64))
+    ; CHECK: RET undef $lr
+    early-clobber renamable $x1, renamable $w0 = LDRWpre killed renamable $x1, 40 :: (load (s32))
+    renamable $x2 = LDRSWui renamable $x1, 1 :: (load (s32))
+    STRXui killed renamable $x0, renamable $x1, 0 :: (store (s64))
+    STRXui killed renamable $x2, renamable $x1, 1 :: (store (s64))
     RET undef $lr
 ...

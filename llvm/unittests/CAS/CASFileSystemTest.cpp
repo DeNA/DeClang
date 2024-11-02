@@ -43,7 +43,7 @@ bufferHasContent(ErrorOr<std::unique_ptr<MemoryBuffer>> ErrorOrBuffer,
 }
 
 static ObjectRef createBlobUnchecked(ObjectStore &CAS, StringRef Content) {
-  return llvm::cantFail(CAS.storeFromString(None, Content));
+  return llvm::cantFail(CAS.storeFromString(std::nullopt, Content));
 }
 
 static Expected<ObjectProxy> createEmptyTree(ObjectStore &CAS) {
@@ -324,7 +324,7 @@ TEST(CASFileSystemTest, getDirectoryEntry) {
       {"/d/e/s8/e/f/s7", "/d/e/f/s7", "/d/b2"},
   };
 
-  for (const auto &Test : makeArrayRef(Tests)) {
+  for (const auto &Test : ArrayRef(Tests)) {
     const vfs::CachedDirectoryEntry *Entry = nullptr;
     ASSERT_THAT_ERROR(CASFS->getDirectoryEntry(Test.In, false).moveInto(Entry),
                       Succeeded());

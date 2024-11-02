@@ -44,7 +44,7 @@ using namespace lldb_private;
 // The first bits in the flags are reserved for the SymbolContext::Scope bits
 // so we know if we have tried to look up information in our internal symbol
 // context (m_sc) already.
-#define RESOLVED_FRAME_CODE_ADDR (uint32_t(eSymbolContextEverything + 1))
+#define RESOLVED_FRAME_CODE_ADDR (uint32_t(eSymbolContextLastItem) << 1)
 #define RESOLVED_FRAME_ID_SYMBOL_SCOPE (RESOLVED_FRAME_CODE_ADDR << 1)
 #define GOT_FRAME_BASE (RESOLVED_FRAME_ID_SYMBOL_SCOPE << 1)
 #define RESOLVED_VARIABLES (GOT_FRAME_BASE << 1)
@@ -57,8 +57,8 @@ StackFrame::StackFrame(const ThreadSP &thread_sp, user_id_t frame_idx,
                        const SymbolContext *sc_ptr)
     : m_thread_wp(thread_sp), m_frame_index(frame_idx),
       m_concrete_frame_index(unwind_frame_index), m_reg_context_sp(),
-      m_id(pc, cfa, thread_sp), m_frame_code_addr(pc), m_sc(), m_flags(),
-      m_frame_base(), m_frame_base_error(), m_cfa_is_valid(cfa_is_valid),
+      m_id(pc, cfa), m_frame_code_addr(pc), m_sc(), m_flags(), m_frame_base(),
+      m_frame_base_error(), m_cfa_is_valid(cfa_is_valid),
       m_stack_frame_kind(kind),
       m_behaves_like_zeroth_frame(behaves_like_zeroth_frame),
       m_variable_list_sp(), m_variable_list_value_objects(),
@@ -83,10 +83,9 @@ StackFrame::StackFrame(const ThreadSP &thread_sp, user_id_t frame_idx,
                        const SymbolContext *sc_ptr)
     : m_thread_wp(thread_sp), m_frame_index(frame_idx),
       m_concrete_frame_index(unwind_frame_index),
-      m_reg_context_sp(reg_context_sp), m_id(pc, cfa, thread_sp),
-      m_frame_code_addr(pc), m_sc(), m_flags(), m_frame_base(),
-      m_frame_base_error(), m_cfa_is_valid(true),
-      m_stack_frame_kind(StackFrame::Kind::Regular),
+      m_reg_context_sp(reg_context_sp), m_id(pc, cfa), m_frame_code_addr(pc),
+      m_sc(), m_flags(), m_frame_base(), m_frame_base_error(),
+      m_cfa_is_valid(true), m_stack_frame_kind(StackFrame::Kind::Regular),
       m_behaves_like_zeroth_frame(behaves_like_zeroth_frame),
       m_variable_list_sp(), m_variable_list_value_objects(),
       m_recognized_frame_sp(), m_disassembly(), m_mutex() {
@@ -110,8 +109,7 @@ StackFrame::StackFrame(const ThreadSP &thread_sp, user_id_t frame_idx,
     : m_thread_wp(thread_sp), m_frame_index(frame_idx),
       m_concrete_frame_index(unwind_frame_index),
       m_reg_context_sp(reg_context_sp),
-      m_id(pc_addr.GetLoadAddress(thread_sp->CalculateTarget().get()), cfa,
-           thread_sp),
+      m_id(pc_addr.GetLoadAddress(thread_sp->CalculateTarget().get()), cfa),
       m_frame_code_addr(pc_addr), m_sc(), m_flags(), m_frame_base(),
       m_frame_base_error(), m_cfa_is_valid(true),
       m_stack_frame_kind(StackFrame::Kind::Regular),
@@ -567,8 +565,9 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
     // Check for direct ivars access which helps us with implicit access to
     // ivars using "this" or "self".
     GetSymbolContext(eSymbolContextFunction | eSymbolContextBlock);
-    if (auto instance_var_name = m_sc.GetInstanceVariableName()) {
-      var_sp = variable_list->FindVariable(instance_var_name);
+    llvm::StringRef instance_var_name = m_sc.GetInstanceVariableName();
+    if (!instance_var_name.empty()) {
+      var_sp = variable_list->FindVariable(ConstString(instance_var_name));
       if (var_sp) {
         separator_idx = 0;
         if (Type *var_type = var_sp->GetType())
@@ -603,7 +602,7 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
       valobj_sp = GetValueObjectForFrameVariable(variable_sp, use_dynamic);
       if (!valobj_sp)
         return valobj_sp;
-      valobj_sp = valobj_sp->GetChildMemberWithName(name_const_string, true);
+      valobj_sp = valobj_sp->GetChildMemberWithName(name_const_string);
       if (valobj_sp)
         break;
     }
@@ -651,7 +650,7 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
         Status deref_error;
         if (valobj_sp->GetCompilerType().IsReferenceType()) {
           valobj_sp = valobj_sp->GetSyntheticValue()->Dereference(deref_error);
-          if (error.Fail()) {
+          if (!valobj_sp || deref_error.Fail()) {
             error.SetErrorStringWithFormatv(
                 "Failed to dereference reference type: %s", deref_error);
             return ValueObjectSP();
@@ -659,7 +658,7 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
         }
 
         valobj_sp = valobj_sp->Dereference(deref_error);
-        if (error.Fail()) {
+        if (!valobj_sp || deref_error.Fail()) {
           error.SetErrorStringWithFormatv(
               "Failed to dereference sythetic value: {0}", deref_error);
           return ValueObjectSP();
@@ -704,13 +703,13 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
           return ValueObjectSP();
         }
       }
-      child_valobj_sp = valobj_sp->GetChildMemberWithName(child_name, true);
+      child_valobj_sp = valobj_sp->GetChildMemberWithName(child_name);
       if (!child_valobj_sp) {
         if (!no_synth_child) {
           child_valobj_sp = valobj_sp->GetSyntheticValue();
           if (child_valobj_sp)
             child_valobj_sp =
-                child_valobj_sp->GetChildMemberWithName(child_name, true);
+                child_valobj_sp->GetChildMemberWithName(child_name);
         }
 
         if (no_synth_child || !child_valobj_sp) {
@@ -794,9 +793,9 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
           // what we have is *ptr[low]. the most similar C++ syntax is to deref
           // ptr and extract bit low out of it. reading array item low would be
           // done by saying ptr[low], without a deref * sign
-          Status error;
-          ValueObjectSP temp(valobj_sp->Dereference(error));
-          if (error.Fail()) {
+          Status deref_error;
+          ValueObjectSP temp(valobj_sp->Dereference(deref_error));
+          if (!temp || deref_error.Fail()) {
             valobj_sp->GetExpressionPath(var_expr_path_strm);
             error.SetErrorStringWithFormat(
                 "could not dereference \"(%s) %s\"",
@@ -812,9 +811,8 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
           // arr[0] (an operation that is equivalent to deref-ing arr) and
           // extract bit low out of it. reading array item low would be done by
           // saying arr[low], without a deref * sign
-          Status error;
-          ValueObjectSP temp(valobj_sp->GetChildAtIndex(0, true));
-          if (error.Fail()) {
+          ValueObjectSP temp(valobj_sp->GetChildAtIndex(0));
+          if (!temp) {
             valobj_sp->GetExpressionPath(var_expr_path_strm);
             error.SetErrorStringWithFormat(
                 "could not get item 0 for \"(%s) %s\"",
@@ -857,17 +855,18 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
                   "\"(%s) %s\" is not an array type",
                   valobj_sp->GetTypeName().AsCString("<invalid type>"),
                   var_expr_path_strm.GetData());
-            } else if (
-                static_cast<uint32_t>(child_index) >=
-                synthetic
-                    ->GetNumChildren() /* synthetic does not have that many values */) {
+            } else if (static_cast<uint32_t>(child_index) >=
+                       synthetic
+                           ->GetNumChildrenIgnoringErrors() /* synthetic does
+                                                                not have that
+                                                                many values */) {
               valobj_sp->GetExpressionPath(var_expr_path_strm);
               error.SetErrorStringWithFormat(
                   "array index %ld is not valid for \"(%s) %s\"", child_index,
                   valobj_sp->GetTypeName().AsCString("<invalid type>"),
                   var_expr_path_strm.GetData());
             } else {
-              child_valobj_sp = synthetic->GetChildAtIndex(child_index, true);
+              child_valobj_sp = synthetic->GetChildAtIndex(child_index);
               if (!child_valobj_sp) {
                 valobj_sp->GetExpressionPath(var_expr_path_strm);
                 error.SetErrorStringWithFormat(
@@ -897,10 +896,10 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
           if (!no_synth_child) {
             ValueObjectSP synthetic = valobj_sp->GetSyntheticValue();
             if (synthetic)
-              child_valobj_sp = synthetic->GetChildAtIndex(child_index, true);
+              child_valobj_sp = synthetic->GetChildAtIndex(child_index);
           }
           if (!child_valobj_sp)
-            child_valobj_sp = valobj_sp->GetChildAtIndex(child_index, true);
+            child_valobj_sp = valobj_sp->GetChildAtIndex(child_index);
           // END SWIFT MOD
 
           if (!child_valobj_sp && (is_incomplete_array || !no_synth_child))
@@ -938,17 +937,16 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
                 "\"(%s) %s\" is not an array type",
                 valobj_sp->GetTypeName().AsCString("<invalid type>"),
                 var_expr_path_strm.GetData());
-          } else if (
-              static_cast<uint32_t>(child_index) >=
-              synthetic
-                  ->GetNumChildren() /* synthetic does not have that many values */) {
+          } else if (static_cast<uint32_t>(child_index) >=
+                     synthetic->GetNumChildrenIgnoringErrors() /* synthetic
+                                     does not have that many values */) {
             valobj_sp->GetExpressionPath(var_expr_path_strm);
             error.SetErrorStringWithFormat(
                 "array index %ld is not valid for \"(%s) %s\"", child_index,
                 valobj_sp->GetTypeName().AsCString("<invalid type>"),
                 var_expr_path_strm.GetData());
           } else {
-            child_valobj_sp = synthetic->GetChildAtIndex(child_index, true);
+            child_valobj_sp = synthetic->GetChildAtIndex(child_index);
             if (!child_valobj_sp) {
               valobj_sp->GetExpressionPath(var_expr_path_strm);
               error.SetErrorStringWithFormat(
@@ -1002,9 +1000,9 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
         // deref ptr and extract bits low thru high out of it. reading array
         // items low thru high would be done by saying ptr[low-high], without a
         // deref * sign
-        Status error;
-        ValueObjectSP temp(valobj_sp->Dereference(error));
-        if (error.Fail()) {
+        Status deref_error;
+        ValueObjectSP temp(valobj_sp->Dereference(deref_error));
+        if (!temp || deref_error.Fail()) {
           valobj_sp->GetExpressionPath(var_expr_path_strm);
           error.SetErrorStringWithFormat(
               "could not dereference \"(%s) %s\"",
@@ -1019,9 +1017,8 @@ ValueObjectSP StackFrame::GetValueForVariableExpressionPath(
         // get arr[0] (an operation that is equivalent to deref-ing arr) and
         // extract bits low thru high out of it. reading array items low thru
         // high would be done by saying arr[low-high], without a deref * sign
-        Status error;
-        ValueObjectSP temp(valobj_sp->GetChildAtIndex(0, true));
-        if (error.Fail()) {
+        ValueObjectSP temp(valobj_sp->GetChildAtIndex(0));
+        if (!temp) {
           valobj_sp->GetExpressionPath(var_expr_path_strm);
           error.SetErrorStringWithFormat(
               "could not get item 0 for \"(%s) %s\"",
@@ -1213,26 +1210,23 @@ bool StackFrame::IsArtificial() const {
   return m_stack_frame_kind == StackFrame::Kind::Artificial;
 }
 
-lldb::LanguageType StackFrame::GetLanguage() {
+SourceLanguage StackFrame::GetLanguage() {
   CompileUnit *cu = GetSymbolContext(eSymbolContextCompUnit).comp_unit;
   if (cu)
     return cu->GetLanguage();
-  return lldb::eLanguageTypeUnknown;
+  return {};
 }
 
-lldb::LanguageType StackFrame::GuessLanguage() {
-  LanguageType lang_type = GetLanguage();
+SourceLanguage StackFrame::GuessLanguage() {
+  SourceLanguage lang_type = GetLanguage();
 
   if (lang_type == eLanguageTypeUnknown) {
-    SymbolContext sc = GetSymbolContext(eSymbolContextFunction
-                                        | eSymbolContextSymbol);
-    if (sc.function) {
-      lang_type = sc.function->GetMangled().GuessLanguage();
-    }
+    SymbolContext sc =
+        GetSymbolContext(eSymbolContextFunction | eSymbolContextSymbol);
+    if (sc.function)
+      lang_type = LanguageType(sc.function->GetMangled().GuessLanguage());
     else if (sc.symbol)
-    {
-      lang_type = sc.symbol->GetMangled().GuessLanguage();
-    }
+      lang_type = SourceLanguage(sc.symbol->GetMangled().GuessLanguage());
   }
 
   return lang_type;
@@ -1312,7 +1306,7 @@ GetBaseExplainingDereference(const Instruction::Operand &operand,
   }
   return std::make_pair(nullptr, 0);
 }
-}
+} // namespace
 
 lldb::ValueObjectSP StackFrame::GuessValueForAddress(lldb::addr_t addr) {
   TargetSP target_sp = CalculateTarget();
@@ -1407,9 +1401,9 @@ ValueObjectSP GetValueForOffset(StackFrame &frame, ValueObjectSP &parent,
     return parent;
   }
 
-  for (int ci = 0, ce = parent->GetNumChildren(); ci != ce; ++ci) {
-    const bool can_create = true;
-    ValueObjectSP child_sp = parent->GetChildAtIndex(ci, can_create);
+  for (int ci = 0, ce = parent->GetNumChildrenIgnoringErrors(); ci != ce;
+       ++ci) {
+    ValueObjectSP child_sp = parent->GetChildAtIndex(ci);
 
     if (!child_sp) {
       return ValueObjectSP();
@@ -1788,17 +1782,29 @@ void StackFrame::CalculateExecutionContext(ExecutionContext &exe_ctx) {
   exe_ctx.SetContext(shared_from_this());
 }
 
+bool StackFrame::DumpUsingFormat(Stream &strm,
+                                 const FormatEntity::Entry *format,
+                                 llvm::StringRef frame_marker) {
+  GetSymbolContext(eSymbolContextEverything);
+  ExecutionContext exe_ctx(shared_from_this());
+  StreamString s;
+  s.PutCString(frame_marker);
+
+  if (format && FormatEntity::Format(*format, s, &m_sc, &exe_ctx, nullptr,
+                                     nullptr, false, false)) {
+    strm.PutCString(s.GetString());
+    return true;
+  }
+  return false;
+}
+
 void StackFrame::DumpUsingSettingsFormat(Stream *strm, bool show_unique,
                                          const char *frame_marker) {
   if (strm == nullptr)
     return;
 
-  GetSymbolContext(eSymbolContextEverything);
   ExecutionContext exe_ctx(shared_from_this());
   StreamString s;
-
-  if (frame_marker)
-    s.PutCString(frame_marker);
 
   const FormatEntity::Entry *frame_format = nullptr;
   Target *target = exe_ctx.GetTargetPtr();
@@ -1809,10 +1815,7 @@ void StackFrame::DumpUsingSettingsFormat(Stream *strm, bool show_unique,
       frame_format = target->GetDebugger().GetFrameFormat();
     }
   }
-  if (frame_format && FormatEntity::Format(*frame_format, s, &m_sc, &exe_ctx,
-                                           nullptr, nullptr, false, false)) {
-    strm->PutCString(s.GetString());
-  } else {
+  if (!DumpUsingFormat(*strm, frame_format, frame_marker)) {
     Dump(strm, true, false);
     strm->EOL();
   }

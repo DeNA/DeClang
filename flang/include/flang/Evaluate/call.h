@@ -185,6 +185,7 @@ struct ProcedureDesignator {
   // Exactly one of these will return a non-null pointer.
   const SpecificIntrinsic *GetSpecificIntrinsic() const;
   const Symbol *GetSymbol() const; // symbol or component symbol
+  const SymbolRef *UnwrapSymbolRef() const; // null if intrinsic or component
 
   // For references to NOPASS components and bindings only.
   // References to PASS components and bindings are represented
@@ -208,6 +209,8 @@ struct ProcedureDesignator {
       u;
 };
 
+using Chevrons = std::vector<Expr<SomeType>>;
+
 class ProcedureRef {
 public:
   CLASS_BOILERPLATE(ProcedureRef)
@@ -222,6 +225,10 @@ public:
   const ProcedureDesignator &proc() const { return proc_; }
   ActualArguments &arguments() { return arguments_; }
   const ActualArguments &arguments() const { return arguments_; }
+  // CALL subr <<< kernel launch >>> (...); not function
+  Chevrons &chevrons() { return chevrons_; }
+  const Chevrons &chevrons() const { return chevrons_; }
+  void set_chevrons(Chevrons &&chevrons) { chevrons_ = std::move(chevrons); }
 
   std::optional<Expr<SubscriptInteger>> LEN() const;
   int Rank() const;
@@ -249,6 +256,7 @@ public:
 protected:
   ProcedureDesignator proc_;
   ActualArguments arguments_;
+  Chevrons chevrons_;
   bool hasAlternateReturns_;
 };
 

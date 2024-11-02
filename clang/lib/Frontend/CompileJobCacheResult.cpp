@@ -19,7 +19,7 @@ CompileJobCacheResult::getAllOutputKinds() {
   static const OutputKind OutputKinds[] = {OutputKind::MainOutput,
                                            OutputKind::SerializedDiagnostics,
                                            OutputKind::Dependencies};
-  return llvm::makeArrayRef(OutputKinds);
+  return ArrayRef(OutputKinds);
 }
 
 Error CompileJobCacheResult::forEachOutput(
@@ -74,7 +74,7 @@ CompileJobCacheResult::Output CompileJobCacheResult::getOutput(size_t I) const {
   return Output{getOutputObject(I), getOutputKind(I)};
 }
 
-Optional<CompileJobCacheResult::Output>
+std::optional<CompileJobCacheResult::Output>
 CompileJobCacheResult::getOutput(OutputKind Kind) const {
   size_t Count = getNumOutputs();
   for (size_t I = 0; I < Count; ++I) {
@@ -82,7 +82,7 @@ CompileJobCacheResult::getOutput(OutputKind Kind) const {
     if (Kind == K)
       return Output{getOutputObject(I), Kind};
   }
-  return None;
+  return std::nullopt;
 }
 
 StringRef CompileJobCacheResult::getOutputKindName(OutputKind Kind) {

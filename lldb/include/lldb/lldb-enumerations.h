@@ -322,7 +322,9 @@ enum ValueType {
   eValueTypeRegister = 5,         ///< stack frame register value
   eValueTypeRegisterSet = 6, ///< A collection of stack frame register values
   eValueTypeConstResult = 7, ///< constant result variables
-  eValueTypeVariableThreadLocal = 8 ///< thread local storage variable
+  eValueTypeVariableThreadLocal = 8, ///< thread local storage variable
+  eValueTypeVTable = 9,              ///< virtual function table
+  eValueTypeVTableEntry = 10, ///< function pointer in virtual function table
 };
 
 /// Token size/granularities for Input Readers.
@@ -375,6 +377,9 @@ FLAGS_ENUM(SymbolContextItem){
     /// from being used during frame PC lookups and many other
     /// potential address to symbol context lookups.
     eSymbolContextVariable = (1u << 7),
+
+    // Keep this last and up-to-date for what the last enum value is.
+    eSymbolContextLastItem = eSymbolContextVariable,
 };
 LLDB_MARK_AS_BITMASK_ENUM(SymbolContextItem)
 
@@ -427,6 +432,21 @@ FLAGS_ENUM(WatchpointEventType){
     eWatchpointEventTypeIgnoreChanged = (1u << 10),
     eWatchpointEventTypeThreadChanged = (1u << 11),
     eWatchpointEventTypeTypeChanged = (1u << 12)};
+
+enum WatchpointWriteType {
+  /// Don't stop when the watched memory region is written to.
+  eWatchpointWriteTypeDisabled,
+  /// Stop on any write access to the memory region, even if
+  /// the value doesn't change.  On some architectures, a write
+  /// near the memory region may be falsely reported as a match,
+  /// and notify this spurious stop as a watchpoint trap.
+  eWatchpointWriteTypeAlways,
+  /// Stop on a write to the memory region that changes its value.
+  /// This is most likely the behavior a user expects, and is the
+  /// behavior in gdb.  lldb can silently ignore writes near the
+  /// watched memory region that are reported as accesses to lldb.
+  eWatchpointWriteTypeOnModify
+};
 
 /// Programming language type.
 ///
@@ -487,14 +507,19 @@ enum LanguageType {
   eLanguageTypeFortran18 = 0x002d,
   eLanguageTypeAda2005 = 0x002e,
   eLanguageTypeAda2012 = 0x002f,
+  eLanguageTypeHIP = 0x0030,
+  eLanguageTypeAssembly = 0x0031,
+  eLanguageTypeC_sharp = 0x0032,
+  eLanguageTypeMojo = 0x0033,
 
   // Vendor Extensions
   // Note: Language::GetNameForLanguageType
   // assumes these can be used as indexes into array language_names, and
   // Language::SetLanguageFromCString and Language::AsCString assume these can
   // be used as indexes into array g_languages.
-  eLanguageTypeMipsAssembler,           ///< Mips_Assembler.
-  eLanguageTypeExtRenderScript,         ///< GOOGLE_RenderScript.
+  eLanguageTypeMipsAssembler, ///< Mips_Assembler.
+  // Mojo will move to the common list of languages once the DWARF committee
+  // creates a language code for it.
   eNumLanguageTypes
 };
 
@@ -504,6 +529,7 @@ enum InstrumentationRuntimeType {
   eInstrumentationRuntimeTypeUndefinedBehaviorSanitizer = 0x0002,
   eInstrumentationRuntimeTypeMainThreadChecker = 0x0003,
   eInstrumentationRuntimeTypeSwiftRuntimeReporting = 0x0004,
+  eInstrumentationRuntimeTypeLibsanitizersAsan = 0x0005,
   eNumInstrumentationRuntimeTypes
 };
 
@@ -745,6 +771,8 @@ enum SectionType {
   eSectionTypeDWARFDebugLocDwo,
   eSectionTypeDWARFDebugLocListsDwo,
   eSectionTypeDWARFDebugTuIndex,
+  eSectionTypeCTF,
+  eSectionTypeLLDBTypeSummaries,
 };
 
 FLAGS_ENUM(EmulateInstructionOptions){
@@ -869,8 +897,9 @@ enum TemplateArgumentKind {
 enum FormatterMatchType {
   eFormatterMatchExact,
   eFormatterMatchRegex,
+  eFormatterMatchCallback,
 
-  eLastFormatterMatchType = eFormatterMatchRegex,
+  eLastFormatterMatchType = eFormatterMatchCallback,
 };
 
 /// Kind of argument for generics, either bound or unbound.
@@ -1301,6 +1330,53 @@ enum CompletionType {
   // you can add custom enums starting from here in your Option class. Also
   // if you & in this bit the base code will not process the option.
   eCustomCompletion = (1u << 25)
+};
+
+enum SymbolDownload {
+  eSymbolDownloadOff = 0,
+  eSymbolDownloadBackground = 1,
+  eSymbolDownloadForeground = 2,
+};
+
+/// Used in the SBProcess AddressMask/FixAddress methods.
+enum AddressMaskType {
+  eAddressMaskTypeCode = 0,
+  eAddressMaskTypeData,
+  eAddressMaskTypeAny,
+  eAddressMaskTypeAll = eAddressMaskTypeAny
+};
+
+/// Used in the SBProcess AddressMask/FixAddress methods.
+enum AddressMaskRange {
+  eAddressMaskRangeLow = 0,
+  eAddressMaskRangeHigh,
+  eAddressMaskRangeAny,
+  eAddressMaskRangeAll = eAddressMaskRangeAny,
+};
+
+/// Specifies if children need to be re-computed
+/// after a call to \ref SyntheticChildrenFrontEnd::Update.
+enum class ChildCacheState {
+  eRefetch = 0, ///< Children need to be recomputed dynamically.
+
+  eReuse = 1, ///< Children did not change and don't need to be recomputed;
+              ///< re-use what we computed the last time we called Update.
+};
+
+/// Used by the debugger to indicate which events are being broadcasted.
+enum DebuggerBroadcastBit {
+  eBroadcastBitProgress = (1 << 0),
+  eBroadcastBitWarning = (1 << 1),
+  eBroadcastBitError = (1 << 2),
+  eBroadcastSymbolChange = (1 << 3),
+  eBroadcastBitProgressCategory = (1 << 4),
+};
+
+/// Used for expressing severity in logs and diagnostics.
+enum Severity {
+  eSeverityError,
+  eSeverityWarning,
+  eSeverityInfo, // Equivalent to Remark used in clang.
 };
 
 } // namespace lldb

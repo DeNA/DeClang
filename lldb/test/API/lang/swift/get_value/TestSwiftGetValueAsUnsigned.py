@@ -20,22 +20,16 @@ import unittest2
 
 
 class SwiftGetValueAsUnsignedAPITest(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_get_value_as_unsigned_sbapi(self):
         """Tests that the SBValue::GetValueAsUnsigned() API works for Swift types"""
         self.build()
         self.getvalue_commands()
 
-    def setUp(self):
-        TestBase.setUp(self)
-
     def getvalue_commands(self):
         """Tests that the SBValue::GetValueAsUnsigned() API works for Swift types"""
-        (target, process, thread, breakpoint) = lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("main.swift")
-        )
+        (target, process, thread, breakpoint) = lldbutil.run_to_source_breakpoint(self, 
+                "break here", lldb.SBFileSpec("main.swift"))
 
         frame = thread.GetFrameAtIndex(0)
         string = frame.FindVariable("aString")
@@ -44,25 +38,22 @@ class SwiftGetValueAsUnsignedAPITest(TestBase):
         classobject = frame.FindVariable("aClassObject")
 
         numberValue = number.GetValueAsUnsigned()
-        self.assertTrue(numberValue == 123456, "Swift.Int does not have a valid value")
-
-        builtinPointerValue = (
-            string.GetChildMemberWithName("str_value")
-            .GetChildMemberWithName("base")
-            .GetChildMemberWithName("value")
-        )
         self.assertTrue(
-            builtinPointerValue != 0, "Builtin.RawPointer does not have a valid value"
-        )
+            numberValue == 123456,
+            "Swift.Int does not have a valid value")
+
+        builtinPointerValue = string.GetChildMemberWithName(
+            "str_value").GetChildMemberWithName("base").GetChildMemberWithName("value")
+        self.assertTrue(builtinPointerValue != 0,
+                        "Builtin.RawPointer does not have a valid value")
 
         objectPointerValue = string.GetChildMemberWithName(
-            "str_value"
-        ).GetChildMemberWithName("value")
-        self.assertTrue(
-            objectPointerValue != 0, "Builtin.RawPointer does not have a valid value"
-        )
+            "str_value").GetChildMemberWithName("value")
+        self.assertTrue(objectPointerValue != 0,
+                        "Builtin.RawPointer does not have a valid value")
 
         classValue = classobject.GetValueAsUnsigned()
         self.assertTrue(
-            classValue != 0, "Class types are aggregates with pointer values"
-        )
+            classValue != 0,
+            "Class types are aggregates with pointer values")
+

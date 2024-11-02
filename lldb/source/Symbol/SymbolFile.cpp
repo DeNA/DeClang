@@ -141,17 +141,6 @@ void SymbolFile::GetMangledNamesForFunction(
     const std::string &scope_qualified_name,
     std::vector<ConstString> &mangled_names) {}
 
-void SymbolFile::FindTypes(
-    ConstString name, const CompilerDeclContext &parent_decl_ctx,
-    uint32_t max_matches,
-    llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-    TypeMap &types) {}
-
-void SymbolFile::FindTypes(llvm::ArrayRef<CompilerContext> pattern,
-                           LanguageSet languages,
-                           llvm::DenseSet<SymbolFile *> &searched_symbol_files,
-                           TypeMap &types) {}
-
 void SymbolFile::AssertModuleLock() {
   // The code below is too expensive to leave enabled in release builds. It's
   // enabled in debug builds or when the correct macro is set.
@@ -172,16 +161,15 @@ SymbolFile::RegisterInfoResolver::~RegisterInfoResolver() = default;
 
 Symtab *SymbolFileCommon::GetSymtab() {
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  if (m_symtab)
-    return m_symtab;
-
   // Fetch the symtab from the main object file.
-  m_symtab = GetMainObjectFile()->GetSymtab();
+  auto *symtab = GetMainObjectFile()->GetSymtab();
+  if (m_symtab != symtab) {
+    m_symtab = symtab;
 
-  // Then add our symbols to it.
-  if (m_symtab)
-    AddSymbols(*m_symtab);
-
+    // Then add our symbols to it.
+    if (m_symtab)
+      AddSymbols(*m_symtab);
+  }
   return m_symtab;
 }
 
@@ -194,8 +182,8 @@ void SymbolFileCommon::SectionFileAddressesChanged() {
   ObjectFile *symfile_objfile = GetObjectFile();
   if (symfile_objfile != module_objfile)
     symfile_objfile->SectionFileAddressesChanged();
-  if (m_symtab)
-    m_symtab->SectionFileAddressesChanged();
+  if (auto *symtab = GetSymtab())
+    symtab->SectionFileAddressesChanged();
 }
 
 uint32_t SymbolFileCommon::GetNumCompileUnits() {

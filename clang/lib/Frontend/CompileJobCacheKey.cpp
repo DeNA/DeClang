@@ -41,20 +41,21 @@ createCompileJobCacheKeyForArgs(ObjectStore &CAS,
     Builder.push(RootRef, llvm::cas::TreeEntry::Tree, "filesystem");
   }
   Builder.push(
-      llvm::cantFail(CAS.storeFromString(None, CommandLine)),
+      llvm::cantFail(CAS.storeFromString(std::nullopt, CommandLine)),
       llvm::cas::TreeEntry::Regular, "command-line");
   Builder.push(
-      llvm::cantFail(CAS.storeFromString(None, "-cc1")),
+      llvm::cantFail(CAS.storeFromString(std::nullopt, "-cc1")),
       llvm::cas::TreeEntry::Regular, "computation");
 
   // FIXME: The version is maybe insufficient...
-  Builder.push(llvm::cantFail(CAS.storeFromString(None, getClangFullVersion())),
-               llvm::cas::TreeEntry::Regular, "version");
+  Builder.push(
+      llvm::cantFail(CAS.storeFromString(std::nullopt, getClangFullVersion())),
+      llvm::cas::TreeEntry::Regular, "version");
 
   return llvm::cantFail(Builder.create(CAS)).getID();
 }
 
-static Optional<llvm::cas::CASID>
+static std::optional<llvm::cas::CASID>
 createCompileJobCacheKeyImpl(ObjectStore &CAS, DiagnosticsEngine &Diags,
                              CompilerInvocation CI) {
   FrontendOptions &FrontendOpts = CI.getFrontendOpts();
@@ -72,6 +73,20 @@ createCompileJobCacheKeyImpl(ObjectStore &CAS, DiagnosticsEngine &Diags,
   // These are added in when the dependency file is generated, but they don't
   // affect the actual compilation.
   DepOpts.ExtraDeps.clear();
+
+  // Canonicalize indexing options.
+
+  // Indexing data are allowed to "escape" the CAS sandbox without indexing
+  // options affecting the CAS key. Essentially indexing data are produced when
+  // the compilation is executed but they are not replayed if the compilation is
+  // cached.
+
+  FrontendOpts.IndexStorePath.clear();
+  FrontendOpts.IndexUnitOutputPath.clear();
+  FrontendOpts.IndexIgnoreSystemSymbols = false;
+  FrontendOpts.IndexRecordCodegenName = false;
+  FrontendOpts.IndexIgnoreMacros = false;
+  FrontendOpts.IndexIgnorePcms = false;
 
   // Canonicalize diagnostic options.
 
@@ -129,12 +144,12 @@ createCompileJobCacheKeyImpl(ObjectStore &CAS, DiagnosticsEngine &Diags,
   if (!RootID) {
     llvm::consumeError(RootID.takeError());
     Diags.Report(diag::err_cas_cannot_parse_root_id) << RootIDString;
-    return None;
+    return std::nullopt;
   }
-  Optional<llvm::cas::ObjectRef> RootRef = CAS.getReference(*RootID);
+  std::optional<llvm::cas::ObjectRef> RootRef = CAS.getReference(*RootID);
   if (!RootRef) {
     Diags.Report(diag::err_cas_missing_root_id) << RootIDString;
-    return None;
+    return std::nullopt;
   }
 
   return createCompileJobCacheKeyForArgs(CAS, Argv, *RootRef, IsIncludeTree);
@@ -152,6 +167,8 @@ canonicalizeForCaching(llvm::cas::ObjectStore &CAS, DiagnosticsEngine &Diags,
   Opts.CompilationCachingServicePath =
       std::move(FrontendOpts.CompilationCachingServicePath);
   FrontendOpts.CompilationCachingServicePath.clear();
+  Opts.WriteOutputAsCASID = FrontendOpts.WriteOutputAsCASID;
+  FrontendOpts.WriteOutputAsCASID = false;
   Opts.DisableCachedCompileJobReplay =
       FrontendOpts.DisableCachedCompileJobReplay;
   FrontendOpts.DisableCachedCompileJobReplay = false;
@@ -174,18 +191,25 @@ canonicalizeForCaching(llvm::cas::ObjectStore &CAS, DiagnosticsEngine &Diags,
   return Opts;
 }
 
-llvm::Optional<llvm::cas::CASID> clang::canonicalizeAndCreateCacheKey(
+std::optional<llvm::cas::CASID> clang::canonicalizeAndCreateCacheKey(
     llvm::cas::ObjectStore &CAS, DiagnosticsEngine &Diags,
     CompilerInvocation &Invocation, CompileJobCachingOptions &Opts) {
   Opts = canonicalizeForCaching(CAS, Diags, Invocation);
   return createCompileJobCacheKeyImpl(CAS, Diags, Invocation);
 }
 
-Optional<llvm::cas::CASID>
+std::optional<llvm::cas::CASID>
 clang::createCompileJobCacheKey(ObjectStore &CAS, DiagnosticsEngine &Diags,
-                                const CompilerInvocation &OriginalInvocation) {
+                                const CompilerInvocation &OriginalCI) {
+  CompilerInvocation CI(OriginalCI);
+  (void)canonicalizeForCaching(CAS, Diags, CI);
+  return createCompileJobCacheKeyImpl(CAS, Diags, std::move(CI));
+}
 
-  CompilerInvocation CI(OriginalInvocation);
+std::optional<llvm::cas::CASID>
+clang::createCompileJobCacheKey(ObjectStore &CAS, DiagnosticsEngine &Diags,
+                                const CowCompilerInvocation &OriginalCI) {
+  CompilerInvocation CI(OriginalCI);
   (void)canonicalizeForCaching(CAS, Diags, CI);
   return createCompileJobCacheKeyImpl(CAS, Diags, std::move(CI));
 }
@@ -194,7 +218,7 @@ static Error printFileSystem(ObjectStore &CAS, ObjectRef Root,
                              raw_ostream &OS) {
   TreeSchema Schema(CAS);
   return Schema.walkFileTreeRecursively(
-      CAS, Root, [&](const NamedTreeEntry &Entry, Optional<TreeProxy> Tree) {
+      CAS, Root, [&](const NamedTreeEntry &Entry, std::optional<TreeProxy> Tree) {
         if (Entry.getKind() != TreeEntry::Tree || Tree->empty()) {
           OS << "\n  ";
           Entry.print(OS, CAS);

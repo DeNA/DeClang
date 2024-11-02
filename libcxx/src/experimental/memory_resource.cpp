@@ -8,6 +8,8 @@
 
 #include <experimental/memory_resource>
 
+_LIBCPP_SUPPRESS_DEPRECATED_PUSH
+
 #ifndef _LIBCPP_HAS_NO_ATOMIC_HEADER
 #  include <atomic>
 #elif !defined(_LIBCPP_HAS_NO_THREADS)
@@ -25,7 +27,7 @@ _LIBCPP_BEGIN_NAMESPACE_LFTS_PMR
 
 // new_delete_resource()
 
-class _LIBCPP_TYPE_VIS __new_delete_memory_resource_imp
+class _LIBCPP_EXPORTED_FROM_ABI __new_delete_memory_resource_imp
     : public memory_resource
 {
     void *do_allocate(size_t size, size_t align) override {
@@ -49,7 +51,7 @@ public:
 
 // null_memory_resource()
 
-class _LIBCPP_TYPE_VIS __null_memory_resource_imp
+class _LIBCPP_EXPORTED_FROM_ABI __null_memory_resource_imp
     : public memory_resource
 {
 public:

@@ -21,8 +21,6 @@ import unittest2
 
 
 class TestSwiftOneCaseEnum(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_swift_one_case_enum(self):
         """Test that an enum with only one case does not crash LLDB"""
@@ -45,8 +43,7 @@ class TestSwiftOneCaseEnum(TestBase):
 
         # Set the breakpoints
         breakpoint = target.BreakpointCreateBySourceRegex(
-            "Set breakpoint here", self.main_source_spec
-        )
+            'Set breakpoint here', self.main_source_spec)
         self.assertTrue(breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
 
         # Launch the process, and do not stop at the entry point.
@@ -55,13 +52,11 @@ class TestSwiftOneCaseEnum(TestBase):
         self.assertTrue(process, PROCESS_IS_VALID)
 
         # Frame #0 should be at our breakpoint.
-        threads = lldbutil.get_threads_stopped_at_breakpoint(process, breakpoint)
+        threads = lldbutil.get_threads_stopped_at_breakpoint(
+            process, breakpoint)
 
         maybeEvent = self.frame().FindVariable("maybeEvent")
         event = self.frame().FindVariable("event")
-        lldbutil.check_variable(
-            self, maybeEvent, use_dynamic=False, use_synthetic=True, value="Goofus"
-        )
-        lldbutil.check_variable(
-            self, event, use_dynamic=False, use_synthetic=True, value="Goofus"
-        )
+        lldbutil.check_variable(self, maybeEvent, use_dynamic=False, use_synthetic=True, value="Goofus")
+        lldbutil.check_variable(self, event, use_dynamic=False, use_synthetic=True, value="Goofus")
+

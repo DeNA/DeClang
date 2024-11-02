@@ -43,6 +43,12 @@ def use_lldb_substitutions(config):
         build_script_args.append("--tools-dir={0}".format(config.lldb_tools_dir))
     if config.llvm_libs_dir:
         build_script_args.append("--libs-dir={0}".format(config.llvm_libs_dir))
+    if config.objc_gnustep_dir:
+        build_script_args.append(
+            '--objc-gnustep-dir="{0}"'.format(config.objc_gnustep_dir)
+        )
+    if config.cmake_sysroot:
+        build_script_args.append("--sysroot={0}".format(config.cmake_sysroot))
 
     lldb_init = _get_lldb_init_path(config)
 
@@ -84,7 +90,7 @@ def use_lldb_substitutions(config):
             unresolved="ignore",
         ),
         "lldb-test",
-        "lldb-vscode",
+        "lldb-dap",
         ToolSubst(
             "%build", command="'" + sys.executable + "'", extra_args=build_script_args
         ),
@@ -196,6 +202,9 @@ def use_support_substitutions(config):
 
     # The clang module cache is used for building inferiors.
     host_flags += ["-fmodules-cache-path={}".format(config.clang_module_cache)]
+
+    if config.cmake_sysroot:
+        host_flags += ["--sysroot={}".format(config.cmake_sysroot)]
 
     host_flags = " ".join(host_flags)
     config.substitutions.append(("%clang_host", "%clang " + host_flags))

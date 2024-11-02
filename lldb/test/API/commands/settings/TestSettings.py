@@ -2,7 +2,6 @@
 Test lldb settings command.
 """
 
-
 import json
 import os
 import re
@@ -65,7 +64,7 @@ class SettingsCommandTestCase(TestBase):
         self.assertEqual(self.dbg.GetSelectedTarget().GetNumBreakpoints(), 1)
 
     def test_append_target_env_vars(self):
-        """Test that 'append target.run-args' works."""
+        """Test that 'append target.env-vars' works."""
         # Append the env-vars.
         self.runCmd("settings append target.env-vars MY_ENV_VAR=YES")
         # And add hooks to restore the settings during tearDown().
@@ -150,14 +149,22 @@ class SettingsCommandTestCase(TestBase):
         self.expect(
             "settings show term-width",
             SETTING_MSG("term-width"),
-            startstr="term-width (int) = 70",
+            startstr="term-width (unsigned) = 70",
         )
 
         # The overall display should also reflect the new setting.
         self.expect(
             "settings show",
             SETTING_MSG("term-width"),
-            substrs=["term-width (int) = 70"],
+            substrs=["term-width (unsigned) = 70"],
+        )
+
+        self.dbg.SetTerminalWidth(60)
+
+        self.expect(
+            "settings show",
+            SETTING_MSG("term-width"),
+            substrs=["term-width (unsigned) = 60"],
         )
 
     # rdar://problem/10712130
@@ -289,7 +296,7 @@ class SettingsCommandTestCase(TestBase):
             if launch_info.GetEnvironmentEntryAtIndex(i) == "MY_ENV_VAR=YES":
                 found_env_var = True
                 break
-        self.assertTrue(found_env_var, "MY_ENV_VAR was not set in LunchInfo object")
+        self.assertTrue(found_env_var, "MY_ENV_VAR was not set in LaunchInfo object")
 
         self.assertEqual(launch_info.GetNumArguments(), 3)
         self.assertEqual(launch_info.GetArgumentAtIndex(0), "A")
@@ -592,7 +599,7 @@ class SettingsCommandTestCase(TestBase):
         self.expect(
             "settings show term-width",
             SETTING_MSG("term-width"),
-            startstr="term-width (int) = 60",
+            startstr="term-width (unsigned) = 60",
         )
         self.runCmd("settings clear term-width", check=False)
         # string

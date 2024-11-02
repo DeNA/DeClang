@@ -26,8 +26,6 @@
 #include "TableGenBackends.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/None.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
@@ -45,6 +43,7 @@
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -390,7 +389,7 @@ public:
       Mods = getNextModifiers(Proto, Pos);
     }
 
-    for (auto Type : Types) {
+    for (const auto &Type : Types) {
       // If this builtin takes an immediate argument, we need to #define it rather
       // than use a standard declaration, so that SemaChecking can range check
       // the immediate passed by the user.
@@ -560,7 +559,7 @@ public:
   /// Called by Intrinsic - this attempts to get an intrinsic that takes
   /// the given types as arguments.
   Intrinsic &getIntrinsic(StringRef Name, ArrayRef<Type> Types,
-                          Optional<std::string> MangledName);
+                          std::optional<std::string> MangledName);
 
   /// Called by Intrinsic - returns a globally-unique number.
   unsigned getUniqueNumber() { return UniqueNumber++; }
@@ -1472,7 +1471,7 @@ Intrinsic::DagEmitter::emitDagCall(DagInit *DI, bool MatchMangledName) {
     N = SI->getAsUnquotedString();
   else
     N = emitDagArg(DI->getArg(0), "").second;
-  Optional<std::string> MangledName;
+  std::optional<std::string> MangledName;
   if (MatchMangledName) {
     if (Intr.getRecord()->getValueAsBit("isLaneQ"))
       N += "q";
@@ -1651,7 +1650,7 @@ std::pair<Type, std::string> Intrinsic::DagEmitter::emitDagShuffle(DagInit *DI){
                  std::make_unique<Rev>(Arg1.first.getElementSizeInBits()));
   ST.addExpander("MaskExpand",
                  std::make_unique<MaskExpander>(Arg1.first.getNumElements()));
-  ST.evaluate(DI->getArg(2), Elts, None);
+  ST.evaluate(DI->getArg(2), Elts, std::nullopt);
 
   std::string S = "__builtin_shufflevector(" + Arg1.second + ", " + Arg2.second;
   for (auto &E : Elts) {
@@ -1896,7 +1895,7 @@ void Intrinsic::indexBody() {
 //===----------------------------------------------------------------------===//
 
 Intrinsic &NeonEmitter::getIntrinsic(StringRef Name, ArrayRef<Type> Types,
-                                     Optional<std::string> MangledName) {
+                                     std::optional<std::string> MangledName) {
   // First, look up the name in the intrinsic map.
   assert_with_loc(IntrinsicMap.find(Name.str()) != IntrinsicMap.end(),
                   ("Intrinsic '" + Name + "' not found!").str());
@@ -2087,12 +2086,13 @@ void NeonEmitter::genOverloadTypeCheckCode(raw_ostream &OS,
 
     std::string Name = Def->getName();
     // Omit type checking for the pointer arguments of vld1_lane, vld1_dup,
-    // and vst1_lane intrinsics.  Using a pointer to the vector element
-    // type with one of those operations causes codegen to select an aligned
-    // load/store instruction.  If you want an unaligned operation,
-    // the pointer argument needs to have less alignment than element type,
-    // so just accept any pointer type.
-    if (Name == "vld1_lane" || Name == "vld1_dup" || Name == "vst1_lane") {
+    // vst1_lane, vldap1_lane, and vstl1_lane intrinsics.  Using a pointer to
+    // the vector element type with one of those operations causes codegen to
+    // select an aligned load/store instruction.  If you want an unaligned
+    // operation, the pointer argument needs to have less alignment than element
+    // type, so just accept any pointer type.
+    if (Name == "vld1_lane" || Name == "vld1_dup" || Name == "vst1_lane" ||
+        Name == "vldap1_lane" || Name == "vstl1_lane") {
       PtrArgNum = -1;
       HasConstPtr = false;
     }
@@ -2354,7 +2354,6 @@ void NeonEmitter::run(raw_ostream &OS) {
   OS << "#include <stdint.h>\n\n";
 
   OS << "#include <arm_bf16.h>\n";
-  OS << "typedef __bf16 bfloat16_t;\n";
 
   // Emit NEON-specific scalar typedefs.
   OS << "typedef float float32_t;\n";

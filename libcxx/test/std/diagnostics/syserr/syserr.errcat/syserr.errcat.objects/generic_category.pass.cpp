@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 // XFAIL: suse-linux-enterprise-server-11
-// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12}}
+// XFAIL: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12}}
 
 // <system_error>
 
@@ -27,11 +27,9 @@ void test_message_for_bad_value() {
     const std::error_category& e_cat1 = std::generic_category();
     const std::string msg = e_cat1.message(-1);
     // Exact message format varies by platform.
-#if defined(_AIX)
-    LIBCPP_ASSERT(msg.rfind("Error -1 occurred", 0) == 0);
-#else
-    LIBCPP_ASSERT(msg.rfind("Unknown error", 0) == 0);
-#endif
+    LIBCPP_ASSERT(msg.rfind("Error -1 occurred", 0) == 0
+                  || msg.rfind("No error information", 0) == 0
+                  || msg.rfind("Unknown error", 0) == 0);
     assert(errno == E2BIG);
 }
 

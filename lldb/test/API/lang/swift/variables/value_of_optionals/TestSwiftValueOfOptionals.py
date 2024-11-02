@@ -21,8 +21,6 @@ import unittest2
 
 
 class TestSwiftValueOfOptionalType(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_swift_value_optional_type(self):
         """Check that trying to read an optional's numeric value doesn't crash LLDB"""
@@ -41,3 +39,4 @@ class TestSwiftValueOfOptionalType(TestBase):
         self.assertTrue(s.GetValueAsSigned(1) == 1, "reading value fails")
         self.assertTrue(s.GetValueAsUnsigned(0) == 0, "reading value fails")
         self.assertTrue(s.GetValueAsUnsigned(1) == 1, "reading value fails")
+

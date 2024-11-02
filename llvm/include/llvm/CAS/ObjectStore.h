@@ -9,7 +9,6 @@
 #ifndef LLVM_CAS_OBJECTSTORE_H
 #define LLVM_CAS_OBJECTSTORE_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CAS/CASID.h"
 #include "llvm/CAS/CASReference.h"
@@ -150,7 +149,7 @@ public:
   /// Get an existing reference to the object called \p ID.
   ///
   /// Returns \c None if the object is not stored in this CAS.
-  virtual Optional<ObjectRef> getReference(const CASID &ID) const = 0;
+  virtual std::optional<ObjectRef> getReference(const CASID &ID) const = 0;
 
   /// \returns true if the object is directly available from the local CAS, for
   /// implementations that have this kind of distinction.
@@ -167,9 +166,11 @@ protected:
   virtual Expected<std::optional<ObjectHandle>> loadIfExists(ObjectRef Ref) = 0;
 
   /// Asynchronous version of \c loadIfExists.
+  /// \param[out] CancelObj Optional pointer to receive a cancellation object.
   virtual void loadIfExistsAsync(
       ObjectRef Ref,
-      unique_function<void(Expected<std::optional<ObjectHandle>>)> Callback);
+      unique_function<void(Expected<std::optional<ObjectHandle>>)> Callback,
+      std::unique_ptr<Cancellable> *CancelObj);
 
   /// Like \c loadIfExists but returns an error if the object is missing.
   Expected<ObjectHandle> load(ObjectRef Ref);
@@ -188,7 +189,7 @@ protected:
   /// Get ObjectRef from open file.
   virtual Expected<ObjectRef>
   storeFromOpenFileImpl(sys::fs::file_t FD,
-                        Optional<sys::fs::file_status> Status);
+                        std::optional<sys::fs::file_status> Status);
 
   /// Get a lifetime-extended StringRef pointing at \p Data.
   ///
@@ -240,7 +241,7 @@ public:
   /// Returns the \a CASID and the size of the file.
   Expected<ObjectRef>
   storeFromOpenFile(sys::fs::file_t FD,
-                    Optional<sys::fs::file_status> Status = None) {
+                    std::optional<sys::fs::file_status> Status = std::nullopt) {
     return storeFromOpenFileImpl(FD, Status);
   }
 
@@ -259,9 +260,16 @@ public:
   std::future<AsyncProxyValue> getProxyFuture(ObjectRef Ref);
 
   /// Asynchronous version of \c getProxyIfExists using a callback.
+  /// \param[out] CancelObj Optional pointer to receive a cancellation object.
+  void getProxyAsync(
+      const CASID &ID,
+      unique_function<void(Expected<std::optional<ObjectProxy>>)> Callback,
+      std::unique_ptr<Cancellable> *CancelObj = nullptr);
+  /// Asynchronous version of \c getProxyIfExists using a callback.
   void getProxyAsync(
       ObjectRef Ref,
-      unique_function<void(Expected<std::optional<ObjectProxy>>)> Callback);
+      unique_function<void(Expected<std::optional<ObjectProxy>>)> Callback,
+      std::unique_ptr<Cancellable> *CancelObj = nullptr);
 
   /// Read the data from \p Data into \p OS.
   uint64_t readData(ObjectHandle Node, raw_ostream &OS, uint64_t Offset = 0,
@@ -272,6 +280,28 @@ public:
     OS << toStringRef(Data);
     return Data.size();
   }
+
+  /// Set the size for limiting growth of on-disk storage. This has an effect
+  /// for when the instance is closed.
+  ///
+  /// Implementations may be not have this implemented.
+  virtual Error setSizeLimit(std::optional<uint64_t> SizeLimit) {
+    return Error::success();
+  }
+
+  /// \returns the storage size of the on-disk CAS data.
+  ///
+  /// Implementations that don't have an implementation for this should return
+  /// \p std::nullopt.
+  virtual Expected<std::optional<uint64_t>> getStorageSize() const {
+    return std::nullopt;
+  }
+
+  /// Prune local storage to reduce its size according to the desired size
+  /// limit. Pruning can happen concurrently with other operations.
+  ///
+  /// Implementations may be not have this implemented.
+  virtual Error pruneStorageData() { return Error::success(); }
 
   /// Validate the whole node tree.
   Error validateTree(ObjectRef Ref);
@@ -310,7 +340,7 @@ public:
   // FIXME: Remove this.
   operator CASID() const { return getID(); }
   CASID getReferenceID(size_t I) const {
-    Optional<CASID> ID = getCAS().getID(getReference(I));
+    std::optional<CASID> ID = getCAS().getID(getReference(I));
     assert(ID && "Expected reference to be first-class object");
     return *ID;
   }

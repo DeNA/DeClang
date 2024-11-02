@@ -21,10 +21,7 @@ import os.path
 import time
 import unittest2
 
-
 class TestSwiftVersion(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @skipUnlessDarwin
     @swiftTest
     def test_cross_module_extension(self):
@@ -32,63 +29,41 @@ class TestSwiftVersion(TestBase):
         self.build()
         self.do_test()
 
-    def setUp(self):
-        TestBase.setUp(self)
-
     def do_test(self):
         """Test that LLDB can debug different Swift language versions"""
         exe_name = "main"
         exe_path = self.getBuildArtifact(exe_name)
 
         tests = [
-            {
-                "file": "mod5.swift",
-                "source_regex": "break 5",
-                "expr": "S5().i",
-                "substr": "5",
-            },
-            {
-                "file": "mod4.swift",
-                "source_regex": "break 4",
-                "expr": "S4().i",
-                "substr": "4",
-            },
+          { 'file' : "mod5.swift",
+            'source_regex' : "break 5",
+            'expr' : "S5().i",
+            'substr' : "5" },
+          { 'file' : "mod4.swift",
+            'source_regex' : "break 4",
+            'expr' : "S4().i",
+            'substr' : "4" }
         ]
 
         # Create the target
         target = self.dbg.CreateTarget(exe_path)
         self.assertTrue(target, VALID_TARGET)
-        self.registerSharedLibrariesWithTarget(target, ["mod4", "mod5"])
+        self.registerSharedLibrariesWithTarget(target, ['mod4', 'mod5'])
 
         for t in tests:
-            source_name = t["file"]
-            source_spec = lldb.SBFileSpec(source_name)
+          source_name = t['file']
+          source_spec = lldb.SBFileSpec(source_name)
 
-            breakpoint = target.BreakpointCreateBySourceRegex(
-                t["source_regex"], source_spec
-            )
-            self.assertTrue(
-                breakpoint.GetNumLocations() > 0,
-                "Breakpoint set sucessfully with file "
-                + source_name
-                + ", regex "
-                + t["source_regex"],
-            )
+          breakpoint = target.BreakpointCreateBySourceRegex(t['source_regex'], source_spec)
+          self.assertTrue(breakpoint.GetNumLocations() > 0, "Breakpoint set sucessfully with file " + source_name + ", regex " + t['source_regex'])
 
         process = target.LaunchSimple(None, None, os.getcwd())
         self.assertTrue(process, PROCESS_IS_VALID)
 
         for t in tests:
-            thread = process.GetSelectedThread()
-            frame = thread.GetFrameAtIndex(0)
-            val = frame.EvaluateExpression(t["expr"])
-            self.assertTrue(
-                t["substr"] in str(val.GetValue()),
-                "Expression "
-                + t["expr"]
-                + " result "
-                + val.GetValue()
-                + " has substring "
-                + t["substr"],
-            )
-            process.Continue()
+          thread = process.GetSelectedThread()
+          frame = thread.GetFrameAtIndex(0)
+          val = frame.EvaluateExpression(t['expr'])
+          self.assertTrue(t['substr'] in str(val.GetValue()), "Expression " + t['expr'] + " result " + val.GetValue() + " has substring " + t['substr'])
+          process.Continue()
+

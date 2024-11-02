@@ -163,6 +163,12 @@ opportunities(Function &F,
         if (OpVal->getType() != V->getType())
           return true;
 
+        // Do not introduce address captures of intrinsics.
+        if (Function *F = dyn_cast<Function>(V)) {
+          if (F->isIntrinsic())
+            return true;
+        }
+
         // Only consider candidates that are "more reduced" than the original
         // value. This explicitly also rules out candidates with the same
         // reduction power. This is to ensure that repeated invocations of this
@@ -187,7 +193,9 @@ opportunities(Function &F,
   }
 }
 
-static void extractOperandsFromModule(Oracle &O, Module &Program) {
+static void extractOperandsFromModule(Oracle &O, ReducerWorkItem &WorkItem) {
+  Module &Program = WorkItem.getModule();
+
   for (Function &F : Program.functions()) {
     SmallVector<std::pair<Use *, Value *>> Replacements;
     opportunities(F, [&](Use &Op, ArrayRef<Value *> Candidates) {
@@ -222,6 +230,6 @@ static void extractOperandsFromModule(Oracle &O, Module &Program) {
 }
 
 void llvm::reduceOperandsSkipDeltaPass(TestRunner &Test) {
-  errs() << "*** Reducing operands by skipping over instructions ...\n";
-  runDeltaPass(Test, extractOperandsFromModule);
+  runDeltaPass(Test, extractOperandsFromModule,
+               "Reducing operands by skipping over instructions");
 }

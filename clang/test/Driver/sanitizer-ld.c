@@ -177,7 +177,7 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree/sysroot \
 // RUN:   | FileCheck --check-prefix=CHECK-ASAN-ANDROID %s
 //
-// CHECK-ASAN-ANDROID: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-ASAN-ANDROID: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-ASAN-ANDROID: "-pie"
 // CHECK-ASAN-ANDROID-NOT: "-lc"
 // CHECK-ASAN-ANDROID-NOT: "-lpthread"
@@ -192,7 +192,7 @@
 // RUN:     -static-libsan \
 // RUN:   | FileCheck --check-prefix=CHECK-ASAN-ANDROID-STATICLIBASAN %s
 //
-// CHECK-ASAN-ANDROID-STATICLIBASAN: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-ASAN-ANDROID-STATICLIBASAN: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-ASAN-ANDROID-STATICLIBASAN: libclang_rt.asan-arm-android.a"
 // CHECK-ASAN-ANDROID-STATICLIBASAN-NOT: "-lpthread"
 // CHECK-ASAN-ANDROID-STATICLIBASAN-NOT: "-lrt"
@@ -203,7 +203,7 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree/sysroot \
 // RUN:   | FileCheck --check-prefix=CHECK-UBSAN-ANDROID %s
 //
-// CHECK-UBSAN-ANDROID: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-UBSAN-ANDROID: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-UBSAN-ANDROID: "-pie"
 // CHECK-UBSAN-ANDROID-NOT: "-lc"
 // CHECK-UBSAN-ANDROID-NOT: "-lpthread"
@@ -218,7 +218,7 @@
 // RUN:     -static-libsan \
 // RUN:   | FileCheck --check-prefix=CHECK-UBSAN-ANDROID-STATICLIBASAN %s
 //
-// CHECK-UBSAN-ANDROID-STATICLIBASAN: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-UBSAN-ANDROID-STATICLIBASAN: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-UBSAN-ANDROID-STATICLIBASAN: libclang_rt.ubsan_standalone-arm-android.a"
 // CHECK-UBSAN-ANDROID-STATICLIBASAN-NOT: "-lpthread"
 // CHECK-UBSAN-ANDROID-STATICLIBASAN-NOT: "-lrt"
@@ -230,7 +230,7 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree/sysroot \
 // RUN:   | FileCheck --check-prefix=CHECK-ASAN-ANDROID-X86 %s
 //
-// CHECK-ASAN-ANDROID-X86: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-ASAN-ANDROID-X86: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-ASAN-ANDROID-X86: "-pie"
 // CHECK-ASAN-ANDROID-X86-NOT: "-lc"
 // CHECK-ASAN-ANDROID-X86-NOT: "-lpthread"
@@ -253,7 +253,7 @@
 // RUN:     -shared \
 // RUN:   | FileCheck --check-prefix=CHECK-ASAN-ANDROID-SHARED %s
 //
-// CHECK-ASAN-ANDROID-SHARED: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-ASAN-ANDROID-SHARED: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-ASAN-ANDROID-SHARED-NOT: "-lc"
 // CHECK-ASAN-ANDROID-SHARED: libclang_rt.asan-arm-android.so"
 // CHECK-ASAN-ANDROID-SHARED-NOT: "-lpthread"
@@ -456,6 +456,18 @@
 // RUN:     --sysroot=%S/Inputs/basic_linux_tree \
 // RUN:   | FileCheck --check-prefix=CHECK-UBSAN-STATIC-DARWIN %s
 // CHECK-UBSAN-STATIC-DARWIN: {{.*}}error: static UndefinedBehaviorSanitizer runtime is not supported on darwin
+
+// RUN: %clang -fsanitize=address -### %s 2>&1 \
+// RUN:     --target=x86_64-apple-darwin -fuse-ld=ld -static-libsan \
+// RUN:     --sysroot=%S/Inputs/basic_linux_tree \
+// RUN:   | FileCheck --check-prefix=CHECK-ASAN-STATIC-DARWIN %s
+// CHECK-ASAN-STATIC-DARWIN: {{.*}}error: static AddressSanitizer runtime is not supported on darwin
+
+// RUN: %clang -fsanitize=thread -### %s 2>&1 \
+// RUN:     --target=x86_64-apple-darwin -fuse-ld=ld -static-libsan \
+// RUN:     --sysroot=%S/Inputs/basic_linux_tree \
+// RUN:   | FileCheck --check-prefix=CHECK-TSAN-STATIC-DARWIN %s
+// CHECK-TSAN-STATIC-DARWIN: {{.*}}error: static ThreadSanitizer runtime is not supported on darwin
 
 // RUN: %clang -fsanitize=address,undefined -### %s 2>&1 \
 // RUN:     --target=i386-unknown-linux -fuse-ld=ld \
@@ -723,12 +735,21 @@
 // RUN: %clang -fsanitize=shadow-call-stack -### %s 2>&1 \
 // RUN:     --target=riscv32-unknown-elf -fuse-ld=ld \
 // RUN:   | FileCheck --check-prefix=CHECK-SHADOWCALLSTACK-ELF-RISCV32 %s
-// CHECK-SHADOWCALLSTACK-ELF-RISCV32: '-fsanitize=shadow-call-stack' only allowed with '-ffixed-x18'
+// CHECK-SHADOWCALLSTACK-ELF-RISCV32-NOT: error:
 
 // RUN: %clang -fsanitize=shadow-call-stack -### %s 2>&1 \
 // RUN:     --target=riscv64-unknown-linux -fuse-ld=ld \
 // RUN:   | FileCheck --check-prefix=CHECK-SHADOWCALLSTACK-LINUX-RISCV64 %s
-// CHECK-SHADOWCALLSTACK-LINUX-RISCV64: '-fsanitize=shadow-call-stack' only allowed with '-ffixed-x18'
+// CHECK-SHADOWCALLSTACK-LINUX-RISCV64-NOT: error:
+
+// RUN: %clang -target riscv64-linux-android -fsanitize=shadow-call-stack %s -### 2>&1 \
+// RUN:   | FileCheck %s --check-prefix=CHECK-SHADOWCALLSTACK-ANDROID-RISCV64
+// CHECK-SHADOWCALLSTACK-ANDROID-RISCV64-NOT: error:
+
+// RUN: %clang -fsanitize=shadow-call-stack -### %s 2>&1 \
+// RUN:     --target=riscv64-unknown-fuchsia -fuse-ld=ld \
+// RUN:   | FileCheck --check-prefix=CHECK-SHADOWCALLSTACK-FUCHSIA-RISCV64 %s
+// CHECK-SHADOWCALLSTACK-FUCHSIA-RISCV64-NOT: error:
 
 // RUN: %clang -fsanitize=shadow-call-stack -### %s 2>&1 \
 // RUN:     --target=aarch64-unknown-linux -fuse-ld=ld -ffixed-x18 \
@@ -790,7 +811,7 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree \
 // RUN:   | FileCheck --check-prefix=CHECK-SAFESTACK-ANDROID-ARM %s
 //
-// CHECK-SAFESTACK-ANDROID-ARM: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-SAFESTACK-ANDROID-ARM: "{{(.*[^-.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-SAFESTACK-ANDROID-ARM-NOT: libclang_rt.safestack
 
 // RUN: %clang -### %s -shared 2>&1 \
@@ -798,7 +819,7 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree \
 // RUN:   | FileCheck --check-prefix=CHECK-SAFESTACK-SHARED-ANDROID-ARM %s
 //
-// CHECK-SAFESTACK-SHARED-ANDROID-ARM: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-SAFESTACK-SHARED-ANDROID-ARM: "{{(.*[^-.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-SAFESTACK-SHARED-ANDROID-ARM-NOT: libclang_rt.safestack
 
 // RUN: %clang -### %s 2>&1 \
@@ -806,7 +827,7 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree \
 // RUN:   | FileCheck --check-prefix=CHECK-SAFESTACK-ANDROID-AARCH64 %s
 //
-// CHECK-SAFESTACK-ANDROID-AARCH64: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-SAFESTACK-ANDROID-AARCH64: "{{(.*[^-.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-SAFESTACK-ANDROID-AARCH64-NOT: libclang_rt.safestack
 
 // RUN: %clang -fsanitize=undefined -### %s 2>&1 \
@@ -882,22 +903,11 @@
 // RUN:   | FileCheck --check-prefix=CHECK-SCUDO-LINUX %s
 // CHECK-SCUDO-LINUX: "{{.*}}ld{{(.exe)?}}"
 // CHECK-SCUDO-LINUX: "-pie"
-// CHECK-SCUDO-LINUX: "--whole-archive" "{{.*}}libclang_rt.scudo-i386.a" "--no-whole-archive"
+// CHECK-SCUDO-LINUX: "--whole-archive" "{{.*}}libclang_rt.scudo_standalone-i386.a" "--no-whole-archive"
 // CHECK-SCUDO-LINUX-NOT: "-lstdc++"
 // CHECK-SCUDO-LINUX: "-lpthread"
 // CHECK-SCUDO-LINUX: "-ldl"
 // CHECK-SCUDO-LINUX: "-lresolv"
-
-// RUN: %clang -fsanitize=scudo -fsanitize-minimal-runtime -### %s 2>&1 \
-// RUN:     --target=i386-unknown-linux -fuse-ld=ld \
-// RUN:     -resource-dir=%S/Inputs/resource_dir \
-// RUN:     --sysroot=%S/Inputs/basic_linux_tree \
-// RUN:   | FileCheck --check-prefix=CHECK-SCUDO-MINIMAL-LINUX %s
-// CHECK-SCUDO-MINIMAL-LINUX: "{{.*}}ld{{(.exe)?}}"
-// CHECK-SCUDO-MINIMAL-LINUX: "-pie"
-// CHECK-SCUDO-MINIMAL-LINUX: "--whole-archive" "{{.*}}libclang_rt.scudo_minimal-i386.a" "--no-whole-archive"
-// CHECK-SCUDO-MINIMAL-LINUX: "-lpthread"
-// CHECK-SCUDO-MINIMAL-LINUX: "-lresolv"
 
 // RUN: %clang -### %s -o %t.so -shared 2>&1 \
 // RUN:     --target=i386-unknown-linux -fuse-ld=ld -fsanitize=scudo -shared-libsan \
@@ -907,8 +917,8 @@
 //
 // CHECK-SCUDO-SHARED-LINUX: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
 // CHECK-SCUDO-SHARED-LINUX-NOT: "-lc"
-// CHECK-SCUDO-SHARED-LINUX-NOT: libclang_rt.scudo-i386.a"
-// CHECK-SCUDO-SHARED-LINUX: libclang_rt.scudo-i386.so"
+// CHECK-SCUDO-SHARED-LINUX-NOT: libclang_rt.scudo_standalone-i386.a"
+// CHECK-SCUDO-SHARED-LINUX: libclang_rt.scudo_standalone-i386.so"
 // CHECK-SCUDO-SHARED-LINUX-NOT: "-lpthread"
 // CHECK-SCUDO-SHARED-LINUX-NOT: "-lrt"
 // CHECK-SCUDO-SHARED-LINUX-NOT: "-ldl"
@@ -921,12 +931,12 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree/sysroot \
 // RUN:   | FileCheck --check-prefix=CHECK-SCUDO-ANDROID %s
 //
-// CHECK-SCUDO-ANDROID: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-SCUDO-ANDROID: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-SCUDO-ANDROID-NOT: "-lc"
 // CHECK-SCUDO-ANDROID: "-pie"
 // CHECK-SCUDO-ANDROID-NOT: "-lpthread"
 // CHECK-SCUDO-ANDROID-NOT: "-lresolv"
-// CHECK-SCUDO-ANDROID: libclang_rt.scudo-arm-android.so"
+// CHECK-SCUDO-ANDROID: libclang_rt.scudo_standalone-arm-android.so"
 // CHECK-SCUDO-ANDROID-NOT: "-lpthread"
 // CHECK-SCUDO-ANDROID-NOT: "-lresolv"
 
@@ -935,9 +945,9 @@
 // RUN:     --sysroot=%S/Inputs/basic_android_tree/sysroot \
 // RUN:     -static-libsan \
 // RUN:   | FileCheck --check-prefix=CHECK-SCUDO-ANDROID-STATIC %s
-// CHECK-SCUDO-ANDROID-STATIC: "{{(.*[^.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
+// CHECK-SCUDO-ANDROID-STATIC: "{{(.*[^.0-9A-Z_a-z])?}}ld.lld{{(.exe)?}}"
 // CHECK-SCUDO-ANDROID-STATIC: "-pie"
-// CHECK-SCUDO-ANDROID-STATIC: "--whole-archive" "{{.*}}libclang_rt.scudo-arm-android.a" "--no-whole-archive"
+// CHECK-SCUDO-ANDROID-STATIC: "--whole-archive" "{{.*}}libclang_rt.scudo_standalone-arm-android.a" "--no-whole-archive"
 // CHECK-SCUDO-ANDROID-STATIC-NOT: "-lstdc++"
 // CHECK-SCUDO-ANDROID-STATIC-NOT: "-lpthread"
 // CHECK-SCUDO-ANDROID-STATIC-NOT: "-lrt"
@@ -950,7 +960,6 @@
 // RUN:   | FileCheck --check-prefix=CHECK-HWASAN-X86-64-LINUX %s
 //
 // CHECK-HWASAN-X86-64-LINUX: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
-// CHECK-HWASAN-X86-64-LINUX: "-pie"
 // CHECK-HWASAN-X86-64-LINUX-NOT: "-lc"
 // CHECK-HWASAN-X86-64-LINUX: libclang_rt.hwasan-x86_64.a"
 // CHECK-HWASAN-X86-64-LINUX-NOT: "--export-dynamic"
@@ -968,7 +977,6 @@
 // RUN:   | FileCheck --check-prefix=CHECK-SHARED-HWASAN-X86-64-LINUX %s
 //
 // CHECK-SHARED-HWASAN-X86-64-LINUX: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
-// CHECK-SHARED-HWASAN-X86-64-LINUX: "-pie"
 // CHECK-SHARED-HWASAN-X86-64-LINUX-NOT: "-lc"
 // CHECK-SHARED-HWASAN-X86-64-LINUX: libclang_rt.hwasan-x86_64.so"
 // CHECK-SHARED-HWASAN-X86-64-LINUX-NOT: "-lpthread"
@@ -985,7 +993,6 @@
 // RUN:   | FileCheck --check-prefix=CHECK-DSO-SHARED-HWASAN-X86-64-LINUX %s
 //
 // CHECK-DSO-SHARED-HWASAN-X86-64-LINUX: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
-// CHECK-DSO_SHARED-HWASAN-X86-64-LINUX: "-pie"
 // CHECK-DSO-SHARED-HWASAN-X86-64-LINUX-NOT: "-lc"
 // CHECK-DSO-SHARED-HWASAN-X86-64-LINUX: libclang_rt.hwasan-x86_64.so"
 // CHECK-DSO-SHARED-HWASAN-X86-64-LINUX-NOT: "-lpthread"
@@ -1002,7 +1009,6 @@
 // RUN:   | FileCheck --check-prefix=CHECK-HWASAN-AARCH64-LINUX %s
 //
 // CHECK-HWASAN-AARCH64-LINUX: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
-// CHECK-HWASAN-AARCH64-LINUX: "-pie"
 // CHECK-HWASAN-AARCH64-LINUX-NOT: "-lc"
 // CHECK-HWASAN-AARCH64-LINUX: libclang_rt.hwasan-aarch64.a"
 // CHECK-HWASAN-AARCH64-LINUX-NOT: "--export-dynamic"
@@ -1021,7 +1027,6 @@
 // RUN:   | FileCheck --check-prefix=CHECK-SHARED-HWASAN-AARCH64-LINUX %s
 //
 // CHECK-SHARED-HWASAN-AARCH64-LINUX: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
-// CHECK-SHARED-HWASAN-AARCH64-LINUX: "-pie"
 // CHECK-SHARED-HWASAN-AARCH64-LINUX-NOT: "-lc"
 // CHECK-SHARED-HWASAN-AARCH64-LINUX: libclang_rt.hwasan-aarch64.so"
 // CHECK-SHARED-HWASAN-AARCH64-LINUX-NOT: "-lpthread"
@@ -1038,7 +1043,6 @@
 // RUN:   | FileCheck --check-prefix=CHECK-DSO-SHARED-HWASAN-AARCH64-LINUX %s
 //
 // CHECK-DSO-SHARED-HWASAN-AARCH64-LINUX: "{{(.*[^-.0-9A-Z_a-z])?}}ld{{(.exe)?}}"
-// CHECK-DSO_SHARED-HWASAN-AARCH64-LINUX: "-pie"
 // CHECK-DSO-SHARED-HWASAN-AARCH64-LINUX-NOT: "-lc"
 // CHECK-DSO-SHARED-HWASAN-AARCH64-LINUX: libclang_rt.hwasan-aarch64.so"
 // CHECK-DSO-SHARED-HWASAN-AARCH64-LINUX-NOT: "-lpthread"

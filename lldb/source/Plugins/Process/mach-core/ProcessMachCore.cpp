@@ -18,12 +18,12 @@
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Host/Host.h"
-#include "lldb/Symbol/LocateSymbolFile.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/MemoryRegionInfo.h"
 #include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Utility/AppleUuidCompatibility.h"
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
@@ -33,7 +33,6 @@
 #include "ProcessMachCore.h"
 #include "Plugins/Process/Utility/StopInfoMachException.h"
 #include "ThreadMachCore.h"
-#include "Utility/UuidCompatibility.h"
 
 // Needed for the plug-in names for the dynamic loaders.
 #include "lldb/Host/SafeMachO.h"
@@ -112,8 +111,8 @@ bool ProcessMachCore::CanDebug(lldb::TargetSP target_sp,
 ProcessMachCore::ProcessMachCore(lldb::TargetSP target_sp,
                                  ListenerSP listener_sp,
                                  const FileSpec &core_file)
-    : PostMortemProcess(target_sp, listener_sp), m_core_aranges(),
-      m_core_range_infos(), m_core_module_sp(), m_core_file(core_file),
+    : PostMortemProcess(target_sp, listener_sp, core_file), m_core_aranges(),
+      m_core_range_infos(), m_core_module_sp(),
       m_dyld_addr(LLDB_INVALID_ADDRESS),
       m_mach_kernel_addr(LLDB_INVALID_ADDRESS) {}
 
@@ -138,13 +137,13 @@ bool ProcessMachCore::CheckAddressForDyldOrKernel(lldb::addr_t addr,
     return false;
   if (header.magic == llvm::MachO::MH_CIGAM ||
       header.magic == llvm::MachO::MH_CIGAM_64) {
-    header.magic = llvm::ByteSwap_32(header.magic);
-    header.cputype = llvm::ByteSwap_32(header.cputype);
-    header.cpusubtype = llvm::ByteSwap_32(header.cpusubtype);
-    header.filetype = llvm::ByteSwap_32(header.filetype);
-    header.ncmds = llvm::ByteSwap_32(header.ncmds);
-    header.sizeofcmds = llvm::ByteSwap_32(header.sizeofcmds);
-    header.flags = llvm::ByteSwap_32(header.flags);
+    header.magic = llvm::byteswap<uint32_t>(header.magic);
+    header.cputype = llvm::byteswap<uint32_t>(header.cputype);
+    header.cpusubtype = llvm::byteswap<uint32_t>(header.cpusubtype);
+    header.filetype = llvm::byteswap<uint32_t>(header.filetype);
+    header.ncmds = llvm::byteswap<uint32_t>(header.ncmds);
+    header.sizeofcmds = llvm::byteswap<uint32_t>(header.sizeofcmds);
+    header.flags = llvm::byteswap<uint32_t>(header.flags);
   }
 
   if (header.magic == llvm::MachO::MH_MAGIC ||
@@ -594,9 +593,34 @@ bool ProcessMachCore::DoUpdateThreadList(ThreadList &old_thread_list,
     ObjectFile *core_objfile = m_core_module_sp->GetObjectFile();
 
     if (core_objfile) {
+      std::set<tid_t> used_tids;
       const uint32_t num_threads = core_objfile->GetNumThreadContexts();
-      for (lldb::tid_t tid = 0; tid < num_threads; ++tid) {
-        ThreadSP thread_sp(new ThreadMachCore(*this, tid));
+      std::vector<tid_t> tids;
+      if (core_objfile->GetCorefileThreadExtraInfos(tids)) {
+        assert(tids.size() == num_threads);
+
+        // Find highest tid value.
+        tid_t highest_tid = 0;
+        for (uint32_t i = 0; i < num_threads; i++) {
+          if (tids[i] != LLDB_INVALID_THREAD_ID && tids[i] > highest_tid)
+            highest_tid = tids[i];
+        }
+        tid_t current_unused_tid = highest_tid + 1;
+        for (uint32_t i = 0; i < num_threads; i++) {
+          if (tids[i] == LLDB_INVALID_THREAD_ID) {
+            tids[i] = current_unused_tid++;
+          }
+        }
+      } else {
+        // No metadata, insert numbers sequentially from 0.
+        for (uint32_t i = 0; i < num_threads; i++) {
+          tids.push_back(i);
+        }
+      }
+
+      for (uint32_t i = 0; i < num_threads; i++) {
+        ThreadSP thread_sp =
+            std::make_shared<ThreadMachCore>(*this, tids[i], i);
         new_thread_list.AddThread(thread_sp);
       }
     }
@@ -628,7 +652,7 @@ size_t ProcessMachCore::ReadMemory(addr_t addr, void *buf, size_t size,
                                    Status &error) {
   // Don't allow the caching that lldb_private::Process::ReadMemory does since
   // in core files we have it all cached our our core file anyway.
-  return DoReadMemory(addr, buf, size, error);
+  return DoReadMemory(FixAnyAddress(addr), buf, size, error);
 }
 
 size_t ProcessMachCore::DoReadMemory(addr_t addr, void *buf, size_t size,

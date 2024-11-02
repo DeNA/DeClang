@@ -18,6 +18,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/Stream.h"
 
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/Threading.h"
 
 using namespace lldb;
@@ -144,7 +145,7 @@ Language::GetHardcodedSynthetics() {
   return {};
 }
 
-std::vector<ConstString>
+std::vector<FormattersMatchCandidate>
 Language::GetPossibleFormattersMatches(ValueObject &valobj,
                                        lldb::DynamicValueType use_dynamic) {
   return {};
@@ -209,9 +210,12 @@ struct language_name_pair language_names[] = {
     {"fortran18", eLanguageTypeFortran18},
     {"ada2005", eLanguageTypeAda2005},
     {"ada2012", eLanguageTypeAda2012},
+    {"HIP", eLanguageTypeHIP},
+    {"assembly", eLanguageTypeAssembly},
+    {"c-sharp", eLanguageTypeC_sharp},
+    {"mojo", eLanguageTypeMojo},
     // Vendor Extensions
     {"assembler", eLanguageTypeMipsAssembler},
-    {"renderscript", eLanguageTypeExtRenderScript},
     // Now synonyms, in arbitrary order
     {"objc", eLanguageTypeObjC},
     {"objc++", eLanguageTypeObjC_plus_plus},
@@ -371,7 +375,6 @@ LanguageType Language::GetPrimaryLanguage(LanguageType language) {
   case eLanguageTypeJulia:
   case eLanguageTypeDylan:
   case eLanguageTypeMipsAssembler:
-  case eLanguageTypeExtRenderScript:
   case eLanguageTypeUnknown:
   default:
     return language;
@@ -431,12 +434,10 @@ bool Language::ImageListTypeScavenger::Find_Impl(
   Target *target = exe_scope->CalculateTarget().get();
   if (target) {
     const auto &images(target->GetImages());
-    ConstString cs_key(key);
-    llvm::DenseSet<SymbolFile *> searched_sym_files;
-    TypeList matches;
-    images.FindTypes(nullptr, cs_key, false, UINT32_MAX, searched_sym_files,
-                     matches);
-    for (const auto &match : matches.Types()) {
+    TypeQuery query(key);
+    TypeResults type_results;
+    images.FindTypes(nullptr, query, type_results);
+    for (const auto &match : type_results.GetTypeMap().Types()) {
       if (match) {
         CompilerType compiler_type(match->GetFullCompilerType());
         compiler_type = AdjustForInclusion(compiler_type);
@@ -453,19 +454,17 @@ bool Language::ImageListTypeScavenger::Find_Impl(
   return result;
 }
 
-bool Language::GetFormatterPrefixSuffix(ValueObject &valobj,
-                                        ConstString type_hint,
-                                        std::string &prefix,
-                                        std::string &suffix) {
-  return false;
+std::pair<llvm::StringRef, llvm::StringRef>
+Language::GetFormatterPrefixSuffix(llvm::StringRef type_hint) {
+  return std::pair<llvm::StringRef, llvm::StringRef>();
 }
 
-bool Language::DemangledNameContainsPath(llvm::StringRef path, 
+bool Language::DemangledNameContainsPath(llvm::StringRef path,
                                          ConstString demangled) const {
   // The base implementation does a simple contains comparision:
   if (path.empty())
     return false;
-  return demangled.GetStringRef().contains(path);                                         
+  return demangled.GetStringRef().contains(path);
 }
 
 DumpValueObjectOptions::DeclPrintingHelper Language::GetDeclPrintingHelper() {
@@ -503,3 +502,36 @@ Language::Language() = default;
 
 // Destructor
 Language::~Language() = default;
+
+SourceLanguage::SourceLanguage(lldb::LanguageType language_type) {
+  auto lname =
+      llvm::dwarf::toDW_LNAME((llvm::dwarf::SourceLanguage)language_type);
+  if (!lname)
+    return;
+  name = lname->first;
+  version = lname->second;
+}
+
+lldb::LanguageType SourceLanguage::AsLanguageType() const {
+  if (auto lang = llvm::dwarf::toDW_LANG((llvm::dwarf::SourceLanguageName)name,
+                                         version))
+    return (lldb::LanguageType)*lang;
+  return lldb::eLanguageTypeUnknown;
+}
+
+llvm::StringRef SourceLanguage::GetDescription() const {
+  LanguageType type = AsLanguageType();
+  if (type)
+    return Language::GetNameForLanguageType(type);
+  return llvm::dwarf::LanguageDescription(
+      (llvm::dwarf::SourceLanguageName)name);
+}
+bool SourceLanguage::IsC() const { return name == llvm::dwarf::DW_LNAME_C; }
+
+bool SourceLanguage::IsObjC() const {
+  return name == llvm::dwarf::DW_LNAME_ObjC;
+}
+
+bool SourceLanguage::IsCPlusPlus() const {
+  return name == llvm::dwarf::DW_LNAME_C_plus_plus;
+}

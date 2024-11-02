@@ -72,7 +72,7 @@ storeDepDirectives(cas::ObjectStore &CAS,
     TokenIdx += Directive.Tokens.size();
   }
 
-  return CAS.storeFromString(None, Buffer);
+  return CAS.storeFromString(std::nullopt, Buffer);
 }
 
 template <typename T> static void readle(StringRef &Slice, T &Out) {
@@ -140,7 +140,7 @@ void DependencyScanningCASFilesystem::scanForDirectives(
   // Get a blob for the clang version string.
   if (!ClangFullVersionID)
     ClangFullVersionID = reportAsFatalIfError(
-        CAS.storeFromString(None, getClangFullVersion()));
+        CAS.storeFromString(std::nullopt, getClangFullVersion()));
 
   // Get a blob for the dependency directives scan command.
   if (!DepDirectivesID)
@@ -149,10 +149,10 @@ void DependencyScanningCASFilesystem::scanForDirectives(
 
   // Get an empty blob.
   if (!EmptyBlobID)
-    EmptyBlobID = reportAsFatalIfError(CAS.storeFromString(None, ""));
+    EmptyBlobID = reportAsFatalIfError(CAS.storeFromString(std::nullopt, ""));
 
   // Construct a tree for the input.
-  Optional<CASID> InputID;
+  std::optional<CASID> InputID;
   {
     HierarchicalTreeBuilder Builder;
     Builder.push(*ClangFullVersionID, TreeEntry::Regular, "version");
@@ -162,9 +162,9 @@ void DependencyScanningCASFilesystem::scanForDirectives(
   }
 
   // Check the result cache.
-  if (Optional<CASID> OutputID =
+  if (std::optional<CASID> OutputID =
           reportAsFatalIfError(Cache.get(*InputID))) {
-    if (Optional<ObjectRef> OutputRef = CAS.getReference(*OutputID)) {
+    if (std::optional<ObjectRef> OutputRef = CAS.getReference(*OutputID)) {
       if (OutputRef == EmptyBlobID)
         return; // Cached directive scanning failure.
       reportAsFatalIfError(
@@ -200,35 +200,24 @@ DependencyScanningCASFilesystem::getOriginal(cas::CASID InputDataID) {
   return Blob.takeError();
 }
 
-/// Whitelist file extensions that should be minimized, treating no extension as
-/// a source file that should be minimized.
-///
-/// This is kinda hacky, it would be better if we knew what kind of file Clang
-/// was expecting instead.
-static bool shouldScanForDirectivesBasedOnExtension(StringRef Filename) {
-  StringRef Ext = llvm::sys::path::extension(Filename);
-  if (Ext.empty())
-    return true; // C++ standard library
-  return llvm::StringSwitch<bool>(Ext)
-      .CasesLower(".c", ".cc", ".cpp", ".c++", ".cxx", true)
-      .CasesLower(".h", ".hh", ".hpp", ".h++", ".hxx", true)
-      .CasesLower(".m", ".mm", true)
-      .CasesLower(".i", ".ii", ".mi", ".mmi", true)
-      .CasesLower(".def", ".inc", true)
-      .Default(false);
-}
-
 static bool shouldCacheStatFailures(StringRef Filename) {
   StringRef Ext = llvm::sys::path::extension(Filename);
   if (Ext.empty())
     return false; // This may be the module cache directory.
-  return shouldScanForDirectivesBasedOnExtension(
-      Filename); // Only cache stat failures on source files.
-}
 
-bool DependencyScanningCASFilesystem::shouldScanForDirectives(
-    StringRef RawFilename) {
-  return shouldScanForDirectivesBasedOnExtension(RawFilename);
+  // rdar://127079541
+  // With Swift, misconfigured Xcode projects currently may fail with
+  // negative 'stat' caching of `.framework` directories enabled,
+  // because they do not always explicitly specify their target
+  // dependencies and may be either getting lucky wih build timing, or
+  // compiling against wrong dependenceis a lot of the time: e.g. an
+  // SDK variant of a dependency module, instead of one in the
+  // project's own build directory. Temporarily disable negative
+  // 'stat' caching here until all such projects are fixed.
+  if (Ext == ".framework")
+    return false;
+  
+  return true;
 }
 
 llvm::cas::CachingOnDiskFileSystem &
@@ -252,7 +241,7 @@ DependencyScanningCASFilesystem::lookupPath(const Twine &Path) {
     }
   }
 
-  Optional<cas::CASID> FileID;
+  std::optional<cas::CASID> FileID;
   llvm::ErrorOr<llvm::vfs::Status> MaybeStatus =
       getCachingFS().statusAndFileID(PathRef, FileID);
   if (!MaybeStatus) {
@@ -273,10 +262,6 @@ DependencyScanningCASFilesystem::lookupPath(const Twine &Path) {
     Entry.EC = Buffer.getError();
     return LookupPathResult{&Entry, std::error_code()};
   }
-
-  if (shouldScanForDirectives(PathRef))
-    scanForDirectives(*CAS.getReference(*FileID), PathRef, Entry.DepTokens,
-                      Entry.DepDirectives);
 
   Entry.Buffer = std::move(*Buffer);
   Entry.Status = llvm::vfs::Status(
@@ -313,7 +298,7 @@ namespace {
 
 class DepScanFile final : public llvm::vfs::File {
 public:
-  DepScanFile(StringRef Buffer, Optional<cas::ObjectRef> CASContents,
+  DepScanFile(StringRef Buffer, std::optional<cas::ObjectRef> CASContents,
               llvm::vfs::Status Stat)
       : Buffer(Buffer), CASContents(std::move(CASContents)),
         Stat(std::move(Stat)) {}
@@ -327,7 +312,8 @@ public:
     return llvm::MemoryBuffer::getMemBuffer(Buffer, Name.toStringRef(Storage));
   }
 
-  llvm::ErrorOr<Optional<cas::ObjectRef>> getObjectRefForContent() override {
+  llvm::ErrorOr<std::optional<cas::ObjectRef>>
+  getObjectRefForContent() override {
     return CASContents;
   }
 
@@ -335,7 +321,7 @@ public:
 
 private:
   StringRef Buffer;
-  Optional<cas::ObjectRef> CASContents;
+  std::optional<cas::ObjectRef> CASContents;
   llvm::vfs::Status Stat;
 };
 
@@ -358,10 +344,21 @@ DependencyScanningCASFilesystem::openFileForRead(const Twine &Path) {
       *Result.Entry->Buffer, Result.Entry->CASContents, Result.Entry->Status);
 }
 
-Optional<ArrayRef<dependency_directives_scan::Directive>>
+std::optional<ArrayRef<dependency_directives_scan::Directive>>
 DependencyScanningCASFilesystem::getDirectiveTokens(const Twine &Path) {
   LookupPathResult Result = lookupPath(Path);
-  if (Result.Entry && !Result.Entry->DepDirectives.empty())
-    return llvm::makeArrayRef(Result.Entry->DepDirectives);
-  return None;
+
+  if (Result.Entry) {
+    if (Result.Entry->DepDirectives.empty()) {
+      SmallString<256> PathStorage;
+      StringRef PathRef = Path.toStringRef(PathStorage);
+      FileEntry &Entry = const_cast<FileEntry &>(*Result.Entry);
+      scanForDirectives(*Entry.CASContents, PathRef, Entry.DepTokens,
+                        Entry.DepDirectives);
+    }
+
+    if (!Result.Entry->DepDirectives.empty())
+      return ArrayRef(Result.Entry->DepDirectives);
+  }
+  return std::nullopt;
 }

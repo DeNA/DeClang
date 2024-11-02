@@ -7,21 +7,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/ModuleList.h"
-#include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
+#include "lldb/Core/PluginManager.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Interpreter/OptionValueFileSpec.h"
 #include "lldb/Interpreter/OptionValueFileSpecList.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
 #include "lldb/Interpreter/Property.h"
-#include "lldb/Symbol/LocateSymbolFile.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/TypeList.h"
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/FileSpecList.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/UUID.h"
@@ -82,6 +82,25 @@ static constexpr OptionEnumValueElement g_swift_module_loading_mode_enums[] = {
   {eSwiftModuleLoadingModeOnlySerialized, "only-serialized",
     "Only load Swift modules via their .swiftmodule file - ignore "
     ".swiftinterface files."} };
+
+
+static constexpr OptionEnumValueElement g_enable_swift_cxx_interop_values[] = {
+    {llvm::to_underlying(AutoBool::Auto), "auto",
+     "Automatically detect if C++ interop mode should be enabled."},
+    {llvm::to_underlying(AutoBool::True), "true", "Enable C++ interop."},
+    {llvm::to_underlying(AutoBool::False), "false", "Disable C++ interop."},
+};
+
+static constexpr OptionEnumValueElement g_enable_full_dwarf_debugging[] = {
+    {llvm::to_underlying(AutoBool::Auto), "auto",
+     "Automatically detect if full DWARF debugging should be enabled. Full "
+     "DWARF debugging is enabled if no reflection metadata is added to the "
+     "debugger."},
+    {llvm::to_underlying(AutoBool::True), "true",
+     "Enable full DWARF debugging."},
+    {llvm::to_underlying(AutoBool::False), "false",
+     "Disable full DWARF debugging."},
+};
 // END SWIFT
 
 #define LLDB_PROPERTIES_modulelist
@@ -129,161 +148,186 @@ ModuleListProperties::ModuleListProperties() {
 
 bool ModuleListProperties::GetEnableExternalLookup() const {
   const uint32_t idx = ePropertyEnableExternalLookup;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 bool ModuleListProperties::SetEnableExternalLookup(bool new_value) {
-  return m_collection_sp->SetPropertyAtIndexAsBoolean(
-      nullptr, ePropertyEnableExternalLookup, new_value);
+  return SetPropertyAtIndex(ePropertyEnableExternalLookup, new_value);
 }
 
-bool ModuleListProperties::GetEnableBackgroundLookup() const {
-  const uint32_t idx = ePropertyEnableBackgroundLookup;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+SymbolDownload ModuleListProperties::GetSymbolAutoDownload() const {
+  // Backward compatibility alias.
+  if (GetPropertyAtIndexAs<bool>(ePropertyEnableBackgroundLookup, false))
+    return eSymbolDownloadBackground;
+
+  const uint32_t idx = ePropertyAutoDownload;
+  return GetPropertyAtIndexAs<lldb::SymbolDownload>(
+      idx, static_cast<lldb::SymbolDownload>(
+               g_modulelist_properties[idx].default_uint_value));
 }
 
 FileSpec ModuleListProperties::GetClangModulesCachePath() const {
-  return m_collection_sp
-      ->GetPropertyAtIndexAsOptionValueFileSpec(nullptr, false,
-                                                ePropertyClangModulesCachePath)
-      ->GetCurrentValue();
+  const uint32_t idx = ePropertyClangModulesCachePath;
+  return GetPropertyAtIndexAs<FileSpec>(idx, {});
+}
+
+bool ModuleListProperties::SetClangModulesCachePath(const FileSpec &path) {
+  const uint32_t idx = ePropertyClangModulesCachePath;
+  return SetPropertyAtIndex(idx, path);
 }
 
 // BEGIN SWIFT
 bool ModuleListProperties::GetUseSwiftClangImporter() const {
   const uint32_t idx = ePropertyUseSwiftClangImporter;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 bool ModuleListProperties::GetUseSwiftDWARFImporter() const {
   const uint32_t idx = ePropertyUseSwiftDWARFImporter;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 bool ModuleListProperties::SetUseSwiftDWARFImporter(bool new_value) {
-  return m_collection_sp->SetPropertyAtIndexAsBoolean(
-      nullptr, ePropertyUseSwiftDWARFImporter, new_value);
+  const uint32_t idx = ePropertyUseSwiftDWARFImporter;
+  return SetPropertyAtIndex(idx, new_value);
 }
 
 bool ModuleListProperties::GetUseSwiftTypeRefTypeSystem() const {
   const uint32_t idx = ePropertyUseSwiftTypeRefTypeSystem;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 bool ModuleListProperties::GetSwiftValidateTypeSystem() const {
   const uint32_t idx = ePropertySwiftValidateTypeSystem;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
+}
+
+bool ModuleListProperties::GetUseSwiftPreciseCompilerInvocation() const {
+  const uint32_t idx = ePropertyUseSwiftPreciseCompilerInvocation;
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 bool ModuleListProperties::SetUseSwiftTypeRefTypeSystem(bool new_value) {
-  return m_collection_sp->SetPropertyAtIndexAsBoolean(
-      nullptr, ePropertyUseSwiftTypeRefTypeSystem, new_value);
-}
-
-bool ModuleListProperties::SetClangModulesCachePath(const FileSpec &path) {
-  return m_collection_sp->SetPropertyAtIndexAsFileSpec(
-      nullptr, ePropertyClangModulesCachePath, path);
+  const uint32_t idx = ePropertyUseSwiftTypeRefTypeSystem;
+  return SetPropertyAtIndex(idx, new_value);
 }
 
 SwiftModuleLoadingMode ModuleListProperties::GetSwiftModuleLoadingMode() const {
   const uint32_t idx = ePropertySwiftModuleLoadingMode;
-  return (SwiftModuleLoadingMode)
-      m_collection_sp->GetPropertyAtIndexAsEnumeration(
-          nullptr, idx, g_modulelist_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<SwiftModuleLoadingMode>(
+      idx, static_cast<SwiftModuleLoadingMode>(
+               g_modulelist_properties[idx].default_uint_value));
 }
 
 bool ModuleListProperties::SetSwiftModuleLoadingMode(SwiftModuleLoadingMode mode) {
-  return m_collection_sp->SetPropertyAtIndexAsEnumeration(
-      nullptr, ePropertySwiftModuleLoadingMode, mode);
+  const uint32_t idx = ePropertySwiftModuleLoadingMode;
+  return SetPropertyAtIndex(idx, mode);
 }
 
 FileSpec ModuleListProperties::GetSwiftMetadataCachePath() const {
   return m_collection_sp
-      ->GetPropertyAtIndexAsOptionValueFileSpec(nullptr, false,
-                                                ePropertySwiftMetadataCachePath)
+      ->GetPropertyAtIndexAsOptionValueFileSpec(ePropertySwiftMetadataCachePath)
       ->GetCurrentValue();
 }
 
 bool ModuleListProperties::SetSwiftMetadataCachePath(const FileSpec &path) {
-  return m_collection_sp->SetPropertyAtIndexAsFileSpec(
-      nullptr, ePropertySwiftMetadataCachePath, path);
+  const uint32_t idx = ePropertySwiftMetadataCachePath;
+  return SetPropertyAtIndex(idx, path);
 }
 
 bool ModuleListProperties::GetEnableSwiftMetadataCache() const {
   const uint32_t idx = ePropertyEnableSwiftMetadataCache;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 uint64_t ModuleListProperties::GetSwiftMetadataCacheMaxByteSize() {
   const uint32_t idx = ePropertySwiftMetadataCacheMaxByteSize;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_modulelist_properties[idx].default_uint_value);
 }
 
 uint64_t ModuleListProperties::GetSwiftMetadataCacheExpirationDays() {
   const uint32_t idx = ePropertySwiftMetadataCacheExpirationDays;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_modulelist_properties[idx].default_uint_value);
+}
+
+
+AutoBool ModuleListProperties::GetSwiftEnableCxxInterop() const {
+  const uint32_t idx = ePropertySwiftEnableCxxInterop;
+
+  return GetPropertyAtIndexAs<AutoBool>(
+      idx, static_cast<AutoBool>(
+               g_modulelist_properties[idx].default_uint_value));
+}
+
+AutoBool ModuleListProperties::GetSwiftEnableFullDwarfDebugging() const {
+  const uint32_t idx = ePropertySwiftEnableFullDwarfDebugging;
+  return GetPropertyAtIndexAs<AutoBool>(
+      idx, static_cast<AutoBool>(
+               g_modulelist_properties[idx].default_uint_value));
+}
+
+bool ModuleListProperties::GetSwiftEnableASTContext() const {
+  const uint32_t idx = ePropertySwiftEnableASTContext;
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 // END SWIFT
 
 FileSpec ModuleListProperties::GetLLDBIndexCachePath() const {
-  return m_collection_sp
-      ->GetPropertyAtIndexAsOptionValueFileSpec(nullptr, false,
-                                                ePropertyLLDBIndexCachePath)
-      ->GetCurrentValue();
+  const uint32_t idx = ePropertyLLDBIndexCachePath;
+  return GetPropertyAtIndexAs<FileSpec>(idx, {});
 }
 
 bool ModuleListProperties::SetLLDBIndexCachePath(const FileSpec &path) {
-  return m_collection_sp->SetPropertyAtIndexAsFileSpec(
-      nullptr, ePropertyLLDBIndexCachePath, path);
+  const uint32_t idx = ePropertyLLDBIndexCachePath;
+  return SetPropertyAtIndex(idx, path);
 }
 
 bool ModuleListProperties::GetEnableLLDBIndexCache() const {
   const uint32_t idx = ePropertyEnableLLDBIndexCache;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 bool ModuleListProperties::SetEnableLLDBIndexCache(bool new_value) {
-  return m_collection_sp->SetPropertyAtIndexAsBoolean(
-      nullptr, ePropertyEnableLLDBIndexCache, new_value);
+  const uint32_t idx = ePropertyEnableLLDBIndexCache;
+  return SetPropertyAtIndex(idx, new_value);
 }
 
 uint64_t ModuleListProperties::GetLLDBIndexCacheMaxByteSize() {
   const uint32_t idx = ePropertyLLDBIndexCacheMaxByteSize;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_modulelist_properties[idx].default_uint_value);
 }
 
 uint64_t ModuleListProperties::GetLLDBIndexCacheMaxPercent() {
   const uint32_t idx = ePropertyLLDBIndexCacheMaxPercent;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_modulelist_properties[idx].default_uint_value);
 }
 
 uint64_t ModuleListProperties::GetLLDBIndexCacheExpirationDays() {
   const uint32_t idx = ePropertyLLDBIndexCacheExpirationDays;
-  return m_collection_sp->GetPropertyAtIndexAsUInt64(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value);
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_modulelist_properties[idx].default_uint_value);
 }
 
 void ModuleListProperties::UpdateSymlinkMappings() {
-  FileSpecList list = m_collection_sp
-                          ->GetPropertyAtIndexAsOptionValueFileSpecList(
-                              nullptr, false, ePropertySymLinkPaths)
-                          ->GetCurrentValue();
+  FileSpecList list =
+      GetPropertyAtIndexAs<FileSpecList>(ePropertySymLinkPaths, {});
   llvm::sys::ScopedWriter lock(m_symlink_paths_mutex);
   const bool notify = false;
   m_symlink_paths.Clear(notify);
-  for (FileSpec symlink : list) {
+  for (auto symlink : list) {
     FileSpec resolved;
     Status status = FileSystem::Instance().Readlink(symlink, resolved);
     if (status.Success())
@@ -298,8 +342,8 @@ PathMappingList ModuleListProperties::GetSymlinkMappings() const {
 
 bool ModuleListProperties::GetLoadSymbolOnDemand() {
   const uint32_t idx = ePropertyLoadSymbolOnDemand;
-  return m_collection_sp->GetPropertyAtIndexAsBoolean(
-      nullptr, idx, g_modulelist_properties[idx].default_uint_value != 0);
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
 ModuleList::ModuleList() : m_modules(), m_modules_mutex() {}
@@ -788,35 +832,20 @@ ModuleSP ModuleList::FindModule(const UUID &uuid) const {
   return module_sp;
 }
 
-void ModuleList::FindTypes(Module *search_first, ConstString name,
-                           bool name_is_fully_qualified, size_t max_matches,
-                           llvm::DenseSet<SymbolFile *> &searched_symbol_files,
-                           TypeList &types) const {
+void ModuleList::FindTypes(Module *search_first, const TypeQuery &query,
+                           TypeResults &results) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
-
-  collection::const_iterator pos, end = m_modules.end();
   if (search_first) {
-    for (pos = m_modules.begin(); pos != end; ++pos) {
-      if (search_first == pos->get()) {
-        search_first->FindTypes(name, name_is_fully_qualified, max_matches,
-                                searched_symbol_files, types);
-
-        if (types.GetSize() >= max_matches)
-          return;
-      }
-    }
-  }
-
-  for (pos = m_modules.begin(); pos != end; ++pos) {
-    // Search the module if the module is not equal to the one in the symbol
-    // context "sc". If "sc" contains a empty module shared pointer, then the
-    // comparison will always be true (valid_module_ptr != nullptr).
-    if (search_first != pos->get())
-      (*pos)->FindTypes(name, name_is_fully_qualified, max_matches,
-                        searched_symbol_files, types);
-
-    if (types.GetSize() >= max_matches)
+    search_first->FindTypes(query, results);
+    if (results.Done(query))
       return;
+  }
+  for (const auto &module_sp : m_modules) {
+    if (search_first != module_sp.get()) {
+      module_sp->FindTypes(query, results);
+      if (results.Done(query))
+        return;
+    }
   }
 }
 
@@ -1137,7 +1166,7 @@ ModuleList::GetSharedModule(const ModuleSpec &module_spec, ModuleSP &module_sp,
   // Fixup the incoming path in case the path points to a valid file, yet the
   // arch or UUID (if one was passed in) don't match.
   ModuleSpec located_binary_modulespec =
-      Symbols::LocateExecutableObjectFile(module_spec);
+      PluginManager::LocateExecutableObjectFile(module_spec);
 
   // Don't look for the file if it appears to be the same one we already
   // checked for above...
@@ -1258,7 +1287,7 @@ bool ModuleList::RemoveSharedModuleIfOrphaned(const Module *module_ptr) {
 
 bool ModuleList::LoadScriptingResourcesInTarget(Target *target,
                                                 std::list<Status> &errors,
-                                                Stream *feedback_stream,
+                                                Stream &feedback_stream,
                                                 bool continue_on_error) {
   if (!target)
     return false;

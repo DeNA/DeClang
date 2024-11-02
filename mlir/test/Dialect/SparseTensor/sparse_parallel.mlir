@@ -10,15 +10,15 @@
 // RUN:   FileCheck %s --check-prefix=CHECK-PAR4
 
 #DenseMatrix = #sparse_tensor.encoding<{
-  dimLevelType = [ "dense", "dense" ]
+  lvlTypes = [ "dense", "dense" ]
 }>
 
 #SparseMatrix = #sparse_tensor.encoding<{
-  dimLevelType = [ "compressed", "compressed" ]
+  lvlTypes = [ "compressed", "compressed" ]
 }>
 
 #CSR = #sparse_tensor.encoding<{
-  dimLevelType = [ "dense", "compressed" ]
+  lvlTypes = [ "dense", "compressed" ]
 }>
 
 #trait_dd = {
@@ -150,7 +150,8 @@ func.func @scale_ss(%scale: f32,
 //
 // CHECK-PAR4-LABEL: func @matvec
 // CHECK-PAR4:         scf.parallel
-// CHECK-PAR4:           scf.for
+// CHECK-PAR4:           scf.parallel
+// CHECK-PAR4:             scf.reduce
 // CHECK-PAR4:         return
 //
 func.func @matvec(%arga: tensor<16x32xf32, #CSR>,

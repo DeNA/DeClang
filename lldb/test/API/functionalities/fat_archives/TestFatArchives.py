@@ -52,7 +52,8 @@ class FatArchiveTestCase(TestBase):
                 line_entry.GetFileSpec(),
                 "Verify breakpoint in fat BSD archive has source file information",
             )
-            self.assertTrue(
-                line_entry.GetLine() != 0,
+            self.assertNotEqual(
+                line_entry.GetLine(),
+                0,
                 "Verify breakpoint in fat BSD archive has source line information",
             )

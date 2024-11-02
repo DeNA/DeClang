@@ -42,12 +42,32 @@ function(add_lldb_library name)
   # only supported parameters to this macro are the optional
   # MODULE;SHARED;STATIC library type and source files
   cmake_parse_arguments(PARAM
-    "MODULE;SHARED;STATIC;OBJECT;PLUGIN;FRAMEWORK"
+    "MODULE;SHARED;STATIC;OBJECT;PLUGIN;FRAMEWORK;NO_INTERNAL_DEPENDENCIES;NO_PLUGIN_DEPENDENCIES"
     "INSTALL_PREFIX;ENTITLEMENTS"
     "EXTRA_CXXFLAGS;DEPENDS;LINK_LIBS;LINK_COMPONENTS;CLANG_LIBS"
     ${ARGN})
   llvm_process_sources(srcs ${PARAM_UNPARSED_ARGUMENTS})
   list(APPEND LLVM_LINK_COMPONENTS ${PARAM_LINK_COMPONENTS})
+
+  if(PARAM_NO_INTERNAL_DEPENDENCIES)
+    foreach(link_lib ${PARAM_LINK_LIBS})
+      if (link_lib MATCHES "^lldb")
+        message(FATAL_ERROR
+          "Library ${name} cannot depend on any other lldb libs "
+          "(Found ${link_lib} in LINK_LIBS)")
+      endif()
+    endforeach()
+  endif()
+
+  if(PARAM_NO_PLUGIN_DEPENDENCIES)
+    foreach(link_lib ${PARAM_LINK_LIBS})
+      if (link_lib MATCHES "^lldbPlugin")
+        message(FATAL_ERROR
+          "Library ${name} cannot depend on a plugin (Found ${link_lib} in "
+          "LINK_LIBS)")
+      endif()
+    endforeach()
+  endif()
 
   if(PARAM_PLUGIN)
     set_property(GLOBAL APPEND PROPERTY LLDB_PLUGINS ${name})
@@ -150,6 +170,13 @@ function(add_lldb_library name)
   else()
     set_target_properties(${name} PROPERTIES FOLDER "lldb libraries")
   endif()
+
+  # If we want to export all lldb symbols (i.e LLDB_EXPORT_ALL_SYMBOLS=ON), we
+  # need to use default visibility for all LLDB libraries even if a global
+  # `CMAKE_CXX_VISIBILITY_PRESET=hidden`is present.
+  if (LLDB_EXPORT_ALL_SYMBOLS)
+    set_target_properties(${name} PROPERTIES CXX_VISIBILITY_PRESET default)
+  endif()
 endfunction(add_lldb_library)
 
 # BEGIN Swift Mods
@@ -191,8 +218,8 @@ function(add_properties_for_swift_modules target reldir)
       set_property(TARGET ${target} APPEND_STRING PROPERTY
                    LINK_FLAGS " -lobjc ")
 
-    set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${SWIFT_BUILD_RPATH}")
-    set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "${SWIFT_INSTALL_RPATH}")
+      set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "${SWIFT_BUILD_RPATH}")
+      set_property(TARGET ${target} APPEND PROPERTY INSTALL_RPATH "${SWIFT_INSTALL_RPATH}")
     elseif (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|OpenBSD|FreeBSD")
       string(REGEX MATCH "^[^-]*" arch ${LLVM_TARGET_TRIPLE})
       target_link_libraries(${target} PRIVATE swiftCore-linux-${arch})
@@ -217,6 +244,11 @@ function(add_properties_for_swift_modules target reldir)
           APPEND PROPERTY BUILD_RPATH "@loader_path/${build_reldir}lib/swift/host")
         set_property(TARGET ${target}
           APPEND PROPERTY INSTALL_RPATH "@loader_path/${reldir}lib/swift/host")
+        if(SWIFT_ALLOW_LINKING_SWIFT_CONTENT_IN_DARWIN_TOOLCHAIN)
+          get_filename_component(TOOLCHAIN_BIN_DIR ${CMAKE_Swift_COMPILER} DIRECTORY)
+          get_filename_component(TOOLCHAIN_LIB_DIR "${TOOLCHAIN_BIN_DIR}/../lib/swift/macosx" ABSOLUTE)
+          target_link_directories(${target} BEFORE PUBLIC ${TOOLCHAIN_LIB_DIR})
+        endif()
       elseif (CMAKE_SYSTEM_NAME MATCHES "Linux|Android|OpenBSD|FreeBSD")
         set_property(TARGET ${target}
           APPEND PROPERTY BUILD_RPATH "$ORIGIN/${build_reldir}lib/swift/host")

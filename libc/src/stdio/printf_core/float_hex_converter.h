@@ -12,6 +12,8 @@
 #include "src/__support/CPP/string_view.h"
 #include "src/__support/FPUtil/FEnvImpl.h"
 #include "src/__support/FPUtil/FPBits.h"
+#include "src/__support/FPUtil/rounding_mode.h"
+#include "src/__support/common.h"
 #include "src/stdio/printf_core/converter_utils.h"
 #include "src/stdio/printf_core/core_structs.h"
 #include "src/stdio/printf_core/float_inf_nan_converter.h"
@@ -25,11 +27,12 @@ namespace printf_core {
 
 using MantissaInt = fputil::FPBits<long double>::UIntType;
 
-int inline convert_float_hex_exp(Writer *writer, const FormatSection &to_conv) {
+LIBC_INLINE int convert_float_hex_exp(Writer *writer,
+                                      const FormatSection &to_conv) {
   // All of the letters will be defined relative to variable a, which will be
-  // the appropriate case based on the name of the conversion.
-  // Since the name of the conversion is also 'a', we can just use it directly.
-  const char a = to_conv.conv_name;
+  // the appropriate case based on the name of the conversion. This converts any
+  // conversion name into the letter 'a' with the appropriate case.
+  const char a = (to_conv.conv_name & 32) | 'A';
 
   bool is_negative;
   int exponent;
@@ -49,7 +52,8 @@ int inline convert_float_hex_exp(Writer *writer, const FormatSection &to_conv) {
   } else {
     mantissa_width = fputil::MantissaWidth<double>::VALUE;
     exponent_bias = fputil::FPBits<double>::EXPONENT_BIAS;
-    fputil::FPBits<double>::UIntType float_raw = to_conv.conv_val_raw;
+    fputil::FPBits<double>::UIntType float_raw =
+        static_cast<fputil::FPBits<double>::UIntType>(to_conv.conv_val_raw);
     fputil::FPBits<double> float_bits(float_raw);
     is_negative = float_bits.get_sign();
     exponent = float_bits.get_exponent();
@@ -111,7 +115,7 @@ int inline convert_float_hex_exp(Writer *writer, const FormatSection &to_conv) {
 
     mantissa >>= shift_amount;
 
-    switch (fputil::get_round()) {
+    switch (fputil::quick_get_round()) {
     case FE_TONEAREST:
       // Round to nearest, if it's exactly halfway then round to even.
       if (truncated_bits > halfway_const)
@@ -143,9 +147,10 @@ int inline convert_float_hex_exp(Writer *writer, const FormatSection &to_conv) {
 
   size_t mant_cur = mant_len;
   size_t first_non_zero = 1;
-  for (; mant_cur > 0; --mant_cur, mantissa /= 16) {
-    char new_digit = ((mantissa % 16) > 9) ? ((mantissa % 16) - 10 + a)
-                                           : ((mantissa % 16) + '0');
+  for (; mant_cur > 0; --mant_cur, mantissa >>= 4) {
+    char mant_mod_16 = static_cast<char>(mantissa) & 15;
+    char new_digit =
+        (mant_mod_16 > 9) ? (mant_mod_16 - 10 + a) : (mant_mod_16 + '0');
     mant_buffer[mant_cur - 1] = new_digit;
     if (new_digit != '0' && first_non_zero < mant_cur)
       first_non_zero = mant_cur;

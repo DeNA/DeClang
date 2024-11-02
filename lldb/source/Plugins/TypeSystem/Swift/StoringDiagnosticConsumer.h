@@ -14,7 +14,8 @@
 #define liblldb_StoringDiagnosticConsumer_h_
 
 #include "Plugins/ExpressionParser/Swift/SwiftDiagnostic.h"
-
+#include "Plugins/Language/Swift/LogChannelSwift.h"
+#include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/StreamString.h"
 
 #include "swift/AST/DiagnosticEngine.h"
@@ -198,6 +199,14 @@ public:
       std::string &s = os.str();
       formatted_text = !s.empty() ? std::move(s) : std::string(text);
     }
+    if (info.Kind == swift::DiagnosticKind::Remark) {
+      if (info.ID == swift::diag::module_loaded.ID) {
+        // Divert module import remarks into the logs.
+        LLDB_LOG(GetLog(LLDBLog::Types), "{0} Module import remark: {1}",
+                 m_ast_context.GetDescription(), formatted_text);
+      }
+      return;
+    }
     RawDiagnostic diagnostic(
         formatted_text, info.Kind, bufferName.str(), bufferID, line_col.first,
         line_col.second,
@@ -207,8 +216,15 @@ public:
       if (m_raw_clang_diagnostics.empty() ||
           m_raw_clang_diagnostics.back() != diagnostic) {
         m_raw_clang_diagnostics.push_back(std::move(diagnostic));
-        if (info.Kind == swift::DiagnosticKind::Error)
+        if (info.Kind == swift::DiagnosticKind::Error) {
           m_num_clang_errors++;
+          // Any errors from clang could be related module import
+          // issues which shoud be surfaced in the health log channel.
+          LLDB_LOG(GetLog(LLDBLog::Types), "{0} Clang error: {1}",
+                   m_ast_context.GetDescription(), formatted_text);
+          LLDB_LOG(lldb_private::GetSwiftHealthLog(), "{0} Clang error: {1}",
+                   m_ast_context.GetDescription(), formatted_text);
+        }
       }
     } else {
       m_raw_swift_diagnostics.push_back(std::move(diagnostic));
@@ -231,15 +247,15 @@ public:
 
   unsigned NumClangErrors() { return m_num_clang_errors; }
 
-  static DiagnosticSeverity SeverityForKind(swift::DiagnosticKind kind) {
+  static lldb::Severity SeverityForKind(swift::DiagnosticKind kind) {
     switch (kind) {
     case swift::DiagnosticKind::Error:
-      return eDiagnosticSeverityError;
+      return lldb::eSeverityError;
     case swift::DiagnosticKind::Warning:
-      return eDiagnosticSeverityWarning;
+      return lldb::eSeverityWarning;
     case swift::DiagnosticKind::Note:
     case swift::DiagnosticKind::Remark:
-      return eDiagnosticSeverityRemark;
+      return lldb::eSeverityInfo;
     }
 
     llvm_unreachable("Unhandled DiagnosticKind in switch.");
@@ -268,7 +284,7 @@ public:
 
     auto format_diagnostic = [&](const RawDiagnostic &diagnostic,
                                  const DiagnosticOrigin origin) {
-      const DiagnosticSeverity severity = SeverityForKind(diagnostic.kind);
+      const lldb::Severity severity = SeverityForKind(diagnostic.kind);
 
       // Make sure the error line is in range or in another file.
       if (diagnostic.bufferID == bufferID && !diagnostic.bufferName.empty() &&
@@ -280,7 +296,7 @@ public:
         return;
 
       // Diagnose global errors.
-      if (severity == eDiagnosticSeverityError && diagnostic.line == 0) {
+      if (severity == lldb::eSeverityError && diagnostic.line == 0) {
         diagnostic_manager.AddDiagnostic(diagnostic.description.c_str(),
                                          severity, origin);
         added_one_diagnostic = true;

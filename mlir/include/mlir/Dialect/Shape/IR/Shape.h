@@ -14,6 +14,7 @@
 #ifndef MLIR_DIALECT_SHAPE_IR_SHAPE_H
 #define MLIR_DIALECT_SHAPE_IR_SHAPE_H
 
+#include "mlir/Bytecode/BytecodeOpInterface.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/FunctionInterfaces.h"
@@ -21,6 +22,7 @@
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/CastInterfaces.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
@@ -35,7 +37,7 @@ namespace shape {
 
 /// Alias type for extent tensors.
 RankedTensorType getExtentTensorType(MLIRContext *ctx,
-                                     int64_t rank = ShapedType::kDynamicSize);
+                                     int64_t rank = ShapedType::kDynamic);
 
 // Check if a type is an extent tensor, e.g., tensor<?xindex>.
 bool isExtentTensorType(Type);

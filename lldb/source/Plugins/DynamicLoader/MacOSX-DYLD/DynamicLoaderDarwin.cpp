@@ -43,12 +43,6 @@
 #define DEBUG_PRINTF(fmt, ...)
 #endif
 
-#ifndef __APPLE__
-#include "Utility/UuidCompatibility.h"
-#else
-#include <uuid/uuid.h>
-#endif
-
 #include <memory>
 
 using namespace lldb;
@@ -615,6 +609,26 @@ void DynamicLoaderDarwin::UpdateDYLDImageInfoFromNewImageInfo(
   }
 }
 
+std::optional<lldb_private::Address> DynamicLoaderDarwin::GetStartAddress() {
+  Log *log = GetLog(LLDBLog::DynamicLoader);
+
+  auto log_err = [log](llvm::StringLiteral err_msg) -> std::nullopt_t {
+    LLDB_LOGV(log, "{}", err_msg);
+    return std::nullopt;
+  };
+
+  ModuleSP dyld_sp = GetDYLDModule();
+  if (!dyld_sp)
+    return log_err("Couldn't retrieve DYLD module. Cannot get `start` symbol.");
+
+  const Symbol *symbol =
+      dyld_sp->FindFirstSymbolWithNameAndType(ConstString("_dyld_start"));
+  if (!symbol)
+    return log_err("Cannot find `start` symbol in DYLD module.");
+
+  return symbol->GetAddress();
+}
+
 void DynamicLoaderDarwin::SetDYLDModule(lldb::ModuleSP &dyld_module_sp) {
   m_dyld_module_wp = dyld_module_sp;
 }
@@ -882,53 +896,37 @@ DynamicLoaderDarwin::GetStepThroughTrampolinePlan(Thread &thread,
         SymbolContextList code_symbols;
         images.FindSymbolsWithNameAndType(trampoline_name, eSymbolTypeCode,
                                           code_symbols);
-        size_t num_code_symbols = code_symbols.GetSize();
+        for (const SymbolContext &context : code_symbols) {
+          AddressRange addr_range;
+          context.GetAddressRange(eSymbolContextEverything, 0, false,
+                                  addr_range);
+          addresses.push_back(addr_range.GetBaseAddress());
+          if (log) {
+            addr_t load_addr =
+                addr_range.GetBaseAddress().GetLoadAddress(target_sp.get());
 
-        if (num_code_symbols > 0) {
-          for (uint32_t i = 0; i < num_code_symbols; i++) {
-            SymbolContext context;
-            AddressRange addr_range;
-            if (code_symbols.GetContextAtIndex(i, context)) {
-              context.GetAddressRange(eSymbolContextEverything, 0, false,
-                                      addr_range);
-              addresses.push_back(addr_range.GetBaseAddress());
-              if (log) {
-                addr_t load_addr =
-                    addr_range.GetBaseAddress().GetLoadAddress(target_sp.get());
-
-                LLDB_LOGF(log,
-                          "Found a trampoline target symbol at 0x%" PRIx64 ".",
-                          load_addr);
-              }
-            }
+            LLDB_LOGF(log, "Found a trampoline target symbol at 0x%" PRIx64 ".",
+                      load_addr);
           }
         }
 
         SymbolContextList reexported_symbols;
         images.FindSymbolsWithNameAndType(
             trampoline_name, eSymbolTypeReExported, reexported_symbols);
-        size_t num_reexported_symbols = reexported_symbols.GetSize();
-        if (num_reexported_symbols > 0) {
-          for (uint32_t i = 0; i < num_reexported_symbols; i++) {
-            SymbolContext context;
-            if (reexported_symbols.GetContextAtIndex(i, context)) {
-              if (context.symbol) {
-                Symbol *actual_symbol =
-                    context.symbol->ResolveReExportedSymbol(*target_sp.get());
-                if (actual_symbol) {
-                  const Address actual_symbol_addr =
-                      actual_symbol->GetAddress();
-                  if (actual_symbol_addr.IsValid()) {
-                    addresses.push_back(actual_symbol_addr);
-                    if (log) {
-                      lldb::addr_t load_addr =
-                          actual_symbol_addr.GetLoadAddress(target_sp.get());
-                      LLDB_LOGF(
-                          log,
-                          "Found a re-exported symbol: %s at 0x%" PRIx64 ".",
-                          actual_symbol->GetName().GetCString(), load_addr);
-                    }
-                  }
+        for (const SymbolContext &context : reexported_symbols) {
+          if (context.symbol) {
+            Symbol *actual_symbol =
+                context.symbol->ResolveReExportedSymbol(*target_sp.get());
+            if (actual_symbol) {
+              const Address actual_symbol_addr = actual_symbol->GetAddress();
+              if (actual_symbol_addr.IsValid()) {
+                addresses.push_back(actual_symbol_addr);
+                if (log) {
+                  lldb::addr_t load_addr =
+                      actual_symbol_addr.GetLoadAddress(target_sp.get());
+                  LLDB_LOGF(log,
+                            "Found a re-exported symbol: %s at 0x%" PRIx64 ".",
+                            actual_symbol->GetName().GetCString(), load_addr);
                 }
               }
             }
@@ -938,24 +936,18 @@ DynamicLoaderDarwin::GetStepThroughTrampolinePlan(Thread &thread,
         SymbolContextList indirect_symbols;
         images.FindSymbolsWithNameAndType(trampoline_name, eSymbolTypeResolver,
                                           indirect_symbols);
-        size_t num_indirect_symbols = indirect_symbols.GetSize();
-        if (num_indirect_symbols > 0) {
-          for (uint32_t i = 0; i < num_indirect_symbols; i++) {
-            SymbolContext context;
-            AddressRange addr_range;
-            if (indirect_symbols.GetContextAtIndex(i, context)) {
-              context.GetAddressRange(eSymbolContextEverything, 0, false,
-                                      addr_range);
-              addresses.push_back(addr_range.GetBaseAddress());
-              if (log) {
-                addr_t load_addr =
-                    addr_range.GetBaseAddress().GetLoadAddress(target_sp.get());
 
-                LLDB_LOGF(log,
-                          "Found an indirect target symbol at 0x%" PRIx64 ".",
-                          load_addr);
-              }
-            }
+        for (const SymbolContext &context : indirect_symbols) {
+          AddressRange addr_range;
+          context.GetAddressRange(eSymbolContextEverything, 0, false,
+                                  addr_range);
+          addresses.push_back(addr_range.GetBaseAddress());
+          if (log) {
+            addr_t load_addr =
+                addr_range.GetBaseAddress().GetLoadAddress(target_sp.get());
+
+            LLDB_LOGF(log, "Found an indirect target symbol at 0x%" PRIx64 ".",
+                      load_addr);
           }
         }
       }

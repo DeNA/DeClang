@@ -21,18 +21,13 @@ import unittest2
 
 
 class TestSwiftArchetypeResolution(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @swiftTest
     def test_swift_archetype_resolution(self):
         """Test that archetype-typed objects get resolved to their proper location in memory"""
         self.build()
-        (target, process, thread, bkpt) = lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("main.swift")
-        )
+        (target, process, thread, bkpt) = \
+            lldbutil.run_to_source_breakpoint(
+                self, 'break here', lldb.SBFileSpec('main.swift'))
 
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
@@ -45,7 +40,7 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(var_x.GetValue() == "1", "Int case fails")
+        self.assertTrue(var_x.GetValue() == '1', "Int case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")
 
@@ -53,13 +48,10 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(
-            var_x.GetChildMemberWithName("y").GetSummary() == '"hello"',
-            "S.String case fails",
-        )
-        self.assertTrue(
-            var_x.GetChildMemberWithName("x").GetValue() == "1", "S.Int case fails"
-        )
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "y").GetSummary() == '"hello"', "S.String case fails")
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "x").GetValue() == '1', "S.Int case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")
 
@@ -67,13 +59,10 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(
-            var_x.GetChildMemberWithName("y").GetSummary() == '"hello"',
-            "C.String case fails",
-        )
-        self.assertTrue(
-            var_x.GetChildMemberWithName("x").GetValue() == "1", "C.Int case fails"
-        )
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "y").GetSummary() == '"hello"', "C.String case fails")
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "x").GetValue() == '1', "C.Int case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")
 
@@ -81,12 +70,10 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(
-            var_x.GetChildMemberWithName("0").GetValue() == "1", "Tuple.0 case fails"
-        )
-        self.assertTrue(
-            var_x.GetChildMemberWithName("1").GetValue() == "2", "Tuple.1 case fails"
-        )
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "0").GetValue() == '1', "Tuple.0 case fails")
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "1").GetValue() == '2', "Tuple.1 case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")
 
@@ -94,7 +81,7 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(var_x.GetValue() == "A", "E case fails")
+        self.assertTrue(var_x.GetValue() == 'A', "E case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")
 
@@ -102,13 +89,10 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(
-            var_x.GetChildMemberWithName("y").GetSummary() == '"hello"',
-            "GS.String case fails",
-        )
-        self.assertTrue(
-            var_x.GetChildMemberWithName("x").GetValue() == "1", "GS.Int case fails"
-        )
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "y").GetSummary() == '"hello"', "GS.String case fails")
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "x").GetValue() == '1', "GS.Int case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")
 
@@ -116,13 +100,10 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(
-            var_x.GetChildMemberWithName("y").GetSummary() == '"hello"',
-            "GC.String case fails",
-        )
-        self.assertTrue(
-            var_x.GetChildMemberWithName("x").GetValue() == "1", "GC.Int case fails"
-        )
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "y").GetSummary() == '"hello"', "GC.String case fails")
+        self.assertTrue(var_x.GetChildMemberWithName(
+            "x").GetValue() == '1', "GC.Int case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")
 
@@ -130,6 +111,6 @@ class TestSwiftArchetypeResolution(TestBase):
         var_x = self.frame().FindVariable("x")
         var_x.SetPreferDynamicValue(lldb.eDynamicCanRunTarget)
         var_x.SetPreferSyntheticValue(True)
-        self.assertTrue(var_x.GetValue() == "A", "GE case fails")
+        self.assertTrue(var_x.GetValue() == 'A', "GE case fails")
         if self.TraceOn():
             self.runCmd("frame variable -d run")

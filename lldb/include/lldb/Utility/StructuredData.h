@@ -537,26 +537,6 @@ public:
       return success;
     }
 
-    bool GetValueForKeyAsString(llvm::StringRef key,
-                                ConstString &result) const {
-      ObjectSP value_sp = GetValueForKey(key);
-      if (value_sp.get()) {
-        if (auto string_value = value_sp->GetAsString()) {
-          result = ConstString(string_value->GetValue());
-          return true;
-        }
-      }
-      return false;
-    }
-
-    bool GetValueForKeyAsString(llvm::StringRef key, ConstString &result,
-                                const char *default_val) const {
-      bool success = GetValueForKeyAsString(key, result);
-      if (!success)
-        result.SetCString(default_val);
-      return success;
-    }
-
     bool GetValueForKeyAsDictionary(llvm::StringRef key,
                                     Dictionary *&result) const {
       result = nullptr;
@@ -652,7 +632,7 @@ public:
     void *m_object;
   };
 
-  static ObjectSP ParseJSON(const std::string &json_text);
+  static ObjectSP ParseJSON(llvm::StringRef json_text);
   static ObjectSP ParseJSONFromFile(const FileSpec &file, Status &error);
   static bool IsRecordType(const ObjectSP object_sp);
 };

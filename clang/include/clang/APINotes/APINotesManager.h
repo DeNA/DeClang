@@ -46,8 +46,7 @@ class APINotesReader;
 /// operation is \c findAPINotes(), which finds the API notes reader that
 /// provides information about the declarations at that location.
 class APINotesManager {
-  typedef llvm::PointerUnion<const DirectoryEntry *, APINotesReader *>
-    ReaderEntry;
+  using ReaderEntry = llvm::PointerUnion<DirectoryEntryRef, APINotesReader *>;
 
   SourceManager &SourceMgr;
 
@@ -95,9 +94,8 @@ class APINotesManager {
   /// Look for API notes in the given directory.
   ///
   /// This might find either a binary or source API notes.
-  const FileEntry *findAPINotesFile(const DirectoryEntry *directory,
-                                    StringRef filename,
-                                    bool wantPublic = true);
+  const FileEntry *findAPINotesFile(DirectoryEntryRef directory,
+                                    StringRef filename, bool wantPublic = true);
 
   /// Attempt to load API notes for the given framework.
   ///
@@ -108,9 +106,9 @@ class APINotesManager {
   /// \returns the header directory entry (e.g., for Headers or PrivateHeaders)
   /// for which the API notes were successfully loaded, or NULL if API notes
   /// could not be loaded for any reason.
-  const DirectoryEntry *loadFrameworkAPINotes(llvm::StringRef FrameworkPath,
-                                              llvm::StringRef FrameworkName,
-                                              bool Public);
+  OptionalDirectoryEntryRef loadFrameworkAPINotes(llvm::StringRef FrameworkPath,
+                                                  llvm::StringRef FrameworkName,
+                                                  bool Public);
 
 public:
   APINotesManager(SourceManager &sourceMgr, const LangOptions &langOpts);
@@ -156,7 +154,7 @@ public:
   ArrayRef<APINotesReader *> getCurrentModuleReaders() const {
     unsigned numReaders = static_cast<unsigned>(CurrentModuleReaders[0] != nullptr) +
       static_cast<unsigned>(CurrentModuleReaders[1] != nullptr);
-    return llvm::makeArrayRef(CurrentModuleReaders).slice(0, numReaders);
+    return ArrayRef(CurrentModuleReaders).slice(0, numReaders);
   }
 
   /// Find the API notes readers that correspond to the given source location.

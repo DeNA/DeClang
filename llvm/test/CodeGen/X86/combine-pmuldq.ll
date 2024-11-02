@@ -116,7 +116,8 @@ define <8 x i64> @combine_zext_pmuludq_256(<8 x i32> %a) {
 ; AVX1-NEXT:    vextractf128 $1, %ymm0, %xmm1
 ; AVX1-NEXT:    vpshufd {{.*#+}} xmm2 = xmm1[2,2,3,3]
 ; AVX1-NEXT:    vpshufd {{.*#+}} xmm3 = xmm0[2,2,3,3]
-; AVX1-NEXT:    vmovdqa {{.*#+}} xmm4 = [715827883,715827883]
+; AVX1-NEXT:    vmovddup {{.*#+}} xmm4 = [715827883,715827883]
+; AVX1-NEXT:    # xmm4 = mem[0,0]
 ; AVX1-NEXT:    vpmuludq %xmm4, %xmm3, %xmm3
 ; AVX1-NEXT:    vpmovzxdq {{.*#+}} xmm0 = xmm0[0],zero,xmm0[1],zero
 ; AVX1-NEXT:    vpmuludq %xmm4, %xmm0, %xmm0
@@ -332,8 +333,7 @@ declare dso_local i32 @foo(i32, i32, i32, i32)
 define <8 x i32> @PR49658_zext(ptr %ptr, i32 %mul) {
 ; SSE-LABEL: PR49658_zext:
 ; SSE:       # %bb.0: # %start
-; SSE-NEXT:    movl %esi, %eax
-; SSE-NEXT:    movq %rax, %xmm0
+; SSE-NEXT:    movd %esi, %xmm0
 ; SSE-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[0,1,0,1]
 ; SSE-NEXT:    pxor %xmm0, %xmm0
 ; SSE-NEXT:    movq $-2097152, %rax # imm = 0xFFE00000

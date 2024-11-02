@@ -87,8 +87,8 @@ define <2 x double> @load_speculative(ptr dereferenceable(16) align 4 %ptr, doub
 ; CHECK-NEXT:    [[PTV1:%.*]] = insertelement <2 x double> undef, double [[PT:%.*]], i64 0
 ; CHECK-NEXT:    [[PTV2:%.*]] = shufflevector <2 x double> [[PTV1]], <2 x double> poison, <2 x i32> zeroinitializer
 ; CHECK-NEXT:    [[UNMASKEDLOAD:%.*]] = load <2 x double>, ptr [[PTR:%.*]], align 4
-; CHECK-NEXT:    [[TMP1:%.*]] = select <2 x i1> [[MASK:%.*]], <2 x double> [[UNMASKEDLOAD]], <2 x double> [[PTV2]]
-; CHECK-NEXT:    ret <2 x double> [[TMP1]]
+; CHECK-NEXT:    [[RES:%.*]] = select <2 x i1> [[MASK:%.*]], <2 x double> [[UNMASKEDLOAD]], <2 x double> [[PTV2]]
+; CHECK-NEXT:    ret <2 x double> [[RES]]
 ;
   %ptv1 = insertelement <2 x double> undef, double %pt, i64 0
   %ptv2 = insertelement <2 x double> %ptv1, double %pt, i64 1
@@ -101,8 +101,8 @@ define <2 x double> @load_speculative_less_aligned(ptr dereferenceable(16) %ptr,
 ; CHECK-NEXT:    [[PTV1:%.*]] = insertelement <2 x double> undef, double [[PT:%.*]], i64 0
 ; CHECK-NEXT:    [[PTV2:%.*]] = shufflevector <2 x double> [[PTV1]], <2 x double> poison, <2 x i32> zeroinitializer
 ; CHECK-NEXT:    [[UNMASKEDLOAD:%.*]] = load <2 x double>, ptr [[PTR:%.*]], align 4
-; CHECK-NEXT:    [[TMP1:%.*]] = select <2 x i1> [[MASK:%.*]], <2 x double> [[UNMASKEDLOAD]], <2 x double> [[PTV2]]
-; CHECK-NEXT:    ret <2 x double> [[TMP1]]
+; CHECK-NEXT:    [[RES:%.*]] = select <2 x i1> [[MASK:%.*]], <2 x double> [[UNMASKEDLOAD]], <2 x double> [[PTV2]]
+; CHECK-NEXT:    ret <2 x double> [[RES]]
 ;
   %ptv1 = insertelement <2 x double> undef, double %pt, i64 0
   %ptv2 = insertelement <2 x double> %ptv1, double %pt, i64 1
@@ -202,7 +202,7 @@ define <4 x double> @gather_lane2(ptr %base, double %pt)  {
 ; CHECK-LABEL: @gather_lane2(
 ; CHECK-NEXT:    [[PTRS:%.*]] = getelementptr double, ptr [[BASE:%.*]], <4 x i64> <i64 poison, i64 poison, i64 2, i64 poison>
 ; CHECK-NEXT:    [[PT_V1:%.*]] = insertelement <4 x double> undef, double [[PT:%.*]], i64 0
-; CHECK-NEXT:    [[PT_V2:%.*]] = shufflevector <4 x double> [[PT_V1]], <4 x double> undef, <4 x i32> <i32 0, i32 0, i32 undef, i32 0>
+; CHECK-NEXT:    [[PT_V2:%.*]] = shufflevector <4 x double> [[PT_V1]], <4 x double> undef, <4 x i32> <i32 0, i32 0, i32 poison, i32 0>
 ; CHECK-NEXT:    [[RES:%.*]] = call <4 x double> @llvm.masked.gather.v4f64.v4p0(<4 x ptr> [[PTRS]], i32 4, <4 x i1> <i1 false, i1 false, i1 true, i1 false>, <4 x double> [[PT_V2]])
 ; CHECK-NEXT:    ret <4 x double> [[RES]]
 ;
@@ -300,7 +300,7 @@ entry:
   %broadcast.splat = shufflevector <vscale x 4 x ptr> %broadcast.splatinsert, <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer
   %broadcast.value = insertelement <vscale x 4 x i16> poison, i16 %val, i32 0
   %broadcast.splatvalue = shufflevector <vscale x 4 x i16> %broadcast.value, <vscale x 4 x i16> poison, <vscale x 4 x i32> zeroinitializer
-  call void @llvm.masked.scatter.nxv4i16.nxv4p0i16(<vscale x 4 x i16> %broadcast.splatvalue, <vscale x 4 x ptr> %broadcast.splat, i32 2, <vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> zeroinitializer , i1 true, i32 0), <vscale x 4 x i1> zeroinitializer, <vscale x 4 x i32> zeroinitializer))
+  call void @llvm.masked.scatter.nxv4i16.nxv4p0(<vscale x 4 x i16> %broadcast.splatvalue, <vscale x 4 x ptr> %broadcast.splat, i32 2, <vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> zeroinitializer , i1 true, i32 0), <vscale x 4 x i1> zeroinitializer, <vscale x 4 x i32> zeroinitializer))
   ret void
 }
 
@@ -336,7 +336,7 @@ entry:
   %broadcast.splatinsert = insertelement <vscale x 4 x ptr> poison, ptr %dst, i32 0
   %broadcast.splat = shufflevector <vscale x 4 x ptr> %broadcast.splatinsert, <vscale x 4 x ptr> poison, <vscale x 4 x i32> zeroinitializer
   %wide.load = load <vscale x 4 x i16>, ptr %src, align 2
-  call void @llvm.masked.scatter.nxv4i16.nxv4p0i16(<vscale x 4 x i16> %wide.load, <vscale x 4 x ptr> %broadcast.splat, i32 2, <vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i32 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer))
+  call void @llvm.masked.scatter.nxv4i16.nxv4p0(<vscale x 4 x i16> %wide.load, <vscale x 4 x ptr> %broadcast.splat, i32 2, <vscale x 4 x i1> shufflevector (<vscale x 4 x i1> insertelement (<vscale x 4 x i1> poison, i1 true, i32 0), <vscale x 4 x i1> poison, <vscale x 4 x i32> zeroinitializer))
   ret void
 }
 
@@ -346,7 +346,7 @@ entry:
 define void @negative_scatter_v4i16_no_uniform_vals_uniform_ptrs_all_inactive_mask(ptr %dst, ptr %src) {
 ; CHECK-LABEL: @negative_scatter_v4i16_no_uniform_vals_uniform_ptrs_all_inactive_mask(
 ; CHECK-NEXT:    [[INSERT_ELT:%.*]] = insertelement <4 x ptr> poison, ptr [[DST:%.*]], i64 0
-; CHECK-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <4 x ptr> [[INSERT_ELT]], <4 x ptr> poison, <4 x i32> <i32 undef, i32 undef, i32 0, i32 0>
+; CHECK-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <4 x ptr> [[INSERT_ELT]], <4 x ptr> poison, <4 x i32> <i32 poison, i32 poison, i32 0, i32 0>
 ; CHECK-NEXT:    [[WIDE_LOAD:%.*]] = load <4 x i16>, ptr [[SRC:%.*]], align 2
 ; CHECK-NEXT:    call void @llvm.masked.scatter.v4i16.v4p0(<4 x i16> [[WIDE_LOAD]], <4 x ptr> [[BROADCAST_SPLAT]], i32 2, <4 x i1> <i1 false, i1 false, i1 true, i1 true>)
 ; CHECK-NEXT:    ret void
@@ -375,7 +375,7 @@ define void @negative_scatter_v4i16_no_uniform_vals_no_uniform_ptrs_all_active_m
 
 ; Function Attrs:
 declare void @llvm.masked.scatter.v4i16.v4p0(<4 x i16>, <4 x ptr>, i32 immarg, <4 x i1>)
-declare void @llvm.masked.scatter.nxv4i16.nxv4p0i16(<vscale x 4 x i16>, <vscale x 4 x ptr>, i32 immarg, <vscale x 4 x i1>)
+declare void @llvm.masked.scatter.nxv4i16.nxv4p0(<vscale x 4 x i16>, <vscale x 4 x ptr>, i32 immarg, <vscale x 4 x i1>)
 
 ; Test gathers that can be simplified to scalar load + splat
 

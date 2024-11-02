@@ -27,8 +27,8 @@
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
+#include <optional>
 #include <utility>
 
 namespace clang {
@@ -211,6 +211,7 @@ class TypeSourceInfo;
 
     /// Whether to perform a minimal import.
     bool Minimal;
+    bool LLDBRedeclCompletion = false;
 
     ODRHandlingType ODRHandling;
 
@@ -258,6 +259,7 @@ class TypeSourceInfo;
     FoundDeclsTy findDeclsInToCtx(DeclContext *DC, DeclarationName Name);
 
     void AddToLookupTable(Decl *ToD);
+    llvm::Error ImportAttrs(Decl *ToD, Decl *FromD);
 
   protected:
     /// Can be overwritten by subclasses to implement their own import logic.
@@ -295,8 +297,10 @@ class TypeSourceInfo;
     /// Whether the importer will perform a minimal import, creating
     /// to-be-completed forward declarations when possible.
     bool isMinimalImport() const { return Minimal; }
+    bool hasLLDBRedeclCompletion() const { return LLDBRedeclCompletion; }
 
     void setODRHandling(ODRHandlingType T) { ODRHandling = T; }
+    void setLLDBRedeclCompletion(bool Val) { LLDBRedeclCompletion = Val; }
 
     /// \brief Import the given object, returns the result.
     ///
@@ -367,7 +371,7 @@ class TypeSourceInfo;
     /// in the "to" context was imported. If it was not imported or of the wrong
     /// type a null value is returned.
     template <typename DeclT>
-    llvm::Optional<DeclT *> getImportedFromDecl(const DeclT *ToD) const {
+    std::optional<DeclT *> getImportedFromDecl(const DeclT *ToD) const {
       auto FromI = ImportedFromDecls.find(ToD);
       if (FromI == ImportedFromDecls.end())
         return {};
@@ -564,7 +568,7 @@ class TypeSourceInfo;
     /// Return if import of the given declaration has failed and if yes
     /// the kind of the problem. This gives the first error encountered with
     /// the node.
-    llvm::Optional<ASTImportError> getImportDeclErrorIfAny(Decl *FromD) const;
+    std::optional<ASTImportError> getImportDeclErrorIfAny(Decl *FromD) const;
 
     /// Mark (newly) imported declaration with error.
     void setImportDeclError(Decl *From, ASTImportError Error);
@@ -577,8 +581,8 @@ class TypeSourceInfo;
     /// Determine the index of a field in its parent record.
     /// F should be a field (or indirect field) declaration.
     /// \returns The index of the field in its parent context (starting from 0).
-    /// On error `None` is returned (parent context is non-record).
-    static llvm::Optional<unsigned> getFieldIndex(Decl *F);
+    /// On error `std::nullopt` is returned (parent context is non-record).
+    static std::optional<unsigned> getFieldIndex(Decl *F);
   };
 
 } // namespace clang

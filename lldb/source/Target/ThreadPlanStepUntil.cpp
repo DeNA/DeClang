@@ -174,7 +174,7 @@ void ThreadPlanStepUntil::AnalyzeStop() {
         bool done;
         StackID cur_frame_zero_id;
 
-        done = (m_stack_id < cur_frame_zero_id);
+        done = IsYounger(m_stack_id, cur_frame_zero_id);
 
         if (done) {
           m_stepped_out = true;
@@ -182,7 +182,7 @@ void ThreadPlanStepUntil::AnalyzeStop() {
         } else
           m_should_stop = false;
 
-        if (this_site->GetNumberOfOwners() == 1)
+        if (this_site->GetNumberOfConstituents() == 1)
           m_explains_stop = true;
         else
           m_explains_stop = false;
@@ -200,7 +200,7 @@ void ThreadPlanStepUntil::AnalyzeStop() {
 
             if (frame_zero_id == m_stack_id)
               done = true;
-            else if (frame_zero_id < m_stack_id)
+            else if (IsYounger(frame_zero_id, m_stack_id))
               done = false;
             else {
               StackFrameSP older_frame_sp = thread.GetStackFrameAtIndex(1);
@@ -228,7 +228,7 @@ void ThreadPlanStepUntil::AnalyzeStop() {
             // only breakpoint here, then we do explain the stop, and we'll
             // continue. If not then we should let higher plans handle this
             // stop.
-            if (this_site->GetNumberOfOwners() == 1)
+            if (this_site->GetNumberOfConstituents() == 1)
               m_explains_stop = true;
             else {
               m_should_stop = true;

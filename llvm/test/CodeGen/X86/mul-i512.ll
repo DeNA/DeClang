@@ -796,18 +796,18 @@ define void @test_512(ptr %a, ptr %b, ptr %out) nounwind {
 ; X32-NEXT:    movl %eax, {{[-0-9]+}}(%e{{[sb]}}p) # 4-byte Spill
 ; X32-NEXT:    adcl {{[-0-9]+}}(%e{{[sb]}}p), %edx # 4-byte Folded Reload
 ; X32-NEXT:    movl %edx, {{[-0-9]+}}(%e{{[sb]}}p) # 4-byte Spill
-; X32-NEXT:    movl {{[0-9]+}}(%esp), %edi
-; X32-NEXT:    movl 60(%edi), %ecx
-; X32-NEXT:    movl {{[-0-9]+}}(%e{{[sb]}}p), %eax # 4-byte Reload
-; X32-NEXT:    imull %eax, %ecx
-; X32-NEXT:    movl 56(%edi), %esi
-; X32-NEXT:    movl %edi, %ebx
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %ebx
+; X32-NEXT:    movl 56(%ebx), %esi
+; X32-NEXT:    movl {{[-0-9]+}}(%e{{[sb]}}p), %ecx # 4-byte Reload
+; X32-NEXT:    movl %ecx, %eax
 ; X32-NEXT:    mull %esi
 ; X32-NEXT:    movl %eax, {{[-0-9]+}}(%e{{[sb]}}p) # 4-byte Spill
-; X32-NEXT:    addl %ecx, %edx
 ; X32-NEXT:    imull {{[-0-9]+}}(%e{{[sb]}}p), %esi # 4-byte Folded Reload
 ; X32-NEXT:    addl %edx, %esi
-; X32-NEXT:    movl 48(%edi), %edi
+; X32-NEXT:    movl 60(%ebx), %eax
+; X32-NEXT:    imull %ecx, %eax
+; X32-NEXT:    addl %eax, %esi
+; X32-NEXT:    movl 48(%ebx), %edi
 ; X32-NEXT:    movl 52(%ebx), %ebp
 ; X32-NEXT:    movl {{[-0-9]+}}(%e{{[sb]}}p), %eax # 4-byte Reload
 ; X32-NEXT:    movl %eax, %ebx
@@ -1373,31 +1373,32 @@ define void @test_512(ptr %a, ptr %b, ptr %out) nounwind {
 ; X64-NEXT:    adcq %rax, %r12
 ; X64-NEXT:    addq %rcx, %r8
 ; X64-NEXT:    adcq %r11, %r12
-; X64-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rcx # 8-byte Reload
-; X64-NEXT:    movq 56(%rcx), %rsi
-; X64-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; X64-NEXT:    imulq %rax, %rsi
-; X64-NEXT:    movq 48(%rcx), %r11
-; X64-NEXT:    movq %rcx, %rdi
-; X64-NEXT:    movq %rax, %rbx
-; X64-NEXT:    mulq %r11
+; X64-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %r9 # 8-byte Reload
+; X64-NEXT:    movq 48(%r9), %rsi
+; X64-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rdi # 8-byte Reload
+; X64-NEXT:    movq %rdi, %rax
+; X64-NEXT:    mulq %rsi
 ; X64-NEXT:    movq %rax, %rcx
-; X64-NEXT:    addq %rsi, %rdx
 ; X64-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %r14 # 8-byte Reload
-; X64-NEXT:    imulq %r14, %r11
-; X64-NEXT:    addq %rdx, %r11
-; X64-NEXT:    movq 32(%rdi), %r9
-; X64-NEXT:    movq 40(%rdi), %r15
+; X64-NEXT:    imulq %r14, %rsi
+; X64-NEXT:    addq %rdx, %rsi
+; X64-NEXT:    movq %r9, %rdx
+; X64-NEXT:    movq 56(%r9), %rax
+; X64-NEXT:    imulq %rdi, %rax
+; X64-NEXT:    movq %rdi, %rbx
+; X64-NEXT:    addq %rax, %rsi
+; X64-NEXT:    movq 32(%r9), %r9
+; X64-NEXT:    movq 40(%rdx), %r15
 ; X64-NEXT:    movq {{[-0-9]+}}(%r{{[sb]}}p), %rax # 8-byte Reload
-; X64-NEXT:    movq %rax, %rsi
-; X64-NEXT:    imulq %r15, %rsi
+; X64-NEXT:    movq %rax, %r11
+; X64-NEXT:    imulq %r15, %r11
 ; X64-NEXT:    mulq %r9
 ; X64-NEXT:    movq %rax, %rdi
-; X64-NEXT:    addq %rsi, %rdx
+; X64-NEXT:    addq %r11, %rdx
 ; X64-NEXT:    imulq %r9, %r10
 ; X64-NEXT:    addq %rdx, %r10
 ; X64-NEXT:    addq %rcx, %rdi
-; X64-NEXT:    adcq %r11, %r10
+; X64-NEXT:    adcq %rsi, %r10
 ; X64-NEXT:    movq %r9, %rax
 ; X64-NEXT:    mulq %rbx
 ; X64-NEXT:    movq %rdx, %rsi

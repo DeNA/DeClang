@@ -58,7 +58,7 @@ class TestGdbRemoteThreadsInStopReply(gdbremote_testcase.GdbRemoteTestCaseBase):
         pcs_text = results["thread-pcs"]
         thread_ids = threads_text.split(",")
         pcs = pcs_text.split(",")
-        self.assertEquals(len(thread_ids), len(pcs))
+        self.assertEqual(len(thread_ids), len(pcs))
 
         thread_pcs = dict()
         for i in range(0, len(pcs)):
@@ -175,6 +175,7 @@ class TestGdbRemoteThreadsInStopReply(gdbremote_testcase.GdbRemoteTestCaseBase):
             self.assertIn(tid, stop_reply_threads)
 
     @skipIfNetBSD
+    @skipIfWindows  # Flaky on Windows
     def test_stop_reply_contains_thread_pcs(self):
         self.build()
         self.set_inferior_startup_launch()

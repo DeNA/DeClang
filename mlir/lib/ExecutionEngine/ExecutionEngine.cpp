@@ -25,12 +25,12 @@
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/MC/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/SubtargetFeature.h"
 
 #define DEBUG_TYPE "execution-engine"
 
@@ -96,11 +96,26 @@ void SimpleObjectCache::dumpToObjectFile(StringRef outputFilename) {
   file->keep();
 }
 
+bool SimpleObjectCache::isEmpty() { return cachedObjects.empty(); }
+
 void ExecutionEngine::dumpToObjectFile(StringRef filename) {
   if (cache == nullptr) {
     llvm::errs() << "cannot dump ExecutionEngine object code to file: "
                     "object cache is disabled\n";
     return;
+  }
+  // Compilation is lazy and it doesn't populate object cache unless requested.
+  // In case object dump is requested before cache is populated, we need to
+  // force compilation manually. 
+  if (cache->isEmpty()) {
+    for (std::string &functionName : functionNames) {
+      auto result = lookupPacked(functionName);
+      if (!result) {
+        llvm::errs() << "Could not compile " << functionName << ":\n  "
+                     << result.takeError() << "\n";
+        return;
+      }
+    }
   }
   cache->dumpToObjectFile(filename);
 }
@@ -113,35 +128,10 @@ void ExecutionEngine::registerSymbols(
           mainJitDylib.getExecutionSession(), jit->getDataLayout())))));
 }
 
-// Setup LLVM target triple from the current machine.
-bool ExecutionEngine::setupTargetTriple(Module *llvmModule) {
-  // Setup the machine properties from the current architecture.
-  auto targetTriple = llvm::sys::getDefaultTargetTriple();
-  std::string errorMessage;
-  const auto *target =
-      llvm::TargetRegistry::lookupTarget(targetTriple, errorMessage);
-  if (!target) {
-    errs() << "NO target: " << errorMessage << "\n";
-    return true;
-  }
-
-  std::string cpu(llvm::sys::getHostCPUName());
-  llvm::SubtargetFeatures features;
-  llvm::StringMap<bool> hostFeatures;
-
-  if (llvm::sys::getHostCPUFeatures(hostFeatures))
-    for (auto &f : hostFeatures)
-      features.AddFeature(f.first(), f.second);
-
-  std::unique_ptr<llvm::TargetMachine> machine(target->createTargetMachine(
-      targetTriple, cpu, features.getString(), {}, {}));
-  if (!machine) {
-    errs() << "Unable to create target machine\n";
-    return true;
-  }
-  llvmModule->setDataLayout(machine->createDataLayout());
-  llvmModule->setTargetTriple(targetTriple);
-  return false;
+void ExecutionEngine::setupTargetTripleAndDataLayout(Module *llvmModule,
+                                                     llvm::TargetMachine *tm) {
+  llvmModule->setDataLayout(tm->createDataLayout());
+  llvmModule->setTargetTriple(tm->getTargetTriple().getTriple());
 }
 
 static std::string makePackedFunctionName(StringRef name) {
@@ -181,17 +171,17 @@ static void packFunctionArguments(Module *module) {
     llvm::Value *argList = interfaceFunc->arg_begin();
     SmallVector<llvm::Value *, 8> args;
     args.reserve(llvm::size(func.args()));
-    for (auto &indexedArg : llvm::enumerate(func.args())) {
+    for (auto [index, arg] : llvm::enumerate(func.args())) {
       llvm::Value *argIndex = llvm::Constant::getIntegerValue(
-          builder.getInt64Ty(), APInt(64, indexedArg.index()));
+          builder.getInt64Ty(), APInt(64, index));
       llvm::Value *argPtrPtr =
           builder.CreateGEP(builder.getInt8PtrTy(), argList, argIndex);
       llvm::Value *argPtr =
           builder.CreateLoad(builder.getInt8PtrTy(), argPtrPtr);
-      llvm::Type *argTy = indexedArg.value().getType();
+      llvm::Type *argTy = arg.getType();
       argPtr = builder.CreateBitCast(argPtr, argTy->getPointerTo());
-      llvm::Value *arg = builder.CreateLoad(argTy, argPtr);
-      args.push_back(arg);
+      llvm::Value *load = builder.CreateLoad(argTy, argPtr);
+      args.push_back(load);
     }
 
     // Call the implementation function with the extracted arguments.
@@ -214,10 +204,11 @@ static void packFunctionArguments(Module *module) {
   }
 }
 
-ExecutionEngine::ExecutionEngine(bool enableObjectCache,
+ExecutionEngine::ExecutionEngine(bool enableObjectDump,
                                  bool enableGDBNotificationListener,
                                  bool enablePerfNotificationListener)
-    : cache(enableObjectCache ? new SimpleObjectCache() : nullptr),
+    : cache(enableObjectDump ? new SimpleObjectCache() : nullptr),
+      functionNames(),
       gdbListener(enableGDBNotificationListener
                       ? llvm::JITEventListener::createGDBRegistrationListener()
                       : nullptr),
@@ -231,11 +222,26 @@ ExecutionEngine::ExecutionEngine(bool enableObjectCache,
   }
 }
 
+ExecutionEngine::~ExecutionEngine() {
+  // Run all dynamic library destroy callbacks to prepare for the shutdown.
+  for (LibraryDestroyFn destroy : destroyFns)
+    destroy();
+}
+
 Expected<std::unique_ptr<ExecutionEngine>>
-ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options) {
+ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options,
+                        std::unique_ptr<llvm::TargetMachine> tm) {
   auto engine = std::make_unique<ExecutionEngine>(
-      options.enableObjectCache, options.enableGDBNotificationListener,
+      options.enableObjectDump, options.enableGDBNotificationListener,
       options.enablePerfNotificationListener);
+
+  // Remember all entry-points if object dumping is enabled.
+  if (options.enableObjectDump) {
+    for (auto funcOp : m->getRegion(0).getOps<LLVM::LLVMFuncOp>()) {
+      StringRef funcName = funcOp.getSymName();
+      engine->functionNames.push_back(funcName.str());
+    }
+  }
 
   std::unique_ptr<llvm::LLVMContext> ctx(new llvm::LLVMContext);
   auto llvmModule = options.llvmModuleBuilder
@@ -243,13 +249,66 @@ ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options) {
                         : translateModuleToLLVMIR(m, *ctx);
   if (!llvmModule)
     return makeStringError("could not convert to LLVM IR");
-  // FIXME: the triple should be passed to the translation or dialect conversion
-  // instead of this.  Currently, the LLVM module created above has no triple
-  // associated with it.
-  setupTargetTriple(llvmModule.get());
+
+  // If no valid TargetMachine was passed, create a default TM ignoring any
+  // input arguments from the user.
+  if (!tm) {
+    auto tmBuilderOrError = llvm::orc::JITTargetMachineBuilder::detectHost();
+    if (!tmBuilderOrError)
+      return tmBuilderOrError.takeError();
+
+    auto tmOrError = tmBuilderOrError->createTargetMachine();
+    if (!tmOrError)
+      return tmOrError.takeError();
+    tm = std::move(tmOrError.get());
+  }
+
+  // TODO: Currently, the LLVM module created above has no triple associated
+  // with it. Instead, the triple is extracted from the TargetMachine, which is
+  // either based on the host defaults or command line arguments when specified
+  // (set-up by callers of this method). It could also be passed to the
+  // translation or dialect conversion instead of this.
+  setupTargetTripleAndDataLayout(llvmModule.get(), tm.get());
   packFunctionArguments(llvmModule.get());
 
   auto dataLayout = llvmModule->getDataLayout();
+
+  // Use absolute library path so that gdb can find the symbol table.
+  SmallVector<SmallString<256>, 4> sharedLibPaths;
+  transform(
+      options.sharedLibPaths, std::back_inserter(sharedLibPaths),
+      [](StringRef libPath) {
+        SmallString<256> absPath(libPath.begin(), libPath.end());
+        cantFail(llvm::errorCodeToError(llvm::sys::fs::make_absolute(absPath)));
+        return absPath;
+      });
+
+  // If shared library implements custom execution layer library init and
+  // destroy functions, we'll use them to register the library. Otherwise, load
+  // the library as JITDyLib below.
+  llvm::StringMap<void *> exportSymbols;
+  SmallVector<LibraryDestroyFn> destroyFns;
+  SmallVector<StringRef> jitDyLibPaths;
+
+  for (auto &libPath : sharedLibPaths) {
+    auto lib = llvm::sys::DynamicLibrary::getPermanentLibrary(
+        libPath.str().str().c_str());
+    void *initSym = lib.getAddressOfSymbol(kLibraryInitFnName);
+    void *destroySim = lib.getAddressOfSymbol(kLibraryDestroyFnName);
+
+    // Library does not provide call backs, rely on symbol visiblity.
+    if (!initSym || !destroySim) {
+      jitDyLibPaths.push_back(libPath);
+      continue;
+    }
+
+    auto initFn = reinterpret_cast<LibraryInitFn>(initSym);
+    initFn(exportSymbols);
+
+    auto destroyFn = reinterpret_cast<LibraryDestroyFn>(destroySim);
+    destroyFns.push_back(destroyFn);
+  }
+  engine->destroyFns = std::move(destroyFns);
 
   // Callback to create the object layer with symbol resolution to current
   // process and dynamically linked libraries.
@@ -276,7 +335,7 @@ ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options) {
     }
 
     // Resolve symbols from shared libraries.
-    for (auto libPath : options.sharedLibPaths) {
+    for (auto &libPath : jitDyLibPaths) {
       auto mb = llvm::MemoryBuffer::getFile(libPath);
       if (!mb) {
         errs() << "Failed to create MemoryBuffer for: " << libPath
@@ -285,7 +344,7 @@ ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options) {
       }
       auto &jd = session.createBareJITDylib(std::string(libPath));
       auto loaded = DynamicLibrarySearchGenerator::Load(
-          libPath.data(), dataLayout.getGlobalPrefix());
+          libPath.str().c_str(), dataLayout.getGlobalPrefix());
       if (!loaded) {
         errs() << "Could not load " << libPath << ":\n  " << loaded.takeError()
                << "\n";
@@ -304,10 +363,7 @@ ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options) {
       -> Expected<std::unique_ptr<IRCompileLayer::IRCompiler>> {
     if (options.jitCodeGenOptLevel)
       jtmb.setCodeGenOptLevel(*options.jitCodeGenOptLevel);
-    auto tm = jtmb.createTargetMachine();
-    if (!tm)
-      return tm.takeError();
-    return std::make_unique<TMOwningSimpleCompiler>(std::move(*tm),
+    return std::make_unique<TMOwningSimpleCompiler>(std::move(tm),
                                                     engine->cache.get());
   };
 
@@ -316,6 +372,7 @@ ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options) {
       cantFail(llvm::orc::LLJITBuilder()
                    .setCompileFunctionCreator(compileFunctionCreator)
                    .setObjectLinkingLayerCreator(objectLinkingLayerCreator)
+                   .setDataLayout(dataLayout)
                    .create());
 
   // Add a ThreadSafemodule to the engine and return.
@@ -331,6 +388,17 @@ ExecutionEngine::create(Operation *m, const ExecutionEngineOptions &options) {
   mainJD.addGenerator(
       cantFail(DynamicLibrarySearchGenerator::GetForCurrentProcess(
           dataLayout.getGlobalPrefix())));
+
+  // Build a runtime symbol map from the exported symbols and register them.
+  auto runtimeSymbolMap = [&](llvm::orc::MangleAndInterner interner) {
+    auto symbolMap = llvm::orc::SymbolMap();
+    for (auto &exportSymbol : exportSymbols)
+      symbolMap[interner(exportSymbol.getKey())] = {
+          llvm::orc::ExecutorAddr::fromPtr(exportSymbol.getValue()),
+          llvm::JITSymbolFlags::Exported};
+    return symbolMap;
+  };
+  engine->registerSymbols(runtimeSymbolMap);
 
   return std::move(engine);
 }

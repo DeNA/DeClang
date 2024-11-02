@@ -50,7 +50,7 @@ public:
                   std::unique_ptr<cas::ActionCache> Cache);
 
   void GetValueAsync(std::string Key,
-                     std::function<void(Expected<Optional<std::string>>)>
+                     std::function<void(Expected<std::optional<std::string>>)>
                          Receiver) override;
   void PutValueAsync(std::string Key, std::string Value,
                      std::function<void(Error)> Receiver) override;
@@ -69,7 +69,7 @@ public:
   CASPutAsync(BlobContents Blob, SmallVector<std::string> Refs,
               std::function<void(Expected<std::string>)> Receiver) override;
 
-  Expected<Optional<std::string>> GetValue(StringRef Key);
+  Expected<std::optional<std::string>> GetValue(StringRef Key);
   Error PutValue(StringRef Key, StringRef Value);
 
   Expected<LoadResponse> CASLoad(StringRef CASID, bool WriteToDisk);
@@ -92,7 +92,7 @@ void LLVMCASCacheProvider::initialize(StringRef TempPath,
 
 void LLVMCASCacheProvider::GetValueAsync(
     std::string Key,
-    std::function<void(Expected<Optional<std::string>>)> Receiver) {
+    std::function<void(Expected<std::optional<std::string>>)> Receiver) {
   Pool.async([this, Key = std::move(Key), Receiver = std::move(Receiver)]() {
     Receiver(GetValue(Key));
   });
@@ -138,10 +138,10 @@ void LLVMCASCacheProvider::CASPutAsync(
        Receiver = std::move(Receiver)]() { Receiver(CASPut(Blob, Refs)); });
 }
 
-Expected<Optional<std::string>>
+Expected<std::optional<std::string>>
 LLVMCASCacheProvider::GetValue(StringRef RawKey) {
   cas::CacheKey Key = cacheKeyFromString(RawKey);
-  Expected<Optional<cas::CASID>> ID = ActCache->get(Key);
+  Expected<std::optional<cas::CASID>> ID = ActCache->get(Key);
   if (!ID)
     return ID.takeError();
 

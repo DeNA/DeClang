@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 #include "AppleObjCRuntime.h"
 #include "lldb/lldb-private.h"
@@ -104,18 +105,6 @@ public:
   bool IsSharedCacheImageLoaded(uint16_t image_index);
 
   std::optional<uint64_t> GetSharedCacheImageHeaderVersion();
-
-  // none of these are valid ISAs - we use them to infer the type
-  // of tagged pointers - if we have something meaningful to say
-  // we report an actual type - otherwise, we just say tagged
-  // there is no connection between the values here and the tagged pointers map
-  static const ObjCLanguageRuntime::ObjCISA g_objc_Tagged_ISA = 1;
-  static const ObjCLanguageRuntime::ObjCISA g_objc_Tagged_ISA_NSAtom = 2;
-  static const ObjCLanguageRuntime::ObjCISA g_objc_Tagged_ISA_NSNumber = 3;
-  static const ObjCLanguageRuntime::ObjCISA g_objc_Tagged_ISA_NSDateTS = 4;
-  static const ObjCLanguageRuntime::ObjCISA g_objc_Tagged_ISA_NSManagedObject =
-      5;
-  static const ObjCLanguageRuntime::ObjCISA g_objc_Tagged_ISA_NSDate = 6;
 
 protected:
   lldb::BreakpointResolverSP
@@ -484,7 +473,7 @@ private:
   EncodingToTypeSP m_encoding_to_type_sp;
   std::once_flag m_no_classes_cached_warning;
   std::once_flag m_no_expanded_cache_warning;
-  llvm::Optional<std::pair<lldb::addr_t, lldb::addr_t>> m_CFBoolean_values;
+  std::optional<std::pair<lldb::addr_t, lldb::addr_t>> m_CFBoolean_values;
   uint64_t m_realized_class_generation_count;
   std::unique_ptr<SharedCacheImageHeaders> m_shared_cache_image_headers_up;
 };

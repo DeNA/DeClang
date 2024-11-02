@@ -14,13 +14,13 @@
 #ifndef MLIR_IR_FUNCTIONINTERFACES_TD_
 #define MLIR_IR_FUNCTIONINTERFACES_TD_
 
-include "mlir/IR/OpBase.td"
+include "mlir/IR/SymbolInterfaces.td"
 
 //===----------------------------------------------------------------------===//
 // FunctionOpInterface
 //===----------------------------------------------------------------------===//
 
-def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
+def FunctionOpInterface : OpInterface<"FunctionOpInterface", [Symbol]> {
   let cppNamespace = "::mlir";
   let description = [{
     This interfaces provides support for interacting with operations that
@@ -49,6 +49,52 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
           for each of the function results.
   }];
   let methods = [
+    InterfaceMethod<[{
+      Returns the type of the function.
+    }],
+    "::mlir::Type", "getFunctionType">,
+    InterfaceMethod<[{
+      Set the type of the function. This method should perform an unsafe
+      modification to the function type; it should not update argument or
+      result attributes.
+    }],
+    "void", "setFunctionTypeAttr", (ins "::mlir::TypeAttr":$type)>,
+
+    InterfaceMethod<[{
+      Get the array of argument attribute dictionaries. The method should return
+      an array attribute containing only dictionary attributes equal in number
+      to the number of function arguments. Alternatively, the method can return
+      null to indicate that the function has no argument attributes.
+    }],
+    "::mlir::ArrayAttr", "getArgAttrsAttr">,
+    InterfaceMethod<[{
+      Get the array of result attribute dictionaries. The method should return
+      an array attribute containing only dictionary attributes equal in number
+      to the number of function results. Alternatively, the method can return
+      null to indicate that the function has no result attributes.
+    }],
+    "::mlir::ArrayAttr", "getResAttrsAttr">,
+    InterfaceMethod<[{
+      Set the array of argument attribute dictionaries.
+    }],
+    "void", "setArgAttrsAttr", (ins "::mlir::ArrayAttr":$attrs)>,
+    InterfaceMethod<[{
+      Set the array of result attribute dictionaries.
+    }],
+    "void", "setResAttrsAttr", (ins "::mlir::ArrayAttr":$attrs)>,
+    InterfaceMethod<[{
+      Remove the array of argument attribute dictionaries. This is the same as
+      setting all argument attributes to an empty dictionary. The method should
+      return the removed attribute.
+    }],
+    "::mlir::Attribute", "removeArgAttrsAttr">,
+    InterfaceMethod<[{
+      Remove the array of result attribute dictionaries. This is the same as
+      setting all result attributes to an empty dictionary. The method should
+      return the removed attribute.
+    }],
+    "::mlir::Attribute", "removeResAttrsAttr">,
+
     InterfaceMethod<[{
       Returns the function argument types based exclusively on
       the type (to allow for this method may be called on function
@@ -118,14 +164,6 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     }]>,
   ];
 
-  let extraClassDeclaration = [{
-    //===------------------------------------------------------------------===//
-    // Name
-    //===------------------------------------------------------------------===//
-
-    /// Return the name of the function.
-    StringRef getName() { return SymbolTable::getSymbolName(*this); }
-  }];
   let extraTraitClassDeclaration = [{
     //===------------------------------------------------------------------===//
     // Builders
@@ -139,7 +177,7 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
         ArrayRef<NamedAttribute> attrs, TypeRange inputTypes) {
       state.addAttribute(SymbolTable::getSymbolAttrName(),
                         builder.getStringAttr(name));
-      state.addAttribute(function_interface_impl::getTypeAttrName(),
+      state.addAttribute(ConcreteOp::getFunctionTypeAttrName(state.name),
                         TypeAttr::get(type));
       state.attributes.append(attrs.begin(), attrs.end());
 
@@ -237,36 +275,8 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     ///    has less parameters we drop the extra attributes, if there are more
     ///    parameters they won't have any attributes.
     void setType(Type newType) {
-      function_interface_impl::setFunctionType(this->getOperation(), newType);
+      function_interface_impl::setFunctionType($_op, newType);
     }
-
-    // FIXME: These functions should be removed in favor of just forwarding to
-    // the derived operation, which should already have these defined
-    // (via ODS).
-
-    /// Returns the name of the attribute used for function types.
-    static StringRef getTypeAttrName() {
-      return function_interface_impl::getTypeAttrName();
-    }
-
-    /// Returns the name of the attribute used for function argument attributes.
-    static StringRef getArgDictAttrName() {
-      return function_interface_impl::getArgDictAttrName();
-    }
-
-    /// Returns the name of the attribute used for function argument attributes.
-    static StringRef getResultDictAttrName() {
-      return function_interface_impl::getResultDictAttrName();
-    }
-
-    /// Return the attribute containing the type of this function.
-    TypeAttr getFunctionTypeAttr() {
-      return this->getOperation()->template getAttrOfType<TypeAttr>(
-          getTypeAttrName());
-    }
-
-    /// Return the type of this function.
-    Type getFunctionType() { return getFunctionTypeAttr().getValue(); }
 
     //===------------------------------------------------------------------===//
     // Argument and Result Handling
@@ -306,7 +316,7 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
       Type newType = $_op.getTypeWithArgsAndResults(
           argIndices, argTypes, /*resultIndices=*/{}, /*resultTypes=*/{});
       function_interface_impl::insertFunctionArguments(
-          this->getOperation(), argIndices, argTypes, argAttrs, argLocs,
+          $_op, argIndices, argTypes, argAttrs, argLocs,
           originalNumArgs, newType);
     }
 
@@ -326,7 +336,7 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
       Type newType = $_op.getTypeWithArgsAndResults(
         /*argIndices=*/{}, /*argTypes=*/{}, resultIndices, resultTypes);
       function_interface_impl::insertFunctionResults(
-          this->getOperation(), resultIndices, resultTypes, resultAttrs,
+          $_op, resultIndices, resultTypes, resultAttrs,
           originalNumResults, newType);
     }
 
@@ -341,7 +351,7 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     void eraseArguments(const BitVector &argIndices) {
       Type newType = $_op.getTypeWithoutArgs(argIndices);
       function_interface_impl::eraseFunctionArguments(
-        this->getOperation(), argIndices, newType);
+        $_op, argIndices, newType);
     }
 
     /// Erase a single result at `resultIndex`.
@@ -355,7 +365,7 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     void eraseResults(const BitVector &resultIndices) {
       Type newType = $_op.getTypeWithoutResults(resultIndices);
       function_interface_impl::eraseFunctionResults(
-          this->getOperation(), resultIndices, newType);
+          $_op, resultIndices, newType);
     }
 
     /// Return the type of this function with the specified arguments and
@@ -404,15 +414,13 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
 
     /// Return all of the attributes for the argument at 'index'.
     ArrayRef<NamedAttribute> getArgAttrs(unsigned index) {
-      return function_interface_impl::getArgAttrs(this->getOperation(), index);
+      return function_interface_impl::getArgAttrs($_op, index);
     }
 
     /// Return an ArrayAttr containing all argument attribute dictionaries of
     /// this function, or nullptr if no arguments have attributes.
-    ArrayAttr getAllArgAttrs() {
-      return this->getOperation()->template getAttrOfType<ArrayAttr>(
-          getArgDictAttrName());
-    }
+    ArrayAttr getAllArgAttrs() { return $_op.getArgAttrsAttr(); }
+
     /// Return all argument attributes of this function.
     void getAllArgAttrs(SmallVectorImpl<DictionaryAttr> &result) {
       if (ArrayAttr argAttrs = getAllArgAttrs()) {
@@ -437,11 +445,11 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
 
     template <typename AttrClass>
     AttrClass getArgAttrOfType(unsigned index, StringAttr name) {
-      return getArgAttr(index, name).template dyn_cast_or_null<AttrClass>();
+      return ::llvm::dyn_cast_or_null<AttrClass>(getArgAttr(index, name));
     }
     template <typename AttrClass>
     AttrClass getArgAttrOfType(unsigned index, StringRef name) {
-      return getArgAttr(index, name).template dyn_cast_or_null<AttrClass>();
+      return ::llvm::dyn_cast_or_null<AttrClass>(getArgAttr(index, name));
     }
 
     /// Set the attributes held by the argument at 'index'.
@@ -456,15 +464,15 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     }
     void setAllArgAttrs(ArrayRef<DictionaryAttr> attributes) {
       assert(attributes.size() == $_op.getNumArguments());
-      function_interface_impl::setAllArgAttrDicts(this->getOperation(), attributes);
+      function_interface_impl::setAllArgAttrDicts($_op, attributes);
     }
     void setAllArgAttrs(ArrayRef<Attribute> attributes) {
       assert(attributes.size() == $_op.getNumArguments());
-      function_interface_impl::setAllArgAttrDicts(this->getOperation(), attributes);
+      function_interface_impl::setAllArgAttrDicts($_op, attributes);
     }
     void setAllArgAttrs(ArrayAttr attributes) {
       assert(attributes.size() == $_op.getNumArguments());
-      this->getOperation()->setAttr(getArgDictAttrName(), attributes);
+      $_op.setArgAttrsAttr(attributes);
     }
 
     /// If the an attribute exists with the specified name, change it to the new
@@ -495,15 +503,13 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
 
     /// Return all of the attributes for the result at 'index'.
     ArrayRef<NamedAttribute> getResultAttrs(unsigned index) {
-      return function_interface_impl::getResultAttrs(this->getOperation(), index);
+      return function_interface_impl::getResultAttrs($_op, index);
     }
 
     /// Return an ArrayAttr containing all result attribute dictionaries of this
     /// function, or nullptr if no result have attributes.
-    ArrayAttr getAllResultAttrs() {
-      return this->getOperation()->template getAttrOfType<ArrayAttr>(
-          getResultDictAttrName());
-    }
+    ArrayAttr getAllResultAttrs() { return $_op.getResAttrsAttr(); }
+
     /// Return all result attributes of this function.
     void getAllResultAttrs(SmallVectorImpl<DictionaryAttr> &result) {
       if (ArrayAttr argAttrs = getAllResultAttrs()) {
@@ -528,11 +534,11 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
 
     template <typename AttrClass>
     AttrClass getResultAttrOfType(unsigned index, StringAttr name) {
-      return getResultAttr(index, name).template dyn_cast_or_null<AttrClass>();
+      return ::llvm::dyn_cast_or_null<AttrClass>(getResultAttr(index, name));
     }
     template <typename AttrClass>
     AttrClass getResultAttrOfType(unsigned index, StringRef name) {
-      return getResultAttr(index, name).template dyn_cast_or_null<AttrClass>();
+      return ::llvm::dyn_cast_or_null<AttrClass>(getResultAttr(index, name));
     }
 
     /// Set the attributes held by the result at 'index'.
@@ -548,16 +554,16 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     void setAllResultAttrs(ArrayRef<DictionaryAttr> attributes) {
       assert(attributes.size() == $_op.getNumResults());
       function_interface_impl::setAllResultAttrDicts(
-        this->getOperation(), attributes);
+        $_op, attributes);
     }
     void setAllResultAttrs(ArrayRef<Attribute> attributes) {
       assert(attributes.size() == $_op.getNumResults());
       function_interface_impl::setAllResultAttrDicts(
-        this->getOperation(), attributes);
+        $_op, attributes);
     }
     void setAllResultAttrs(ArrayAttr attributes) {
       assert(attributes.size() == $_op.getNumResults());
-      this->getOperation()->setAttr(getResultDictAttrName(), attributes);
+      $_op.setResAttrsAttr(attributes);
     }
 
     /// If the an attribute exists with the specified name, change it to the new
@@ -583,7 +589,7 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     /// attribute is returned.
     DictionaryAttr getArgAttrDict(unsigned index) {
       assert(index < $_op.getNumArguments() && "invalid argument number");
-      return function_interface_impl::getArgAttrDict(this->getOperation(), index);
+      return function_interface_impl::getArgAttrDict($_op, index);
     }
 
     /// Returns the dictionary attribute corresponding to the result at 'index'.
@@ -591,7 +597,7 @@ def FunctionOpInterface : OpInterface<"FunctionOpInterface"> {
     /// returned.
     DictionaryAttr getResultAttrDict(unsigned index) {
       assert(index < $_op.getNumResults() && "invalid result number");
-      return function_interface_impl::getResultAttrDict(this->getOperation(), index);
+      return function_interface_impl::getResultAttrDict($_op, index);
     }
   }];
 

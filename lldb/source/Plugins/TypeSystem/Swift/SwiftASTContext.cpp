@@ -11,9 +11,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+#include "Plugins/TypeSystem/Swift/SwiftDWARFImporterForClangTypes.h"
 #include "Plugins/TypeSystem/Swift/StoringDiagnosticConsumer.h"
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 
+#include "lldb/Utility/Log.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTDemangler.h"
 #include "swift/AST/ASTMangler.h"
@@ -34,7 +36,6 @@
 #include "swift/AST/Type.h"
 #include "swift/AST/Types.h"
 #include "swift/ASTSectionImporter/ASTSectionImporter.h"
-#include "swift/Basic/Dwarf.h"
 #include "swift/Basic/LLVM.h"
 #include "swift/Basic/LangOptions.h"
 #include "swift/Basic/Located.h"
@@ -55,8 +56,14 @@
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
 #include "clang/Driver/Driver.h"
+#include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/TextDiagnosticPrinter.h"
+#include "clang/Lex/Preprocessor.h"
 
+#include "clang/Lex/PreprocessorOptions.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
@@ -64,6 +71,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/MC/TargetRegistry.h"
+#include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TargetSelect.h"
@@ -82,7 +90,6 @@
 #include "swift/Strings.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangHost.h"
-#include "Plugins/ExpressionParser/Swift/SwiftUserExpression.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/DumpDataExtractor.h"
@@ -91,7 +98,6 @@
 #include "lldb/Core/Progress.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/StreamFile.h"
-#include "lldb/Core/ThreadSafeDenseMap.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 #include "lldb/Host/Host.h"
@@ -110,6 +116,7 @@
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Status.h"
+#include "lldb/Utility/ThreadSafeDenseMap.h"
 #include "lldb/Utility/Timer.h"
 #include "lldb/Utility/XcodeSDK.h"
 
@@ -120,6 +127,7 @@
 #include "Plugins/SymbolFile/DWARF/DWARFASTParserClang.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <set>
@@ -210,40 +218,44 @@ CompilerType SwiftASTContext::GetCompilerType(swift::TypeBase *swift_type) {
   return {weak_from_this(), swift_type};
 }
 
-swift::Type SwiftASTContext::GetSwiftType(CompilerType compiler_type) {
-  if (compiler_type.GetTypeSystem().isa_and_nonnull<SwiftASTContext>())
+llvm::Expected<swift::Type>
+SwiftASTContext::GetSwiftType(CompilerType compiler_type) {
+  if (compiler_type.GetTypeSystem().GetSharedPointer().get() == this)
     return reinterpret_cast<swift::TypeBase *>(
         compiler_type.GetOpaqueQualType());
-
-  // FIXME: Suboptimal performance, because the ConstString is looked up again.
-  if (auto ts = compiler_type.GetTypeSystem()
-      .dyn_cast_or_null<TypeSystemSwiftTypeRef>()) {
-    ConstString mangled_name(
-        reinterpret_cast<const char *>(compiler_type.GetOpaqueQualType()));
-    if (auto *swift_ast_context = ts->GetSwiftASTContext())
-      return swift_ast_context->ReconstructType(mangled_name);
-  }
-  return {};
+  return ReconstructType(compiler_type.GetMangledTypeName());
 }
 
 swift::Type SwiftASTContext::GetSwiftType(opaque_compiler_type_t opaque_type) {
   assert(opaque_type && *reinterpret_cast<const char *>(opaque_type) != '$' &&
          "wrong type system");
-  return lldb_private::GetSwiftType(CompilerType(weak_from_this(), opaque_type));
+  return GetSwiftTypeIgnoringErrors(
+      CompilerType(weak_from_this(), opaque_type));
+}
+
+swift::Type
+SwiftASTContext::GetSwiftTypeIgnoringErrors(CompilerType compiler_type) {
+  return llvm::expectedToStdOptional(GetSwiftType(compiler_type))
+      .value_or(swift::Type());
+}
+
+swift::CanType
+SwiftASTContext::GetCanonicalSwiftType(CompilerType compiler_type) {
+  swift::Type swift_type = GetSwiftTypeIgnoringErrors(compiler_type);
+  return swift_type ? swift_type->getCanonicalType() : swift::CanType();
 }
 
 swift::CanType
 SwiftASTContext::GetCanonicalSwiftType(opaque_compiler_type_t opaque_type) {
   assert(!opaque_type || *reinterpret_cast<const char *>(opaque_type) != '$' &&
          "wrong type system");
-  return lldb_private::GetCanonicalSwiftType(
-      CompilerType(weak_from_this(), opaque_type));
+  return GetCanonicalSwiftType(CompilerType(weak_from_this(), opaque_type));
 }
 
 ConstString SwiftASTContext::GetMangledTypeName(opaque_compiler_type_t type) {
   VALID_OR_RETURN_CHECK_TYPE(
       type, ConstString("<invalid Swift context or opaque type>"));
-  return GetMangledTypeName(GetSwiftType({weak_from_this(), type}).getPointer());
+  return GetMangledTypeName(GetSwiftType(type).getPointer());
 }
 
 typedef lldb_private::ThreadSafeDenseMap<swift::ASTContext *, SwiftASTContext *>
@@ -270,18 +282,18 @@ typedef std::shared_ptr<SwiftEnumDescriptor> SwiftEnumDescriptorSP;
 typedef llvm::DenseMap<opaque_compiler_type_t, SwiftEnumDescriptorSP>
     EnumInfoCache;
 typedef std::shared_ptr<EnumInfoCache> EnumInfoCacheSP;
-typedef llvm::DenseMap<const swift::ASTContext *, EnumInfoCacheSP>
+typedef llvm::DenseMap<const SwiftASTContext *, EnumInfoCacheSP>
     ASTEnumInfoCacheMap;
 
-static EnumInfoCache *GetEnumInfoCache(const swift::ASTContext *a) {
+static EnumInfoCache *GetEnumInfoCache(const SwiftASTContext *swift_ast_ctx) {
   static ASTEnumInfoCacheMap g_cache;
   static std::mutex g_mutex;
   std::lock_guard<std::mutex> locker(g_mutex);
-  ASTEnumInfoCacheMap::iterator pos = g_cache.find(a);
+  ASTEnumInfoCacheMap::iterator pos = g_cache.find(swift_ast_ctx);
   if (pos == g_cache.end()) {
-    g_cache.insert(
-        std::make_pair(a, std::shared_ptr<EnumInfoCache>(new EnumInfoCache())));
-    return g_cache.find(a)->second.get();
+    g_cache.insert(std::make_pair(
+        swift_ast_ctx, std::shared_ptr<EnumInfoCache>(new EnumInfoCache())));
+    return g_cache.find(swift_ast_ctx)->second.get();
   }
   return pos->second.get();
 }
@@ -349,12 +361,12 @@ public:
 
   virtual ~SwiftEnumDescriptor() = default;
 
-  static SwiftEnumDescriptor *CreateDescriptor(swift::ASTContext *ast,
+  static SwiftEnumDescriptor *CreateDescriptor(SwiftASTContext *swift_ast_ctx,
                                                swift::CanType swift_can_type,
                                                swift::EnumDecl *enum_decl);
 
 protected:
-  SwiftEnumDescriptor(swift::ASTContext *ast, swift::CanType swift_can_type,
+  SwiftEnumDescriptor(swift::CanType swift_can_type,
                       swift::EnumDecl *enum_decl, SwiftEnumDescriptor::Kind k)
       : m_kind(k), m_type_name() {
     if (swift_can_type.getPointer()) {
@@ -373,10 +385,9 @@ private:
 
 class SwiftEmptyEnumDescriptor : public SwiftEnumDescriptor {
 public:
-  SwiftEmptyEnumDescriptor(swift::ASTContext *ast,
-                           swift::CanType swift_can_type,
+  SwiftEmptyEnumDescriptor(swift::CanType swift_can_type,
                            swift::EnumDecl *enum_decl)
-      : SwiftEnumDescriptor(ast, swift_can_type, enum_decl,
+      : SwiftEnumDescriptor(swift_can_type, enum_decl,
                             SwiftEnumDescriptor::Kind::Empty) {}
 
   ElementInfo *GetElementFromData(const lldb_private::DataExtractor &data,
@@ -437,18 +448,15 @@ class SwiftCStyleEnumDescriptor : public SwiftEnumDescriptor {
   llvm::SmallString<32> m_description = {"SwiftCStyleEnumDescriptor"};
 
 public:
-  SwiftCStyleEnumDescriptor(swift::ASTContext *ast,
+  SwiftCStyleEnumDescriptor(SwiftASTContext *swift_ast_ctx,
                             swift::CanType swift_can_type,
                             swift::EnumDecl *enum_decl)
-      : SwiftEnumDescriptor(ast, swift_can_type, enum_decl,
+      : SwiftEnumDescriptor(swift_can_type, enum_decl,
                             SwiftEnumDescriptor::Kind::CStyle),
         m_nopayload_elems_bitmask(), m_elements(), m_element_indexes() {
     LOG_PRINTF(GetLog(LLDBLog::Types), "doing C-style enum layout for %s",
                GetTypeName().AsCString());
 
-    SwiftASTContext *swift_ast_ctx = SwiftASTContext::GetSwiftASTContext(ast);
-    if (!swift_ast_ctx)
-      return;
     swift::irgen::IRGenModule &irgen_module = swift_ast_ctx->GetIRGenModule();
     const swift::irgen::EnumImplStrategy &enum_impl_strategy =
         swift::irgen::getEnumImplStrategy(irgen_module, swift_can_type);
@@ -579,15 +587,14 @@ class SwiftAllPayloadEnumDescriptor : public SwiftEnumDescriptor {
   llvm::SmallString<32> m_description = {"SwiftAllPayloadEnumDescriptor"};
 
 public:
-  SwiftAllPayloadEnumDescriptor(swift::ASTContext *ast,
+  SwiftAllPayloadEnumDescriptor(SwiftASTContext *swift_ast_ctx,
                                 swift::CanType swift_can_type,
                                 swift::EnumDecl *enum_decl)
-      : SwiftEnumDescriptor(ast, swift_can_type, enum_decl,
+      : SwiftEnumDescriptor(swift_can_type, enum_decl,
                             SwiftEnumDescriptor::Kind::AllPayload) {
     LOG_PRINTF(GetLog(LLDBLog::Types), "doing ADT-style enum layout for %s",
                GetTypeName().AsCString());
 
-    SwiftASTContext *swift_ast_ctx = SwiftASTContext::GetSwiftASTContext(ast);
     swift::irgen::IRGenModule &irgen_module = swift_ast_ctx->GetIRGenModule();
     const swift::irgen::EnumImplStrategy &enum_impl_strategy =
         swift::irgen::getEnumImplStrategy(irgen_module, swift_can_type);
@@ -722,13 +729,13 @@ private:
 
 class SwiftMixedEnumDescriptor : public SwiftEnumDescriptor {
 public:
-  SwiftMixedEnumDescriptor(swift::ASTContext *ast,
+  SwiftMixedEnumDescriptor(SwiftASTContext *swift_ast_ctx,
                            swift::CanType swift_can_type,
                            swift::EnumDecl *enum_decl)
-      : SwiftEnumDescriptor(ast, swift_can_type, enum_decl,
+      : SwiftEnumDescriptor(swift_can_type, enum_decl,
                             SwiftEnumDescriptor::Kind::Mixed),
-        m_non_payload_cases(ast, swift_can_type, enum_decl),
-        m_payload_cases(ast, swift_can_type, enum_decl) {}
+        m_non_payload_cases(swift_ast_ctx, swift_can_type, enum_decl),
+        m_payload_cases(swift_ast_ctx, swift_can_type, enum_decl) {}
 
   ElementInfo *GetElementFromData(const lldb_private::DataExtractor &data,
                                   bool no_payload) override {
@@ -767,10 +774,9 @@ class SwiftResilientEnumDescriptor : public SwiftEnumDescriptor {
   llvm::SmallString<32> m_description = {"SwiftResilientEnumDescriptor"};
 
 public:
-  SwiftResilientEnumDescriptor(swift::ASTContext *ast,
-                               swift::CanType swift_can_type,
+  SwiftResilientEnumDescriptor(swift::CanType swift_can_type,
                                swift::EnumDecl *enum_decl)
-      : SwiftEnumDescriptor(ast, swift_can_type, enum_decl,
+      : SwiftEnumDescriptor(swift_can_type, enum_decl,
                             SwiftEnumDescriptor::Kind::Resilient) {
     LOG_PRINTF(GetLog(LLDBLog::Types), "doing resilient enum layout for %s",
                GetTypeName().AsCString());
@@ -795,13 +801,12 @@ public:
 };
 
 SwiftEnumDescriptor *
-SwiftEnumDescriptor::CreateDescriptor(swift::ASTContext *ast,
+SwiftEnumDescriptor::CreateDescriptor(SwiftASTContext *swift_ast_ctx,
                                       swift::CanType swift_can_type,
                                       swift::EnumDecl *enum_decl) {
-  assert(ast);
+  assert(swift_ast_ctx);
   assert(enum_decl);
   assert(swift_can_type.getPointer());
-  SwiftASTContext *swift_ast_ctx = SwiftASTContext::GetSwiftASTContext(ast);
   assert(swift_ast_ctx);
   swift::irgen::IRGenModule &irgen_module = swift_ast_ctx->GetIRGenModule();
   const swift::irgen::EnumImplStrategy &enum_impl_strategy =
@@ -812,31 +817,35 @@ SwiftEnumDescriptor::CreateDescriptor(swift::ASTContext *ast,
       elements_with_no_payload = enum_impl_strategy.getElementsWithNoPayload();
   swift::SILType swift_sil_type = irgen_module.getLoweredType(swift_can_type);
   if (!irgen_module.getTypeInfo(swift_sil_type).isFixedSize())
-    return new SwiftResilientEnumDescriptor(ast, swift_can_type, enum_decl);
+    return new SwiftResilientEnumDescriptor(swift_can_type, enum_decl);
   if (elements_with_no_payload.size() == 0) {
     // Nothing with no payload.. empty or all payloads?
     if (elements_with_payload.size() == 0)
-      return new SwiftEmptyEnumDescriptor(ast, swift_can_type, enum_decl);
-    return new SwiftAllPayloadEnumDescriptor(ast, swift_can_type, enum_decl);
+      return new SwiftEmptyEnumDescriptor(swift_can_type, enum_decl);
+    return new SwiftAllPayloadEnumDescriptor(swift_ast_ctx, swift_can_type,
+                                             enum_decl);
   }
 
   // Something with no payload.. mixed or C-style?
   if (elements_with_payload.size() == 0)
-    return new SwiftCStyleEnumDescriptor(ast, swift_can_type, enum_decl);
-  return new SwiftMixedEnumDescriptor(ast, swift_can_type, enum_decl);
+    return new SwiftCStyleEnumDescriptor(swift_ast_ctx, swift_can_type,
+                                         enum_decl);
+  return new SwiftMixedEnumDescriptor(swift_ast_ctx, swift_can_type, enum_decl);
 }
 
 static SwiftEnumDescriptor *
-GetEnumInfoFromEnumDecl(swift::ASTContext *ast, swift::CanType swift_can_type,
+GetEnumInfoFromEnumDecl(SwiftASTContext *swift_ast_ctx,
+                        swift::CanType swift_can_type,
                         swift::EnumDecl *enum_decl) {
-  return SwiftEnumDescriptor::CreateDescriptor(ast, swift_can_type, enum_decl);
+  return SwiftEnumDescriptor::CreateDescriptor(swift_ast_ctx, swift_can_type,
+                                               enum_decl);
 }
 
 SwiftEnumDescriptor *
 SwiftASTContext::GetCachedEnumInfo(opaque_compiler_type_t type) {
   VALID_OR_RETURN_CHECK_TYPE(type, nullptr);
 
-  EnumInfoCache *enum_info_cache = GetEnumInfoCache(GetASTContext());
+  EnumInfoCache *enum_info_cache = GetEnumInfoCache(this);
   EnumInfoCache::const_iterator pos = enum_info_cache->find(type);
   if (pos != enum_info_cache->end())
     return pos->second.get();
@@ -847,11 +856,11 @@ SwiftASTContext::GetCachedEnumInfo(opaque_compiler_type_t type) {
   SwiftEnumDescriptorSP enum_info_sp;
   swift::CanType swift_can_type(GetCanonicalSwiftType(type));
   if (auto *enum_type = swift_can_type->getAs<swift::EnumType>()) {
-    enum_info_sp.reset(GetEnumInfoFromEnumDecl(GetASTContext(), swift_can_type,
+    enum_info_sp.reset(GetEnumInfoFromEnumDecl(this, swift_can_type,
                                                enum_type->getDecl()));
   } else if (auto *bound_enum_type =
                  swift_can_type->getAs<swift::BoundGenericEnumType>()) {
-    enum_info_sp.reset(GetEnumInfoFromEnumDecl(GetASTContext(), swift_can_type,
+    enum_info_sp.reset(GetEnumInfoFromEnumDecl(this, swift_can_type,
                                                bound_enum_type->getDecl()));
   }
 
@@ -924,7 +933,7 @@ SwiftASTContext::ScopedDiagnostics::GetOptionalErrorKind() const {
     return ErrorKind::swift;
 
   for (size_t i = m_cursor.lldb; i < consumer.m_diagnostics.size(); ++i)
-    if (consumer.m_diagnostics[i]->GetSeverity() == eDiagnosticSeverityError)
+    if (consumer.m_diagnostics[i]->GetSeverity() == eSeverityError)
       return ErrorKind::swift;
 
   return {};
@@ -938,8 +947,7 @@ llvm::Error SwiftASTContext::ScopedDiagnostics::GetAllErrors() const {
   // Retrieve the error message from the DiagnosticConsumer.
   DiagnosticManager diagnostic_manager;
   PrintDiagnostics(diagnostic_manager);
-  return llvm::make_error<llvm::StringError>(diagnostic_manager.GetString(),
-                                             llvm::inconvertibleErrorCode());
+  return llvm::createStringError(diagnostic_manager.GetString());
 }
 
 SwiftASTContext::ScopedDiagnostics::~ScopedDiagnostics() {
@@ -978,22 +986,55 @@ SwiftASTContext::SwiftASTContext(std::string description,
     : TypeSystemSwift(), m_typeref_typesystem(&typeref_typesystem),
       m_compiler_invocation_ap(new swift::CompilerInvocation()),
       m_diagnostic_consumer_ap(new StoringDiagnosticConsumer(*this)) {
+  assert(
+      ModuleList::GetGlobalModuleListProperties().GetSwiftEnableASTContext() &&
+      "Swift AST context instantiation is disabled!");
+
   m_description = description;
 
   // Set the clang modules cache path.
   m_compiler_invocation_ap->setClangModuleCachePath(
       GetClangModulesCacheProperty());
+}
 
+static std::string DerivePlatformPluginPath(StringRef sdk_path) {
+  llvm::StringRef path = sdk_path;
+  path = llvm::sys::path::parent_path(path);
+  if (llvm::sys::path::filename(path) != "SDKs")
+    return {};
+  path = llvm::sys::path::parent_path(path);
+  if (llvm::sys::path::filename(path) != "Developer")
+    return {};
+  path = llvm::sys::path::parent_path(path);
+  if (!path.ends_with(".platform"))
+    return {};
+  return std::string(path) + "/usr/local/lib/swift/host/plugins";
+}
+
+void SwiftASTContext::SetCompilerInvocationLLDBOverrides() {
   swift::IRGenOptions &ir_gen_opts =
       m_compiler_invocation_ap->getIRGenOptions();
   ir_gen_opts.OutputKind = swift::IRGenOutputKind::Module;
   ir_gen_opts.UseJIT = true;
-  ir_gen_opts.DWARFVersion = swift::DWARFVersion;
   // Allow deserializing @_implementationOnly dependencies
   // to avoid crashing due to module recovery issues.
   swift::LangOptions &lang_opts = m_compiler_invocation_ap->getLangOptions();
   lang_opts.AllowDeserializingImplementationOnly = true;
   lang_opts.DebuggerSupport = true;
+
+  // ModuleFileSharedCore::getTransitiveLoadingBehavior() has a
+  // best-effort mode that is enabled when debugger support is turned
+  // on that will try to import implementation-only imports of Swift
+  // modules, but won't treat import failures as errors. When explicit
+  // modules are on, this has the unwanted side-effect of potentially
+  // triggering an implicit Clang module build if one of the internal
+  // dependencies of a library was not used to build the target. It
+  // can also lead to additional Swift modules being pulled in that
+  // through their dependencies can lead to dependency cycles that
+  // were not a problem at build time.
+  bool is_precise = ModuleList::GetGlobalModuleListProperties()
+                        .GetUseSwiftPreciseCompilerInvocation();
+  lang_opts.ImportNonPublicDependencies = is_precise ? false : true;
   // When loading Swift types that conform to ObjC protocols that have
   // been renamed with NS_SWIFT_NAME the DwarfImporterDelegate will crash
   // during protocol conformance checks as the underlying type cannot be
@@ -1002,10 +1043,25 @@ SwiftASTContext::SwiftASTContext(std::string description,
   // for the protocol conforming types.
   lang_opts.AllowModuleWithCompilerErrors = true;
   lang_opts.EnableTargetOSChecking = false;
+  lang_opts.EnableModuleLoadingRemarks = true;
 
   // Bypass deserialization safety to allow deserializing internal details from
   // swiftmodule files.
   lang_opts.EnableDeserializationSafety = false;
+
+  // Platform plugin path (macOS hosts only).
+  swift::PluginSearchOption::ExternalPluginPath platform_plugins;
+  platform_plugins.SearchPath =
+      DerivePlatformPluginPath(m_compiler_invocation_ap->getSDKPath());
+  if (!platform_plugins.SearchPath.empty()) {
+    platform_plugins.ServerPath = GetPluginServer(platform_plugins.SearchPath);
+    if (!platform_plugins.ServerPath.empty()) {
+      if (FileSystem::Instance().Exists(platform_plugins.SearchPath) &&
+          FileSystem::Instance().Exists(platform_plugins.ServerPath))
+        m_compiler_invocation_ap->getSearchPathOptions()
+            .PluginSearchOpts.push_back(platform_plugins);
+    }
+  }
 }
 
 SwiftASTContext::~SwiftASTContext() {
@@ -1069,6 +1125,8 @@ static const char *getImportFailureString(swift::serialization::Status status) {
            "was required to do so.";
   case swift::serialization::Status::SDKMismatch:
     return "The module file was built with a different SDK version.";
+  case swift::serialization::Status::ChannelIncompatible:
+    return "The distribution channel doesn't match.";
   }
 }
 
@@ -1157,11 +1215,20 @@ static std::string GetPluginServerForSDK(llvm::StringRef sdk_path) {
   return server_or_err->str();
 }
 
+namespace {
+  constexpr std::array<std::string_view, 4> g_known_eplicit_module_prefixes =
+       {"-fmodule-map-file=",
+        "-fmodule-file=",
+        "-fno-implicit-modules",
+        "-fno-implicit-module-maps"};
+}
+
 /// Retrieve the serialized AST data blobs and initialize the compiler
 /// invocation with the concatenated search paths from the blobs.
 /// \returns true if an error was encountered.
 static bool DeserializeAllCompilerFlags(swift::CompilerInvocation &invocation,
                                         llvm::StringRef module_name,
+                                        llvm::StringRef module_filter,
                                         llvm::ArrayRef<StringRef> buffers,
                                         const PathMappingList &path_map,
                                         bool discover_implicit_search_paths,
@@ -1251,8 +1318,8 @@ static bool DeserializeAllCompilerFlags(swift::CompilerInvocation &invocation,
       swift::serialization::ExtendedValidationInfo extended_validation_info;
       info = swift::serialization::validateSerializedAST(
           buf, invocation.getSILOptions().EnableOSSAModules,
-          /*requiredSDK*/ StringRef(), /*requiresRevisionMatch*/ false,
-          &extended_validation_info, /*dependencies*/ nullptr, &searchPaths);
+          /*requiredSDK*/ StringRef(), &extended_validation_info,
+          /*dependencies*/ nullptr, &searchPaths);
       bool invalid_ast = info.status != swift::serialization::Status::Valid;
       bool invalid_size = (info.bytes == 0) || (info.bytes > buf.size());
       bool invalid_name = info.name.empty();
@@ -1264,6 +1331,15 @@ static bool DeserializeAllCompilerFlags(swift::CompilerInvocation &invocation,
         // If there's a size error, quit the loop early, otherwise try the next.
         if (invalid_size)
           break;
+        continue;
+      }
+
+      // Skip over this module if filtering and the filter matches.
+      if (!module_filter.empty() && module_filter != info.name) {
+        LOG_PRINTF(GetLog(LLDBLog::Types),
+                   "Skipping compiler options from %s, filter=%s",
+                   extended_validation_info.getModuleABIName().str().c_str(),
+                   module_filter.str().c_str());
         continue;
       }
 
@@ -1286,6 +1362,7 @@ static bool DeserializeAllCompilerFlags(swift::CompilerInvocation &invocation,
                 << getImportFailureString(result) << "\n";
           return false;
         }
+
         if (discover_implicit_search_paths) {
           for (auto &searchPath : searchPaths) {
             std::string path = remap(searchPath.Path);
@@ -1468,8 +1545,8 @@ bool ConsumeIncludeOption(StringRef &arg, StringRef &prefix) {
 }
 
 std::array<StringRef, 2> macro_flags = { "-D", "-U" };
-std::array<StringRef, 5> multi_arg_flags =
-    { "-D", "-U", "-I", "-F", "-working-directory" };
+std::array<StringRef, 6> multi_arg_flags = {
+    "-D", "-U", "-I", "-F", "-working-directory", "--target="};
 std::array<StringRef, 6> args_to_unique = {
     "-D", "-U", "-I", "-F", "-fmodule-file=", "-fmodule-map-file="};
 
@@ -1504,9 +1581,26 @@ void SwiftASTContext::AddExtraClangArgs(const std::vector<std::string> &source,
 
   llvm::SmallString<128> cur_working_dir;
   llvm::SmallString<128> clang_argument;
+
+  auto match_explicit_build_option = [](StringRef arg) {
+    for (const auto &option : g_known_eplicit_module_prefixes)
+      if (arg.starts_with(option))
+        return true;
+    return false;
+  };
+  bool has_explicit_builds_enabled =
+      llvm::find(source, "-fno-implicit-modules") != source.end();
+
   for (const std::string &arg : source) {
-    // Join multi-arg options for uniquing.
-    clang_argument += arg;
+    if (arg == "-triple") {
+      // Clang extra args are for driver flags. Replace the frontend `-triple`
+      // flag with a `--target=` driver flag.
+      clang_argument = "--target=";
+    } else {
+      // Join multi-arg options for uniquing.
+      clang_argument += arg;
+    }
+
     if (IsMultiArgClangFlag(clang_argument))
       continue;
 
@@ -1534,6 +1628,15 @@ void SwiftASTContext::AddExtraClangArgs(const std::vector<std::string> &source,
     if (clang_argument.empty())
       continue;
 
+    // In case of explicit modules, for now fallback to implicit
+    // module loading.
+    // TODO: Incorporate loading explicit module dependencies to
+    // speedup dependency resolution.
+    if (!Target::GetGlobalProperties().GetSwiftAllowExplicitModules())
+      if (has_explicit_builds_enabled &&
+          match_explicit_build_option(clang_argument))
+        continue;
+
     // Otherwise add the argument to the list.
     if (!IsMacroDefinition(clang_argument))
       ApplyWorkingDir(clang_argument, cur_working_dir);
@@ -1546,9 +1649,207 @@ void SwiftASTContext::AddExtraClangArgs(const std::vector<std::string> &source,
   }
 }
 
-void SwiftASTContext::AddExtraClangArgs(const std::vector<std::string> &ExtraArgs) {
+namespace {
+
+bool HasNonexistentExplicitModule(const std::vector<std::string> &args) {
+  for (const std::string &arg : args) {
+    StringRef value = arg;
+    if (!value.consume_front("-fmodule-file="))
+      continue;
+    StringRef path = value;
+    size_t eq = value.find('=');
+    // The value that follows is in one of two formats:
+    //   1. ModuleName=ModulePath
+    //   2. ModulePath
+    if (eq != std::string::npos)
+      // The value appears to be in ModuleName=ModulePath forat.
+      path = value.drop_front(eq + 1);
+    // Check both path and value. This is to handle paths containing '='.
+    if (!llvm::sys::fs::exists(path) && !llvm::sys::fs::exists(value)) {
+      std::string m_description;
+      HEALTH_LOG_PRINTF("Nonexistent explicit module file %s", arg.data());
+      return true;
+    }
+  }
+  return false;
+}
+
+void RemoveExplicitModules(std::vector<std::string> &args) {
+  llvm::erase_if(args, [](const std::string &arg) {
+    if (arg == "-fno-implicit-modules" || arg == "-fno-implicit-module-maps")
+      return true;
+    StringRef s = arg;
+    if (s.starts_with("-fmodule-file=") || s.starts_with("-fmodule-map-file="))
+      return true;
+
+    return false;
+  });
+}
+
+} // namespace
+
+/// LLDB wrapper for `clang::driver::applyOverrideOptions` (which implements
+/// CCC_OVERRIDE_OPTIONS behavior).
+static void applyOverrideOptions(std::vector<std::string> &args,
+                                 llvm::StringRef overrideOpts) {
+  if (overrideOpts.empty())
+    return;
+
+  // Convert input args to the type required by applyOverrideOptions.
+  llvm::SmallVector<const char *, 64> raw_args;
+  // Add placeholder clang executable, which applyOverrideOptions expects to be
+  // the first argument.
+  raw_args.push_back("clang");
+  for (const std::string &arg : args)
+    raw_args.push_back(arg.data());
+
+  /// LLVM stream backed by a callback. This is used to redirect
+  /// applyOverrideOptions logging to LLDB.
+  struct CallbackStream : public llvm::raw_ostream {
+    using callback_t = std::function<void(const char *, size_t)>;
+    callback_t m_callback;
+    uint64_t m_pos = 0;
+
+    CallbackStream(callback_t callback) : m_callback(callback) {}
+    ~CallbackStream() override { flush(); }
+
+    void write_impl(const char *Ptr, size_t Size) override {
+      m_callback(Ptr, Size);
+      m_pos += Size;
+    }
+
+    uint64_t current_pos() const override { return m_pos; }
+  };
+
+  // Perform the override operations.
+  llvm::StringSet<> savedStrings;
+  auto *log = GetLog(LLDBLog::Types);
+  CallbackStream log_stream{[log](const char *Ptr, size_t Size) {
+    if (!log)
+      return;
+    if (Ptr[Size] == '\n')
+      // Skip the newline because LLDB logging writes a newline.
+      Size--;
+    log->PutString({Ptr, Size});
+  }};
+
+  clang::driver::applyOverrideOptions(raw_args, overrideOpts.data(),
+                                      savedStrings, &log_stream);
+
+  // Delete the placeholder "clang" executable argument.
+  raw_args.erase(raw_args.begin());
+
+  // Copy `raw_args` into a new args vector.
+  std::vector<std::string> new_args;
+  for (const char *arg : raw_args)
+    new_args.emplace_back(arg);
+
+  // Only now that `raw_args` has been copied into `new_args`, it's safe to
+  // overwrite `args` (which owns the data pointed to by `raw_args`).
+  args = new_args;
+}
+
+void SwiftASTContext::AddExtraClangArgs(
+    const std::vector<std::string> &ExtraArgs, StringRef overrideOpts) {
   swift::ClangImporterOptions &importer_options = GetClangImporterOptions();
+
+  // Detect cc1 flags.  When DirectClangCC1ModuleBuild is on then the
+  // clang arguments in the serialized invocation are clang cc1 flags,
+  // which are very specific to one compiler version and cannot
+  // be merged with driver options.
+  bool fresh_invocation = importer_options.ExtraArgs.empty();
+  if (fresh_invocation && !ExtraArgs.empty() && ExtraArgs.front() == "-cc1")
+    importer_options.DirectClangCC1ModuleBuild = true;
+  if (!importer_options.DirectClangCC1ModuleBuild && !ExtraArgs.empty() &&
+      ExtraArgs.front() == "-cc1")
+    AddDiagnostic(
+        eSeverityWarning,
+        "Mixing and matching of driver and cc1 Clang options detected");
+
+  // If using direct cc1 flags, compute the arguments and return.
+  // Since this is cc1 flags, no driver overwrite can be applied.
+  if (importer_options.DirectClangCC1ModuleBuild) {
+    AddExtraClangCC1Args(ExtraArgs, importer_options.ExtraArgs);
+    return;
+  }
+
   AddExtraClangArgs(ExtraArgs, importer_options.ExtraArgs);
+  applyOverrideOptions(importer_options.ExtraArgs, overrideOpts);
+  if (HasNonexistentExplicitModule(importer_options.ExtraArgs))
+    RemoveExplicitModules(importer_options.ExtraArgs);
+
+  // Detect explicitly-built modules.
+  m_has_explicit_modules =
+      llvm::any_of(importer_options.ExtraArgs, [](const std::string &arg) {
+        return StringRef(arg).starts_with("-fmodule-file=");
+      });
+}
+
+void SwiftASTContext::AddExtraClangCC1Args(
+    const std::vector<std::string> &source, std::vector<std::string> &dest) {
+  clang::CompilerInvocation invocation;
+  llvm::SmallVector<const char *> clangArgs;
+  clangArgs.reserve(source.size());
+  llvm::for_each(source, [&](const std::string &Arg) {
+    // Workaround for the extra driver argument embedded in the swiftmodule by
+    // some swift compiler version. It always starts with `--target=` and it is
+    // not a valid cc1 option.
+    if (!StringRef(Arg).starts_with("--target="))
+      clangArgs.push_back(Arg.c_str());
+  });
+
+  std::string diags;
+  llvm::raw_string_ostream os(diags);
+  auto diagOpts = llvm::makeIntrusiveRefCnt<clang::DiagnosticOptions>();
+  clang::DiagnosticsEngine clangDiags(
+      new clang::DiagnosticIDs(), diagOpts,
+      new clang::TextDiagnosticPrinter(os, diagOpts.get()));
+
+  if (!clang::CompilerInvocation::CreateFromArgs(invocation, clangArgs,
+                                                 clangDiags)) {
+    // If cc1 arguments failed to parse, report diagnostics and return
+    // immediately.
+    AddDiagnostic(eSeverityError, diags);
+    // Disable direct-cc1 build as fallback.
+    GetClangImporterOptions().DirectClangCC1ModuleBuild = false;
+    return;
+  }
+
+  // Clear module cache key and other CAS options to load modules from disk
+  // directly.
+  invocation.getFrontendOpts().ModuleCacheKeys.clear();
+  invocation.getCASOpts() = clang::CASOptions();
+
+  // Remove non-existing modules in a systematic way.
+  bool module_missing = false;
+  auto CheckFileExists = [&](const char *file) {
+    if (!llvm::sys::fs::exists(file)) {
+      std::string m_description;
+      HEALTH_LOG_PRINTF("Nonexistent explicit module file %s", file);
+      module_missing = true;
+    }
+  };
+  llvm::for_each(invocation.getHeaderSearchOpts().PrebuiltModuleFiles,
+                 [&](const auto &mod) { CheckFileExists(mod.second.c_str()); });
+  llvm::for_each(invocation.getFrontendOpts().ModuleFiles,
+                 [&](const auto &mod) { CheckFileExists(mod.c_str()); });
+
+  // If missing, clear all the prebuilt module options and use implicit module
+  // build.
+  if (module_missing) {
+    invocation.getHeaderSearchOpts().PrebuiltModuleFiles.clear();
+    invocation.getFrontendOpts().ModuleFiles.clear();
+    invocation.getLangOpts().ImplicitModules = true;
+    invocation.getHeaderSearchOpts().ImplicitModuleMaps = true;
+  }
+
+  invocation.generateCC1CommandLine(
+      [&](const llvm::Twine &arg) { dest.push_back(arg.str()); });
+
+  // If cc1 arguments are parsed and generated correctly, set explicitly-built
+  // module since only explicit module build can use direct cc1 mode.
+  m_has_explicit_modules = true;
+  return;
 }
 
 void SwiftASTContext::AddUserClangArgs(TargetProperties &props) {
@@ -1647,11 +1948,22 @@ void SwiftASTContext::FilterClangImporterOptions(
   // Copy back a filtered version of ExtraArgs.
   std::vector<std::string> orig_args(std::move(extra_args));
   for (auto &arg : orig_args) {
+    StringRef arg_sr(arg);
+    // LLDB wants to control implicit/explicit modules build flags.
+    if (arg_sr == "-fno-implicit-modules" ||
+        arg_sr == "-fno-implicit-module-maps")
+      continue;
+
+    // This is not a cc1 option.
+    if (arg_sr.starts_with("--target=") && ctx &&
+        ctx->GetClangImporterOptions().DirectClangCC1ModuleBuild)
+      continue;
+
     // The VFS options turn into fatal errors when the referenced file
     // is not found. Since the Xcode build system tends to create a
     // lot of VFS overlays by default, stat them and emit a warning if
     // the yaml file couldn't be found.
-    if (StringRef(arg).startswith("-ivfs")) {
+    if (arg_sr.startswith("-ivfs")) {
       // Stash the argument.
       ivfs_arg = arg;
       continue;
@@ -1665,19 +1977,20 @@ void SwiftASTContext::FilterClangImporterOptions(
               << "Ignoring missing VFS file: " << arg
               << "\nThis is the likely root cause for any subsequent compiler "
                  "errors.";
-          ctx->AddDiagnostic(eDiagnosticSeverityWarning, error);
+          ctx->AddDiagnostic(eSeverityWarning, error);
         }
         continue;
       }
       // Keep it.
       extra_args.push_back(ivfs_arg);
     }
+
     extra_args.push_back(std::move(arg));
   }
 }
 
 /// Retrieve the .dSYM bundle for \p module.
-static llvm::Optional<StringRef> GetDSYMBundle(Module &module) {
+static std::optional<StringRef> GetDSYMBundle(Module &module) {
   auto sym_file = module.GetSymbolFile();
   if (!sym_file)
     return {};
@@ -1775,19 +2088,169 @@ GetASTBuffersFromModule(const std::string &m_description,
 /// Detect whether a Swift module was "imported" by DWARFImporter.
 /// All this *really* means is that it couldn't be loaded through any
 /// other mechanism.
-static bool IsDWARFImported(swift::ModuleDecl &module) {
-  return llvm::any_of(module.getFiles(), [](swift::FileUnit *file_unit) {
+static bool IsDWARFImported(const swift::ModuleDecl &module) {
+  return llvm::any_of(module.getFiles(), [](const swift::FileUnit *file_unit) {
     return (file_unit->getKind() == swift::FileUnitKind::DWARFModule);
   });
 }
 
 /// Detect whether this is a proper Swift module.
-static bool IsSerializedAST(swift::ModuleDecl &module) {
-  return llvm::any_of(module.getFiles(), [](swift::FileUnit *file_unit) {
+static bool IsSerializedAST(const swift::ModuleDecl &module) {
+  return llvm::any_of(module.getFiles(), [](const swift::FileUnit *file_unit) {
     return (file_unit->getKind() == swift::FileUnitKind::SerializedAST);
   });
 }
 
+/// Scan a newly added lldb::Module for Swift modules and report any errors in
+/// its module SwiftASTContext to Target.
+static void
+ProcessModule(Module &module, std::string m_description,
+              bool discover_implicit_search_paths, bool use_all_compiler_flags,
+              bool is_main_executable, StringRef module_filter,
+              llvm::Triple triple,
+              std::vector<swift::PluginSearchOption> &plugin_search_options,
+              std::vector<std::string> &module_search_paths,
+              std::vector<std::pair<std::string, bool>> &framework_search_paths,
+              std::vector<std::string> &extra_clang_args) {
+  {
+    llvm::raw_string_ostream ss(m_description);
+    ss << "::ProcessModule(" << '"';
+    module.GetDescription(ss, eDescriptionLevelBrief);
+    ss << '"' << ')';
+  }
+
+  const FileSpec &module_file = module.GetFileSpec();
+  std::string module_path = module_file.GetPath();
+
+  // Add the containing framework to the framework search path.
+  // Don't do that if this is the executable module, since it
+  // might be buried in some framework that we don't care about.
+  if (use_all_compiler_flags && !is_main_executable) {
+    size_t framework_offset = module_path.rfind(".framework/");
+
+    if (framework_offset != std::string::npos) {
+      // Sometimes the version of the framework that got loaded has been
+      // stripped and in that case, adding it to the framework search
+      // path will just short-cut a clang search that might otherwise
+      // find the needed headers. So don't add these paths.
+      std::string framework_path = module_path.substr(0, framework_offset);
+      framework_path.append(".framework");
+      FileSpec path_spec(framework_path);
+      FileSystem::Instance().Resolve(path_spec);
+      FileSpec headers_spec = path_spec.CopyByAppendingPathComponent("Headers");
+      bool add_it = false;
+      if (FileSystem::Instance().Exists(headers_spec))
+        add_it = true;
+      if (!add_it) {
+        FileSpec module_spec =
+            path_spec.CopyByAppendingPathComponent("Modules");
+        if (FileSystem::Instance().Exists(module_spec))
+          add_it = true;
+      }
+
+      if (!add_it) {
+        LOG_PRINTF(GetLog(LLDBLog::Types),
+                   "rejecting framework path \"%s\" as it has no \"Headers\" "
+                   "or \"Modules\" subdirectories.",
+                   framework_path.c_str());
+      }
+
+      if (add_it) {
+        while (framework_offset && (module_path[framework_offset] != '/'))
+          framework_offset--;
+
+        if (module_path[framework_offset] == '/') {
+          // framework_offset now points to the '/';
+
+          std::string parent_path = module_path.substr(0, framework_offset);
+          StringRef p(parent_path);
+
+          // Never add framework paths pointing into the system. These
+          // modules must be imported from the SDK instead.
+          if (!p.startswith("/System/Library") && !IsDeviceSupport(p) &&
+              !p.startswith(
+                  "/Library/Apple/System/Library/PrivateFrameworks") &&
+              !p.startswith("/System/iOSSupport/System/Library/Frameworks")) {
+            LOG_PRINTF(GetLog(LLDBLog::Types),
+                       "adding framework path \"%s\"/.. .",
+                       framework_path.c_str());
+            framework_search_paths.push_back(
+                {std::move(parent_path), /*system*/ false});
+          }
+        }
+      }
+    }
+  }
+
+  // Skip images without a serialized Swift AST.
+  if (!HasSwiftModules(module))
+    return;
+
+  // Load search path options from the module.
+  if (!use_all_compiler_flags && !is_main_executable)
+    return;
+
+  // Add Swift interfaces in the .dSYM at the end of the search paths.
+  // .swiftmodules win over .swiftinterfaces, when they are loaded
+  // directly from the .swift_ast section.
+  //
+  // FIXME: Since these paths end up in the scratch context, we would
+  //        need a mechanism to ensure that and newer versions (in the
+  //        library evolution sense, not the date on disk) win over
+  //        older versions of the same .swiftinterface.
+  if (auto dsym = GetDSYMBundle(module)) {
+    llvm::SmallString<256> path(*dsym);
+    StringRef arch = llvm::Triple::getArchTypeName(triple.getArch());
+    llvm::sys::path::append(path, "Contents", "Resources", "Swift", arch);
+    bool exists = false;
+    llvm::sys::fs::is_directory(path, exists);
+    if (exists)
+      module_search_paths.push_back(std::string(path));
+  }
+
+  // Create a one-off CompilerInvocation as a place to load the
+  // deserialized search path options into.
+  SymbolFile *sym_file = module.GetSymbolFile();
+  if (!sym_file)
+    return;
+  bool found_swift_modules = false;
+  bool got_serialized_options = false;
+  llvm::SmallString<0> error;
+  llvm::raw_svector_ostream errs(error);
+  swift::CompilerInvocation invocation;
+  auto ast_file_datas = module.GetASTData(eLanguageTypeSwift);
+  std::string module_name = module.GetSpecificationDescription();
+  std::vector<llvm::StringRef> buffers =
+      GetASTBuffersFromModule(m_description, ast_file_datas, module_name);
+
+  // If no N_AST symbols exist, this is not an error.
+  if (!buffers.empty())
+    if (DeserializeAllCompilerFlags(
+            invocation, module_name, module_filter, buffers,
+            module.GetSourceMappingList(), discover_implicit_search_paths,
+            m_description, errs, got_serialized_options, found_swift_modules)) {
+      // TODO: After removing DeserializeAllCompilerFlags from
+      //       CreateInstance(per-Module), errs will need to be
+      //       collected here and surfaced.
+    }
+
+  // Copy the interesting deserialized flags to the out parameters.
+  const auto &opts = invocation.getSearchPathOptions();
+  plugin_search_options.insert(plugin_search_options.end(),
+                               opts.PluginSearchOpts.begin(),
+                               opts.PluginSearchOpts.end());
+  module_search_paths.insert(module_search_paths.end(),
+                             opts.getImportSearchPaths().begin(),
+                             opts.getImportSearchPaths().end());
+  for (auto path : opts.getFrameworkSearchPaths())
+    framework_search_paths.push_back({path.Path, path.IsSystem});
+  auto &clang_opts = invocation.getClangImporterOptions().ExtraArgs;
+  for (const std::string &arg : clang_opts) {
+    extra_clang_args.push_back(arg);
+    LOG_VERBOSE_PRINTF(GetLog(LLDBLog::Types), "adding Clang argument \"%s\".",
+                       arg.c_str());
+  }
+}
 
 lldb::TypeSystemSP
 SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
@@ -1795,6 +2258,10 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
                                 bool fallback) {
   TargetSP target = typeref_typesystem.GetTargetWP().lock();
   if (!SwiftASTContextSupportsLanguage(language))
+    return lldb::TypeSystemSP();
+
+  if (!ModuleList::GetGlobalModuleListProperties()
+           .GetSwiftEnableASTContext())
     return lldb::TypeSystemSP();
 
   std::string m_description;
@@ -1888,6 +2355,9 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
   swift_ast_sp->GetLanguageOptions().EnableCXXInterop =
       module.IsSwiftCxxInteropEnabled();
 
+  if (module.IsEmbeddedSwift())
+    swift_ast_sp->GetLanguageOptions().enableFeature(swift::Feature::Embedded);
+
   bool found_swift_modules = false;
   SymbolFile *sym_file = module.GetSymbolFile();
 
@@ -1899,19 +2369,19 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
     bool discover_implicit_search_paths = false;
     auto ast_file_datas = module.GetASTData(eLanguageTypeSwift);
     std::string module_name = module.GetSpecificationDescription();
+    StringRef module_filter;
     std::vector<llvm::StringRef> buffers =
         GetASTBuffersFromModule(m_description, ast_file_datas, module_name);
 
     // If no N_AST symbols exist, this is not an error.
     if (!buffers.empty())
       if (DeserializeAllCompilerFlags(
-              swift_ast_sp->GetCompilerInvocation(),
-              module_name, buffers,
-              module.GetSourceMappingList(), discover_implicit_search_paths,
-              m_description, errs, got_serialized_options,
-              found_swift_modules)) {
+              swift_ast_sp->GetCompilerInvocation(), module_name, module_filter,
+              buffers, module.GetSourceMappingList(),
+              discover_implicit_search_paths, m_description, errs,
+              got_serialized_options, found_swift_modules)) {
         // Validation errors are not fatal for the context.
-        swift_ast_sp->AddDiagnostic(eDiagnosticSeverityError, errs.str());
+        swift_ast_sp->AddDiagnostic(eSeverityError, errs.str());
       }
 
     llvm::StringRef serialized_triple =
@@ -1959,10 +2429,25 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
   ConfigureResourceDirs(swift_ast_sp->GetCompilerInvocation(), resource_dir,
                         triple);
 
-  // Apply the working directory to all relative paths.
-  std::vector<std::string> DeserializedArgs = swift_ast_sp->GetClangArguments();
+  swift_ast_sp->SetCompilerInvocationLLDBOverrides();
+
+  // Collect search paths before importing modules.
+  const bool discover_implicit_search_paths = false;
+  const bool use_all_compiler_flags = false;
+  const bool is_target_module = true;
+
+  StringRef module_filter;
+  std::vector<swift::PluginSearchOption> plugin_search_options;
+  std::vector<std::string> extra_clang_args = swift_ast_sp->GetClangArguments();
   swift_ast_sp->GetClangImporterOptions().ExtraArgs.clear();
-  swift_ast_sp->AddExtraClangArgs(DeserializedArgs);
+
+  ProcessModule(module, m_description, discover_implicit_search_paths,
+                use_all_compiler_flags, is_target_module, module_filter, triple,
+                plugin_search_options, module_search_paths,
+                framework_search_paths, extra_clang_args);
+  // Apply the working directory to all relative paths.
+  StringRef overrideOpts = target ? target->GetSwiftClangOverrideOptions() : "";
+  swift_ast_sp->AddExtraClangArgs(extra_clang_args, overrideOpts);
   if (target)
     swift_ast_sp->AddUserClangArgs(*target);
   else
@@ -1972,20 +2457,6 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
   swift_ast_sp->RemapClangImporterOptions(module.GetSourceMappingList());
   swift_ast_sp->FilterClangImporterOptions(
       swift_ast_sp->GetClangImporterOptions().ExtraArgs, swift_ast_sp.get());
-
-  // Add Swift interfaces in the .dSYM at the end of the search paths.
-  // .swiftmodules win over .swiftinterfaces, when they are loaded
-  // directly from the .swift_ast section.
-  if (auto dsym = GetDSYMBundle(module)) {
-    llvm::SmallString<256> path(*dsym);
-    llvm::Triple triple(swift_ast_sp->GetTriple());
-    StringRef arch = llvm::Triple::getArchTypeName(triple.getArch());
-    llvm::sys::path::append(path, "Contents", "Resources", "Swift", arch);
-    bool exists = false;
-    llvm::sys::fs::is_directory(path, exists);
-    if (exists)
-      module_search_paths.push_back(std::string(path));
-  }
 
   swift_ast_sp->InitializeSearchPathOptions(module_search_paths,
                                             framework_search_paths);
@@ -2004,6 +2475,24 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
   {
     LLDB_SCOPED_TIMERF("%s (getStdlibModule)", m_description.c_str());
     const bool can_create = true;
+
+    // Report progress on module importing by using a callback function in
+    // swift::ASTContext
+    Progress progress("Importing Swift standard library");
+    swift_ast_sp->m_ast_context_ap->SetPreModuleImportCallback(
+        [&progress](llvm::StringRef module_name,
+                    swift::ASTContext::ModuleImportKind kind) {
+          progress.Increment(1, module_name.str());
+        });
+
+    // Clear the callback function on scope exit to prevent an out-of-scope
+    // access of the progress local variable
+    auto on_exit = llvm::make_scope_exit([&]() {
+      swift_ast_sp->m_ast_context_ap->SetPreModuleImportCallback(
+          [](llvm::StringRef module_name,
+             swift::ASTContext::ModuleImportKind kind) {});
+    });
+
     swift::ModuleDecl *stdlib =
         swift_ast_sp->m_ast_context_ap->getStdlibModule(can_create);
     if (!stdlib || IsDWARFImported(*stdlib)) {
@@ -2012,13 +2501,14 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
     }
   }
 
+  // Import serialized modules.
   std::vector<std::string> module_names;
   swift_ast_sp->RegisterSectionModules(module, module_names);
   if (!module_names.size()) {
     // This dylib has no Swift contents; logging the configuration is pointless.
     suppress_config_log = true;
   } else {
-    swift_ast_sp->ValidateSectionModules(module, module_names);
+    swift_ast_sp->ImportSectionModules(module, module_names);
     if (GetLog(LLDBLog::Types)) {
       std::lock_guard<std::recursive_mutex> locker(g_log_mutex);
       LOG_PRINTF(GetLog(LLDBLog::Types), "((Module*)%p, \"%s\") = %p",
@@ -2034,6 +2524,41 @@ SwiftASTContext::CreateInstance(lldb::LanguageType language, Module &module,
   }
 
   return swift_ast_sp;
+}
+
+/// Determine whether this CU was compiled with C++ interop enabled.
+bool SwiftASTContext::ShouldEnableCXXInterop(CompileUnit *cu) {
+  AutoBool interop_enabled =
+    ModuleList::GetGlobalModuleListProperties().GetSwiftEnableCxxInterop();
+  switch (interop_enabled) {
+  case AutoBool::True:
+    return true;
+  case AutoBool::False:
+    return false;
+  case AutoBool::Auto: {
+    if (!cu)
+      return false;
+    lldb::ModuleSP module = cu->CalculateSymbolContextModule();
+    if (!module)
+      return false;
+    // Look for the "-enable-experimental-cxx-interop" compile flag in the
+    // args of the compile units this module is composed of.
+    auto *sym_file = module->GetSymbolFile();
+    if (!sym_file)
+      return false;
+    auto options = sym_file->GetCompileOptions();
+    for (auto &[unit, args] : options) {
+      if (unit.get() == cu) {
+        if (cu->GetLanguage() == eLanguageTypeSwift)
+          for (const char *arg : args.GetArgumentArrayRef())
+            if (strcmp(arg, "-enable-experimental-cxx-interop") == 0)
+              return true;
+        return false;
+      }
+    }
+  }
+  }
+  return false;
 }
 
 static bool IsUnitTestExecutable(lldb_private::Module &module) {
@@ -2089,162 +2614,15 @@ static lldb::ModuleSP GetUnitTestModule(lldb_private::ModuleList &modules) {
   return ModuleSP();
 }
 
-/// Scan a newly added lldb::Module for Swift modules and report any errors in
-/// its module SwiftASTContext to Target.
-static void ProcessModule(
-    ModuleSP module_sp, std::string m_description,
-    bool discover_implicit_search_paths, bool use_all_compiler_flags,
-    Target &target, llvm::Triple triple,
-    std::vector<swift::PluginSearchOption> &plugin_search_options,
-    std::vector<std::string> &module_search_paths,
-    std::vector<std::pair<std::string, bool>> &framework_search_paths,
-    std::vector<std::string> &extra_clang_args) {
-  {
-    llvm::raw_string_ostream ss(m_description);
-    ss << "::ProcessModule(" << '"';
-    module_sp->GetDescription(ss, eDescriptionLevelBrief);
-    ss << '"' << ')';
-  }
-
-  const FileSpec &module_file = module_sp->GetFileSpec();
-  std::string module_path = module_file.GetPath();
-
-  // Add the containing framework to the framework search path.
-  // Don't do that if this is the executable module, since it
-  // might be buried in some framework that we don't care about.
-  if (use_all_compiler_flags &&
-      target.GetExecutableModulePointer() != module_sp.get()) {
-    size_t framework_offset = module_path.rfind(".framework/");
-
-    if (framework_offset != std::string::npos) {
-      // Sometimes the version of the framework that got loaded has been
-      // stripped and in that case, adding it to the framework search
-      // path will just short-cut a clang search that might otherwise
-      // find the needed headers. So don't add these paths.
-      std::string framework_path = module_path.substr(0, framework_offset);
-      framework_path.append(".framework");
-      FileSpec path_spec(framework_path);
-      FileSystem::Instance().Resolve(path_spec);
-      FileSpec headers_spec = path_spec.CopyByAppendingPathComponent("Headers");
-      bool add_it = false;
-      if (FileSystem::Instance().Exists(headers_spec))
-        add_it = true;
-      if (!add_it) {
-        FileSpec module_spec =
-            path_spec.CopyByAppendingPathComponent("Modules");
-        if (FileSystem::Instance().Exists(module_spec))
-          add_it = true;
-      }
-
-      if (!add_it) {
-        LOG_PRINTF(GetLog(LLDBLog::Types),
-                   "rejecting framework path \"%s\" as it has no \"Headers\" "
-                   "or \"Modules\" subdirectories.",
-                   framework_path.c_str());
-      }
-
-      if (add_it) {
-        while (framework_offset && (module_path[framework_offset] != '/'))
-          framework_offset--;
-
-        if (module_path[framework_offset] == '/') {
-          // framework_offset now points to the '/';
-
-          std::string parent_path = module_path.substr(0, framework_offset);
-          StringRef p(parent_path);
-
-          // Never add framework paths pointing into the system. These
-          // modules must be imported from the SDK instead.
-          if (!p.startswith("/System/Library") && !IsDeviceSupport(p) &&
-              !p.startswith(
-                  "/Library/Apple/System/Library/PrivateFrameworks") &&
-              !p.startswith("/System/iOSSupport/System/Library/Frameworks")) {
-            LOG_PRINTF(GetLog(LLDBLog::Types), "adding framework path \"%s\"/.. .",
-                       framework_path.c_str());
-            framework_search_paths.push_back(
-                {std::move(parent_path), /*system*/ false});
-          }
-        }
-      }
-    }
-  }
-
-  // Skip images without a serialized Swift AST.
-  if (!HasSwiftModules(*module_sp))
-    return;
-
-  // Load search path options from the module.
-  if (!use_all_compiler_flags &&
-      target.GetExecutableModulePointer() != module_sp.get())
-    return;
-
-  // Add Swift interfaces in the .dSYM at the end of the search paths.
-  // .swiftmodules win over .swiftinterfaces, when they are loaded
-  // directly from the .swift_ast section.
-  //
-  // FIXME: Since these paths end up in the scratch context, we would
-  //        need a mechanism to ensure that and newer versions (in the
-  //        library evolution sense, not the date on disk) win over
-  //        older versions of the same .swiftinterface.
-  if (auto dsym = GetDSYMBundle(*module_sp)) {
-    llvm::SmallString<256> path(*dsym);
-    StringRef arch = llvm::Triple::getArchTypeName(triple.getArch());
-    llvm::sys::path::append(path, "Contents", "Resources", "Swift", arch);
-    bool exists = false;
-    llvm::sys::fs::is_directory(path, exists);
-    if (exists)
-      module_search_paths.push_back(std::string(path));
-  }
-
-  // Create a one-off CompilerInvocation as a place to load the
-  // deserialized search path options into.
-  SymbolFile *sym_file = module_sp->GetSymbolFile();
-  if (!sym_file)
-    return;
-  bool found_swift_modules = false;
-  bool got_serialized_options = false;
-  llvm::SmallString<0> error;
-  llvm::raw_svector_ostream errs(error);
-  swift::CompilerInvocation invocation;
-  auto ast_file_datas = module_sp->GetASTData(eLanguageTypeSwift);
-  std::string module_name = module_sp->GetSpecificationDescription();
-  std::vector<llvm::StringRef> buffers =
-      GetASTBuffersFromModule(m_description, ast_file_datas, module_name);
-
-  // If no N_AST symbols exist, this is not an error.
-  if (!buffers.empty())
-    if (DeserializeAllCompilerFlags(
-            invocation, module_name, buffers, module_sp->GetSourceMappingList(),
-            discover_implicit_search_paths, m_description, errs,
-            got_serialized_options, found_swift_modules)) {
-      // TODO: After removing DeserializeAllCompilerFlags from
-      //       CreateInstance(per-Module), errs will need to be
-      //       collected here and surfaced.
-    }
-
-  // Copy the interesting deserialized flags to the out parameters.
-  const auto &opts = invocation.getSearchPathOptions();
-  plugin_search_options.insert(plugin_search_options.end(),
-                               opts.PluginSearchOpts.begin(),
-                               opts.PluginSearchOpts.end());
-  module_search_paths.insert(module_search_paths.end(),
-                             opts.getImportSearchPaths().begin(),
-                             opts.getImportSearchPaths().end());
-  for (auto path:opts.getFrameworkSearchPaths())
-    framework_search_paths.push_back({path.Path, path.IsSystem});
-  auto &clang_opts = invocation.getClangImporterOptions().ExtraArgs;
-  for (const std::string &arg : clang_opts) {
-    extra_clang_args.push_back(arg);
-    LOG_VERBOSE_PRINTF(GetLog(LLDBLog::Types), "adding Clang argument \"%s\".",
-                       arg.c_str());
-  }
-}
-
 lldb::TypeSystemSP SwiftASTContext::CreateInstance(
     lldb::LanguageType language,
     TypeSystemSwiftTypeRefForExpressions &typeref_typesystem,
     const char *extra_options) {
   if (!SwiftASTContextSupportsLanguage(language))
+    return lldb::TypeSystemSP();
+
+  if (!ModuleList::GetGlobalModuleListProperties()
+           .GetSwiftEnableASTContext())
     return lldb::TypeSystemSP();
 
   LLDB_SCOPED_TIMER();
@@ -2287,6 +2665,10 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(
 
   swift_ast_sp->GetLanguageOptions().EnableCXXInterop =
       target.IsSwiftCxxInteropEnabled();
+
+  if (target.IsEmbeddedSwift())
+    swift_ast_sp->GetLanguageOptions().enableFeature(swift::Feature::Embedded);
+
   bool handled_sdk_path = false;
   const size_t num_images = target.GetImages().GetSize();
 
@@ -2418,12 +2800,16 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(
 
   for (ModuleSP module_sp : target.GetImages().Modules())
     if (module_sp) {
+      StringRef module_filter;
       std::vector<std::string> extra_clang_args;
-      ProcessModule(module_sp, m_description, discover_implicit_search_paths,
-                    use_all_compiler_flags, target, triple,
-                    plugin_search_options, module_search_paths,
-                    framework_search_paths, extra_clang_args);
-      swift_ast_sp->AddExtraClangArgs(extra_clang_args);
+      ProcessModule(*module_sp, m_description, discover_implicit_search_paths,
+                    use_all_compiler_flags,
+                    target.GetExecutableModulePointer() == module_sp.get(),
+                    module_filter, triple, plugin_search_options,
+                    module_search_paths, framework_search_paths,
+                    extra_clang_args);
+      swift_ast_sp->AddExtraClangArgs(extra_clang_args,
+                                      target.GetSwiftClangOverrideOptions());
     }
 
   for (const FileSpec &path : target.GetSwiftModuleSearchPaths())
@@ -2465,6 +2851,8 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(
   // otherwise no modules will be found.
   swift_ast_sp->InitializeSearchPathOptions(module_search_paths,
                                             framework_search_paths);
+  swift_ast_sp->SetCompilerInvocationLLDBOverrides();
+
   if (!swift_ast_sp->GetClangImporter()) {
     logError("couldn't create a ClangImporter");
     return {};
@@ -2480,6 +2868,371 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(
     std::vector<std::string> module_names;
     auto module_sp = target.GetImages().GetModuleAtIndex(mi);
     swift_ast_sp->RegisterSectionModules(*module_sp, module_names);
+  }
+
+  LOG_PRINTF(GetLog(LLDBLog::Types), "((Target*)%p) = %p",
+             static_cast<void *>(&target),
+             static_cast<void *>(swift_ast_sp.get()));
+
+  if (swift_ast_sp->HasFatalErrors()) {
+    logError(swift_ast_sp->GetFatalErrors().AsCString());
+    return {};
+  }
+
+  {
+    LLDB_SCOPED_TIMERF("%s (getStdlibModule)", m_description.c_str());
+    const bool can_create = true;
+
+    // Report progress on module importing by using a callback function in
+    // swift::ASTContext.
+    Progress progress("Importing Swift standard library");
+    swift_ast_sp->m_ast_context_ap->SetPreModuleImportCallback(
+        [&progress](llvm::StringRef module_name,
+                    swift::ASTContext::ModuleImportKind kind) {
+          progress.Increment(1, module_name.str());
+        });
+
+    // Clear the callback function on scope exit to prevent an out-of-scope
+    // access of the progress local variable.
+    auto on_exit = llvm::make_scope_exit([&]() {
+      swift_ast_sp->m_ast_context_ap->SetPreModuleImportCallback(
+          [](llvm::StringRef module_name,
+             swift::ASTContext::ModuleImportKind kind) {});
+    });
+
+    swift::ModuleDecl *stdlib =
+        swift_ast_sp->m_ast_context_ap->getStdlibModule(can_create);
+    if (!stdlib || IsDWARFImported(*stdlib)) {
+      logError("couldn't load the Swift stdlib");
+      return {};
+    }
+  }
+
+  return swift_ast_sp;
+}
+
+
+lldb::TypeSystemSP SwiftASTContext::CreateInstance(
+    const SymbolContext &sc,
+    TypeSystemSwiftTypeRefForExpressions &typeref_typesystem) {
+  LLDB_SCOPED_TIMER();
+
+  if (!ModuleList::GetGlobalModuleListProperties()
+           .GetSwiftEnableASTContext())
+    return lldb::TypeSystemSP();
+
+  CompileUnit *cu = sc.comp_unit;
+  StringRef swift_module_name = TypeSystemSwiftTypeRef::GetSwiftModuleFor(&sc);
+  std::string m_description;
+  {
+    StreamString ss;
+    ss << "SwiftASTContextForExpressions"
+       << "(module: " << '"' << swift_module_name << "\", "
+       << "cu: " << '"';
+    if (cu)
+      ss << cu->GetPrimaryFile().GetFilename();
+    else
+      ss << "null";
+    ss << '"' << ')';
+    m_description = ss.GetString();
+  }
+
+  TargetSP target_sp = typeref_typesystem.GetTargetWP().lock();
+  if (!target_sp)
+    return {};
+  Target &target = *target_sp;
+
+  // Make an AST but don't set the triple yet. We need to
+  // try and detect if we have a iOS simulator.
+  std::shared_ptr<SwiftASTContextForExpressions> swift_ast_sp(
+      new SwiftASTContextForExpressions(m_description, typeref_typesystem));
+  auto defer_log = llvm::make_scope_exit(
+      [swift_ast_sp] { swift_ast_sp->LogConfiguration(); });
+
+  LOG_PRINTF(GetLog(LLDBLog::Types), "(Target)");
+  auto logError = [&](const char *message) {
+    LOG_PRINTF(GetLog(LLDBLog::Types), "Failed to create scratch context - %s",
+               message);
+    if (StreamSP errs_sp = target.GetDebugger().GetAsyncErrorStream())
+      errs_sp->Printf("Cannot create Swift scratch context (%s)", message);
+  };
+
+  ArchSpec arch = target.GetArchitecture();
+  if (!arch.IsValid()) {
+    logError("invalid target architecture");
+    return {};
+  }
+
+  // This is a scratch AST context, mark it as such.
+  swift_ast_sp->m_is_scratch_context = true;
+
+  swift_ast_sp->GetLanguageOptions().EnableCXXInterop =
+      ShouldEnableCXXInterop(cu);
+
+  if (target.IsEmbeddedSwift())
+    swift_ast_sp->GetLanguageOptions().enableFeature(swift::Feature::Embedded);
+
+  bool handled_sdk_path = false;
+  const size_t num_images = target.GetImages().GetSize();
+
+  // Set the SDK path prior to doing search paths.  Otherwise when we
+  // create search path options we put in the wrong SDK path.
+  FileSpec &target_sdk_spec = target.GetSDKPath();
+  if (target_sdk_spec && FileSystem::Instance().Exists(target_sdk_spec)) {
+    swift_ast_sp->SetPlatformSDKPath(target_sdk_spec.GetPath());
+    handled_sdk_path = true;
+  }
+
+  if (!handled_sdk_path) {
+    for (size_t mi = 0; mi != num_images; ++mi) {
+      ModuleSP module_sp = target.GetImages().GetModuleAtIndex(mi);
+      if (!HasSwiftModules(*module_sp))
+        continue;
+
+      std::string sdk_path = GetSDKPathFromDebugInfo(m_description, *module_sp);
+
+      if (sdk_path.empty())
+        continue;
+
+      handled_sdk_path = true;
+      swift_ast_sp->SetPlatformSDKPath(sdk_path);
+      break;
+    }
+  }
+
+  // First, prime the compiler with the options from the main executable:
+  bool got_serialized_options = false;
+  ModuleSP exe_module_sp(target.GetExecutableModule());
+
+  // If we're debugging a testsuite, then treat the main test bundle
+  // as the executable.
+  if (exe_module_sp && IsUnitTestExecutable(*exe_module_sp)) {
+    ModuleSP unit_test_module = GetUnitTestModule(target.GetImages());
+
+    if (unit_test_module) {
+      exe_module_sp = unit_test_module;
+    }
+  }
+
+  {
+    auto get_executable_triple = [&]() -> llvm::Triple {
+      if (!exe_module_sp)
+        return {};
+      return exe_module_sp->GetArchitecture().GetTriple();
+    };
+
+    ArchSpec module_arch;
+    llvm::Triple module_triple;
+    if (sc.module_sp) {
+      module_arch = sc.module_sp->GetArchitecture();
+      module_triple = module_arch.GetTriple();
+    }
+
+    ArchSpec target_arch = target.GetArchitecture();
+    llvm::Triple target_triple = target_arch.GetTriple();
+
+    ArchSpec preferred_arch;
+    llvm::Triple preferred_triple;
+    if (module_arch && module_arch.IsFullySpecifiedTriple()) {
+      LOG_PRINTF(GetLog(LLDBLog::Types),
+                 "Preferring module triple %s over target triple %s.",
+                 module_triple.str().c_str(), target_triple.str().c_str());
+      preferred_arch = module_arch;
+      preferred_triple = module_triple;
+    } else {
+      // When no viable module triple, fallback to the target triple.
+      preferred_arch = target_arch;
+      preferred_triple = target_triple;
+    }
+
+    llvm::Triple computed_triple;
+    if (preferred_arch.IsFullySpecifiedTriple()) {
+      // If a fully specified triple was passed in, for example
+      // through CreateTargetWithFileAndTargetTriple(), prefer that.
+      LOG_PRINTF(GetLog(LLDBLog::Types), "Fully specified target triple %s.",
+                 preferred_triple.str().c_str());
+      computed_triple = preferred_triple;
+    } else {
+      // Underspecified means that one or more of vendor, os, or os
+      // version (Darwin only) is missing.
+      LOG_PRINTF(GetLog(LLDBLog::Types), "Underspecified target triple %s.",
+                 preferred_triple.str().c_str());
+      llvm::VersionTuple platform_version;
+      PlatformSP platform_sp(target.GetPlatform());
+      if (platform_sp)
+        platform_version =
+            platform_sp->GetOSVersion(target.GetProcessSP().get());
+      LOG_PRINTF(GetLog(LLDBLog::Types), "Platform version is %s",
+                 platform_version.empty()
+                     ? "<empty>"
+                     : platform_version.getAsString().c_str());
+      // Try to fill in the platform OS version. The idea behind using
+      // the platform version is to let the expression evaluator mark
+      // the expressions with the highest supported availability
+      // attribute. Don't use the platform when an environment is
+      // present, since there might be some ambiguity about the
+      // plaform (e.g., ios-macabi runs on the macOS, but uses iOS
+      // version numbers).
+      if (!platform_version.empty() && preferred_triple.getEnvironment() ==
+                                           llvm::Triple::UnknownEnvironment) {
+        LOG_PRINTF(GetLog(LLDBLog::Types), "Completing triple based on platform.");
+
+        llvm::SmallString<32> buffer;
+        {
+          llvm::raw_svector_ostream os(buffer);
+          os << preferred_triple.getArchName() << '-';
+          os << preferred_triple.getVendorName() << '-';
+          os << llvm::Triple::getOSTypeName(preferred_triple.getOS());
+          os << platform_version.getAsString();
+        }
+        computed_triple = llvm::Triple(buffer);
+      } else {
+        LOG_PRINTF(GetLog(LLDBLog::Types),
+                   "Completing triple based on main binary load commands.");
+        computed_triple = get_executable_triple();
+      }
+    }
+
+    if (computed_triple.getOS() == llvm::Triple::MacOSX) {
+      // Handle the case where an apparent macOS binary has been
+      // force-loaded as a macCatalyst process. The Xcode test
+      // runner works this way.
+      llvm::Triple exe_triple = get_executable_triple();
+      if (exe_triple.getOS() == llvm::Triple::IOS &&
+          exe_triple.getEnvironment() == llvm::Triple::MacABI) {
+        LOG_PRINTF(GetLog(LLDBLog::Types), "Adjusting triple to macCatalyst.");
+        computed_triple.setOSAndEnvironmentName(
+            exe_triple.getOSAndEnvironmentName());
+      }
+    }
+    if (computed_triple == llvm::Triple()) {
+      LOG_PRINTF(GetLog(LLDBLog::Types), "Failed to compute triple.");
+      return {};
+    }
+    swift_ast_sp->SetTriple(computed_triple);
+  }
+
+  llvm::Triple triple = swift_ast_sp->GetTriple();
+  std::string resource_dir = HostInfo::GetSwiftResourceDir(
+      triple, swift_ast_sp->GetPlatformSDKPath());
+  ConfigureResourceDirs(swift_ast_sp->GetCompilerInvocation(), resource_dir,
+                        triple);
+
+  std::vector<swift::PluginSearchOption> plugin_search_options;
+  std::vector<std::string> module_search_paths;
+  std::vector<std::pair<std::string, bool>> framework_search_paths;
+  std::vector<std::string> extra_clang_args;
+  
+  const bool discover_implicit_search_paths =
+      target.GetSwiftDiscoverImplicitSearchPaths();
+
+  const bool use_all_compiler_flags =
+      !got_serialized_options || target.GetUseAllCompilerFlags();
+
+  for (const FileSpec &path : target.GetSwiftModuleSearchPaths())
+    module_search_paths.push_back(path.GetPath());
+
+  for (const FileSpec &path : target.GetSwiftFrameworkSearchPaths())
+    framework_search_paths.push_back({path.GetPath(),
+                                      /*is_system*/ false});
+  ModuleSP module_sp = sc.module_sp;
+  if (module_sp) {
+    StringRef module_filter = swift_module_name;
+    std::vector<std::string> extra_clang_args;
+    ProcessModule(*module_sp, m_description, discover_implicit_search_paths,
+                  use_all_compiler_flags,
+                  target.GetExecutableModulePointer() == module_sp.get(),
+                  module_filter, triple, plugin_search_options,
+                  module_search_paths, framework_search_paths,
+                  extra_clang_args);
+    swift_ast_sp->AddExtraClangArgs(extra_clang_args,
+                                    target.GetSwiftClangOverrideOptions());
+  }
+
+  // Now fold any extra options we were passed. This has to be done
+  // BEFORE the ClangImporter is made by calling GetClangImporter or
+  // these options will be ignored.
+
+  swift_ast_sp->AddUserClangArgs(target);
+  swift_ast_sp->ApplyDiagnosticOptions();
+
+  // Apply source path remappings found in each module's dSYM.
+  for (ModuleSP module : target.GetImages().Modules())
+    if (module)
+      swift_ast_sp->RemapClangImporterOptions(module->GetSourceMappingList());
+
+  // Apply source path remappings found in the target settings.
+  swift_ast_sp->RemapClangImporterOptions(target.GetSourcePathMap());
+  swift_ast_sp->FilterClangImporterOptions(
+      swift_ast_sp->GetClangImporterOptions().ExtraArgs, swift_ast_sp.get());
+
+  // This needs to happen once all the import paths are set, or
+  // otherwise no modules will be found.
+  swift_ast_sp->InitializeSearchPathOptions(module_search_paths,
+                                            framework_search_paths);
+  swift_ast_sp->SetCompilerInvocationLLDBOverrides();
+
+  if (!swift_ast_sp->GetClangImporter()) {
+    logError("couldn't create a ClangImporter");
+    return {};
+  }
+
+  // Initialize the compiler plugin search paths.
+  auto &opts = swift_ast_sp->GetSearchPathOptions();
+  opts.PluginSearchOpts.insert(opts.PluginSearchOpts.end(),
+                               plugin_search_options.begin(),
+                               plugin_search_options.end());
+
+  // Register the symbol context's module first. This makes it more
+  // likely that compatible AST blobs are found first, since then the
+  // local AST blobs overwrite any ones with the same import path from
+  // another dylib.
+  llvm::DenseSet<Module *> visited_modules;
+  llvm::StringMap<ModuleSP> all_modules;
+  for (size_t mi = 0; mi != num_images; ++mi) {
+    auto image_sp = target.GetImages().GetModuleAtIndex(mi);
+    std::string path = image_sp->GetSpecificationDescription();
+    all_modules.insert({path, image_sp});
+    all_modules.insert({llvm::sys::path::filename(path), image_sp});
+  }
+  std::vector<std::string> module_names;
+  std::function<void(ModuleSP, unsigned)> scan_module =
+      [&](ModuleSP cur_module_sp, unsigned indent) {
+        if (!cur_module_sp ||
+            !visited_modules.insert(cur_module_sp.get()).second)
+          return;
+        swift_ast_sp->RegisterSectionModules(*cur_module_sp, module_names);
+        if (GetLog(LLDBLog::Types)) {
+          std::string spacer(indent, '-');
+          LOG_PRINTF(GetLog(LLDBLog::Types), "+%s Dependency scan: %s",
+                     spacer.c_str(),
+                     cur_module_sp->GetSpecificationDescription().c_str());
+        }
+        if (auto object = cur_module_sp->GetObjectFile()) {
+          FileSpecList file_list;
+          object->GetDependentModules(file_list);
+          for (auto &fs : file_list) {
+            if (ModuleSP dependency = all_modules.lookup(fs.GetPath())) {
+              scan_module(dependency, indent + 1);
+            } else if (ModuleSP dependency =
+                           all_modules.lookup(fs.GetFilename())) {
+              scan_module(dependency, indent + 1);
+            } else {
+              if (GetLog(LLDBLog::Types)) {
+                std::string spacer(indent, '-');
+                LOG_PRINTF(GetLog(LLDBLog::Types),
+                           "+%s Could not find %s in images", spacer.c_str(),
+                           fs.GetPath().c_str());
+              }
+            }
+          }
+        }
+      };
+  scan_module(module_sp, 0);
+  for (size_t mi = 0; mi != num_images; ++mi) {
+    auto image_sp = target.GetImages().GetModuleAtIndex(mi);
+    if (!visited_modules.count(image_sp.get()))
+      swift_ast_sp->RegisterSectionModules(*image_sp, module_names);
   }
 
   LOG_PRINTF(GetLog(LLDBLog::Types), "((Target*)%p) = %p",
@@ -2548,7 +3301,7 @@ Status SwiftASTContext::GetAllDiagnostics() const {
 }
 
 void SwiftASTContext::StreamAllDiagnostics(
-    llvm::Optional<lldb::user_id_t> debugger_id) const {
+    std::optional<lldb::user_id_t> debugger_id) const {
   Status error = m_fatal_errors;
   if (!error.Success()) {
     Debugger::ReportWarning(error.AsCString(), debugger_id,
@@ -2563,11 +3316,11 @@ void SwiftASTContext::StreamAllDiagnostics(
     if (diag) {
       std::string msg = diag->GetMessage().str();
       switch (diag->GetSeverity()) {
-      case eDiagnosticSeverityError:
+      case eSeverityError:
         Debugger::ReportError(msg, debugger_id, &m_swift_diags_streamed);
         break;
-      case eDiagnosticSeverityWarning:
-      case eDiagnosticSeverityRemark:
+      case eSeverityWarning:
+      case eSeverityInfo:
         Debugger::ReportWarning(msg, debugger_id, &m_swift_warning_streamed);
         break;
       }
@@ -2744,6 +3497,10 @@ swift::TypeCheckerOptions &SwiftASTContext::GetTypeCheckerOptions() {
 
 swift::symbolgraphgen::SymbolGraphOptions &SwiftASTContext::GetSymbolGraphOptions() {
   return GetCompilerInvocation().getSymbolGraphOptions();
+}
+
+swift::CASOptions &SwiftASTContext::GetCASOptions() {
+  return GetCompilerInvocation().getCASOptions();
 }
 
 swift::DiagnosticEngine &SwiftASTContext::GetDiagnosticEngine() {
@@ -2923,20 +3680,23 @@ void SwiftASTContext::InitializeSearchPathOptions(
       invocation_framework_paths);
 }
 
-swift::ASTContext *SwiftASTContext::GetASTContext() {
+ThreadSafeASTContext SwiftASTContext::GetASTContext() {
   assert(m_initialized_search_path_options &&
          m_initialized_clang_importer_options &&
          "search path options must be initialized before ClangImporter");
 
+  m_ast_context_mutex.lock();
+
   if (m_ast_context_ap.get())
-    return m_ast_context_ap.get();
+    return {m_ast_context_ap.get(), m_ast_context_mutex};
 
   LLDB_SCOPED_TIMER();
   m_ast_context_ap.reset(swift::ASTContext::get(
       GetLanguageOptions(), GetTypeCheckerOptions(), GetSILOptions(),
       GetSearchPathOptions(), GetClangImporterOptions(),
-      GetSymbolGraphOptions(), GetSourceManager(), GetDiagnosticEngine(),
-      /*OutputBackend=*/nullptr, ReportModuleLoadingProgress));
+      GetSymbolGraphOptions(), GetCASOptions(), GetSourceManager(),
+      GetDiagnosticEngine(),
+      /*OutputBackend=*/nullptr));
 
   if (getenv("LLDB_SWIFT_DUMP_DIAGS")) {
     // NOTE: leaking a swift::PrintingDiagnosticConsumer() here, but
@@ -2954,17 +3714,17 @@ swift::ASTContext *SwiftASTContext::GetASTContext() {
     if (!clang_importer_options.OverrideResourceDir.empty()) {
       // Create the DWARFImporterDelegate.
       const auto &props = ModuleList::GetGlobalModuleListProperties();
-      swift::DWARFImporterDelegate *delegate = nullptr;
       if (props.GetUseSwiftDWARFImporter())
-        delegate = &m_typeref_typesystem->GetDWARFImporterDelegate();
+        m_dwarfimporter_delegate_up =
+            std::make_unique<SwiftDWARFImporterDelegate>(*this);
       auto importer_diags = getScopedDiagnosticConsumer();
       clang_importer_ap = swift::ClangImporter::create(
-          *m_ast_context_ap, "", m_dependency_tracker.get(), delegate);
+          *m_ast_context_ap, "", m_dependency_tracker.get(),
+          m_dwarfimporter_delegate_up.get());
 
       // Handle any errors.
       if (!clang_importer_ap || importer_diags->HasErrors()) {
-        AddDiagnostic(eDiagnosticSeverityError,
-                      "failed to create ClangImporter");
+        AddDiagnostic(eSeverityError, "failed to create ClangImporter");
         if (GetLog(LLDBLog::Types)) {
           DiagnosticManager diagnostic_manager;
           importer_diags->PrintDiagnostics(diagnostic_manager);
@@ -2999,7 +3759,7 @@ swift::ASTContext *SwiftASTContext::GetASTContext() {
   // Compute the prebuilt module cache path to use:
   // <resource-dir>/<platform>/prebuilt-modules/<version>
   llvm::Triple triple(GetTriple());
-  llvm::Optional<llvm::VersionTuple> sdk_version =
+  std::optional<llvm::VersionTuple> sdk_version =
       m_ast_context_ap->LangOpts.SDKVersion;
   if (!sdk_version) {
     auto SDKInfoOrErr = clang::parseDarwinSDKInfo(
@@ -3124,8 +3884,8 @@ swift::ASTContext *SwiftASTContext::GetASTContext() {
 
   GetASTMap().Insert(m_ast_context_ap.get(), this);
 
-  VALID_OR_RETURN(nullptr);
-  return m_ast_context_ap.get();
+  VALID_OR_RETURN(ThreadSafeASTContext());
+  return {m_ast_context_ap.get(), m_ast_context_mutex};
 }
 
 swift::MemoryBufferSerializedModuleLoader *
@@ -3184,7 +3944,7 @@ SwiftASTContext::CreateModule(const SourceModule &module, Status &error,
     return nullptr;
   }
 
-  swift::ASTContext *ast = GetASTContext();
+  ThreadSafeASTContext ast = GetASTContext();
   if (!ast) {
     error.SetErrorStringWithFormat("invalid swift AST (nullptr)");
     return nullptr;
@@ -3193,7 +3953,7 @@ SwiftASTContext::CreateModule(const SourceModule &module, Status &error,
 
   swift::Identifier module_id(
       ast->getIdentifier(module.path.front().GetCString()));
-  auto *module_decl = swift::ModuleDecl::create(module_id, *ast, importInfo);
+  auto *module_decl = swift::ModuleDecl::create(module_id, **ast, importInfo);
   if (!module_decl) {
     error.SetErrorStringWithFormat("failed to create module for \"%s\"",
                                    module.path.front().GetCString());
@@ -3218,13 +3978,27 @@ void SwiftASTContext::CacheModule(swift::ModuleDecl *module) {
   m_swift_module_cache.insert({ID, module});
 }
 
-bool SwiftASTContext::ReportModuleLoadingProgress(llvm::StringRef module_name,
-                                                  bool is_overlay) {
-  Progress progress(llvm::formatv(is_overlay ? "Importing overlay module {0}"
-                                             : "Importing module {0}",
-                                  module_name)
-                        .str());
-  return true;
+void SwiftASTContext::RegisterModuleABINameToRealName(
+    swift::ModuleDecl *module) {
+  if (module->getABIName() == module->getName())
+    return;
+
+  // Ignore _Concurrency, which is hardcoded in the compiler and should be
+  // looked up using its ABI name "Swift"
+  if (module->getName().str() == swift::SWIFT_CONCURRENCY_NAME)
+    return;
+
+  // Also ignore modules with the special "Compiler" prefix.
+  if (module->getABIName().str().starts_with(
+          swift::SWIFT_MODULE_ABI_NAME_PREFIX))
+    return;
+
+  LOG_PRINTF(GetLog(LLDBLog::Types),
+             "Mapping module ABI name \"%s\" to its regular name \"%s\"",
+             module->getABIName().str().str().c_str(),
+             module->getName().str().str().c_str());
+  m_module_abi_to_regular_name.insert({module->getABIName().str(),
+                                      module->getName().str()});
 }
 
 swift::ModuleDecl *SwiftASTContext::GetModule(const SourceModule &module,
@@ -3252,7 +4026,7 @@ swift::ModuleDecl *SwiftASTContext::GetModule(const SourceModule &module,
   }
 
   LLDB_SCOPED_TIMER();
-  swift::ASTContext *ast = GetASTContext();
+  ThreadSafeASTContext ast = GetASTContext();
   if (!ast) {
     LOG_PRINTF(GetLog(LLDBLog::Types), "(\"%s\") invalid ASTContext",
                module.path.front().GetCString());
@@ -3276,6 +4050,36 @@ swift::ModuleDecl *SwiftASTContext::GetModule(const SourceModule &module,
 
   // Create a diagnostic consumer for the diagnostics produced by the import.
   auto import_diags = getScopedDiagnosticConsumer();
+
+  // Report progress on module importing by using a callback function in
+  // swift::ASTContext.
+  std::unique_ptr<Progress> progress;
+  ast->SetPreModuleImportCallback(
+      [&progress](llvm::StringRef module_name,
+                  swift::ASTContext::ModuleImportKind kind) {
+        if (!progress)
+          progress = std::make_unique<Progress>("Importing Swift modules");
+        switch (kind) {
+        case swift::ASTContext::Module:
+          progress->Increment(1, module_name.str());
+          break;
+        case swift::ASTContext::Overlay:
+          progress->Increment(1, module_name.str() + " (overlay)");
+          break;
+        case swift::ASTContext::BridgingHeader:
+          progress->Increment(1, "Compiling bridging header: " +
+                                     module_name.str());
+          break;
+        }
+      });
+
+  // Clear the callback function on scope exit to prevent an out-of-scope access
+  // of the progress local variable
+  auto on_exit = llvm::make_scope_exit([&]() {
+    ast->SetPreModuleImportCallback(
+        [](llvm::StringRef module_name,
+           swift::ASTContext::ModuleImportKind kind) {});
+  });
 
   // Perform the import.
   swift::ModuleDecl *module_decl = ast->getModuleByName(module_basename_sref);
@@ -3306,6 +4110,7 @@ swift::ModuleDecl *SwiftASTContext::GetModule(const SourceModule &module,
              module.path.front().GetCString(),
              module_decl->getName().str().str().c_str());
 
+  RegisterModuleABINameToRealName(module_decl);
   m_swift_module_cache[module.path.front().GetStringRef()] = module_decl;
   return module_decl;
 }
@@ -3326,7 +4131,7 @@ swift::ModuleDecl *SwiftASTContext::GetModule(const FileSpec &module_spec,
       return iter->second;
 
     if (FileSystem::Instance().Exists(module_spec)) {
-      swift::ASTContext *ast = GetASTContext();
+      ThreadSafeASTContext ast = GetASTContext();
       if (!GetClangImporter()) {
         LOG_PRINTF(GetLog(LLDBLog::Types),
                    "((FileSpec)\"%s\") -- no ClangImporter so giving up",
@@ -3360,6 +4165,7 @@ swift::ModuleDecl *SwiftASTContext::GetModule(const FileSpec &module_spec,
                    module_spec.GetPath().c_str(),
                    module->getName().str().str().c_str());
 
+        RegisterModuleABINameToRealName(module);
         m_swift_module_cache[module_basename.GetCString()] = module;
         return module;
       } else {
@@ -3835,59 +4641,45 @@ void SwiftASTContext::RegisterSectionModules(
     }
   };
 
-  if (auto section_sp =
-          section_list->FindSectionByType(eSectionTypeSwiftModules, true)) {
-    DataExtractor section_data;
+  if (m_ast_file_data_map.find(&module) != m_ast_file_data_map.end())
+    return;
 
-    if (section_sp->GetSectionData(section_data)) {
-      llvm::StringRef section_data_ref(
-          (const char *)section_data.GetDataStart(),
-          section_data.GetByteSize());
-      parse_ast_section(section_data_ref, 1, 1);
-    }
-  } else {
-    if (m_ast_file_data_map.find(&module) != m_ast_file_data_map.end())
-      return;
+  // Grab all the AST blobs from the symbol vendor.
+  auto ast_file_datas = module.GetASTData(eLanguageTypeSwift);
+    if (ast_file_datas.size())
+  LOG_PRINTF(GetLog(LLDBLog::Types),
+             "(\"%s\") retrieved %zu AST Data blobs from the symbol vendor "
+             "(filter=\"%s\").",
+             GetBriefModuleName(module).c_str(), ast_file_datas.size(),
+             filter.str().c_str());
 
-    // Grab all the AST blobs from the symbol vendor.
-    auto ast_file_datas = module.GetASTData(eLanguageTypeSwift);
-    LOG_PRINTF(GetLog(LLDBLog::Types),
-               "(\"%s\") retrieved %zu AST Data blobs from the symbol vendor "
-               "(filter=\"%s\").",
-               GetBriefModuleName(module).c_str(), ast_file_datas.size(),
-               filter.str().c_str());
+  // Add each of the AST blobs to the vector of AST blobs for
+  // the module.
+  auto &ast_vector = GetASTVectorForModule(&module);
+  ast_vector.insert(ast_vector.end(), ast_file_datas.begin(),
+                    ast_file_datas.end());
 
-    // Add each of the AST blobs to the vector of AST blobs for
-    // the module.
-    auto &ast_vector = GetASTVectorForModule(&module);
-    ast_vector.insert(ast_vector.end(), ast_file_datas.begin(),
-                      ast_file_datas.end());
-
-    // Retrieve the module names from the AST blobs retrieved
-    // from the symbol vendor.
-    size_t i = 0;
-    for (auto ast_file_data_sp : ast_file_datas) {
-      // Parse the AST section info from the AST blob.
-      llvm::StringRef section_data_ref(
-          (const char *)ast_file_data_sp->GetBytes(),
-          ast_file_data_sp->GetByteSize());
-      parse_ast_section(section_data_ref, ++i, ast_file_datas.size());
-    }
+  // Retrieve the module names from the AST blobs retrieved
+  // from the symbol vendor.
+  size_t i = 0;
+  for (auto ast_file_data_sp : ast_file_datas) {
+    // Parse the AST section info from the AST blob.
+    llvm::StringRef section_data_ref((const char *)ast_file_data_sp->GetBytes(),
+                                     ast_file_data_sp->GetByteSize());
+    parse_ast_section(section_data_ref, ++i, ast_file_datas.size());
   }
 }
 
-void SwiftASTContext::ValidateSectionModules(
+void SwiftASTContext::ImportSectionModules(
     Module &module, const std::vector<std::string> &module_names) {
   VALID_OR_RETURN();
   LLDB_SCOPED_TIMER();
 
   Status error;
 
-  Progress progress(
-      llvm::formatv("Loading Swift module {0}",
-                    module.GetFileSpec().GetFilename().AsCString()),
-      module_names.size());
-
+  Progress progress("Loading Swift module dependencies",
+                    module.GetFileSpec().GetFilename().AsCString(),
+                    module_names.size());
   size_t completion = 0;
 
   for (const std::string &module_name : module_names) {
@@ -3896,9 +4688,9 @@ void SwiftASTContext::ValidateSectionModules(
 
     // We have to increment the completion value even if we can't get the module
     // object to stay in-sync with the total progress reporting.
-    progress.Increment(++completion);
+    progress.Increment(++completion, module_name);
     if (!GetModule(module_info, error))
-      module.ReportWarning("unable to load swift module \"%s\" (%s)",
+      module.ReportWarning("unable to load swift module \"{0}\" ({1})",
                            module_name.c_str(), error.AsCString());
   }
 }
@@ -3971,7 +4763,9 @@ static swift::Type ConvertSILFunctionTypesToASTFunctionTypes(swift::Type t) {
 CompilerType
 SwiftASTContext::GetTypeFromMangledTypename(ConstString mangled_typename) {
   if (llvm::isa<SwiftASTContextForExpressions>(this))
-    return GetCompilerType(ReconstructType(mangled_typename));
+    return GetCompilerType(
+        llvm::expectedToStdOptional(ReconstructType(mangled_typename))
+            .value_or(nullptr));
   return GetCompilerType(mangled_typename);
 }
 
@@ -4028,38 +4822,36 @@ CompilerType SwiftASTContext::GetAsClangType(ConstString mangled_name) {
 }
 
 swift::TypeBase *
-SwiftASTContext::ReconstructType(ConstString mangled_typename) {
+SwiftASTContext::ReconstructTypeOrWarn(ConstString mangled_typename) {
   Status error;
 
-  auto reconstructed_type = ReconstructType(mangled_typename, error);
-  if (!error.Success())
-    AddDiagnostic(eDiagnosticSeverityWarning, error.AsCString());
-  return reconstructed_type;
+  auto reconstructed_type = ReconstructType(mangled_typename);
+  if (!reconstructed_type)
+    AddDiagnostic(eSeverityWarning,
+                  llvm::toString(reconstructed_type.takeError()));
+  return *reconstructed_type;
 }
 
-swift::TypeBase *SwiftASTContext::ReconstructType(ConstString mangled_typename,
-                                                  Status &error) {
+llvm::Expected<swift::TypeBase *>
+SwiftASTContext::ReconstructTypeImpl(ConstString mangled_typename) {
   VALID_OR_RETURN(nullptr);
 
   const char *mangled_cstr = mangled_typename.AsCString();
-  if (mangled_typename.IsEmpty() ||
-      !SwiftLanguageRuntime::IsSwiftMangledName(mangled_typename.GetStringRef())) {
-    error.SetErrorStringWithFormat(
-        "typename \"%s\" is not a valid Swift mangled name", mangled_cstr);
-    return {};
+  if (mangled_typename.IsEmpty() || !SwiftLanguageRuntime::IsSwiftMangledName(
+                                        mangled_typename.GetStringRef())) {
+    return llvm::createStringError("typename \"" +
+                                   mangled_typename.GetStringRef() +
+                                   "\" is not a valid Swift mangled name");
   }
 
   LOG_VERBOSE_PRINTF(GetLog(LLDBLog::Types), "(\"%s\")", mangled_cstr);
 
-  swift::ASTContext *ast_ctx = GetASTContext();
+  ThreadSafeASTContext ast_ctx = GetASTContext();
   if (!ast_ctx) {
     LOG_PRINTF(GetLog(LLDBLog::Types), "(\"%s\") -- null Swift AST Context",
                mangled_cstr);
-    error.SetErrorString("null Swift AST Context");
-    return {};
+    return llvm::createStringError("null Swift AST Context");
   }
-
-  error.Clear();
 
   // If we were to crash doing this, remember what type caused it.
   llvm::PrettyStackTraceFormat PST("error finding type for %s", mangled_cstr);
@@ -4067,14 +4859,16 @@ swift::TypeBase *SwiftASTContext::ReconstructType(ConstString mangled_typename,
   if (found_type) {
     LOG_VERBOSE_PRINTF(GetLog(LLDBLog::Types),
                        "(\"%s\") -- found in the positive cache", mangled_cstr);
-    assert(&found_type->getASTContext() == ast_ctx);
+    assert(&found_type->getASTContext() == *ast_ctx);
     return found_type;
   }
 
   if (m_negative_type_cache.Lookup(mangled_cstr)) {
     LOG_PRINTF(GetLog(LLDBLog::Types),
                "(\"%s\") -- found in the negative cache", mangled_cstr);
-    return {};
+    return llvm::createStringError("type for typename \"" +
+                                   mangled_typename.GetString() +
+                                   "\" was not found (cached)");
   }
 
   LOG_PRINTF(GetLog(LLDBLog::Types), "(\"%s\") -- not cached, searching",
@@ -4082,9 +4876,9 @@ swift::TypeBase *SwiftASTContext::ReconstructType(ConstString mangled_typename,
 
   LLDB_SCOPED_TIMERF("%s (not cached)", LLVM_PRETTY_FUNCTION);
   found_type = swift::Demangle::getTypeForMangling(
-                   *ast_ctx, mangled_typename.GetStringRef())
+                   **ast_ctx, mangled_typename.GetStringRef())
                    .getPointer();
-  assert(!found_type || &found_type->getASTContext() == ast_ctx);
+  assert(!found_type || &found_type->getASTContext() == *ast_ctx);
 
   // If the typeref type system is disabled GetAsClangType will eventually call
   // ReconstructType again, eventually leading to a stack overflow.
@@ -4115,9 +4909,9 @@ swift::TypeBase *SwiftASTContext::ReconstructType(ConstString mangled_typename,
         break;
       auto super_mangled_typename = super_type.GetMangledTypeName();
       found_type = swift::Demangle::getTypeForMangling(
-                       *ast_ctx, super_mangled_typename.GetStringRef())
+                       **ast_ctx, super_mangled_typename.GetStringRef())
                        .getPointer();
-      assert(!found_type || &found_type->getASTContext() == ast_ctx);
+      assert(!found_type || &found_type->getASTContext() == *ast_ctx);
     }
   }
 
@@ -4125,7 +4919,7 @@ swift::TypeBase *SwiftASTContext::ReconstructType(ConstString mangled_typename,
     swift::TypeBase *ast_type =
         ConvertSILFunctionTypesToASTFunctionTypes(found_type).getPointer();
     assert(ast_type);
-    assert(&ast_type->getASTContext() == ast_ctx);
+    assert(&ast_type->getASTContext() == *ast_ctx);
     // This transformation is lossy: all SILFunction types are mapped
     // to the same AST type. We thus cannot cache the result, since
     // the mapping isn't bijective.
@@ -4139,20 +4933,56 @@ swift::TypeBase *SwiftASTContext::ReconstructType(ConstString mangled_typename,
 
   LOG_PRINTF(GetLog(LLDBLog::Types), "(\"%s\") -- not found", mangled_cstr);
 
-  error.SetErrorStringWithFormat("type for typename \"%s\" was not found",
-                                 mangled_cstr);
   CacheDemangledTypeFailure(mangled_typename);
-  return {};
+  return llvm::createStringError("type for typename \"" +
+                                 mangled_typename.GetString() +
+                                 "\" was not found");
+}
+
+llvm::Expected<swift::TypeBase *>
+SwiftASTContext::ReconstructType(ConstString mangled_typename) {
+  VALID_OR_RETURN(nullptr);
+
+  // Mangled names are encoded with the ABI module name in debug info, but with
+  // the regular module name in the swift module. When reconstructing these
+  // types, SwiftASTContext must first substitute the ABI module name with the
+  // regular one on the type's mangled name before attempting to reconstruct
+  // them.
+  auto mangling = TypeSystemSwiftTypeRef::TransformModuleName(
+      mangled_typename, m_module_abi_to_regular_name);
+  ConstString module_adjusted_mangled_typename;
+  if (mangling.isSuccess())
+    module_adjusted_mangled_typename = ConstString(mangling.result());
+
+  if (mangled_typename == module_adjusted_mangled_typename)
+    return ReconstructTypeImpl(mangled_typename);
+
+  // If the mangles names don't match, try the one with the module's regular
+  // name first.
+  auto result = ReconstructTypeImpl(module_adjusted_mangled_typename);
+
+  if (result)
+    return result;
+
+  auto error = llvm::toString(result.takeError());
+  LOG_PRINTF(
+      GetLog(LLDBLog::Types),
+      "Reconstruct type failed for adjusted type: \"%s\" with error: \"%s\"",
+      module_adjusted_mangled_typename.GetCString(), error.c_str());
+
+  // If the mangled name with the regular name fails, try the one with the ABI
+  // name. This could happen if a module's ABI name is the same as another
+  // module's regular name.
+  return ReconstructTypeImpl(mangled_typename);
 }
 
 CompilerType SwiftASTContext::GetAnyObjectType() {
   VALID_OR_RETURN(CompilerType());
-  swift::ASTContext *ast = GetASTContext();
+  ThreadSafeASTContext ast = GetASTContext();
   return ToCompilerType({ast->getAnyObjectType()});
 }
 
-static CompilerType ValueDeclToType(swift::ValueDecl *decl,
-                                    swift::ASTContext *ast) {
+static CompilerType ValueDeclToType(swift::ValueDecl *decl) {
   if (decl) {
     switch (decl->getKind()) {
     case swift::DeclKind::TypeAlias: {
@@ -4181,15 +5011,14 @@ static CompilerType ValueDeclToType(swift::ValueDecl *decl,
   return CompilerType();
 }
 
-static CompilerType DeclToType(swift::Decl *decl, swift::ASTContext *ast) {
+static CompilerType DeclToType(swift::Decl *decl) {
   if (swift::ValueDecl *value_decl =
           swift::dyn_cast_or_null<swift::ValueDecl>(decl))
-    return ValueDeclToType(value_decl, ast);
+    return ValueDeclToType(value_decl);
   return {};
 }
 
-static SwiftASTContext::TypeOrDecl DeclToTypeOrDecl(swift::ASTContext *ast,
-                                                    swift::Decl *decl) {
+static SwiftASTContext::TypeOrDecl DeclToTypeOrDecl(swift::Decl *decl) {
   if (decl) {
     switch (decl->getKind()) {
     case swift::DeclKind::BuiltinTuple:
@@ -4269,13 +5098,13 @@ SwiftASTContext::FindContainedTypeOrDecl(llvm::StringRef name,
 
   CompilerType container_type = container_type_or_decl.Apply<CompilerType>(
       [](CompilerType type) -> CompilerType { return type; },
-      [this](swift::Decl *decl) -> CompilerType {
-        return DeclToType(decl, GetASTContext());
+      [](swift::Decl *decl) -> CompilerType {
+        return DeclToType(decl);
       });
 
   if (!name.empty() &&
       container_type.GetTypeSystem().isa_and_nonnull<TypeSystemSwift>()) {
-    swift::Type swift_type = GetSwiftType(container_type);
+    swift::Type swift_type = GetSwiftTypeIgnoringErrors(container_type);
     if (!swift_type)
       return 0;
     swift::CanType swift_can_type(swift_type->getCanonicalType());
@@ -4286,8 +5115,8 @@ SwiftASTContext::FindContainedTypeOrDecl(llvm::StringRef name,
     swift::NominalTypeDecl *nominal_decl = nominal_type->getDecl();
     llvm::ArrayRef<swift::ValueDecl *> decls = nominal_decl->lookupDirect(
         swift::DeclName(m_ast_context_ap->getIdentifier(name)));
-    for (auto decl : decls)
-      results.emplace(DeclToTypeOrDecl(GetASTContext(), decl));
+    for (auto *decl : decls)
+      results.emplace(DeclToTypeOrDecl(decl));
   }
   return results.size() - size_before;
 }
@@ -4306,17 +5135,17 @@ CompilerType SwiftASTContext::FindType(const char *name,
     return *search_results.begin();
 }
 
-llvm::Optional<SwiftASTContext::TypeOrDecl>
+std::optional<SwiftASTContext::TypeOrDecl>
 SwiftASTContext::FindTypeOrDecl(const char *name,
                                 swift::ModuleDecl *swift_module) {
-  VALID_OR_RETURN(llvm::Optional<SwiftASTContext::TypeOrDecl>());
+  VALID_OR_RETURN(std::optional<SwiftASTContext::TypeOrDecl>());
 
   TypesOrDecls search_results;
 
   FindTypesOrDecls(name, swift_module, search_results, false);
 
   if (search_results.empty())
-    return llvm::Optional<SwiftASTContext::TypeOrDecl>();
+    return std::optional<SwiftASTContext::TypeOrDecl>();
   else
     return *search_results.begin();
 }
@@ -4375,19 +5204,19 @@ size_t SwiftASTContext::FindTypesOrDecls(const char *name,
                                 value_decls);
     if (identifier.isOperator()) {
       if (auto *op = swift_module->lookupPrefixOperator(identifier))
-        results.emplace(DeclToTypeOrDecl(GetASTContext(), op));
+        results.emplace(DeclToTypeOrDecl(op));
 
       if (auto *op = swift_module->lookupInfixOperator(identifier).getSingle())
-        results.emplace(DeclToTypeOrDecl(GetASTContext(), op));
+        results.emplace(DeclToTypeOrDecl(op));
 
       if (auto *op = swift_module->lookupPostfixOperator(identifier))
-        results.emplace(DeclToTypeOrDecl(GetASTContext(), op));
+        results.emplace(DeclToTypeOrDecl(op));
     }
     if (auto *pg = swift_module->lookupPrecedenceGroup(identifier).getSingle())
-      results.emplace(DeclToTypeOrDecl(GetASTContext(), pg));
+      results.emplace(DeclToTypeOrDecl(pg));
 
-    for (auto decl : value_decls)
-      results.emplace(DeclToTypeOrDecl(GetASTContext(), decl));
+    for (auto *decl : value_decls)
+      results.emplace(DeclToTypeOrDecl(decl));
   }
 
   return results.size() - before;
@@ -4476,8 +5305,7 @@ swift::PrintOptions SwiftASTContext::GetUserVisibleTypePrintingOptions(
   print_options.FullyQualifiedTypesIfAmbiguous = true;
   print_options.FullyQualifiedTypes = true;
   print_options.ExplodePatternBindingDecls = false;
-  print_options.PrintDocumentationComments =
-      print_options.PrintRegularClangComments = print_help_if_available;
+  print_options.PrintDocumentationComments = print_help_if_available;
   return print_options;
 }
 
@@ -4495,10 +5323,12 @@ llvm::TargetOptions *SwiftASTContext::getTargetOptions() {
 swift::ModuleDecl *SwiftASTContext::GetScratchModule() {
   VALID_OR_RETURN(nullptr);
 
-  if (m_scratch_module == nullptr)
+  if (m_scratch_module == nullptr) {
+    ThreadSafeASTContext ast_ctx = GetASTContext();
     m_scratch_module = swift::ModuleDecl::create(
         GetASTContext()->getIdentifier("__lldb_scratch_module"),
-        *GetASTContext());
+        **ast_ctx);
+  }
   return m_scratch_module;
 }
 
@@ -4555,7 +5385,7 @@ swift::irgen::IRGenModule &SwiftASTContext::GetIRGenModule() {
         "",        // features
         *getTargetOptions(),
         llvm::Reloc::Static, // TODO verify with Sean, Default went away
-        llvm::None, optimization_level);
+        std::nullopt, optimization_level);
     if (target_machine) {
       // Set the module's string representation.
       const llvm::DataLayout data_layout = target_machine->createDataLayout();
@@ -4594,7 +5424,7 @@ SwiftASTContext::CreateTupleType(const std::vector<TupleElement> &elements) {
   else {
     std::vector<swift::TupleTypeElt> tuple_elems;
     for (const TupleElement &element : elements) {
-      if (auto swift_type = GetSwiftType(element.element_type)) {
+      if (auto swift_type = GetSwiftTypeIgnoringErrors(element.element_type)) {
         if (element.element_name.IsEmpty())
           tuple_elems.push_back(swift::TupleTypeElt(swift_type));
         else
@@ -4605,8 +5435,9 @@ SwiftASTContext::CreateTupleType(const std::vector<TupleElement> &elements) {
         return {};
     }
     llvm::ArrayRef<swift::TupleTypeElt> fields(tuple_elems);
+    ThreadSafeASTContext ast_ctx = GetASTContext();
     return ToCompilerType(
-        {swift::TupleType::get(fields, *GetASTContext())});
+        {swift::TupleType::get(fields, **ast_ctx)});
   }
 }
 
@@ -4617,7 +5448,7 @@ bool SwiftASTContext::IsTupleType(lldb::opaque_compiler_type_t type) {
   return llvm::isa<::swift::TupleType>(swift_type);
 }
 
-llvm::Optional<TypeSystemSwift::NonTriviallyManagedReferenceKind>
+std::optional<TypeSystemSwift::NonTriviallyManagedReferenceKind>
 SwiftASTContext::GetNonTriviallyManagedReferenceKind(
     lldb::opaque_compiler_type_t type) {
   VALID_OR_RETURN({});
@@ -4640,21 +5471,22 @@ SwiftASTContext::GetNonTriviallyManagedReferenceKind(
 CompilerType
 SwiftASTContext::CreateGenericTypeParamType(unsigned int depth,
                                                  unsigned int index) {
+  ThreadSafeASTContext ast_ctx = GetASTContext();
   return ToCompilerType(
-      swift::GenericTypeParamType::get(false, depth, index, *GetASTContext()));
+      swift::GenericTypeParamType::get(false, depth, index, **ast_ctx));
 }
 
 CompilerType SwiftASTContext::GetErrorType() {
   VALID_OR_RETURN(CompilerType());
 
-  swift::ASTContext *swift_ctx = GetASTContext();
+  ThreadSafeASTContext swift_ctx = GetASTContext();
   if (swift_ctx) {
     // Getting the error type requires the Stdlib module be loaded,
     // but doesn't cause it to be loaded.  Do that here.
     swift_ctx->getStdlibModule(true);
     swift::NominalTypeDecl *error_type_decl = GetASTContext()->getErrorDecl();
     if (error_type_decl) {
-      auto error_type = error_type_decl->getDeclaredType().getPointer();
+      auto *error_type = error_type_decl->getDeclaredType().getPointer();
       return ToCompilerType({error_type});
     }
   }
@@ -4683,7 +5515,7 @@ bool SwiftASTContext::HasClangImporterErrors() const {
           ->NumClangErrors() != 0);
 }
 
-void SwiftASTContext::AddDiagnostic(DiagnosticSeverity severity,
+void SwiftASTContext::AddDiagnostic(lldb::Severity severity,
                                     llvm::StringRef message) {
   assert(m_diagnostic_consumer_ap);
   HEALTH_LOG_PRINTF("%s", message.str().c_str());
@@ -4768,10 +5600,15 @@ void SwiftASTContextForExpressions::ModulesDidLoad(ModuleList &module_list) {
     std::vector<std::pair<std::string, bool>> framework_search_paths;
     std::vector<std::string> extra_clang_args;
     lldb::ModuleSP module_sp = module_list.GetModuleAtIndex(mi);
-    ProcessModule(module_sp, m_description, discover_implicit_search_paths,
-                  use_all_compiler_flags, *target_sp, GetTriple(),
-                  plugin_search_options, module_search_paths,
-                  framework_search_paths, extra_clang_args);
+    if (!module_sp)
+      continue;
+    StringRef module_filter;
+    ProcessModule(*module_sp, m_description, discover_implicit_search_paths,
+                  use_all_compiler_flags,
+                  target_sp->GetExecutableModulePointer() == module_sp.get(),
+                  module_filter, GetTriple(), plugin_search_options,
+                  module_search_paths, framework_search_paths,
+                  extra_clang_args);
     // If the use-all-compiler-flags setting is enabled, the
     // expression context is supposed to merge all search paths
     // from all dylibs.
@@ -4824,9 +5661,8 @@ void SwiftASTContext::LogConfiguration() {
                         .RuntimeLibraryPaths.size());
 
   for (const auto &runtime_library_path :
-       m_ast_context_ap->SearchPathOpts.RuntimeLibraryPaths) {
+       m_ast_context_ap->SearchPathOpts.RuntimeLibraryPaths)
     HEALTH_LOG_PRINTF("    %s", runtime_library_path.c_str());
-  }
 
   HEALTH_LOG_PRINTF("  Runtime library import paths     : (%llu items)",
                     (unsigned long long)m_ast_context_ap->SearchPathOpts
@@ -4834,37 +5670,37 @@ void SwiftASTContext::LogConfiguration() {
                         .size());
 
   for (const auto &runtime_import_path :
-       m_ast_context_ap->SearchPathOpts.getRuntimeLibraryImportPaths()) {
+       m_ast_context_ap->SearchPathOpts.getRuntimeLibraryImportPaths())
     HEALTH_LOG_PRINTF("    %s", runtime_import_path.c_str());
-  }
 
   HEALTH_LOG_PRINTF("  Framework search paths           : (%llu items)",
                     (unsigned long long)m_ast_context_ap->SearchPathOpts
                         .getFrameworkSearchPaths()
                         .size());
   for (const auto &framework_search_path :
-       m_ast_context_ap->SearchPathOpts.getFrameworkSearchPaths()) {
+       m_ast_context_ap->SearchPathOpts.getFrameworkSearchPaths())
     HEALTH_LOG_PRINTF("    %s", framework_search_path.Path.c_str());
-  }
 
   HEALTH_LOG_PRINTF("  Import search paths              : (%llu items)",
                     (unsigned long long)m_ast_context_ap->SearchPathOpts
                         .getImportSearchPaths()
                         .size());
   for (const std::string &import_search_path :
-       m_ast_context_ap->SearchPathOpts.getImportSearchPaths()) {
+       m_ast_context_ap->SearchPathOpts.getImportSearchPaths())
     HEALTH_LOG_PRINTF("    %s", import_search_path.c_str());
-  }
 
   swift::ClangImporterOptions &clang_importer_options =
       GetClangImporterOptions();
 
+  if (!clang_importer_options.BridgingHeader.empty())
+    HEALTH_LOG_PRINTF("  Bridging Header               : %s",
+                      clang_importer_options.BridgingHeader.c_str());
+
   HEALTH_LOG_PRINTF(
       "  Extra clang arguments            : (%llu items)",
       (unsigned long long)clang_importer_options.ExtraArgs.size());
-  for (std::string &extra_arg : clang_importer_options.ExtraArgs) {
+  for (std::string &extra_arg : clang_importer_options.ExtraArgs)
     HEALTH_LOG_PRINTF("    %s", extra_arg.c_str());
-  }
 
   HEALTH_LOG_PRINTF("  Plugin search options            : (%llu items)",
                     (unsigned long long)m_ast_context_ap->SearchPathOpts
@@ -4894,10 +5730,9 @@ void SwiftASTContext::LogConfiguration() {
       continue;
     }
     if (auto *opt =
-            elem.dyn_cast<swift::PluginSearchOption::ExternalPluginPath>()) {
+            elem.dyn_cast<swift::PluginSearchOption::ExternalPluginPath>())
       HEALTH_LOG_PRINTF("    -external-plugin-path %s#%s",
                         opt->SearchPath.c_str(), opt->ServerPath.c_str());
-    }
   }
 }
 
@@ -4941,7 +5776,7 @@ bool SwiftASTContext::Verify(opaque_compiler_type_t type) {
   // that would recursively trigger another call to Verify().
   swift::TypeBase *swift_type = reinterpret_cast<swift::TypeBase *>(type);
   // Check that type is a Swift type and belongs this AST context.
-  return !swift_type || &swift_type->getASTContext() == GetASTContext();
+  return !swift_type || &swift_type->getASTContext() == *GetASTContext();
 }
 #endif
 
@@ -5148,8 +5983,13 @@ bool SwiftASTContext::IsVoidType(opaque_compiler_type_t type) {
 }
 
 bool SwiftASTContext::IsGenericType(const CompilerType &compiler_type) {
-  if (swift::Type swift_type = ::GetSwiftType(compiler_type))
-    return swift_type->hasTypeParameter(); // is<swift::ArchetypeType>();
+  if (auto swift_ast_ctx =
+          compiler_type.GetTypeSystem().dyn_cast_or_null<SwiftASTContext>()) {
+    if (swift::Type swift_type =
+            swift_ast_ctx->GetSwiftTypeIgnoringErrors(compiler_type))
+      return swift_type->hasTypeParameter();
+  } else
+    return compiler_type.GetTypeInfo() & eTypeIsGenericTypeParam;
   return false;
 }
 
@@ -5204,13 +6044,12 @@ SwiftASTContext::GetStaticSelfType(lldb::opaque_compiler_type_t type) {
 bool SwiftASTContext::GetProtocolTypeInfo(const CompilerType &type,
                                           ProtocolInfo &protocol_info) {
   LLDB_SCOPED_TIMER();
-  if (swift::CanType swift_can_type = ::GetCanonicalSwiftType(type)) {
+  if (swift::CanType swift_can_type = GetCanonicalSwiftType(type)) {
     if (!swift_can_type.isExistentialType())
       return false;
 
     swift::ExistentialLayout layout = swift_can_type.getExistentialLayout();
     protocol_info.m_is_class_only = layout.requiresClass();
-    protocol_info.m_num_protocols = layout.getProtocols().size();
     protocol_info.m_is_objc = layout.isObjC();
     protocol_info.m_is_anyobject = layout.isAnyObject();
     protocol_info.m_is_errortype = layout.isErrorExistential();
@@ -5220,10 +6059,23 @@ bool SwiftASTContext::GetProtocolTypeInfo(const CompilerType &type,
     }
 
     unsigned num_witness_tables = 0;
+    unsigned num_protocols = 0;
     for (auto protoDecl : layout.getProtocols()) {
+      // Ignore invertible protocols like Copyable entirely. They're marker
+      // protocols that are not mangled into generic signatures. Only their
+      // absence is mangled.
+      // FIXME: this should probably be filtering all marker protocols,
+      //  including Sendable, since marker protocols lack a witness table.
+      if (protoDecl->getInvertibleProtocolKind())
+        continue;
+
+      num_protocols++;
+
       if (!protoDecl->isObjC())
         num_witness_tables++;
     }
+
+    protocol_info.m_num_protocols = num_protocols;
 
     if (layout.isErrorExistential()) {
       // Error existential -- instance pointer only.
@@ -5258,7 +6110,8 @@ SwiftASTContext::GetTypeRefType(lldb::opaque_compiler_type_t type) {
 // Type Completion
 //----------------------------------------------------------------------
 
-ConstString SwiftASTContext::GetTypeName(opaque_compiler_type_t type) {
+ConstString SwiftASTContext::GetTypeName(opaque_compiler_type_t type,
+                                         bool BaseOnly) {
   VALID_OR_RETURN_CHECK_TYPE(
       type, ConstString("<invalid Swift context or opaque type>"));
   LLDB_SCOPED_TIMER();
@@ -5293,7 +6146,8 @@ GetArchetypeNames(swift::Type swift_type, swift::ASTContext &ast_ctx,
     return dict;
 
   llvm::DenseMap<std::pair<uint64_t, uint64_t>, StringRef> names;
-  SwiftLanguageRuntime::GetGenericParameterNamesForFunction(*sc, names);
+  SwiftLanguageRuntime::GetGenericParameterNamesForFunction(*sc, nullptr,
+                                                            names);
   swift_type.visit([&](swift::Type type) {
     if (!type->isTypeParameter() || dict.count(type->getCanonicalType()))
       return;
@@ -5314,14 +6168,15 @@ ConstString SwiftASTContext::GetDisplayTypeName(opaque_compiler_type_t type,
   VALID_OR_RETURN_CHECK_TYPE(
       type, ConstString("<invalid Swift context or opaque type>"));
   LLDB_SCOPED_TIMER();
-  std::string type_name(GetTypeName(type).AsCString(""));
+  std::string type_name(GetTypeName(type, false).AsCString(""));
   if (type) {
     swift::Type swift_type(GetSwiftType(type));
     swift::PrintOptions print_options;
     print_options.FullyQualifiedTypes = false;
     print_options.SynthesizeSugarOnTypes = true;
     print_options.FullyQualifiedTypesIfAmbiguous = true;
-    auto dict = GetArchetypeNames(swift_type, *GetASTContext(), sc);
+    ThreadSafeASTContext ast_ctx = GetASTContext();
+    auto dict = GetArchetypeNames(swift_type, **ast_ctx, sc);
     print_options.AlternativeTypeNames = &dict;
     type_name = swift_type.getString(print_options);
   }
@@ -5356,7 +6211,6 @@ SwiftASTContext::GetTypeInfo(opaque_compiler_type_t type,
   case swift::TypeKind::InOut:
   case swift::TypeKind::Module:
   case swift::TypeKind::ElementArchetype:
-  case swift::TypeKind::OpaqueTypeArchetype:
   case swift::TypeKind::OpenedArchetype:
   case swift::TypeKind::ParameterizedProtocol:
   case swift::TypeKind::Placeholder:
@@ -5367,6 +6221,7 @@ SwiftASTContext::GetTypeInfo(opaque_compiler_type_t type,
   case swift::TypeKind::SILMoveOnlyWrapped:
   case swift::TypeKind::SILToken:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     LOG_PRINTF(GetLog(LLDBLog::Types), "Unexpected type: %s",
@@ -5374,6 +6229,7 @@ SwiftASTContext::GetTypeInfo(opaque_compiler_type_t type,
     assert(false && "Internal compiler type");
     break;
   case swift::TypeKind::UnboundGeneric:
+  case swift::TypeKind::OpaqueTypeArchetype:
     break;
 
   case swift::TypeKind::GenericFunction:
@@ -5562,6 +6418,7 @@ lldb::TypeClass SwiftASTContext::GetTypeClass(opaque_compiler_type_t type) {
   case swift::TypeKind::OpenedArchetype:
   case swift::TypeKind::UnboundGeneric:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::ExistentialMetatype:
   case swift::TypeKind::DynamicSelf:
   case swift::TypeKind::Error:
@@ -5612,7 +6469,7 @@ SwiftASTContext::GetArrayElementType(opaque_compiler_type_t type,
       if (0 == strcmp(declname, "ContiguousArray") ||
           0 == strcmp(declname, "Array") ||
           0 == strcmp(declname, "ArraySlice")) {
-        assert(GetASTContext() == &args[0].getPointer()->getASTContext());
+        assert(*GetASTContext() == &args[0].getPointer()->getASTContext());
         element_type = ToCompilerType(args[0].getPointer());
       }
     }
@@ -5627,11 +6484,13 @@ CompilerType SwiftASTContext::GetCanonicalType(opaque_compiler_type_t type) {
   return ToCompilerType({GetCanonicalSwiftType(type).getPointer()});
 }
 
-CompilerType SwiftASTContext::GetInstanceType(opaque_compiler_type_t type) {
+CompilerType
+SwiftASTContext::GetInstanceType(opaque_compiler_type_t type,
+                                 ExecutionContextScope *exe_scope) {
   VALID_OR_RETURN_CHECK_TYPE(type, CompilerType());
 
   swift::CanType swift_can_type(GetCanonicalSwiftType(type));
-  assert((&swift_can_type->getASTContext() == GetASTContext()) &&
+  assert((&swift_can_type->getASTContext() == *GetASTContext()) &&
          "input type belongs to different SwiftASTContext");
   auto metatype_type = swift::dyn_cast<swift::AnyMetatypeType>(swift_can_type);
   if (metatype_type)
@@ -5777,7 +6636,7 @@ CompilerType SwiftASTContext::GetPointeeType(opaque_compiler_type_t type) {
 CompilerType SwiftASTContext::GetPointerType(opaque_compiler_type_t type) {
   VALID_OR_RETURN_CHECK_TYPE(type, CompilerType());
 
-  auto swift_type = GetSwiftType({weak_from_this(), type});
+  auto swift_type = GetSwiftType(type);
   auto pointer_type =
       swift_type->wrapInPointer(swift::PointerTypeKind::PTK_UnsafePointer);
   if (pointer_type)
@@ -5789,7 +6648,7 @@ CompilerType SwiftASTContext::GetPointerType(opaque_compiler_type_t type) {
 CompilerType SwiftASTContext::GetTypedefedType(opaque_compiler_type_t type) {
   VALID_OR_RETURN_CHECK_TYPE(type, CompilerType());
 
-  swift::Type swift_type(GetSwiftType({weak_from_this(), type}));
+  swift::Type swift_type(GetSwiftType(type));
   swift::TypeAliasType *name_alias_type =
       swift::dyn_cast<swift::TypeAliasType>(swift_type.getPointer());
   if (name_alias_type) {
@@ -5849,10 +6708,10 @@ bool SwiftASTContext::IsFixedSize(CompilerType compiler_type) {
   return false;
 }
 
-llvm::Optional<uint64_t>
+std::optional<uint64_t>
 SwiftASTContext::GetBitSize(opaque_compiler_type_t type,
                             ExecutionContextScope *exe_scope) {
-  VALID_OR_RETURN_CHECK_TYPE(type, llvm::None);
+  VALID_OR_RETURN_CHECK_TYPE(type, std::nullopt);
   LLDB_SCOPED_TIMER();
 
   // If the type has type parameters, bind them first.
@@ -5867,7 +6726,7 @@ SwiftASTContext::GetBitSize(opaque_compiler_type_t type,
 
     // Check that the type has been bound successfully -- and if not,
     // log the event and bail out to avoid an infinite loop.
-    swift::CanType swift_bound_type(::GetCanonicalSwiftType(bound_type));
+    swift::CanType swift_bound_type(GetCanonicalSwiftType(bound_type));
     if (swift_bound_type && swift_bound_type->hasTypeParameter()) {
       LOG_PRINTF(GetLog(LLDBLog::Types), "Can't bind type: %s",
                  bound_type.GetTypeName().AsCString());
@@ -5899,10 +6758,10 @@ SwiftASTContext::GetBitSize(opaque_compiler_type_t type,
   return {};
 }
 
-llvm::Optional<uint64_t>
+std::optional<uint64_t>
 SwiftASTContext::GetByteStride(opaque_compiler_type_t type,
                                ExecutionContextScope *exe_scope) {
-  VALID_OR_RETURN_CHECK_TYPE(type, llvm::None);
+  VALID_OR_RETURN_CHECK_TYPE(type, std::nullopt);
   LLDB_SCOPED_TIMER();
 
   // If the type has type parameters, bind them first.
@@ -5917,7 +6776,7 @@ SwiftASTContext::GetByteStride(opaque_compiler_type_t type,
 
     // Check that the type has been bound successfully -- and if not,
     // log the event and bail out to avoid an infinite loop.
-    swift::CanType swift_bound_type(::GetCanonicalSwiftType(bound_type));
+    swift::CanType swift_bound_type(GetCanonicalSwiftType(bound_type));
     if (swift_bound_type && swift_bound_type->hasTypeParameter()) {
       LOG_PRINTF(GetLog(LLDBLog::Types), "Can't bind type: %s",
                  bound_type.GetTypeName().AsCString());
@@ -5942,10 +6801,10 @@ SwiftASTContext::GetByteStride(opaque_compiler_type_t type,
   return {};
 }
 
-llvm::Optional<size_t>
+std::optional<size_t>
 SwiftASTContext::GetTypeBitAlign(opaque_compiler_type_t type,
                                  ExecutionContextScope *exe_scope) {
-  VALID_OR_RETURN_CHECK_TYPE(type, llvm::None);
+  VALID_OR_RETURN_CHECK_TYPE(type, std::nullopt);
   LLDB_SCOPED_TIMER();
 
   // If the type has type parameters, bind them first.
@@ -5960,7 +6819,7 @@ SwiftASTContext::GetTypeBitAlign(opaque_compiler_type_t type,
 
     // Check that the type has been bound successfully -- and if not,
     // log the event and bail out to avoid an infinite loop.
-    swift::CanType swift_bound_type(::GetCanonicalSwiftType(bound_type));
+    swift::CanType swift_bound_type(GetCanonicalSwiftType(bound_type));
     if (swift_bound_type && swift_bound_type->hasTypeParameter()) {
       LOG_PRINTF(GetLog(LLDBLog::Types), "Can't bind type: %s",
                  bound_type.GetTypeName().AsCString());
@@ -6016,6 +6875,7 @@ lldb::Encoding SwiftASTContext::GetEncoding(opaque_compiler_type_t type,
   case swift::TypeKind::SILToken:
   case swift::TypeKind::PackArchetype:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     break;
@@ -6086,13 +6946,12 @@ lldb::Encoding SwiftASTContext::GetEncoding(opaque_compiler_type_t type,
   return lldb::eEncodingInvalid;
 }
 
-uint32_t SwiftASTContext::GetNumChildren(opaque_compiler_type_t type,
-                                         bool omit_empty_base_classes,
-                                         const ExecutionContext *exe_ctx) {
-  VALID_OR_RETURN_CHECK_TYPE(type, 0);
+llvm::Expected<uint32_t>
+SwiftASTContext::GetNumChildren(opaque_compiler_type_t type,
+                                bool omit_empty_base_classes,
+                                const ExecutionContext *exe_ctx) {
+  VALID_OR_RETURN_CHECK_TYPE(type, llvm::createStringError("invalid type"));
   LLDB_SCOPED_TIMER();
-
-  uint32_t num_children = 0;
 
   swift::CanType swift_can_type(GetCanonicalSwiftType(type));
 
@@ -6121,6 +6980,7 @@ uint32_t SwiftASTContext::GetNumChildren(opaque_compiler_type_t type,
   case swift::TypeKind::SILToken:
   case swift::TypeKind::PackArchetype:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     break;
@@ -6187,15 +7047,16 @@ uint32_t SwiftASTContext::GetNumChildren(opaque_compiler_type_t type,
         swift_can_type->castTo<swift::LValueType>();
     swift::TypeBase *deref_type = lvalue_type->getObjectType().getPointer();
 
-    uint32_t num_pointee_children =
+    llvm::Expected<uint32_t> num_pointee_children =
         ToCompilerType(deref_type)
             .GetNumChildren(omit_empty_base_classes, exe_ctx);
+    if (!num_pointee_children)
+      return num_pointee_children;
     // If this type points to a simple type (or to a class), then it
     // has 1 child.
-    if (num_pointee_children == 0 || deref_type->getClassOrBoundGenericClass())
-      num_children = 1;
-    else
-      num_children = num_pointee_children;
+    if (*num_pointee_children == 0 || deref_type->getClassOrBoundGenericClass())
+      return 1;
+    return num_pointee_children;
   } break;
 
   case swift::TypeKind::UnboundGeneric:
@@ -6210,7 +7071,7 @@ uint32_t SwiftASTContext::GetNumChildren(opaque_compiler_type_t type,
     break;
   }
 
-  return num_children;
+  return 0;
 }
 
 #pragma mark Aggregate Types
@@ -6263,6 +7124,7 @@ uint32_t SwiftASTContext::GetNumFields(opaque_compiler_type_t type,
   case swift::TypeKind::SILToken:
   case swift::TypeKind::PackArchetype:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     break;
@@ -6316,7 +7178,9 @@ uint32_t SwiftASTContext::GetNumFields(opaque_compiler_type_t type,
   case swift::TypeKind::Protocol:
   case swift::TypeKind::ProtocolComposition:
   case swift::TypeKind::Existential:
-    return GetNumChildren(type, /*omit_empty_base_classes=*/false, nullptr);
+    return llvm::expectedToStdOptional(
+               GetNumChildren(type, /*omit_empty_base_classes=*/false, nullptr))
+        .value_or(0);
 
   case swift::TypeKind::ExistentialMetatype:
   case swift::TypeKind::Metatype:
@@ -6390,10 +7254,9 @@ SwiftASTContext::GetSuperclassName(const CompilerType &superclass_type) {
 }
 
 /// Retrieve the type and name of a child of an existential type.
-static std::pair<CompilerType, std::string>
-GetExistentialTypeChild(swift::ASTContext *swift_ast_ctx, CompilerType type,
-                        const SwiftASTContext::ProtocolInfo &protocol_info,
-                        unsigned idx) {
+static std::pair<CompilerType, std::string> GetExistentialTypeChild(
+    SwiftASTContext &swift_ast_ctx, swift::ASTContext &ast, CompilerType type,
+    const SwiftASTContext::ProtocolInfo &protocol_info, unsigned idx) {
   assert(idx < protocol_info.m_num_storage_words &&
          "caller is responsible for validating index");
 
@@ -6402,24 +7265,17 @@ GetExistentialTypeChild(swift::ASTContext *swift_ast_ctx, CompilerType type,
     std::string name;
     llvm::raw_string_ostream(name) << "payload_data_" << idx;
 
-    auto raw_pointer = swift_ast_ctx->TheRawPointerType;
+    auto raw_pointer = ast.TheRawPointerType;
     return {ToCompilerType(raw_pointer.getPointer()), std::move(name)};
   }
 
   // The instance for a class-bound existential.
   if (idx == 0 && protocol_info.m_is_class_only) {
     CompilerType class_type;
-    // FIXME: Remove this comment once the TypeSystemSwiftTyperef
-    // transition is complete.
-    //
-    // There is not enough data available to support this in
-    // TypeSystemSwiftTypeRef, but there is also notuser-visible
-    // feature affected by this apart from the --raw-types output, so
-    // this was removed to match TypeSystemSwiftTyperef:
-    /* if (protocol_info.m_superclass) {
+    if (protocol_info.m_superclass) {
       class_type = protocol_info.m_superclass;
-      } else */ {
-      auto raw_pointer = swift_ast_ctx->TheRawPointerType;
+    } else {
+      auto raw_pointer = ast.TheRawPointerType;
       class_type = ToCompilerType(raw_pointer.getPointer());
     }
 
@@ -6428,21 +7284,20 @@ GetExistentialTypeChild(swift::ASTContext *swift_ast_ctx, CompilerType type,
 
   // The instance for an error existential.
   if (idx == 0 && protocol_info.m_is_errortype) {
-    auto raw_pointer = swift_ast_ctx->TheRawPointerType;
+    auto raw_pointer = ast.TheRawPointerType;
     return {ToCompilerType(raw_pointer.getPointer()), "error"};
   }
 
   // The metatype for a non-class, non-error existential.
   if (idx && idx == protocol_info.m_num_payload_words) {
     // The metatype for a non-class, non-error existential.
-    auto any_metatype =
-        swift::ExistentialMetatypeType::get(swift_ast_ctx->TheAnyType);
+    auto any_metatype = swift::ExistentialMetatypeType::get(ast.TheAnyType);
     return {ToCompilerType(any_metatype), "metadata"};
   }
 
   // A witness table. Figure out which protocol it corresponds to.
   unsigned witness_table_idx = idx - protocol_info.m_num_payload_words - 1;
-  swift::CanType swift_can_type(GetCanonicalSwiftType(type));
+  swift::CanType swift_can_type(swift_ast_ctx.GetCanonicalSwiftType(type));
   swift::ExistentialLayout layout = swift_can_type.getExistentialLayout();
 
   std::string name;
@@ -6457,7 +7312,7 @@ GetExistentialTypeChild(swift::ASTContext *swift_ast_ctx, CompilerType type,
     --witness_table_idx;
   }
 
-  auto raw_pointer = swift_ast_ctx->TheRawPointerType;
+  auto raw_pointer = ast.TheRawPointerType;
   return {ToCompilerType(raw_pointer.getPointer()), std::move(name)};
 }
 
@@ -6496,6 +7351,7 @@ CompilerType SwiftASTContext::GetFieldAtIndex(opaque_compiler_type_t type,
   case swift::TypeKind::SILToken:
   case swift::TypeKind::PackArchetype:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     break;
@@ -6608,10 +7464,13 @@ CompilerType SwiftASTContext::GetFieldAtIndex(opaque_compiler_type_t type,
 
     CompilerType compiler_type = ToCompilerType(GetSwiftType(type));
     CompilerType child_type;
+    if (!GetASTContext())
+      return {};
+    ThreadSafeASTContext ast_ctx = GetASTContext();
     std::tie(child_type, name) = GetExistentialTypeChild(
-        GetASTContext(), compiler_type, protocol_info, idx);
+        *this, **ast_ctx, compiler_type, protocol_info, idx);
 
-    llvm::Optional<uint64_t> child_size = child_type.GetByteSize(nullptr);
+    std::optional<uint64_t> child_size = child_type.GetByteSize(nullptr);
     if (!child_size)
       return {};
     if (bit_offset_ptr)
@@ -6687,6 +7546,7 @@ uint32_t SwiftASTContext::GetNumPointeeChildren(opaque_compiler_type_t type) {
   case swift::TypeKind::SILToken:
   case swift::TypeKind::PackArchetype:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     return 0;
@@ -6744,7 +7604,7 @@ uint32_t SwiftASTContext::GetNumPointeeChildren(opaque_compiler_type_t type) {
   return 0;
 }
 
-static llvm::Optional<uint64_t> GetInstanceVariableOffset_Metadata(
+static std::optional<uint64_t> GetInstanceVariableOffset_Metadata(
     ValueObject *valobj, ExecutionContext *exe_ctx, const CompilerType &type,
     StringRef ivar_name, const CompilerType &ivar_type) {
   llvm::SmallString<1> m_description;
@@ -6764,7 +7624,7 @@ static llvm::Optional<uint64_t> GetInstanceVariableOffset_Metadata(
   }
 
   Status error;
-  llvm::Optional<uint64_t> offset =
+  std::optional<uint64_t> offset =
       runtime->GetMemberVariableOffset(type, valobj, ivar_name, &error);
   if (offset)
     LOG_PRINTF(GetLog(LLDBLog::Types), "for %s: %llu", ivar_name.str().c_str(),
@@ -6776,7 +7636,7 @@ static llvm::Optional<uint64_t> GetInstanceVariableOffset_Metadata(
   return offset;
 }
 
-static llvm::Optional<uint64_t>
+static std::optional<uint64_t>
 GetInstanceVariableOffset(ValueObject *valobj, ExecutionContext *exe_ctx,
                           const CompilerType &class_type, StringRef ivar_name,
                           const CompilerType &ivar_type) {
@@ -6794,7 +7654,7 @@ GetInstanceVariableOffset(ValueObject *valobj, ExecutionContext *exe_ctx,
                                             ivar_name, ivar_type);
 }
 
-CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
+llvm::Expected<CompilerType> SwiftASTContext::GetChildCompilerTypeAtIndex(
     opaque_compiler_type_t type, ExecutionContext *exe_ctx, size_t idx,
     bool transparent_pointers, bool omit_empty_base_classes,
     bool ignore_array_bounds, std::string &child_name,
@@ -6808,7 +7668,7 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
   auto get_type_size = [&exe_ctx](uint32_t &result, CompilerType type) {
     auto *exe_scope =
         exe_ctx ? exe_ctx->GetBestExecutionContextScope() : nullptr;
-    llvm::Optional<uint64_t> size = type.GetByteSize(exe_scope);
+    std::optional<uint64_t> size = type.GetByteSize(exe_scope);
     if (!size)
       return false;
     result = *size;
@@ -6817,7 +7677,8 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
 
   language_flags = 0;
   swift::CanType swift_can_type(GetCanonicalSwiftType(type));
-  assert(&swift_can_type->getASTContext() == GetASTContext());
+  ThreadSafeASTContext ast_ctx = GetASTContext();
+  assert(&swift_can_type->getASTContext() == *ast_ctx);
 
   const swift::TypeKind type_kind = swift_can_type->getKind();
   switch (type_kind) {
@@ -6844,6 +7705,7 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
   case swift::TypeKind::SILToken:
   case swift::TypeKind::PackArchetype:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     break;
@@ -6879,7 +7741,8 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
           cached_enum_info->GetElementWithPayloadAtIndex(idx);
       child_name.assign(element_info->name.GetCString());
       if (!get_type_size(child_byte_size, element_info->payload_type))
-        return {};
+        return llvm::createStringError("could not get size for enum element " +
+                                       llvm::Twine(idx));
       child_byte_offset = 0;
       child_bitfield_bit_size = 0;
       child_bitfield_bit_offset = 0;
@@ -6887,7 +7750,7 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
       child_is_deref_of_parent = false;
       if (element_info->is_indirect) {
         language_flags |= LanguageFlags::eIsIndirectEnumCase;
-        return ToCompilerType(GetASTContext()->TheRawPointerType.getPointer());
+        return ToCompilerType(ast_ctx->TheRawPointerType.getPointer());
       } else
         return element_info->payload_type;
     }
@@ -6907,15 +7770,17 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
 
     CompilerType child_type = ToCompilerType(child.getType().getPointer());
     if (!get_type_size(child_byte_size, child_type))
-      return {};
+      return llvm::createStringError("could not get size of tuple element " +
+                                     child_name);
     child_is_base_class = false;
     child_is_deref_of_parent = false;
 
     CompilerType compiler_type = ToCompilerType(GetSwiftType(type));
-    llvm::Optional<uint64_t> offset = GetInstanceVariableOffset(
+    std::optional<uint64_t> offset = GetInstanceVariableOffset(
         valobj, exe_ctx, compiler_type, printed_idx.c_str(), child_type);
     if (!offset)
-      return {};
+      return llvm::createStringError("could not get offset for tuple element " +
+                                     child_name);
 
     child_byte_offset = *offset;
     child_bitfield_bit_size = 0;
@@ -6936,7 +7801,7 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
 
         child_name = GetSuperclassName(superclass_type);
         if (!get_type_size(child_byte_size, superclass_type))
-          return {};
+          return llvm::createStringError("could not get size of super class");
         child_is_base_class = true;
         child_is_deref_of_parent = false;
 
@@ -6976,7 +7841,9 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
                 ToCompilerType(VD->getTypeInContext().getPointer());
             child_name = VD->getNameStr().str();
             if (!get_type_size(child_byte_size, child_type))
-              return {};
+              return llvm::createStringError("could not get size of field " +
+                                             child_name);
+
             child_is_base_class = false;
             child_is_deref_of_parent = false;
             child_byte_offset = 0;
@@ -6984,7 +7851,8 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
             child_bitfield_bit_offset = 0;
             return child_type;
           }
-          return {};
+          return llvm::createStringError("could not get size of field " +
+                                         child_name);
         }
 
     auto stored_properties = GetStoredProperties(nominal);
@@ -6999,16 +7867,17 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
     CompilerType child_type = ToCompilerType(child_swift_type.getPointer());
     child_name = property->getBaseName().userFacingName().str();
     if (!get_type_size(child_byte_size, child_type))
-      return {};
+      return llvm::createStringError("could not get size of field " +
+                                     child_name);
     child_is_base_class = false;
     child_is_deref_of_parent = false;
 
     CompilerType compiler_type = ToCompilerType(GetSwiftType(type));
-    llvm::Optional<uint64_t> offset = GetInstanceVariableOffset(
+    std::optional<uint64_t> offset = GetInstanceVariableOffset(
         valobj, exe_ctx, compiler_type, child_name.c_str(), child_type);
     if (!offset)
-      return {};
-
+      return llvm::createStringError("could not get offset of field " +
+                                     child_name);
     child_byte_offset = *offset;
     child_bitfield_bit_size = 0;
     child_bitfield_bit_offset = 0;
@@ -7027,10 +7896,14 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
 
     CompilerType compiler_type = ToCompilerType(GetSwiftType(type));
     CompilerType child_type;
+    if (!ast_ctx)
+      return llvm::createStringError("no ast context");
+
     std::tie(child_type, child_name) = GetExistentialTypeChild(
-        GetASTContext(), compiler_type, protocol_info, idx);
+        *this, **ast_ctx, compiler_type, protocol_info, idx);
     if (!get_type_size(child_byte_size, child_type))
-      return {};
+      return llvm::createStringError("could not get size of field " +
+                                     llvm::Twine(idx));
     child_byte_offset = idx * child_byte_size;
     child_bitfield_bit_size = 0;
     child_bitfield_bit_offset = 0;
@@ -7053,7 +7926,9 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
     break;
 
   case swift::TypeKind::LValue:
-    if (idx < GetNumChildren(type, omit_empty_base_classes, exe_ctx)) {
+    if (idx < llvm::expectedToStdOptional(
+                  GetNumChildren(type, omit_empty_base_classes, exe_ctx))
+                  .value_or(0)) {
       CompilerType pointee_clang_type(GetNonReferenceType(type));
       Flags pointee_clang_type_flags(pointee_clang_type.GetTypeInfo());
       const char *parent_name = valobj ? valobj->GetName().GetCString() : NULL;
@@ -7065,7 +7940,7 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
       // We have a pointer to a simple type
       if (idx == 0) {
         if (!get_type_size(child_byte_size, pointee_clang_type))
-          return {};
+          return llvm::createStringError("could not get size of lvalue");
         child_byte_offset = 0;
         return pointee_clang_type;
       }
@@ -7123,12 +7998,12 @@ CompilerType SwiftASTContext::GetChildCompilerTypeAtIndex(
 // second index 1 is the child index for "m_b" within class A.
 
 size_t SwiftASTContext::GetIndexOfChildMemberWithName(
-    opaque_compiler_type_t type, const char *name, ExecutionContext *exe_ctx,
+    opaque_compiler_type_t type, StringRef name, ExecutionContext *exe_ctx,
     bool omit_empty_base_classes, std::vector<uint32_t> &child_indexes) {
   VALID_OR_RETURN_CHECK_TYPE(type, 0);
   LLDB_SCOPED_TIMER();
 
-  if (name && name[0]) {
+  if (!name.empty()) {
     swift::CanType swift_can_type(GetCanonicalSwiftType(type));
 
     const swift::TypeKind type_kind = swift_can_type->getKind();
@@ -7156,6 +8031,7 @@ size_t SwiftASTContext::GetIndexOfChildMemberWithName(
     case swift::TypeKind::SILToken:
     case swift::TypeKind::PackArchetype:
     case swift::TypeKind::TypeVariable:
+    case swift::TypeKind::ErrorUnion:
     case swift::TypeKind::Unresolved:
     case swift::TypeKind::VariadicSequence:
       break;
@@ -7276,8 +8152,11 @@ size_t SwiftASTContext::GetIndexOfChildMemberWithName(
       for (unsigned idx : swift::range(protocol_info.m_num_storage_words)) {
         CompilerType child_type;
         std::string child_name;
+        ThreadSafeASTContext ast_ctx = GetASTContext();
+        if (!ast_ctx)
+          return 0;
         std::tie(child_type, child_name) = GetExistentialTypeChild(
-            GetASTContext(), compiler_type, protocol_info, idx);
+            *this, **ast_ctx, compiler_type, protocol_info, idx);
         if (name == child_name) {
           child_indexes.push_back(idx);
           return child_indexes.size();
@@ -7355,7 +8234,7 @@ bool SwiftASTContext::GetSelectedEnumCase(const CompilerType &type,
                                           ConstString *name, bool *has_payload,
                                           CompilerType *payload,
                                           bool *is_indirect) {
-  swift::CanType swift_can_type = ::GetCanonicalSwiftType(type);
+  swift::CanType swift_can_type = GetCanonicalSwiftType(type);
   if (!swift_can_type)
     return false;
   auto *ast = GetSwiftASTContext(&swift_can_type->getASTContext());
@@ -7400,7 +8279,7 @@ CompilerType SwiftASTContext::GetBoundGenericType(opaque_compiler_type_t type,
   VALID_OR_RETURN_CHECK_TYPE(type, CompilerType());
 
   swift::CanType swift_can_type(GetCanonicalSwiftType(type));
-  assert(&swift_can_type->getASTContext() == GetASTContext());
+  assert(&swift_can_type->getASTContext() == *GetASTContext());
   if (auto *bound_generic_type =
           swift_can_type->getAs<swift::BoundGenericType>())
     if (idx < bound_generic_type->getGenericArgs().size())
@@ -7415,7 +8294,7 @@ CompilerType SwiftASTContext::GetUnboundGenericType(opaque_compiler_type_t type,
   VALID_OR_RETURN_CHECK_TYPE(type, CompilerType());
 
   swift::CanType swift_can_type(GetCanonicalSwiftType(type));
-  assert(&swift_can_type->getASTContext() == GetASTContext());
+  assert(&swift_can_type->getASTContext() == *GetASTContext());
   if (auto *unbound_generic_type =
           swift_can_type->getAs<swift::UnboundGenericType>()) {
     auto *nominal_type_decl = unbound_generic_type->getDecl();
@@ -7433,7 +8312,7 @@ CompilerType SwiftASTContext::GetUnboundGenericType(opaque_compiler_type_t type,
 
 CompilerType SwiftASTContext::GetGenericArgumentType(CompilerType ct,
                                                      size_t idx) {
-  swift::Type swift_type = ::GetSwiftType(ct);
+  swift::Type swift_type = GetSwiftTypeIgnoringErrors(ct);
   if (!swift_type)
     return {};
   auto *ast = GetSwiftASTContext(&swift_type->getASTContext());
@@ -7510,7 +8389,7 @@ LLVM_DUMP_METHOD void SwiftASTContext::dump(opaque_compiler_type_t type) const {
 #endif
 
 bool SwiftASTContext::DumpTypeValue(
-    opaque_compiler_type_t type, Stream *s, lldb::Format format,
+    opaque_compiler_type_t type, Stream &s, lldb::Format format,
     const lldb_private::DataExtractor &data, lldb::offset_t byte_offset,
     size_t byte_size, uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
     ExecutionContextScope *exe_scope, bool is_base_class) {
@@ -7544,6 +8423,7 @@ bool SwiftASTContext::DumpTypeValue(
   case swift::TypeKind::SILToken:
   case swift::TypeKind::PackArchetype:
   case swift::TypeKind::TypeVariable:
+  case swift::TypeKind::ErrorUnion:
   case swift::TypeKind::Unresolved:
   case swift::TypeKind::VariadicSequence:
     break;
@@ -7631,7 +8511,7 @@ bool SwiftASTContext::DumpTypeValue(
       byte_size = 4;
       break;
     }
-    return DumpDataExtractor(data, s, byte_offset, format, byte_size,
+    return DumpDataExtractor(data, &s, byte_offset, format, byte_size,
                              item_count, UINT32_MAX, LLDB_INVALID_ADDRESS,
                              bitfield_bit_size, bitfield_bit_offset, exe_scope);
   } break;
@@ -7645,7 +8525,7 @@ bool SwiftASTContext::DumpTypeValue(
   case swift::TypeKind::UnownedStorage:
   case swift::TypeKind::WeakStorage:
     return ToCompilerType(swift_can_type->getReferenceStorageReferent())
-        .DumpTypeValue(s, format, data, byte_offset, byte_size,
+        .DumpTypeValue(&s, format, data, byte_offset, byte_size,
                        bitfield_bit_size, bitfield_bit_offset, exe_scope,
                        is_base_class);
   case swift::TypeKind::Enum:
@@ -7654,26 +8534,27 @@ bool SwiftASTContext::DumpTypeValue(
     if (cached_enum_info) {
       auto enum_elem_info = cached_enum_info->GetElementFromData(data, true);
       if (enum_elem_info)
-        s->Printf("%s", enum_elem_info->name.GetCString());
+        s.Printf("%s", enum_elem_info->name.GetCString());
       else {
         lldb::offset_t ptr = 0;
         if (data.GetByteSize())
-          s->Printf("<invalid> (0x%" PRIx8 ")", data.GetU8(&ptr));
+          s.Printf("<invalid> (0x%" PRIx8 ")", data.GetU8(&ptr));
         else
-          s->Printf("<empty>");
+          s.Printf("<empty>");
       }
       return true;
     } else
-      s->Printf("<unknown type>");
+      s.Printf("<unknown type>");
   } break;
 
   case swift::TypeKind::Struct:
   case swift::TypeKind::Protocol:
     return false;
 
-  case swift::TypeKind::ExistentialMetatype:
-  case swift::TypeKind::Metatype: {
-    return DumpDataExtractor(data, s, byte_offset, eFormatPointer, byte_size, 1,
+    
+  case swift::TypeKind::Metatype:
+  case swift::TypeKind::ExistentialMetatype: {
+    return DumpDataExtractor(data, &s, byte_offset, eFormatPointer, byte_size, 1,
                              UINT32_MAX, LLDB_INVALID_ADDRESS,
                              bitfield_bit_size, bitfield_bit_offset, exe_scope);
   } break;
@@ -7694,7 +8575,7 @@ bool SwiftASTContext::DumpTypeValue(
     break;
   }
 
-  return 0;
+  return false;
 }
 
 bool SwiftASTContext::IsImportedType(opaque_compiler_type_t type,
@@ -7765,17 +8646,15 @@ SwiftASTContext::ConvertClangTypeToSwiftType(CompilerType clang_type) {
   if (!typeref_type)
     return {};
 
-  Status error;
-  auto *ast_type = ReconstructType(typeref_type.GetMangledTypeName(), error);
-  if (error.Fail()) {
-    LLDB_LOGF(GetLog(LLDBLog::Types),
-              "[SwiftASTContext::ConvertClangTypeToSwiftType] Could not "
-              "reconstruct type. Error: %s",
-              error.AsCString());
+  auto ast_type = ReconstructType(typeref_type.GetMangledTypeName());
+  if (!ast_type) {
+    LLDB_LOG_ERROR(GetLog(LLDBLog::Types), ast_type.takeError(),
+                   "[SwiftASTContext::ConvertClangTypeToSwiftType] Could not "
+                   "reconstruct type. Error: {0}");
     return {};
   }
 
-  return {this->weak_from_this(), ast_type};
+  return {this->weak_from_this(), *ast_type};
 }
 
 CompilerType SwiftASTContext::GetBuiltinIntType() {
@@ -7784,7 +8663,7 @@ CompilerType SwiftASTContext::GetBuiltinIntType() {
 }
 
 bool SwiftASTContext::TypeHasArchetype(CompilerType type) {
-  auto swift_type = GetSwiftType(type);
+  auto swift_type = GetSwiftTypeIgnoringErrors(type);
   if (swift_type)
     return swift_type->hasArchetype();
   return false;
@@ -7802,14 +8681,14 @@ void SwiftASTContext::DumpTypeDescription(opaque_compiler_type_t type,
                                           lldb::DescriptionLevel level,
                                           ExecutionContextScope *) {
   StreamFile s(stdout, false);
-  DumpTypeDescription(type, &s, level);
+  DumpTypeDescription(type, s, level);
 }
 
 void SwiftASTContext::DumpTypeDescription(opaque_compiler_type_t type,
-                                          Stream *s,
+                                          Stream &s,
                                           lldb::DescriptionLevel level,
                                           ExecutionContextScope *) {
-  DumpTypeDescription(type, s, false, true, level);
+  DumpTypeDescription(type, &s, false, true, level);
 }
 
 void SwiftASTContext::DumpTypeDescription(opaque_compiler_type_t type,
@@ -8042,7 +8921,7 @@ void SwiftASTContext::DumpTypeDescription(opaque_compiler_type_t type,
     s->Printf("<could not resolve type>");
 }
 
-DWARFASTParser *SwiftASTContext::GetDWARFParser() {
+plugin::dwarf::DWARFASTParser *SwiftASTContext::GetDWARFParser() {
   return GetTypeSystemSwiftTypeRef().GetDWARFParser();
 }
 
@@ -8085,38 +8964,19 @@ lldb::TargetWP SwiftASTContextForExpressions::GetTargetWP() const {
   return ts->m_target_wp;
 }
 
-UserExpression *SwiftASTContextForExpressions::GetUserExpression(
-    llvm::StringRef expr, llvm::StringRef prefix, lldb::LanguageType language,
-    Expression::ResultType desired_type,
-    const EvaluateExpressionOptions &options, ValueObject *ctx_obj) {
-  TargetSP target_sp = GetTargetWP().lock();
-  if (!target_sp)
-    return nullptr;
-  if (ctx_obj != nullptr) {
-    lldb_assert(0,
-                "Swift doesn't support 'evaluate in the context"
-                " of an object'.",
-                __FUNCTION__, __FILE__, __LINE__);
-    return nullptr;
-  }
-
-  return new SwiftUserExpression(*target_sp.get(), expr, prefix, language,
-                                 desired_type, options);
-}
-
 PersistentExpressionState *
 SwiftASTContextForExpressions::GetPersistentExpressionState() {
   return GetTypeSystemSwiftTypeRef().GetPersistentExpressionState();
 }
 
-static void DescribeFileUnit(Stream &s, swift::FileUnit *file_unit) {
+static void DescribeFileUnit(Stream &s, const swift::FileUnit *file_unit) {
   s.PutCString("kind = ");
 
   switch (file_unit->getKind()) {
   case swift::FileUnitKind::Source: {
     s.PutCString("Source, ");
-    if (swift::SourceFile *source_file =
-            llvm::dyn_cast<swift::SourceFile>(file_unit)) {
+    if (auto *source_file =
+            llvm::dyn_cast<const swift::SourceFile>(file_unit)) {
       s.Printf("filename = \"%s\", ", source_file->getFilename().str().c_str());
       s.PutCString("source file kind = ");
       switch (source_file->Kind) {
@@ -8135,6 +8995,9 @@ static void DescribeFileUnit(Stream &s, swift::FileUnit *file_unit) {
       case swift::SourceFileKind::Interface:
         s.PutCString("Interface");
         break;
+      case swift::SourceFileKind::DefaultArgument:
+        s.PutCString("Default Argument");
+        break;
       }
     }
   } break;
@@ -8150,7 +9013,7 @@ static void DescribeFileUnit(Stream &s, swift::FileUnit *file_unit) {
       s.PutCString("Serialized Swift AST, ");
     else
       s.PutCString("Clang module, ");
-    swift::LoadedFile *loaded_file = swift::cast<swift::LoadedFile>(file_unit);
+    auto *loaded_file = swift::cast<const swift::LoadedFile>(file_unit);
     s.Printf("filename = \"%s\"", loaded_file->getFilename().str().c_str());
   } break;
   case swift::FileUnitKind::DWARFModule:
@@ -8243,7 +9106,7 @@ static swift::ModuleDecl *LoadOneModule(const SourceModule &module,
 
   if (GetLog(LLDBLog::Types | LLDBLog::Expressions)) {
     StreamString ss;
-    for (swift::FileUnit *file_unit : swift_module->getFiles())
+    for (const swift::FileUnit *file_unit : swift_module->getFiles())
       DescribeFileUnit(ss, file_unit);
     LOG_PRINTF(GetLog(LLDBLog::Types | LLDBLog::Expressions),
                "Imported module %s from {%s}", module.path.front().AsCString(),
@@ -8258,13 +9121,11 @@ bool SwiftASTContextForExpressions::GetImplicitImports(
         &modules,
     Status &error) {
   LLDB_SCOPED_TIMER();
-  if (!GetCompileUnitImports(sc, process_sp, modules, error)) {
+  if (!GetCompileUnitImports(sc, process_sp, modules, error))
     return false;
-  }
 
   // Get the hand-loaded modules from the SwiftPersistentExpressionState.
   for (auto &module_pair : m_hand_loaded_modules) {
-
     auto &attributed_import = module_pair.second;
 
     // If the ImportedModule in the SwiftPersistentExpressionState has a
@@ -8324,10 +9185,7 @@ bool SwiftASTContextForExpressions::CacheUserImports(
 
   auto src_file_imports = source_file.getImports();
 
-  Progress progress(llvm::formatv("Caching Swift user imports from '{0}'",
-                                  source_file.getFilename().data()),
-                    src_file_imports.size());
-
+  Progress progress("Importing modules used in expression");
   size_t completion = 0;
 
   /// Find all explicit imports in the expression.
@@ -8345,7 +9203,9 @@ bool SwiftASTContextForExpressions::CacheUserImports(
   source_file.walk(import_finder);
   
   for (const auto &attributed_import : src_file_imports) {
-    progress.Increment(++completion);
+    progress.Increment(
+        ++completion,
+        attributed_import.module.importedModule->getModuleFilename().str());
     swift::ModuleDecl *module = attributed_import.module.importedModule;
     if (module && import_finder.imports.count(module)) {
       std::string module_name;
@@ -8376,15 +9236,17 @@ bool SwiftASTContextForExpressions::CacheUserImports(
               llvm::raw_svector_ostream errs(error);
               bool discover_implicit_search_paths = false;
               swift::CompilerInvocation &invocation = GetCompilerInvocation();
+              StringRef module_filter;
 
               LOG_PRINTF(GetLog(LLDBLog::Types),
                          "Scanning for search paths in %s",
                          ast_file.str().c_str());
               if (DeserializeAllCompilerFlags(
-                      invocation, ast_file, {file_or_err->get()->getBuffer()},
-                      path_remap, discover_implicit_search_paths,
-                      m_description.str().str(), errs, got_serialized_options,
-                      found_swift_modules, /*search_paths_only = */true)) {
+                      invocation, ast_file, module_filter,
+                      {file_or_err->get()->getBuffer()}, path_remap,
+                      discover_implicit_search_paths, m_description.str().str(),
+                      errs, got_serialized_options, found_swift_modules,
+                      /*search_paths_only = */ true)) {
                 LOG_PRINTF(GetLog(LLDBLog::Types), "Could not parse %s: %s",
                            ast_file.str().c_str(), error.str().str().c_str());
               }
@@ -8402,15 +9264,16 @@ bool SwiftASTContextForExpressions::CacheUserImports(
 }
 
 bool SwiftASTContext::GetCompileUnitImports(
-    SymbolContext &sc, ProcessSP process_sp,
+    const SymbolContext &sc, ProcessSP process_sp,
     llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
         &modules,
     Status &error) {
   return GetCompileUnitImportsImpl(sc, process_sp, &modules, error);
 }
 
-void SwiftASTContext::PerformCompileUnitImports(
-    SymbolContext &sc, lldb::ProcessSP process_sp, Status &error) {
+void SwiftASTContext::PerformCompileUnitImports(const SymbolContext &sc,
+                                                lldb::ProcessSP process_sp,
+                                                Status &error) {
   GetCompileUnitImportsImpl(sc, process_sp, nullptr, error);
 }
 
@@ -8420,11 +9283,12 @@ GetCUSignature(CompileUnit &compile_unit) {
 }
 
 bool SwiftASTContext::GetCompileUnitImportsImpl(
-    SymbolContext &sc, lldb::ProcessSP process_sp,
+    const SymbolContext &sc, lldb::ProcessSP process_sp,
     llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
         *modules,
     Status &error) {
   LLDB_SCOPED_TIMER();
+
   CompileUnit *compile_unit = sc.comp_unit;
   if (compile_unit && compile_unit->GetModule())
     // Check the cache if this compile unit's imports were previously
@@ -8458,14 +9322,46 @@ bool SwiftASTContext::GetCompileUnitImportsImpl(
   if (cu_imports.size() == 0)
     return true;
 
-  Progress progress(
-      llvm::formatv("Getting Swift compile unit imports for '{0}'",
-                    compile_unit->GetPrimaryFile().GetFilename()),
-      cu_imports.size());
+  // Set PCM validation. This is not a great place to do this, but it
+  // needs to happen after ClangImporter was created and
+  // m_has_explicit_modules has been initialized.
+  {
+    // Read the setting.
+    AutoBool validate_pcm_setting = AutoBool::Auto;
+    TargetSP target_sp = GetTargetWP().lock();
+    if (target_sp)
+      validate_pcm_setting = target_sp->GetSwiftPCMValidation();
 
+    // If the setting is explicit, honor it.
+    bool validate_pcm = validate_pcm_setting != AutoBool::False;
+    if (validate_pcm_setting == AutoBool::Auto) {
+      // Disable validation for explicit modules.
+      validate_pcm = m_has_explicit_modules ? false : true;
+      // Enable validation in asserts builds.
+#ifndef NDEBUG
+      validate_pcm = true;
+#endif
+    }
+    
+    auto &pp_opts = m_clangimporter->getClangPreprocessor()
+      .getPreprocessorOpts();
+    pp_opts.DisablePCHOrModuleValidation =
+        validate_pcm ? clang::DisableValidationForModuleKind::None
+                     : clang::DisableValidationForModuleKind::All;
+    pp_opts.ModulesCheckRelocated = validate_pcm;
+
+    LOG_PRINTF(GetLog(LLDBLog::Types), "PCM validation is %s",
+               validate_pcm ? "disabled" : "enabled");
+  }
+  
+  LOG_PRINTF(GetLog(LLDBLog::Types), "Importing dependencies of current CU");
+  
+  std::string category = "Importing Swift module dependencies for ";
+  category += compile_unit->GetPrimaryFile().GetFilename();
+  Progress progress(category, "", cu_imports.size());
   size_t completion = 0;
   for (const SourceModule &module : cu_imports) {
-    progress.Increment(++completion);
+    progress.Increment(++completion, module.path.back().GetStringRef().str());
     // When building the Swift stdlib with debug info these will
     // show up in "Swift.o", but we already imported them and
     // manually importing them will fail.

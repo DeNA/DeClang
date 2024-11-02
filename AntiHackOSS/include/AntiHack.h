@@ -18,6 +18,7 @@
 #define _ANTI_CHEAT_INCLUDES_
 
 #include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/IR/Function.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Transforms/IPO.h"

@@ -27,7 +27,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -173,7 +172,7 @@ private:
                  Selector SelInfo, QualType T, TypeSourceInfo *ReturnTInfo,
                  DeclContext *contextDecl, bool isInstance = true,
                  bool isVariadic = false, bool isPropertyAccessor = false,
-                 bool isSynthesizedAccessorStub = false, 
+                 bool isSynthesizedAccessorStub = false,
                  bool isImplicitlyDeclared = false, bool isDefined = false,
                  ImplementationControl impControl = None,
                  bool HasRelatedResultType = false);
@@ -374,8 +373,7 @@ public:
   // ArrayRef access to formal parameters.  This should eventually
   // replace the iterator interface above.
   ArrayRef<ParmVarDecl*> parameters() const {
-    return llvm::makeArrayRef(const_cast<ParmVarDecl**>(getParams()),
-                              NumParams);
+    return llvm::ArrayRef(const_cast<ParmVarDecl **>(getParams()), NumParams);
   }
 
   ParmVarDecl *getParamDecl(unsigned Idx) {
@@ -389,9 +387,8 @@ public:
   /// Sets the method's parameters and selector source locations.
   /// If the method is implicit (not coming from source) \p SelLocs is
   /// ignored.
-  void setMethodParams(ASTContext &C,
-                       ArrayRef<ParmVarDecl*> Params,
-                       ArrayRef<SourceLocation> SelLocs = llvm::None);
+  void setMethodParams(ASTContext &C, ArrayRef<ParmVarDecl *> Params,
+                       ArrayRef<SourceLocation> SelLocs = std::nullopt);
 
   // Iterator access to parameter types.
   struct GetTypeFn {
@@ -1159,6 +1156,7 @@ public:
 class ObjCInterfaceDecl : public ObjCContainerDecl
                         , public Redeclarable<ObjCInterfaceDecl> {
   friend class ASTContext;
+  friend class ODRDiagsEmitter;
 
   /// TypeForDecl - This indicates the Type object that represents this
   /// TypeDecl.  It is a cache maintained by ASTContext::getObjCInterfaceType
@@ -1216,6 +1214,12 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
     /// One of the \c InheritedDesignatedInitializersState enumeratos.
     mutable unsigned InheritedDesignatedInitializers : 2;
 
+    /// Tracks whether a ODR hash has been computed for this interface.
+    unsigned HasODRHash : 1;
+
+    /// A hash of parts of the class to help in ODR checking.
+    unsigned ODRHash = 0;
+
     /// The location of the last location in this declaration, before
     /// the properties/methods. For example, this will be the '>', '}', or
     /// identifier,
@@ -1224,7 +1228,7 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
     DefinitionData()
         : ExternallyCompleted(false), IvarListMissingImplementation(true),
           HasDesignatedInitializers(false),
-          InheritedDesignatedInitializers(IDI_Unknown) {}
+          InheritedDesignatedInitializers(IDI_Unknown), HasODRHash(false) {}
   };
 
   /// The type parameters associated with this class, if any.
@@ -1234,7 +1238,8 @@ class ObjCInterfaceDecl : public ObjCContainerDecl
   /// which will be NULL if this class has not yet been defined.
   ///
   /// The bit indicates when we don't need to check for out-of-date
-  /// declarations. It will be set unless modules are enabled.
+  /// declarations. It will be set unless there is an ExternalASTSource that
+  /// could provide a definition.
   llvm::PointerIntPair<DefinitionData *, 1, bool> Data;
 
   ObjCInterfaceDecl(const ASTContext &C, DeclContext *DC, SourceLocation AtLoc,
@@ -1523,7 +1528,7 @@ public:
     // If the name of this class is out-of-date, bring it up-to-date, which
     // might bring in a definition.
     // Note: a null value indicates that we don't have a definition and that
-    // modules are enabled.
+    // there is a ExternalASTSource that could provide a definition.
     if (!Data.getOpaqueValue())
       getMostRecentDecl();
 
@@ -1547,6 +1552,13 @@ public:
   /// Starts the definition of this Objective-C class, taking it from
   /// a forward declaration (\@class) to a definition (\@interface).
   void startDefinition();
+
+  /// Starts the definition without sharing it with other redeclarations.
+  /// Such definition shouldn't be used for anything but only to compare if
+  /// a duplicate is compatible with previous definition or if it is
+  /// a distinct duplicate.
+  void startDuplicateDefinitionForComparison();
+  void mergeDuplicateDefinitionWithCommon(const ObjCInterfaceDecl *Definition);
 
   /// Retrieve the superclass type.
   const ObjCObjectType *getSuperClassType() const {
@@ -1905,10 +1917,17 @@ public:
   const Type *getTypeForDecl() const { return TypeForDecl; }
   void setTypeForDecl(const Type *TD) const { TypeForDecl = TD; }
 
+  /// Get precomputed ODRHash or add a new one.
+  unsigned getODRHash();
+
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == ObjCInterface; }
 
 private:
+  /// True if a valid hash is stored in ODRHash.
+  bool hasODRHash() const;
+  void setHasODRHash(bool HasHash);
+
   const ObjCInterfaceDecl *findInterfaceWithDesignatedInitializers() const;
   bool inheritsDesignatedInitializers() const;
 };
@@ -2065,13 +2084,20 @@ class ObjCProtocolDecl : public ObjCContainerDecl,
 
     /// Referenced protocols
     ObjCProtocolList ReferencedProtocols;
+
+    /// Tracks whether a ODR hash has been computed for this protocol.
+    unsigned HasODRHash : 1;
+
+    /// A hash of parts of the class to help in ODR checking.
+    unsigned ODRHash = 0;
   };
 
   /// Contains a pointer to the data associated with this class,
   /// which will be NULL if this class has not yet been defined.
   ///
   /// The bit indicates when we don't need to check for out-of-date
-  /// declarations. It will be set unless modules are enabled.
+  /// declarations. It will be set unless there is an ExternalASTSource that
+  /// could provide a definition.
   llvm::PointerIntPair<DefinitionData *, 1, bool> Data;
 
   ObjCProtocolDecl(ASTContext &C, DeclContext *DC, IdentifierInfo *Id,
@@ -2101,10 +2127,15 @@ class ObjCProtocolDecl : public ObjCContainerDecl,
     return getMostRecentDecl();
   }
 
+  /// True if a valid hash is stored in ODRHash.
+  bool hasODRHash() const;
+  void setHasODRHash(bool HasHash);
+
 public:
   friend class ASTDeclReader;
   friend class ASTDeclWriter;
   friend class ASTReader;
+  friend class ODRDiagsEmitter;
 
   static ObjCProtocolDecl *Create(ASTContext &C, DeclContext *DC,
                                   IdentifierInfo *Id,
@@ -2203,7 +2234,7 @@ public:
     // If the name of this protocol is out-of-date, bring it up-to-date, which
     // might bring in a definition.
     // Note: a null value indicates that we don't have a definition and that
-    // modules are enabled.
+    // there is a ExternalASTSource that could provide a definition.
     if (!Data.getOpaqueValue())
       getMostRecentDecl();
 
@@ -2228,6 +2259,13 @@ public:
 
   /// Starts the definition of this Objective-C protocol.
   void startDefinition();
+
+  /// Starts the definition without sharing it with other redeclarations.
+  /// Such definition shouldn't be used for anything but only to compare if
+  /// a duplicate is compatible with previous definition or if it is
+  /// a distinct duplicate.
+  void startDuplicateDefinitionForComparison();
+  void mergeDuplicateDefinitionWithCommon(const ObjCProtocolDecl *Definition);
 
   /// Produce a name to be used for protocol's metadata. It comes either via
   /// objc_runtime_name attribute or protocol name.
@@ -2259,6 +2297,9 @@ public:
   void collectInheritedProtocolProperties(const ObjCPropertyDecl *Property,
                                           ProtocolPropertySet &PS,
                                           PropertyDeclOrder &PO) const;
+
+  /// Get precomputed ODRHash or add a new one.
+  unsigned getODRHash();
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == ObjCProtocol; }

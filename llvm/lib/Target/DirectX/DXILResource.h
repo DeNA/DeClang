@@ -13,9 +13,9 @@
 #ifndef LLVM_TARGET_DIRECTX_DXILRESOURCE_H
 #define LLVM_TARGET_DIRECTX_DXILRESOURCE_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Frontend/HLSL/HLSLResource.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Support/Compiler.h"
 #include <cstdint>
@@ -25,22 +25,7 @@ class Module;
 class GlobalVariable;
 
 namespace dxil {
-
-// FIXME: Ultimately this class and some of these utilities should be moved into
-// a new LLVMFrontendHLSL library so that they can be reused in Clang.
-// See issue https://github.com/llvm/llvm-project/issues/58000.
-class FrontendResource {
-  MDNode *Entry;
-
-public:
-  FrontendResource(MDNode *E) : Entry(E) {
-    assert(Entry->getNumOperands() == 3 && "Unexpected metadata shape");
-  }
-
-  GlobalVariable *getGlobalVariable();
-  StringRef getSourceType();
-  Constant *getID();
-};
+class CBufferDataLayout;
 
 class ResourceBase {
 protected:
@@ -50,39 +35,14 @@ protected:
   uint32_t Space;
   uint32_t LowerBound;
   uint32_t RangeSize;
-  ResourceBase(uint32_t I, FrontendResource R);
+  ResourceBase(uint32_t I, hlsl::FrontendResource R);
 
-  void write(LLVMContext &Ctx, MutableArrayRef<Metadata *> Entries);
+  void write(LLVMContext &Ctx, MutableArrayRef<Metadata *> Entries) const;
 
   void print(raw_ostream &O, StringRef IDPrefix, StringRef BindingPrefix) const;
-
-  // The value ordering of this enumeration is part of the DXIL ABI. Elements
-  // can only be added to the end, and not removed.
-  enum class Kinds : uint32_t {
-    Invalid = 0,
-    Texture1D,
-    Texture2D,
-    Texture2DMS,
-    Texture3D,
-    TextureCube,
-    Texture1DArray,
-    Texture2DArray,
-    Texture2DMSArray,
-    TextureCubeArray,
-    TypedBuffer,
-    RawBuffer,
-    StructuredBuffer,
-    CBuffer,
-    Sampler,
-    TBuffer,
-    RTAccelerationStructure,
-    FeedbackTexture2D,
-    FeedbackTexture2DArray,
-    NumEntries,
-  };
-
+  using Kinds = hlsl::ResourceKind;
   static StringRef getKindName(Kinds Kind);
-  static void printKind(Kinds Kind, unsigned alignment, raw_ostream &OS,
+  static void printKind(Kinds Kind, unsigned Alignment, raw_ostream &OS,
                         bool SRV = false, bool HasCounter = false,
                         uint32_t SampleCount = 0);
 
@@ -113,11 +73,11 @@ protected:
 
   static StringRef getComponentTypeName(ComponentType CompType);
   static void printComponentType(Kinds Kind, ComponentType CompType,
-                                 unsigned alignment, raw_ostream &OS);
+                                 unsigned Alignment, raw_ostream &OS);
 
 public:
   struct ExtendedProperties {
-    llvm::Optional<ComponentType> ElementType;
+    std::optional<ComponentType> ElementType;
 
     // The value ordering of this enumeration is part of the DXIL ABI. Elements
     // can only be added to the end, and not removed.
@@ -128,7 +88,7 @@ public:
       Atomic64Use
     };
 
-    MDNode *write(LLVMContext &Ctx);
+    MDNode *write(LLVMContext &Ctx) const;
   };
 };
 
@@ -142,9 +102,30 @@ class UAVResource : public ResourceBase {
   void parseSourceType(StringRef S);
 
 public:
-  UAVResource(uint32_t I, FrontendResource R);
+  UAVResource(uint32_t I, hlsl::FrontendResource R);
 
-  MDNode *write();
+  MDNode *write() const;
+  void print(raw_ostream &O) const;
+};
+
+class ConstantBuffer : public ResourceBase {
+  uint32_t CBufferSizeInBytes = 0; // Cbuffer used size in bytes.
+public:
+  ConstantBuffer(uint32_t I, hlsl::FrontendResource R);
+  void setSize(CBufferDataLayout &DL);
+  MDNode *write() const;
+  void print(raw_ostream &O) const;
+};
+
+template <typename T> class ResourceTable {
+  StringRef MDName;
+
+  llvm::SmallVector<T> Data;
+
+public:
+  ResourceTable(StringRef Name) : MDName(Name) {}
+  void collect(Module &M);
+  MDNode *write(Module &M) const;
   void print(raw_ostream &O) const;
 };
 
@@ -153,14 +134,12 @@ public:
 // resource. This partial patch handles some of the leg work, but not all of it.
 // See issue https://github.com/llvm/llvm-project/issues/57936.
 class Resources {
-  llvm::SmallVector<UAVResource> UAVs;
-
-  void collectUAVs(Module &M);
+  ResourceTable<UAVResource> UAVs = {"hlsl.uavs"};
+  ResourceTable<ConstantBuffer> CBuffers = {"hlsl.cbufs"};
 
 public:
   void collect(Module &M);
-
-  void write(Module &M);
+  void write(Module &M) const;
   void print(raw_ostream &O) const;
   LLVM_DUMP_METHOD void dump() const;
 };

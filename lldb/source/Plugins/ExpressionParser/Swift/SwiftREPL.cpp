@@ -43,6 +43,8 @@
 using namespace lldb;
 using namespace lldb_private;
 
+char SwiftREPL::ID;
+
 lldb::REPLSP SwiftREPL::CreateInstance(Status &err, lldb::LanguageType language,
                                        Debugger *debugger, Target *target,
                                        const char *repl_options) {
@@ -291,8 +293,7 @@ void SwiftREPL::Terminate() {
   SwiftASTContext::Terminate();
 }
 
-SwiftREPL::SwiftREPL(Target &target)
-    : REPL(LLVMCastKind::eKindSwift, target), m_swift_ast(nullptr) {}
+SwiftREPL::SwiftREPL(Target &target) : REPL(target), m_swift_ast(nullptr) {}
 
 SwiftREPL::~SwiftREPL() {}
 
@@ -308,8 +309,8 @@ Status SwiftREPL::DoInitialization() {
   return Status();
 }
 
-ConstString SwiftREPL::GetSourceFileBasename() {
-  static ConstString s_basename("repl.swift");
+llvm::StringRef SwiftREPL::GetSourceFileBasename() {
+  static constexpr llvm::StringLiteral s_basename("repl.swift");
   return s_basename;
 }
 
@@ -535,7 +536,8 @@ bool SwiftREPL::PrintOneVariable(Debugger &debugger, StreamFileSP &output_sp,
       fprintf(output_sp->GetFile().GetStream(), "%s", color);
     }
 
-    valobj_sp->Dump(*output_sp, options);
+    if (llvm::Error error = valobj_sp->Dump(*output_sp, options))
+      *output_sp << "error: " << toString(std::move(error));
 
     if (colorize_out)
       fprintf(output_sp->GetFile().GetStream(), ANSI_ESCAPE1(ANSI_CTRL_NORMAL));
@@ -562,19 +564,18 @@ void SwiftREPL::CompleteCode(const std::string &current_code,
       llvm::consumeError(type_system_or_err.takeError());
       return;
     }
-
     auto *swift_ts =
         llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
             type_system_or_err->get());
     auto *target_swift_ast =
         llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
-            swift_ts->GetSwiftASTContext());
+            swift_ts->GetSwiftASTContext(nullptr));
     m_swift_ast = target_swift_ast;
   }
   SwiftASTContextForExpressions *swift_ast = m_swift_ast;
 
   if (swift_ast) {
-    swift::ASTContext *ast = swift_ast->GetASTContext();
+    ThreadSafeASTContext ast = swift_ast->GetASTContext();
     swift::REPLCompletions completions;
     SourceModule completion_module_info;
     completion_module_info.path.push_back(ConstString("repl"));
@@ -586,8 +587,8 @@ void SwiftREPL::CompleteCode(const std::string &current_code,
       importInfo.StdlibKind = swift::ImplicitStdlibKind::Stdlib;
       repl_module = swift_ast->CreateModule(completion_module_info, error,
                                             importInfo);
-      llvm::Optional<unsigned> bufferID;
-      swift::SourceFile *repl_source_file = new (*ast) swift::SourceFile(
+      std::optional<unsigned> bufferID;
+      swift::SourceFile *repl_source_file = new (**ast) swift::SourceFile(
           *repl_module, swift::SourceFileKind::Main, bufferID);
       repl_module->addFile(*repl_source_file);
       swift::performImportResolution(*repl_source_file);

@@ -93,8 +93,6 @@
 #include "llvm/IR/Use.h"
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/ArrayRecycler.h"
 #include "llvm/Support/Casting.h"
@@ -104,7 +102,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/PointerLikeTypeTraits.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/GVNExpression.h"
 #include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
 #include "llvm/Transforms/Utils/Local.h"
@@ -1200,10 +1197,9 @@ NewGVN::ExprResult NewGVN::createExpression(Instruction *I) const {
     if (auto Simplified = checkExprResults(E, I, V))
       return Simplified;
   } else if (auto *GEPI = dyn_cast<GetElementPtrInst>(I)) {
-    Value *V =
-        simplifyGEPInst(GEPI->getSourceElementType(), *E->op_begin(),
-                        makeArrayRef(std::next(E->op_begin()), E->op_end()),
-                        GEPI->isInBounds(), Q);
+    Value *V = simplifyGEPInst(GEPI->getSourceElementType(), *E->op_begin(),
+                               ArrayRef(std::next(E->op_begin()), E->op_end()),
+                               GEPI->isInBounds(), Q);
     if (auto Simplified = checkExprResults(E, I, V))
       return Simplified;
   } else if (AllConstant) {
@@ -1278,10 +1274,17 @@ const UnknownExpression *NewGVN::createUnknownExpression(Instruction *I) const {
 const CallExpression *
 NewGVN::createCallExpression(CallInst *CI, const MemoryAccess *MA) const {
   // FIXME: Add operand bundles for calls.
-  // FIXME: Allow commutative matching for intrinsics.
   auto *E =
       new (ExpressionAllocator) CallExpression(CI->getNumOperands(), CI, MA);
   setBasicExpressionInfo(CI, E);
+  if (CI->isCommutative()) {
+    // Ensure that commutative intrinsics that only differ by a permutation
+    // of their operands get the same value number by sorting the operand value
+    // numbers.
+    assert(CI->getNumOperands() >= 2 && "Unsupported commutative intrinsic!");
+    if (shouldSwapOperands(E->getOperand(0), E->getOperand(1)))
+      E->swapOperands(0, 1);
+  }
   return E;
 }
 
@@ -1454,8 +1457,7 @@ NewGVN::performSymbolicLoadCoercion(Type *LoadType, Value *LoadPtr,
     if (Offset >= 0) {
       if (auto *C = dyn_cast<Constant>(
               lookupOperandLeader(DepSI->getValueOperand()))) {
-        if (Constant *Res =
-                getConstantStoreValueForLoad(C, Offset, LoadType, DL)) {
+        if (Constant *Res = getConstantValueForLoad(C, Offset, LoadType, DL)) {
           LLVM_DEBUG(dbgs() << "Coercing load from store " << *DepSI
                             << " to constant " << *Res << "\n");
           return createConstantExpression(Res);
@@ -1471,7 +1473,7 @@ NewGVN::performSymbolicLoadCoercion(Type *LoadType, Value *LoadPtr,
       // We can coerce a constant load into a load.
       if (auto *C = dyn_cast<Constant>(lookupOperandLeader(DepLI)))
         if (auto *PossibleConstant =
-                getConstantLoadValueForLoad(C, Offset, LoadType, DL)) {
+                getConstantValueForLoad(C, Offset, LoadType, DL)) {
           LLVM_DEBUG(dbgs() << "Coercing load from load " << *LI
                             << " to constant " << *PossibleConstant << "\n");
           return createConstantExpression(PossibleConstant);
@@ -1563,7 +1565,7 @@ NewGVN::performSymbolicPredicateInfoEvaluation(IntrinsicInst *I) const {
 
   LLVM_DEBUG(dbgs() << "Found predicate info from instruction !\n");
 
-  const Optional<PredicateConstraint> &Constraint = PI->getConstraint();
+  const std::optional<PredicateConstraint> &Constraint = PI->getConstraint();
   if (!Constraint)
     return ExprResult::none();
 
@@ -1607,6 +1609,23 @@ NewGVN::ExprResult NewGVN::performSymbolicCallEvaluation(Instruction *I) const {
       return ExprResult::some(createVariableOrConstant(ReturnedValue));
     }
   }
+
+  // FIXME: Currently the calls which may access the thread id may
+  // be considered as not accessing the memory. But this is
+  // problematic for coroutines, since coroutines may resume in a
+  // different thread. So we disable the optimization here for the
+  // correctness. However, it may block many other correct
+  // optimizations. Revert this one when we detect the memory
+  // accessing kind more precisely.
+  if (CI->getFunction()->isPresplitCoroutine())
+    return ExprResult::none();
+
+  // Do not combine convergent calls since they implicitly depend on the set of
+  // threads that is currently executing, and they might be in different basic
+  // blocks.
+  if (CI->isConvergent())
+    return ExprResult::none();
+
   if (AA->doesNotAccessMemory(CI)) {
     return ExprResult::some(
         createCallExpression(CI, TOPClass->getMemoryLeader()));
@@ -1982,6 +2001,7 @@ NewGVN::performSymbolicEvaluation(Value *V,
       break;
     case Instruction::BitCast:
     case Instruction::AddrSpaceCast:
+    case Instruction::Freeze:
       return createExpression(I);
       break;
     case Instruction::ICmp:
@@ -2729,10 +2749,10 @@ NewGVN::makePossiblePHIOfOps(Instruction *I,
       return nullptr;
     }
     // No point in doing this for one-operand phis.
-    if (OpPHI->getNumOperands() == 1) {
-      OpPHI = nullptr;
-      continue;
-    }
+    // Since all PHIs for operands must be in the same block, then they must
+    // have the same number of operands so we can just abort.
+    if (OpPHI->getNumOperands() == 1)
+      return nullptr;
   }
 
   if (!OpPHI)
@@ -3702,9 +3722,10 @@ void NewGVN::deleteInstructionsInBlock(BasicBlock *BB) {
   }
   // Now insert something that simplifycfg will turn into an unreachable.
   Type *Int8Ty = Type::getInt8Ty(BB->getContext());
-  new StoreInst(PoisonValue::get(Int8Ty),
-                Constant::getNullValue(Int8Ty->getPointerTo()),
-                BB->getTerminator());
+  new StoreInst(
+      PoisonValue::get(Int8Ty),
+      Constant::getNullValue(PointerType::getUnqual(BB->getContext())),
+      BB->getTerminator());
 }
 
 void NewGVN::markInstructionForDeletion(Instruction *I) {
@@ -4197,61 +4218,6 @@ bool NewGVN::shouldSwapOperandsForIntrinsic(const Value *A, const Value *B,
   }
   return false;
 }
-
-namespace {
-
-class NewGVNLegacyPass : public FunctionPass {
-public:
-  // Pass identification, replacement for typeid.
-  static char ID;
-
-  NewGVNLegacyPass() : FunctionPass(ID) {
-    initializeNewGVNLegacyPassPass(*PassRegistry::getPassRegistry());
-  }
-
-  bool runOnFunction(Function &F) override;
-
-private:
-  void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<AssumptionCacheTracker>();
-    AU.addRequired<DominatorTreeWrapperPass>();
-    AU.addRequired<TargetLibraryInfoWrapperPass>();
-    AU.addRequired<MemorySSAWrapperPass>();
-    AU.addRequired<AAResultsWrapperPass>();
-    AU.addPreserved<DominatorTreeWrapperPass>();
-    AU.addPreserved<GlobalsAAWrapperPass>();
-  }
-};
-
-} // end anonymous namespace
-
-bool NewGVNLegacyPass::runOnFunction(Function &F) {
-  if (skipFunction(F))
-    return false;
-  return NewGVN(F, &getAnalysis<DominatorTreeWrapperPass>().getDomTree(),
-                &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F),
-                &getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F),
-                &getAnalysis<AAResultsWrapperPass>().getAAResults(),
-                &getAnalysis<MemorySSAWrapperPass>().getMSSA(),
-                F.getParent()->getDataLayout())
-      .runGVN();
-}
-
-char NewGVNLegacyPass::ID = 0;
-
-INITIALIZE_PASS_BEGIN(NewGVNLegacyPass, "newgvn", "Global Value Numbering",
-                      false, false)
-INITIALIZE_PASS_DEPENDENCY(AssumptionCacheTracker)
-INITIALIZE_PASS_DEPENDENCY(MemorySSAWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(DominatorTreeWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(TargetLibraryInfoWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(AAResultsWrapperPass)
-INITIALIZE_PASS_DEPENDENCY(GlobalsAAWrapperPass)
-INITIALIZE_PASS_END(NewGVNLegacyPass, "newgvn", "Global Value Numbering", false,
-                    false)
-
-// createGVNPass - The public interface to this file.
-FunctionPass *llvm::createNewGVNPass() { return new NewGVNLegacyPass(); }
 
 PreservedAnalyses NewGVNPass::run(Function &F, AnalysisManager<Function> &AM) {
   // Apparently the order in which we get these results matter for

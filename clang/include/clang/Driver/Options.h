@@ -34,14 +34,12 @@ enum ClangFlags {
   DXCOption = (1 << 17),
   CLDXCOption = (1 << 18),
   Ignored = (1 << 19),
+  TargetSpecific = (1 << 20),
 };
 
 enum ID {
     OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,       \
-               FLAGS, PARAM, HELP, METAVAR, VALUES)                            \
-  LLVM_MAKE_OPT_ID(PREFIX, PREFIXED_NAME, ID, KIND, GROUP, ALIAS, ALIASARGS,   \
-                   FLAGS, PARAM, HELP, METAVAR, VALUES),
+#define OPTION(...) LLVM_MAKE_OPT_ID(__VA_ARGS__),
 #include "clang/Driver/Options.inc"
     LastOption
 #undef OPTION

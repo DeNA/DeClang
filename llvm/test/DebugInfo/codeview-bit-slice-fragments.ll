@@ -25,7 +25,7 @@ entryresume.0:
 
 declare void @llvm.dbg.value(metadata %0, metadata %1, metadata %2) #0
 
-attributes #0 = { nocallback nofree nosync nounwind speculatable willreturn }
+attributes #0 = { nocallback nofree nosync nounwind speculatable willreturn memory(none) }
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!3, !4}

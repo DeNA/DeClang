@@ -18,7 +18,7 @@ config.suffixes = []
 # Swift's libReflection builds without ASAN, which causes a known
 # false positive in std::vector. We also want to support testing a sanitized
 # lldb using unsanitized llvm, clang, and swift libraries.
-config.environment["ASAN_OPTIONS"] = "detect_container_overflow=0"
+config.environment['ASAN_OPTIONS'] = 'detect_container_overflow=0'
 # End Swift mod.
 
 # test_source_root: The root path where unit test binaries are located.

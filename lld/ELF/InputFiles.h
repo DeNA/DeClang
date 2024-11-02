@@ -43,22 +43,24 @@ class Symbol;
 extern std::unique_ptr<llvm::TarWriter> tar;
 
 // Opens a given file.
-llvm::Optional<MemoryBufferRef> readFile(StringRef path);
+std::optional<MemoryBufferRef> readFile(StringRef path);
 
 // Add symbols in File to the symbol table.
 void parseFile(InputFile *file);
 
+void parseArmCMSEImportLib(InputFile *file);
+
 // The root class of input files.
 class InputFile {
 protected:
-  SmallVector<Symbol *, 0> symbols;
+  std::unique_ptr<Symbol *[]> symbols;
+  uint32_t numSymbols = 0;
   SmallVector<InputSectionBase *, 0> sections;
 
 public:
   enum Kind : uint8_t {
     ObjKind,
     SharedKind,
-    ArchiveKind,
     BitcodeKind,
     BinaryKind,
   };
@@ -85,7 +87,13 @@ public:
   ArrayRef<Symbol *> getSymbols() const {
     assert(fileKind == BinaryKind || fileKind == ObjKind ||
            fileKind == BitcodeKind);
-    return symbols;
+    return {symbols.get(), numSymbols};
+  }
+
+  MutableArrayRef<Symbol *> getMutableSymbols() {
+    assert(fileKind == BinaryKind || fileKind == ObjKind ||
+           fileKind == BitcodeKind);
+    return {symbols.get(), numSymbols};
   }
 
   // Get filename to use for linker script processing.
@@ -171,16 +179,17 @@ public:
   StringRef getStringTable() const { return stringTable; }
 
   ArrayRef<Symbol *> getLocalSymbols() {
-    if (symbols.empty())
+    if (numSymbols == 0)
       return {};
-    return llvm::makeArrayRef(symbols).slice(1, firstGlobal - 1);
+    return llvm::ArrayRef(symbols.get() + 1, firstGlobal - 1);
   }
   ArrayRef<Symbol *> getGlobalSymbols() {
-    return llvm::makeArrayRef(symbols).slice(firstGlobal);
+    return llvm::ArrayRef(symbols.get() + firstGlobal,
+                          numSymbols - firstGlobal);
   }
   MutableArrayRef<Symbol *> getMutableGlobalSymbols() {
-    return llvm::makeMutableArrayRef(symbols.data(), symbols.size())
-        .slice(firstGlobal);
+    return llvm::MutableArrayRef(symbols.get() + firstGlobal,
+                                     numSymbols - firstGlobal);
   }
 
   template <typename ELFT> typename ELFT::ShdrRange getELFShdrs() const {
@@ -234,7 +243,7 @@ public:
                                  const Elf_Shdr &sec);
 
   Symbol &getSymbol(uint32_t symbolIndex) const {
-    if (symbolIndex >= this->symbols.size())
+    if (symbolIndex >= numSymbols)
       fatal(toString(this) + ": invalid symbol index");
     return *this->symbols[symbolIndex];
   }
@@ -246,8 +255,9 @@ public:
     return getSymbol(symIndex);
   }
 
-  llvm::Optional<llvm::DILineInfo> getDILineInfo(InputSectionBase *, uint64_t);
-  llvm::Optional<std::pair<std::string, unsigned>> getVariableLoc(StringRef name);
+  std::optional<llvm::DILineInfo> getDILineInfo(InputSectionBase *, uint64_t);
+  std::optional<std::pair<std::string, unsigned>>
+  getVariableLoc(StringRef name);
 
   // Name of source file obtained from STT_FILE symbol value,
   // or empty string if there is no such symbol in object file
@@ -278,6 +288,8 @@ public:
 
   void initSectionsAndLocalSyms(bool ignoreComdats);
   void postParse();
+  void importCmseSymbols();
+  void redirectCmseSymbols();
 
 private:
   void initializeSections(bool ignoreComdats,

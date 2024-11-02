@@ -102,7 +102,7 @@ class FileManager : public RefCountedBase<FileManager> {
       SeenBypassFileEntries;
 
   /// The file entry for stdin, if it has been accessed through the FileManager.
-  Optional<FileEntryRef> STDIN;
+  OptionalFileEntryRef STDIN;
 
   /// The canonical names of files and directories .
   llvm::DenseMap<const void *, llvm::StringRef> CanonicalNames;
@@ -166,8 +166,8 @@ public:
                                                     bool CacheFailure = true);
 
   /// Get a \c DirectoryEntryRef if it exists, without doing anything on error.
-  llvm::Optional<DirectoryEntryRef>
-  getOptionalDirectoryRef(StringRef DirName, bool CacheFailure = true) {
+  OptionalDirectoryEntryRef getOptionalDirectoryRef(StringRef DirName,
+                                                    bool CacheFailure = true) {
     return llvm::expectedToOptional(getDirectoryRef(DirName, CacheFailure));
   }
 
@@ -231,9 +231,9 @@ public:
   llvm::Expected<FileEntryRef> getSTDIN();
 
   /// Get a FileEntryRef if it exists, without doing anything on error.
-  llvm::Optional<FileEntryRef> getOptionalFileRef(StringRef Filename,
-                                                  bool OpenFile = false,
-                                                  bool CacheFailure = true) {
+  OptionalFileEntryRef getOptionalFileRef(StringRef Filename,
+                                          bool OpenFile = false,
+                                          bool CacheFailure = true) {
     return llvm::expectedToOptional(
         getFileRef(Filename, OpenFile, CacheFailure));
   }
@@ -247,6 +247,10 @@ public:
   getVirtualFileSystemPtr() const {
     return FS;
   }
+
+  /// Enable or disable tracking of VFS usage. Used to not track full header
+  /// search and implicit modulemap lookup.
+  void trackVFSUsage(bool Active);
 
   void setVirtualFileSystem(IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS) {
     this->FS = std::move(FS);
@@ -270,18 +274,18 @@ public:
   /// bypasses all mapping and uniquing, blindly creating a new FileEntry.
   /// There is no attempt to deduplicate these; if you bypass the same file
   /// twice, you get two new file entries.
-  llvm::Optional<FileEntryRef> getBypassFile(FileEntryRef VFE);
+  OptionalFileEntryRef getBypassFile(FileEntryRef VFE);
 
   /// Open the specified file as a MemoryBuffer, returning a new
   /// MemoryBuffer if successful, otherwise returning null.
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
   getBufferForFile(const FileEntry *Entry, bool isVolatile = false,
                    bool RequiresNullTerminator = true,
-                   Optional<cas::ObjectRef> *CASContents = nullptr);
+                   std::optional<cas::ObjectRef> *CASContents = nullptr);
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
   getBufferForFile(StringRef Filename, bool isVolatile = false,
                    bool RequiresNullTerminator = true,
-                   Optional<cas::ObjectRef> *CASContents = nullptr) {
+                   std::optional<cas::ObjectRef> *CASContents = nullptr) {
     return getBufferForFileImpl(Filename, /*FileSize=*/-1, isVolatile,
                                 RequiresNullTerminator, CASContents);
   }
@@ -290,14 +294,14 @@ public:
   /// for its contents if supported by the file system, and then closes the
   /// file. If both the buffer and its `cas::ObjectRef` are needed use \p
   /// getBufferForFile to avoid the extra file lookup.
-  llvm::ErrorOr<Optional<cas::ObjectRef>>
+  llvm::ErrorOr<std::optional<cas::ObjectRef>>
   getObjectRefForFileContent(const Twine &Filename);
 
 private:
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
   getBufferForFileImpl(StringRef Filename, int64_t FileSize, bool isVolatile,
                        bool RequiresNullTerminator,
-                       Optional<cas::ObjectRef> *CASContents);
+                       std::optional<cas::ObjectRef> *CASContents);
 
 public:
   /// Get the 'stat' information for the given \p Path.
@@ -330,7 +334,7 @@ public:
   /// This is a very expensive operation, despite its results being cached,
   /// and should only be used when the physical layout of the file system is
   /// required, which is (almost) never.
-  StringRef getCanonicalName(const DirectoryEntry *Dir);
+  StringRef getCanonicalName(DirectoryEntryRef Dir);
 
   /// Retrieve the canonical name for a given file.
   ///

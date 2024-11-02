@@ -20,11 +20,11 @@
 namespace lldb_private {
 
 struct JSONSymbol {
-  llvm::Optional<uint64_t> address;
-  llvm::Optional<uint64_t> value;
-  llvm::Optional<uint64_t> size;
-  llvm::Optional<uint64_t> id;
-  llvm::Optional<lldb::SymbolType> type;
+  std::optional<uint64_t> address;
+  std::optional<uint64_t> value;
+  std::optional<uint64_t> size;
+  std::optional<uint64_t> id;
+  std::optional<lldb::SymbolType> type;
   std::string name;
 };
 
@@ -130,7 +130,7 @@ public:
 
   ConstString GetNameNoArguments() const;
 
-  ConstString GetDisplayName() const;
+  ConstString GetDisplayName(const SymbolContext *sc = nullptr) const;
 
   uint32_t GetID() const { return m_uid; }
 

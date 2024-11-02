@@ -9,9 +9,7 @@ define i1 @gep_sub_1_uge_inbounds(ptr %dst, ptr %lower) {
 ; CHECK-NEXT:    call void @llvm.assume(i1 [[PRE]])
 ; CHECK-NEXT:    [[DST_ADD_3:%.*]] = getelementptr inbounds i8, ptr [[DST]], i64 3
 ; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_3]], i64 -1
-; CHECK-NEXT:    [[CMP_SUB_1:%.*]] = icmp uge ptr [[DST_SUB_1]], [[LOWER]]
 ; CHECK-NEXT:    [[DST_SUB_3:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_3]], i64 -3
-; CHECK-NEXT:    [[CMP_SUB_3:%.*]] = icmp uge ptr [[DST_SUB_3]], [[LOWER]]
 ; CHECK-NEXT:    [[RES_1:%.*]] = xor i1 true, true
 ; CHECK-NEXT:    [[DST_SUB_4:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_3]], i64 -4
 ; CHECK-NEXT:    [[CMP_SUB_4:%.*]] = icmp uge ptr [[DST_SUB_4]], [[LOWER]]
@@ -126,9 +124,7 @@ define i1 @gep_sub_1_ult(ptr %dst, ptr %upper) {
 ; CHECK-NEXT:    call void @llvm.assume(i1 [[PRE]])
 ; CHECK-NEXT:    [[DST_ADD_3:%.*]] = getelementptr inbounds i8, ptr [[DST]], i64 3
 ; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_3]], i64 -1
-; CHECK-NEXT:    [[CMP_SUB_1:%.*]] = icmp ult ptr [[DST_SUB_1]], [[UPPER]]
 ; CHECK-NEXT:    [[DST_SUB_3:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_3]], i64 -3
-; CHECK-NEXT:    [[CMP_SUB_3:%.*]] = icmp ult ptr [[DST_SUB_3]], [[UPPER]]
 ; CHECK-NEXT:    [[RES_1:%.*]] = xor i1 true, true
 ; CHECK-NEXT:    ret i1 [[RES_1]]
 ;
@@ -153,7 +149,6 @@ define i1 @gep_sub_ult_var_idx(ptr %dst, ptr %upper, i8 %idx) {
 ; CHECK-NEXT:    [[PRE:%.*]] = icmp ult ptr [[DST_ADD_IDX]], [[UPPER:%.*]]
 ; CHECK-NEXT:    call void @llvm.assume(i1 [[PRE]])
 ; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_IDX]], i64 -1
-; CHECK-NEXT:    [[CMP_SUB_1:%.*]] = icmp ult ptr [[DST_SUB_1]], [[UPPER]]
 ; CHECK-NEXT:    [[DST_SUB_2:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_IDX]], i64 -2
 ; CHECK-NEXT:    [[CMP_SUB_2:%.*]] = icmp ult ptr [[DST_SUB_2]], [[UPPER]]
 ; CHECK-NEXT:    [[RES_1:%.*]] = xor i1 true, [[CMP_SUB_2]]
@@ -192,10 +187,8 @@ define i1 @gep_sub_ult_var_idx_sgt_1(ptr %dst, ptr %upper, i8 %idx) {
 ; CHECK-NEXT:    [[PRE:%.*]] = icmp ult ptr [[DST_ADD_IDX]], [[UPPER:%.*]]
 ; CHECK-NEXT:    call void @llvm.assume(i1 [[PRE]])
 ; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_IDX]], i64 -1
-; CHECK-NEXT:    [[CMP_SUB_1:%.*]] = icmp ult ptr [[DST_SUB_1]], [[UPPER]]
 ; CHECK-NEXT:    [[DST_SUB_2:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_IDX]], i64 -2
-; CHECK-NEXT:    [[CMP_SUB_2:%.*]] = icmp ult ptr [[DST_SUB_2]], [[UPPER]]
-; CHECK-NEXT:    [[RES_1:%.*]] = xor i1 [[CMP_SUB_1]], [[CMP_SUB_2]]
+; CHECK-NEXT:    [[RES_1:%.*]] = xor i1 true, true
 ; CHECK-NEXT:    [[DST_SUB_3:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_IDX]], i64 -3
 ; CHECK-NEXT:    [[CMP_SUB_3:%.*]] = icmp ult ptr [[DST_SUB_3]], [[UPPER]]
 ; CHECK-NEXT:    [[RES_2:%.*]] = xor i1 [[RES_1]], [[CMP_SUB_3]]
@@ -231,7 +224,6 @@ define i1 @gep_sub_1_ult_var_idx_inbounds(ptr %dst, ptr %upper, i8 %len, i8 %idx
 ; CHECK-NEXT:    call void @llvm.assume(i1 [[CMP_IDX_ULT_LEN]])
 ; CHECK-NEXT:    [[IDX_EXT:%.*]] = zext i8 [[IDX]] to i16
 ; CHECK-NEXT:    [[DST_ADD_IDX:%.*]] = getelementptr inbounds i8, ptr [[DST]], i16 [[IDX_EXT]]
-; CHECK-NEXT:    [[CMP_IDX:%.*]] = icmp ult ptr [[DST_ADD_IDX]], [[UPPER]]
 ; CHECK-NEXT:    ret i1 true
 ;
   %not.zero = icmp ne i8 %len, 0
@@ -342,6 +334,66 @@ define i1 @gep_sub_2_ult_var_idx(ptr %dst, ptr %upper, i8 %len, i8 %idx) {
   ret i1 %cmp.idx
 }
 
+define i1 @gep_sub_2_ult_var_idx_inbounds_len_sge_2(ptr %dst, ptr %upper, i8 %len, i8 %idx) {
+; CHECK-LABEL: @gep_sub_2_ult_var_idx_inbounds_len_sge_2(
+; CHECK-NEXT:    [[SGE_2:%.*]] = icmp sge i8 [[LEN:%.*]], 2
+; CHECK-NEXT:    call void @llvm.assume(i1 [[SGE_2]])
+; CHECK-NEXT:    [[LEN_EXT:%.*]] = zext i8 [[LEN]] to i16
+; CHECK-NEXT:    [[DST_ADD_LEN:%.*]] = getelementptr inbounds i8, ptr [[DST:%.*]], i16 [[LEN_EXT]]
+; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_LEN]], i64 -1
+; CHECK-NEXT:    [[CMP_SUB_1:%.*]] = icmp ult ptr [[DST_SUB_1]], [[UPPER:%.*]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[CMP_SUB_1]])
+; CHECK-NEXT:    [[CMP_IDX_ULT_LEN:%.*]] = icmp ult i8 [[IDX:%.*]], [[LEN]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[CMP_IDX_ULT_LEN]])
+; CHECK-NEXT:    [[IDX_EXT:%.*]] = zext i8 [[IDX]] to i16
+; CHECK-NEXT:    [[DST_ADD_IDX:%.*]] = getelementptr inbounds i8, ptr [[DST]], i16 [[IDX_EXT]]
+; CHECK-NEXT:    ret i1 true
+;
+  %sge.2 = icmp sge i8 %len, 2
+  call void @llvm.assume(i1 %sge.2)
+  %len.ext = zext i8 %len to i16
+  %dst.add.len = getelementptr inbounds i8, ptr %dst, i16 %len.ext
+  %dst.sub.1 = getelementptr inbounds i8, ptr %dst.add.len, i64 -1
+  %cmp.sub.1 = icmp ult ptr %dst.sub.1, %upper
+  call void @llvm.assume(i1 %cmp.sub.1)
+  %cmp.idx.ult.len = icmp ult i8 %idx, %len
+  call void @llvm.assume(i1 %cmp.idx.ult.len)
+  %idx.ext = zext i8 %idx to i16
+  %dst.add.idx = getelementptr inbounds i8, ptr %dst, i16 %idx.ext
+  %cmp.idx = icmp ult ptr %dst.add.idx, %upper
+  ret i1 %cmp.idx
+}
+
+define i1 @gep_sub_2_ult_var_idx_inbounds_len_uge_2(ptr %dst, ptr %upper, i8 %len, i8 %idx) {
+; CHECK-LABEL: @gep_sub_2_ult_var_idx_inbounds_len_uge_2(
+; CHECK-NEXT:    [[UGE_2:%.*]] = icmp uge i8 [[LEN:%.*]], 2
+; CHECK-NEXT:    call void @llvm.assume(i1 [[UGE_2]])
+; CHECK-NEXT:    [[LEN_EXT:%.*]] = zext i8 [[LEN]] to i16
+; CHECK-NEXT:    [[DST_ADD_LEN:%.*]] = getelementptr inbounds i8, ptr [[DST:%.*]], i16 [[LEN_EXT]]
+; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[DST_ADD_LEN]], i64 -1
+; CHECK-NEXT:    [[CMP_SUB_1:%.*]] = icmp ult ptr [[DST_SUB_1]], [[UPPER:%.*]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[CMP_SUB_1]])
+; CHECK-NEXT:    [[CMP_IDX_ULT_LEN:%.*]] = icmp ult i8 [[IDX:%.*]], [[LEN]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[CMP_IDX_ULT_LEN]])
+; CHECK-NEXT:    [[IDX_EXT:%.*]] = zext i8 [[IDX]] to i16
+; CHECK-NEXT:    [[DST_ADD_IDX:%.*]] = getelementptr inbounds i8, ptr [[DST]], i16 [[IDX_EXT]]
+; CHECK-NEXT:    ret i1 true
+;
+  %uge.2 = icmp uge i8 %len, 2
+  call void @llvm.assume(i1 %uge.2)
+  %len.ext = zext i8 %len to i16
+  %dst.add.len = getelementptr inbounds i8, ptr %dst, i16 %len.ext
+  %dst.sub.1 = getelementptr inbounds i8, ptr %dst.add.len, i64 -1
+  %cmp.sub.1 = icmp ult ptr %dst.sub.1, %upper
+  call void @llvm.assume(i1 %cmp.sub.1)
+  %cmp.idx.ult.len = icmp ult i8 %idx, %len
+  call void @llvm.assume(i1 %cmp.idx.ult.len)
+  %idx.ext = zext i8 %idx to i16
+  %dst.add.idx = getelementptr inbounds i8, ptr %dst, i16 %idx.ext
+  %cmp.idx = icmp ult ptr %dst.add.idx, %upper
+  ret i1 %cmp.idx
+}
+
 define i1 @gep_sub_ult_var_idx_len_sgt_1(ptr %dst, ptr %upper, i8 %len, i8 %idx) {
 ; CHECK-LABEL: @gep_sub_ult_var_idx_len_sgt_1(
 ; CHECK-NEXT:    [[SGT_1:%.*]] = icmp sgt i8 [[LEN:%.*]], 1
@@ -371,4 +423,146 @@ define i1 @gep_sub_ult_var_idx_len_sgt_1(ptr %dst, ptr %upper, i8 %len, i8 %idx)
   %dst.add.idx = getelementptr inbounds i8, ptr %dst, i16 %idx.ext
   %cmp.idx = icmp ult ptr %dst.add.idx, %upper
   ret i1 %cmp.idx
+}
+
+define i1 @gep_sub_1_ult_var_idx_lower_bound(ptr %lower, ptr %src, i8 %len) {
+; CHECK-LABEL: @gep_sub_1_ult_var_idx_lower_bound(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[SRC_UGE_LOWER:%.*]] = icmp uge ptr [[SRC:%.*]], [[LOWER:%.*]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[SRC_UGE_LOWER]])
+; CHECK-NEXT:    [[LEN_POS:%.*]] = icmp sge i8 [[LEN:%.*]], 0
+; CHECK-NEXT:    call void @llvm.assume(i1 [[LEN_POS]])
+; CHECK-NEXT:    [[GEP_LEN:%.*]] = getelementptr inbounds i8, ptr [[SRC]], i8 [[LEN]]
+; CHECK-NEXT:    [[GEP_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[GEP_LEN]], i8 -1
+; CHECK-NEXT:    [[RES:%.*]] = icmp ult ptr [[GEP_SUB_1]], [[LOWER]]
+; CHECK-NEXT:    ret i1 [[RES]]
+;
+entry:
+  %src.uge.lower = icmp uge ptr %src, %lower
+  call void @llvm.assume(i1 %src.uge.lower)
+
+  %len.pos = icmp sge i8 %len, 0
+  call void @llvm.assume(i1 %len.pos)
+
+  %gep.len = getelementptr inbounds i8, ptr %src, i8 %len
+  %gep.sub.1 = getelementptr inbounds i8, ptr %gep.len, i8 -1
+  %res = icmp ult ptr %gep.sub.1, %lower
+  ret i1 %res
+}
+
+define i1 @gep_sub_1_ult_var_idx_lower_bound_len_ne_0(ptr %lower, ptr %src, i8 %len) {
+; CHECK-LABEL: @gep_sub_1_ult_var_idx_lower_bound_len_ne_0(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[LEN_NE_0:%.*]] = icmp ne i8 [[LEN:%.*]], 0
+; CHECK-NEXT:    call void @llvm.assume(i1 [[LEN_NE_0]])
+; CHECK-NEXT:    [[SRC_UGE_LOWER:%.*]] = icmp uge ptr [[SRC:%.*]], [[LOWER:%.*]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[SRC_UGE_LOWER]])
+; CHECK-NEXT:    [[LEN_POS:%.*]] = icmp sge i8 [[LEN]], 0
+; CHECK-NEXT:    call void @llvm.assume(i1 [[LEN_POS]])
+; CHECK-NEXT:    [[GEP_LEN:%.*]] = getelementptr inbounds i8, ptr [[SRC]], i8 [[LEN]]
+; CHECK-NEXT:    [[GEP_SUB_1:%.*]] = getelementptr inbounds i8, ptr [[GEP_LEN]], i8 -1
+; CHECK-NEXT:    [[RES:%.*]] = icmp ult ptr [[GEP_SUB_1]], [[LOWER]]
+; CHECK-NEXT:    ret i1 [[RES]]
+;
+entry:
+  %len.ne.0 = icmp ne i8 %len, 0
+  call void @llvm.assume(i1 %len.ne.0)
+
+  %src.uge.lower = icmp uge ptr %src, %lower
+  call void @llvm.assume(i1 %src.uge.lower)
+
+  %len.pos = icmp sge i8 %len, 0
+  call void @llvm.assume(i1 %len.pos)
+
+  %gep.len = getelementptr inbounds i8, ptr %src, i8 %len
+  %gep.sub.1 = getelementptr inbounds i8, ptr %gep.len, i8 -1
+  %res = icmp ult ptr %gep.sub.1, %lower
+  ret i1 %res
+}
+
+define i1 @gep_sub_2_ult_var_idx_lower_bound_len_ne_0(ptr %lower, ptr %src, i8 %len) {
+; CHECK-LABEL: @gep_sub_2_ult_var_idx_lower_bound_len_ne_0(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[LEN_NE_0:%.*]] = icmp ne i8 [[LEN:%.*]], 0
+; CHECK-NEXT:    call void @llvm.assume(i1 [[LEN_NE_0]])
+; CHECK-NEXT:    [[SRC_UGE_LOWER:%.*]] = icmp uge ptr [[SRC:%.*]], [[LOWER:%.*]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[SRC_UGE_LOWER]])
+; CHECK-NEXT:    [[LEN_POS:%.*]] = icmp sge i8 [[LEN]], 0
+; CHECK-NEXT:    call void @llvm.assume(i1 [[LEN_POS]])
+; CHECK-NEXT:    [[GEP_LEN:%.*]] = getelementptr inbounds i8, ptr [[SRC]], i8 [[LEN]]
+; CHECK-NEXT:    [[GEP_SUB_2:%.*]] = getelementptr inbounds i8, ptr [[GEP_LEN]], i8 -2
+; CHECK-NEXT:    [[RES:%.*]] = icmp ult ptr [[GEP_SUB_2]], [[LOWER]]
+; CHECK-NEXT:    ret i1 [[RES]]
+;
+entry:
+  %len.ne.0 = icmp ne i8 %len, 0
+  call void @llvm.assume(i1 %len.ne.0)
+
+  %src.uge.lower = icmp uge ptr %src, %lower
+  call void @llvm.assume(i1 %src.uge.lower)
+
+  %len.pos = icmp sge i8 %len, 0
+  call void @llvm.assume(i1 %len.pos)
+
+  %gep.len = getelementptr inbounds i8, ptr %src, i8 %len
+  %gep.sub.2 = getelementptr inbounds i8, ptr %gep.len, i8 -2
+  %res = icmp ult ptr %gep.sub.2, %lower
+  ret i1 %res
+}
+
+define i1 @gep_i16_sub_1_uge_inbounds(ptr %dst, ptr %lower) {
+; CHECK-LABEL: @gep_i16_sub_1_uge_inbounds(
+; CHECK-NEXT:    [[PRE:%.*]] = icmp uge ptr [[DST:%.*]], [[LOWER:%.*]]
+; CHECK-NEXT:    call void @llvm.assume(i1 [[PRE]])
+; CHECK-NEXT:    [[DST_ADD_3:%.*]] = getelementptr inbounds i8, ptr [[DST]], i64 3
+; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i16, ptr [[DST_ADD_3]], i64 -1
+; CHECK-NEXT:    [[DST_SUB_2:%.*]] = getelementptr inbounds i16, ptr [[DST_ADD_3]], i64 -2
+; CHECK-NEXT:    [[CMP_SUB_2:%.*]] = icmp ule ptr [[DST_SUB_2]], [[DST]]
+; CHECK-NEXT:    [[RES_1:%.*]] = xor i1 false, [[CMP_SUB_2]]
+; CHECK-NEXT:    [[DST_SUB_3:%.*]] = getelementptr inbounds i16, ptr [[DST_ADD_3]], i64 -3
+; CHECK-NEXT:    [[CMP_SUB_3:%.*]] = icmp ule ptr [[DST_SUB_3]], [[LOWER]]
+; CHECK-NEXT:    [[RES_2:%.*]] = xor i1 [[RES_1]], [[CMP_SUB_3]]
+; CHECK-NEXT:    ret i1 [[RES_2]]
+;
+  %pre = icmp uge ptr %dst, %lower
+  call void @llvm.assume(i1 %pre)
+  %dst.add.3 = getelementptr inbounds i8, ptr %dst, i64 3
+  %dst.sub.1 = getelementptr inbounds i16, ptr %dst.add.3, i64 -1
+  %cmp.sub.1 = icmp ule ptr %dst.sub.1, %lower
+  %dst.sub.2 = getelementptr inbounds i16, ptr %dst.add.3, i64 -2
+  %cmp.sub.2 = icmp ule ptr %dst.sub.2, %dst
+  %res.1 = xor i1 %cmp.sub.1, %cmp.sub.2
+  %dst.sub.3 = getelementptr inbounds i16, ptr %dst.add.3, i64 -3
+  %cmp.sub.3 = icmp ule ptr %dst.sub.3, %lower
+  %res.2 = xor i1 %res.1, %cmp.sub.3
+  ret i1 %res.2
+}
+
+define i1 @gep_i16_sub_1_uge_inbounds_var_idx(ptr %dst, i64 %off) {
+; CHECK-LABEL: @gep_i16_sub_1_uge_inbounds_var_idx(
+; CHECK-NEXT:    [[OFF_UGE:%.*]] = icmp sge i64 [[OFF:%.*]], 1
+; CHECK-NEXT:    call void @llvm.assume(i1 [[OFF_UGE]])
+; CHECK-NEXT:    [[DST_ADD_3:%.*]] = getelementptr inbounds i8, ptr [[DST:%.*]], i64 [[OFF]]
+; CHECK-NEXT:    [[DST_SUB_1:%.*]] = getelementptr inbounds i16, ptr [[DST_ADD_3]], i32 -1
+; CHECK-NEXT:    [[CMP_SUB_1:%.*]] = icmp ule ptr [[DST_SUB_1]], [[DST]]
+; CHECK-NEXT:    [[DST_SUB_2:%.*]] = getelementptr inbounds i16, ptr [[DST_ADD_3]], i64 -2
+; CHECK-NEXT:    [[CMP_SUB_2:%.*]] = icmp ule ptr [[DST_SUB_2]], [[DST]]
+; CHECK-NEXT:    [[RES_1:%.*]] = xor i1 [[CMP_SUB_1]], [[CMP_SUB_2]]
+; CHECK-NEXT:    [[DST_SUB_3:%.*]] = getelementptr inbounds i16, ptr [[DST_ADD_3]], i64 -3
+; CHECK-NEXT:    [[CMP_SUB_3:%.*]] = icmp ule ptr [[DST_SUB_3]], [[DST]]
+; CHECK-NEXT:    [[RES_2:%.*]] = xor i1 [[RES_1]], [[CMP_SUB_3]]
+; CHECK-NEXT:    ret i1 [[RES_2]]
+;
+  %off.uge = icmp sge i64 %off, 1
+  call void @llvm.assume(i1 %off.uge)
+  %dst.add.3 = getelementptr inbounds i8, ptr %dst, i64 %off
+  %dst.sub.1 = getelementptr inbounds i16, ptr %dst.add.3, i32 -1
+  %cmp.sub.1 = icmp ule ptr %dst.sub.1, %dst
+  %dst.sub.2 = getelementptr inbounds i16, ptr %dst.add.3, i64 -2
+  %cmp.sub.2 = icmp ule ptr %dst.sub.2, %dst
+  %res.1 = xor i1 %cmp.sub.1, %cmp.sub.2
+  %dst.sub.3 = getelementptr inbounds i16, ptr %dst.add.3, i64 -3
+  %cmp.sub.3 = icmp ule ptr %dst.sub.3, %dst
+  %res.2 = xor i1 %res.1, %cmp.sub.3
+  ret i1 %res.2
 }

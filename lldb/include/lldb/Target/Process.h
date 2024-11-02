@@ -22,9 +22,12 @@
 #include <unordered_set>
 #include <vector>
 
-#include "lldb/Breakpoint/BreakpointSiteList.h"
+#include "lldb/Breakpoint/BreakpointSite.h"
+#include "lldb/Breakpoint/StopPointSiteList.h"
+#include "lldb/Breakpoint/WatchpointResource.h"
 #include "lldb/Core/LoadedModuleInfoList.h"
 #include "lldb/Core/PluginInterface.h"
+#include "lldb/Core/SourceManager.h"
 #include "lldb/Core/ThreadSafeValue.h"
 #include "lldb/Core/ThreadedCommunication.h"
 #include "lldb/Core/UserSettingsController.h"
@@ -150,8 +153,8 @@ public:
 
   void SetResumeCount(uint32_t c) { m_resume_count = c; }
 
-  const char *GetProcessPluginName() const {
-    return (m_plugin_name.empty() ? nullptr : m_plugin_name.c_str());
+  llvm::StringRef GetProcessPluginName() const {
+    return llvm::StringRef(m_plugin_name);
   }
 
   void SetProcessPluginName(llvm::StringRef plugin) {
@@ -410,9 +413,9 @@ public:
 
     ~ProcessEventData() override;
 
-    static ConstString GetFlavorString();
+    static llvm::StringRef GetFlavorString();
 
-    ConstString GetFlavor() const override;
+    llvm::StringRef GetFlavor() const override;
 
     lldb::ProcessSP GetProcessSP() const { return m_process_wp.lock(); }
 
@@ -577,6 +580,10 @@ public:
   ///     of CommandObject like CommandObjectRaw, CommandObjectParsed,
   ///     or CommandObjectMultiword.
   virtual CommandObject *GetPluginCommandObject() { return nullptr; }
+  
+  /// The underlying plugin might store the low-level communication history for
+  /// this session.  Dump it into the provided stream.
+  virtual void DumpPluginHistory(Stream &s) { return; }
 
   /// Launch a new process.
   ///
@@ -1379,9 +1386,23 @@ public:
 
   virtual void DidExit() {}
 
+  /// Get the current address mask in the Process
+  ///
+  /// This mask can used to set/clear non-address bits in an addr_t.
+  ///
+  /// \return
+  ///   The current address mask.
+  ///   Bits which are set to 1 are not used for addressing.
+  ///   An address mask of 0 means all bits are used for addressing.
+  ///   An address mask of LLDB_INVALID_ADDRESS_MASK (all 1's) means
+  ///   that no mask has been set.
   lldb::addr_t GetCodeAddressMask();
   lldb::addr_t GetDataAddressMask();
 
+  /// The highmem masks are for targets where we may have different masks
+  /// for low memory versus high memory addresses, and they will be left
+  /// as LLDB_INVALID_ADDRESS_MASK normally, meaning the base masks
+  /// should be applied to all addresses.
   lldb::addr_t GetHighmemCodeAddressMask();
   lldb::addr_t GetHighmemDataAddressMask();
 
@@ -1454,6 +1475,13 @@ public:
   virtual bool IsAlive();
 
   virtual bool IsLiveDebugSession() const { return true; };
+
+  /// Provide a way to retrieve the core dump file that is loaded for debugging.
+  /// Only available if IsLiveDebugSession() returns true.
+  ///
+  /// \return
+  ///     File path to the core file.
+  virtual FileSpec GetCoreFile() const { return {}; }
 
   /// Before lldb detaches from a process, it warns the user that they are
   /// about to lose their debug session. In some cases, this warning doesn't
@@ -2097,9 +2125,10 @@ public:
   // doesn't work for a specific process plug-in.
   virtual Status DisableSoftwareBreakpoint(BreakpointSite *bp_site);
 
-  BreakpointSiteList &GetBreakpointSiteList();
+  StopPointSiteList<lldb_private::BreakpointSite> &GetBreakpointSiteList();
 
-  const BreakpointSiteList &GetBreakpointSiteList() const;
+  const StopPointSiteList<lldb_private::BreakpointSite> &
+  GetBreakpointSiteList() const;
 
   void DisableAllBreakpointSites();
 
@@ -2112,16 +2141,17 @@ public:
 
   Status EnableBreakpointSiteByID(lldb::user_id_t break_id);
 
-  // BreakpointLocations use RemoveOwnerFromBreakpointSite to remove themselves
-  // from the owner's list of this breakpoint sites.
-  void RemoveOwnerFromBreakpointSite(lldb::user_id_t owner_id,
-                                     lldb::user_id_t owner_loc_id,
-                                     lldb::BreakpointSiteSP &bp_site_sp);
+  // BreakpointLocations use RemoveConstituentFromBreakpointSite to remove
+  // themselves from the constituent's list of this breakpoint sites.
+  void RemoveConstituentFromBreakpointSite(lldb::user_id_t site_id,
+                                           lldb::user_id_t constituent_id,
+                                           lldb::BreakpointSiteSP &bp_site_sp);
 
   // Process Watchpoints (optional)
-  virtual Status EnableWatchpoint(Watchpoint *wp, bool notify = true);
+  virtual Status EnableWatchpoint(lldb::WatchpointSP wp_sp, bool notify = true);
 
-  virtual Status DisableWatchpoint(Watchpoint *wp, bool notify = true);
+  virtual Status DisableWatchpoint(lldb::WatchpointSP wp_sp,
+                                   bool notify = true);
 
   // Thread Queries
 
@@ -2139,6 +2169,11 @@ public:
   void UpdateThreadListIfNeeded();
 
   ThreadList &GetThreadList() { return m_thread_list; }
+
+  StopPointSiteList<lldb_private::WatchpointResource> &
+  GetWatchpointResourceList() {
+    return m_watchpoint_resource_list;
+  }
 
   // When ExtendedBacktraces are requested, the HistoryThreads that are created
   // need an owner -- they're saved here in the Process.  The threads in this
@@ -2564,7 +2599,7 @@ void PruneThreadPlans();
   /// \return
   ///     Returns the result of attempting to configure the feature.
   virtual Status
-  ConfigureStructuredData(ConstString type_name,
+  ConfigureStructuredData(llvm::StringRef type_name,
                           const StructuredData::ObjectSP &config_sp);
 
   /// Broadcasts the given structured data object from the given plugin.
@@ -2594,11 +2629,15 @@ void PruneThreadPlans();
   ///     The plugin if one is available for the specified feature;
   ///     otherwise, returns an empty shared pointer.
   lldb::StructuredDataPluginSP
-  GetStructuredDataPlugin(ConstString type_name) const;
+  GetStructuredDataPlugin(llvm::StringRef type_name) const;
 
   virtual void *GetImplementation() { return nullptr; }
 
   virtual void ForceScriptedState(lldb::StateType state) {}
+
+  SourceManager::SourceFileCache &GetSourceFileCache() {
+    return m_source_file_cache;
+  }
 
 protected:
   friend class Trace;
@@ -2796,7 +2835,7 @@ protected:
   };
 
   void SetNextEventAction(Process::NextEventAction *next_event_action) {
-    if (m_next_event_action_up.get())
+    if (m_next_event_action_up)
       m_next_event_action_up->HandleBeingUnshipped();
 
     m_next_event_action_up.reset(next_event_action);
@@ -2860,7 +2899,7 @@ protected:
   ///
   ///     virtual void
   ///     HandleArrivalOfStructuredData(Process &process,
-  ///                                   ConstString type_name,
+  ///                                   llvm::StringRef type_name,
   ///                                   const StructuredData::ObjectSP
   ///                                   &object_sp)
   ///
@@ -2941,9 +2980,6 @@ protected:
     }
   };
 
-  using StructuredDataPluginMap =
-      std::map<ConstString, lldb::StructuredDataPluginSP>;
-
   // Member variables
   std::weak_ptr<Target> m_target_wp; ///< The target that owns this process.
   lldb::pid_t m_pid = LLDB_INVALID_PROCESS_ID;
@@ -2985,22 +3021,26 @@ protected:
                                      /// threads we knew existed, but haven't
                                      /// determined that they have died yet.
   std::vector<ThreadPlanStack> m_async_thread_plans;
-  ThreadList m_extended_thread_list; ///< Owner for extended threads that may be
-                                     ///generated, cleared on natural stops
+  ThreadList
+      m_extended_thread_list; ///< Constituent for extended threads that may be
+                              /// generated, cleared on natural stops
   uint32_t m_extended_thread_stop_id; ///< The natural stop id when
                                       ///extended_thread_list was last updated
   QueueList
       m_queue_list; ///< The list of libdispatch queues at a given stop point
   uint32_t m_queue_list_stop_id; ///< The natural stop id when queue list was
                                  ///last fetched
+  StopPointSiteList<lldb_private::WatchpointResource>
+      m_watchpoint_resource_list; ///< Watchpoint resources currently in use.
   std::vector<Notifications> m_notifications; ///< The list of notifications
                                               ///that this process can deliver.
   std::vector<lldb::addr_t> m_image_tokens;
   lldb::ListenerSP m_listener_sp; ///< Shared pointer to the listener used for
                                   ///public events.  Can not be empty.
-  BreakpointSiteList m_breakpoint_site_list; ///< This is the list of breakpoint
-                                             ///locations we intend to insert in
-                                             ///the target.
+  StopPointSiteList<lldb_private::BreakpointSite>
+      m_breakpoint_site_list; ///< This is the list of breakpoint
+                              /// locations we intend to insert in
+                              /// the target.
   lldb::DynamicLoaderUP m_dyld_up;
   lldb::JITLoaderListUP m_jit_loaders_up;
   lldb::DynamicCheckerFunctionsUP m_dynamic_checkers_up; ///< The functions used
@@ -3044,16 +3084,20 @@ protected:
   /// from looking up or creating things during or after a finalize call.
   std::atomic<bool> m_finalizing;
 
-  /// Mask for code an data addresses. The default value (0) means no mask is
-  /// set.  The bits set to 1 indicate bits that are NOT significant for
-  /// addressing.
-  /// The highmem versions are for targets where we may have different masks
-  /// for low memory versus high memory addresses.
+  /// Mask for code an data addresses.
+  /// The default value LLDB_INVALID_ADDRESS_MASK means no mask has been set,
+  /// and addresses values should not be modified.
+  /// In these masks, the bits are set to 1 indicate bits that are not
+  /// significant for addressing.
+  /// The highmem masks are for targets where we may have different masks
+  /// for low memory versus high memory addresses, and they will be left
+  /// as LLDB_INVALID_ADDRESS_MASK normally, meaning the base masks
+  /// should be applied to all addresses.
   /// @{
-  lldb::addr_t m_code_address_mask = 0;
-  lldb::addr_t m_data_address_mask = 0;
-  lldb::addr_t m_highmem_code_address_mask = 0;
-  lldb::addr_t m_highmem_data_address_mask = 0;
+  lldb::addr_t m_code_address_mask = LLDB_INVALID_ADDRESS_MASK;
+  lldb::addr_t m_data_address_mask = LLDB_INVALID_ADDRESS_MASK;
+  lldb::addr_t m_highmem_code_address_mask = LLDB_INVALID_ADDRESS_MASK;
+  lldb::addr_t m_highmem_data_address_mask = LLDB_INVALID_ADDRESS_MASK;
   /// @}
 
   bool m_clear_thread_plans_on_stop;
@@ -3068,12 +3112,15 @@ protected:
                                         // don't support the ability to modify
                                         // the stack.
   std::mutex m_run_thread_plan_lock;
-  StructuredDataPluginMap m_structured_data_plugin_map;
+  llvm::StringMap<lldb::StructuredDataPluginSP> m_structured_data_plugin_map;
 
   enum { eCanJITDontKnow = 0, eCanJITYes, eCanJITNo } m_can_jit;
 
   std::unique_ptr<UtilityFunction> m_dlopen_utility_func_up;
   llvm::once_flag m_dlopen_utility_func_flag_once;
+
+  /// Per process source file cache.
+  SourceManager::SourceFileCache m_source_file_cache;
 
   size_t RemoveBreakpointOpcodesFromBuffer(lldb::addr_t addr, size_t size,
                                            uint8_t *buf) const;

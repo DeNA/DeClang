@@ -133,8 +133,9 @@ static StringRef CopyString(ASTContext &ctx, StringRef string) {
 static AttributeCommonInfo getDummyAttrInfo() {
   return AttributeCommonInfo(SourceRange(),
                              AttributeCommonInfo::UnknownAttribute,
-                             AttributeCommonInfo::AS_GNU,
-                             /*Spelling*/0);
+                             {AttributeCommonInfo::AS_GNU,
+                              /*Spelling*/ 0, /*IsAlignas*/ false,
+                              /*IsRegularKeywordAttribute*/ false});
 }
 
 namespace {
@@ -232,7 +233,7 @@ static void handleAPINotedRetainCountAttribute(Sema &S, Decl *D,
 
 static void handleAPINotedRetainCountConvention(
     Sema &S, Decl *D, VersionedInfoMetadata metadata,
-    Optional<api_notes::RetainCountConventionKind> convention) {
+    std::optional<api_notes::RetainCountConventionKind> convention) {
   if (!convention)
     return;
   switch (*convention) {
@@ -320,7 +321,7 @@ static void ProcessAPINotes(Sema &S, Decl *D,
       auto &C = S.getASTContext();
       ParsedAttr *SNA = AP.create(&C.Idents.get("swift_name"), SourceRange(),
                                   nullptr, SourceLocation(), nullptr, nullptr,
-                                  nullptr, ParsedAttr::AS_GNU);
+                                  nullptr, ParsedAttr::Form::GNU());
 
       if (!S.DiagnoseSwiftName(D, info.SwiftName, D->getLocation(), *SNA, /*IsAsync=*/false)) {
         return nullptr;
@@ -629,17 +630,17 @@ static void ProcessAPINotes(Sema &S, TagDecl *D,
                             VersionedInfoMetadata metadata) {
   if (auto ImportAs = info.SwiftImportAs) {
     auto str = "import_" + ImportAs.value();
-    auto attr = SwiftAttrAttr::Create(S.Context, str, AttributeCommonInfo(clang::SourceRange()));
+    auto attr = SwiftAttrAttr::Create(S.Context, str);
     D->addAttr(attr);
   }
   if (auto RetainOp = info.SwiftRetainOp) {
     auto str = "retain:" + RetainOp.value();
-    auto attr = SwiftAttrAttr::Create(S.Context, str, AttributeCommonInfo(clang::SourceRange()));
+    auto attr = SwiftAttrAttr::Create(S.Context, str);
     D->addAttr(attr);
   }
   if (auto ReleaseOp = info.SwiftReleaseOp) {
     auto str = "release:" + ReleaseOp.value();
-    auto attr = SwiftAttrAttr::Create(S.Context, str, AttributeCommonInfo(clang::SourceRange()));
+    auto attr = SwiftAttrAttr::Create(S.Context, str);
     D->addAttr(attr);
   }
 
@@ -701,10 +702,11 @@ static void ProcessAPINotes(Sema &S, TypedefNameDecl *D,
           kind = SwiftNewTypeAttr::NK_Enum;
           break;
         }
-        AttributeCommonInfo syntaxInfo{SourceRange(),
-                                       AttributeCommonInfo::AT_SwiftNewType,
-                                       AttributeCommonInfo::AS_GNU,
-                                       SwiftNewTypeAttr::GNU_swift_wrapper};
+        AttributeCommonInfo syntaxInfo{
+            SourceRange(),
+            AttributeCommonInfo::AT_SwiftNewType,
+            {AttributeCommonInfo::AS_GNU, SwiftNewTypeAttr::GNU_swift_wrapper,
+             /*IsAlignas*/ false, /*IsRegularKeywordAttribute*/ false}};
         return new (S.Context) SwiftNewTypeAttr(S.Context, syntaxInfo, kind);
     });
   }
@@ -845,7 +847,7 @@ void Sema::ProcessAPINotes(Decl *D) {
               NamespaceStack.push(CurrentNamespace);
           }
         }
-        Optional<api_notes::ContextID> NamespaceID;
+        std::optional<api_notes::ContextID> NamespaceID;
         while (!NamespaceStack.empty()) {
           auto CurrentNamespace = NamespaceStack.top();
           NamespaceStack.pop();
@@ -973,44 +975,44 @@ void Sema::ProcessAPINotes(Decl *D) {
   if (auto ObjCContainer = dyn_cast<ObjCContainerDecl>(D->getDeclContext())) {
     // Location function that looks up an Objective-C context.
     auto GetContext = [&](api_notes::APINotesReader *Reader)
-                        -> Optional<api_notes::ContextID> {
+        -> std::optional<api_notes::ContextID> {
       if (auto Protocol = dyn_cast<ObjCProtocolDecl>(ObjCContainer)) {
         if (auto Found = Reader->lookupObjCProtocolID(Protocol->getName()))
           return *Found;
 
-        return None;
+        return std::nullopt;
       }
 
       if (auto Impl = dyn_cast<ObjCCategoryImplDecl>(ObjCContainer)) {
         if (auto Cat = Impl->getCategoryDecl())
           ObjCContainer = Cat;
         else
-          return None;
+          return std::nullopt;
       }
 
       if (auto Category = dyn_cast<ObjCCategoryDecl>(ObjCContainer)) {
         if (Category->getClassInterface())
           ObjCContainer = Category->getClassInterface();
         else
-          return None;
+          return std::nullopt;
       }
 
       if (auto Impl = dyn_cast<ObjCImplDecl>(ObjCContainer)) {
         if (Impl->getClassInterface())
           ObjCContainer = Impl->getClassInterface();
         else
-          return None;
+          return std::nullopt;
       }
 
       if (auto Class = dyn_cast<ObjCInterfaceDecl>(ObjCContainer)) {
         if (auto Found = Reader->lookupObjCClassID(Class->getName()))
           return *Found;
 
-        return None;
+        return std::nullopt;
 
       }
 
-      return None;
+      return std::nullopt;
     };
 
     // Objective-C methods.

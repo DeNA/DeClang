@@ -32,7 +32,7 @@ bool TreeSchema::isNode(const ObjectProxy &Node) const {
 }
 
 TreeSchema::TreeSchema(cas::ObjectStore &CAS) : TreeSchema::RTTIExtends(CAS) {
-  TreeKindRef = cantFail(CAS.storeFromString(None, SchemaName));
+  TreeKindRef = cantFail(CAS.storeFromString(std::nullopt, SchemaName));
 }
 
 ObjectRef TreeSchema::getKindRef() const { return *TreeKindRef; }
@@ -53,7 +53,8 @@ Error TreeSchema::forEachTreeEntry(
 
 Error TreeSchema::walkFileTreeRecursively(
     ObjectStore &CAS, ObjectRef Root,
-    function_ref<Error(const NamedTreeEntry &, Optional<TreeProxy>)> Callback) {
+    function_ref<Error(const NamedTreeEntry &, std::optional<TreeProxy>)>
+        Callback) {
   BumpPtrAllocator Alloc;
   StringSaver Saver(Alloc);
   SmallString<128> PathStorage;
@@ -62,7 +63,7 @@ Error TreeSchema::walkFileTreeRecursively(
 
   while (!Stack.empty()) {
     if (Stack.back().getKind() != TreeEntry::Tree) {
-      if (Error E = Callback(Stack.pop_back_val(), None))
+      if (Error E = Callback(Stack.pop_back_val(), std::nullopt))
         return E;
       continue;
     }
@@ -75,7 +76,7 @@ Error TreeSchema::walkFileTreeRecursively(
     if (Error E = Callback(Parent, Tree))
       return E;
     for (int I = Tree.size(), E = 0; I != E; --I) {
-      Optional<NamedTreeEntry> Child = Tree.get(I - 1);
+      std::optional<NamedTreeEntry> Child = Tree.get(I - 1);
       assert(Child && "Expected no corruption");
 
       PathStorage = Parent.getName();
@@ -100,11 +101,11 @@ NamedTreeEntry TreeSchema::loadTreeEntry(TreeProxy Tree, size_t I) const {
   return {ObjectRef, Kind, Name};
 }
 
-Optional<size_t> TreeSchema::lookupTreeEntry(TreeProxy Tree,
-                                             StringRef Name) const {
+std::optional<size_t> TreeSchema::lookupTreeEntry(TreeProxy Tree,
+                                                  StringRef Name) const {
   size_t NumNames = Tree.size();
   if (!NumNames)
-    return None;
+    return std::nullopt;
 
   // Start with a binary search, if there are enough entries.
   //
@@ -133,7 +134,7 @@ Optional<size_t> TreeSchema::lookupTreeEntry(TreeProxy Tree,
     if (Name == Tree.getName(First))
       return First;
 
-  return None;
+  return std::nullopt;
 }
 
 Expected<TreeProxy> TreeSchema::load(ObjectRef Object) const {

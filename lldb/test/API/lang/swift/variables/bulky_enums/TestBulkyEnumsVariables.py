@@ -21,30 +21,23 @@ import unittest2
 
 
 class TestBulkyEnumVariables(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
     @swiftTest
     def test_bulky_enum_variables(self):
         """Tests that large-size Enum variables display correctly"""
         self.build()
         self.do_test()
 
-    def setUp(self):
-        TestBase.setUp(self)
-
     def do_test(self):
         """Tests that large-size Enum variables display correctly"""
         self.build()
         lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("main.swift")
-        )
+            self, 'break here', lldb.SBFileSpec('main.swift'))
 
         self.expect(
-            "frame variable e",
+            'frame variable e',
             substrs=[
-                "e = X ",
+                'e = X ',
                 '0 = "hello world"',
-                "b = (a = 100, b = 200)",
-                "a = (a = 300, b = 400)",
-            ],
-        )
+                'b = (a = 100, b = 200)',
+                'a = (a = 300, b = 400)'])
+

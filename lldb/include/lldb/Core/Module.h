@@ -29,7 +29,9 @@
 #include "lldb/lldb-types.h"
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include <optional>
 #include "llvm/Support/Chrono.h"
 
 #include <atomic>
@@ -37,6 +39,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -336,6 +339,12 @@ public:
                      const ModuleFunctionSearchOptions &options,
                      SymbolContextList &sc_list);
 
+  /// Find functions by compiler context.
+  void FindFunctions(llvm::ArrayRef<CompilerContext> compiler_ctx,
+                     lldb::FunctionNameType name_type_mask,
+                     const ModuleFunctionSearchOptions &options,
+                     SymbolContextList &sc_list);
+
   /// Find functions by name.
   ///
   /// If the function is an inlined function, it will have a block,
@@ -414,70 +423,19 @@ public:
   void FindGlobalVariables(const RegularExpression &regex, size_t max_matches,
                            VariableList &variable_list);
 
-  /// Find types by name.
+  /// Find types using a type-matching object that contains all search
+  /// parameters.
   ///
-  /// Type lookups in modules go through the SymbolFile. The SymbolFile needs to
-  /// be able to lookup types by basename and not the fully qualified typename.
-  /// This allows the type accelerator tables to stay small, even with heavily
-  /// templatized C++. The type search will then narrow down the search
-  /// results. If "exact_match" is true, then the type search will only match
-  /// exact type name matches. If "exact_match" is false, the type will match
-  /// as long as the base typename matches and as long as any immediate
-  /// containing namespaces/class scopes that are specified match. So to
-  /// search for a type "d" in "b::c", the name "b::c::d" can be specified and
-  /// it will match any class/namespace "b" which contains a class/namespace
-  /// "c" which contains type "d". We do this to allow users to not always
-  /// have to specify complete scoping on all expressions, but it also allows
-  /// for exact matching when required.
+  /// \see lldb_private::TypeQuery
   ///
-  /// \param[in] type_name
-  ///     The name of the type we are looking for that is a fully
-  ///     or partially qualified type name.
+  /// \param[in] query
+  ///     A type matching object that contains all of the details of the type
+  ///     search.
   ///
-  /// \param[in] exact_match
-  ///     If \b true, \a type_name is fully qualified and must match
-  ///     exactly. If \b false, \a type_name is a partially qualified
-  ///     name where the leading namespaces or classes can be
-  ///     omitted to make finding types that a user may type
-  ///     easier.
-  ///
-  /// \param[out] types
-  ///     A type list gets populated with any matches.
-  ///
-  void
-  FindTypes(ConstString type_name, bool exact_match, size_t max_matches,
-            llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-            TypeList &types);
-
-  /// Find types by name.
-  ///
-  /// This behaves like the other FindTypes method but allows to
-  /// specify a DeclContext and a language for the type being searched
-  /// for.
-  ///
-  /// \param searched_symbol_files
-  ///     Prevents one file from being visited multiple times.
-  void
-  FindTypes(llvm::ArrayRef<CompilerContext> pattern, LanguageSet languages,
-            llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-            TypeMap &types);
-
-  lldb::TypeSP FindFirstType(const SymbolContext &sc, ConstString type_name,
-                             bool exact_match);
-
-  /// Find types by name that are in a namespace. This function is used by the
-  /// expression parser when searches need to happen in an exact namespace
-  /// scope.
-  ///
-  /// \param[in] type_name
-  ///     The name of a type within a namespace that should not include
-  ///     any qualifying namespaces (just a type basename).
-  ///
-  /// \param[out] type_list
-  ///     A type list gets populated with any matches.
-  void FindTypesInNamespace(ConstString type_name,
-                            const CompilerDeclContext &parent_decl_ctx,
-                            size_t max_matches, TypeList &type_list);
+  /// \param[in] results
+  ///     Any matching types will be populated into the \a results object using
+  ///     TypeMap::InsertUnique(...).
+  void FindTypes(const TypeQuery &query, TypeResults &results);
 
   /// Get const accessor for the module architecture.
   ///
@@ -561,7 +519,7 @@ public:
   bool IsLoadedInTarget(Target *target);
 
   bool LoadScriptingResourceInTarget(Target *target, Status &error,
-                                     Stream *feedback_stream = nullptr);
+                                     Stream &feedback_stream);
 
   /// Get the number of compile units for this module.
   ///
@@ -814,40 +772,59 @@ public:
   llvm::Expected<lldb::TypeSystemSP>
   GetTypeSystemForLanguage(lldb::LanguageType language);
 
+  /// Call \p callback for each \p TypeSystem in this \p Module.
+  /// Return true from callback to keep iterating, false to stop iterating.
+  void ForEachTypeSystem(llvm::function_ref<bool(lldb::TypeSystemSP)> callback);
+
   // Special error functions that can do printf style formatting that will
   // prepend the message with something appropriate for this module (like the
   // architecture, path and object name (if any)). This centralizes code so
   // that everyone doesn't need to format their error and log messages on their
   // own and keeps the output a bit more consistent.
-  void LogMessage(Log *log, const char *format, ...)
-      __attribute__((format(printf, 3, 4)));
+  template <typename... Args>
+  void LogMessage(Log *log, const char *format, Args &&...args) {
+    LogMessage(log, llvm::formatv(format, std::forward<Args>(args)...));
+  }
 
-  void LogMessageVerboseBacktrace(Log *log, const char *format, ...)
-      __attribute__((format(printf, 3, 4)));
+  template <typename... Args>
+  void LogMessageVerboseBacktrace(Log *log, const char *format,
+                                  Args &&...args) {
+    LogMessageVerboseBacktrace(
+        log, llvm::formatv(format, std::forward<Args>(args)...));
+  }
 
-  void ReportWarning(const char *format, ...)
-      __attribute__((format(printf, 2, 3)));
+  template <typename... Args>
+  void ReportWarning(const char *format, Args &&...args) {
+    ReportWarning(llvm::formatv(format, std::forward<Args>(args)...));
+  }
 
-  void ReportError(const char *format, ...)
-      __attribute__((format(printf, 2, 3)));
+  template <typename... Args>
+  void ReportError(const char *format, Args &&...args) {
+    ReportError(llvm::formatv(format, std::forward<Args>(args)...));
+  }
 
   // Only report an error once when the module is first detected to be modified
   // so we don't spam the console with many messages.
-  void ReportErrorIfModifyDetected(const char *format, ...)
-      __attribute__((format(printf, 2, 3)));
+  template <typename... Args>
+  void ReportErrorIfModifyDetected(const char *format, Args &&...args) {
+    ReportErrorIfModifyDetected(
+        llvm::formatv(format, std::forward<Args>(args)...));
+  }
 
-  void ReportWarningOptimization(llvm::Optional<lldb::user_id_t> debugger_id);
+  void ReportWarningOptimization(std::optional<lldb::user_id_t> debugger_id);
 
   void
   ReportWarningUnsupportedLanguage(lldb::LanguageType language,
-                                   llvm::Optional<lldb::user_id_t> debugger_id);
+                                   std::optional<lldb::user_id_t> debugger_id);
 
 #ifdef LLDB_ENABLE_SWIFT
   void
   ReportWarningToolchainMismatch(CompileUnit &comp_unit,
-                                 llvm::Optional<lldb::user_id_t> debugger_id);
+                                 std::optional<lldb::user_id_t> debugger_id);
 
   bool IsSwiftCxxInteropEnabled();
+
+  bool IsEmbeddedSwift();
 #endif
 
   // Return true if the file backing this module has changed since the module
@@ -897,7 +874,7 @@ public:
   /// \return
   ///     The newly remapped filespec that is may or may not exist if
   ///     \a path was successfully located.
-  llvm::Optional<std::string> RemapSourceFile(llvm::StringRef path) const;
+  std::optional<std::string> RemapSourceFile(llvm::StringRef path) const;
   bool RemapSourceFile(const char *, std::string &) const = delete;
 
   void ClearModuleDependentCaches();
@@ -905,10 +882,6 @@ public:
   void SetTypeSystemMap(const TypeSystemMap &type_system_map) {
     m_type_system_map = type_system_map;
   }
-
-  /// Call \p callback for each \p TypeSystem in this \p Module.
-  /// Return true from callback to keep iterating, false to stop iterating.
-  void ForEachTypeSystem(llvm::function_ref<bool(lldb::TypeSystemSP)> callback);
 
   std::vector<lldb::DataBufferSP> GetASTData(lldb::LanguageType language);
 
@@ -1068,9 +1041,9 @@ protected:
   lldb::ObjectFileSP m_objfile_sp; ///< A shared pointer to the object file
                                    /// parser for this module as it may or may
                                    /// not be shared with the SymbolFile
-  llvm::Optional<UnwindTable> m_unwind_table; ///< Table of FuncUnwinders
-                                              /// objects created for this
-                                              /// Module's functions
+  std::optional<UnwindTable> m_unwind_table; ///< Table of FuncUnwinders
+                                             /// objects created for this
+                                             /// Module's functions
   lldb::SymbolVendorUP
       m_symfile_up; ///< A pointer to the symbol vendor for this module.
   std::vector<lldb::SymbolVendorUP>
@@ -1110,43 +1083,6 @@ protected:
   std::once_flag m_toolchain_mismatch_warning;
 #endif
 
-  /// Resolve a file or load virtual address.
-  ///
-  /// Tries to resolve \a vm_addr as a file address (if \a
-  /// vm_addr_is_file_addr is true) or as a load address if \a
-  /// vm_addr_is_file_addr is false) in the symbol vendor. \a resolve_scope
-  /// indicates what clients wish to resolve and can be used to limit the
-  /// scope of what is parsed.
-  ///
-  /// \param[in] vm_addr
-  ///     The load virtual address to resolve.
-  ///
-  /// \param[in] vm_addr_is_file_addr
-  ///     If \b true, \a vm_addr is a file address, else \a vm_addr
-  ///     if a load address.
-  ///
-  /// \param[in] resolve_scope
-  ///     The scope that should be resolved (see
-  ///     SymbolContext::Scope).
-  ///
-  /// \param[out] so_addr
-  ///     The section offset based address that got resolved if
-  ///     any bits are returned.
-  ///
-  /// \param[out] sc
-  //      The symbol context that has objects filled in. Each bit
-  ///     in the \a resolve_scope pertains to a member in the \a sc.
-  ///
-  /// \return
-  ///     A integer that contains SymbolContext::Scope bits set for
-  ///     each item that was successfully resolved.
-  ///
-  /// \see SymbolContext::Scope
-  uint32_t ResolveSymbolContextForAddress(lldb::addr_t vm_addr,
-                                          bool vm_addr_is_file_addr,
-                                          lldb::SymbolContextItem resolve_scope,
-                                          Address &so_addr, SymbolContext &sc);
-
   void SymbolIndicesToSymbolContextList(Symtab *symtab,
                                         std::vector<uint32_t> &symbol_indexes,
                                         SymbolContextList &sc_list);
@@ -1164,17 +1100,18 @@ protected:
 private:
   Module(); // Only used internally by CreateJITModule ()
 
-  void FindTypes_Impl(
-      ConstString name, const CompilerDeclContext &parent_decl_ctx,
-      size_t max_matches,
-      llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-      TypeMap &types);
-
   Module(const Module &) = delete;
   const Module &operator=(const Module &) = delete;
 
+  void LogMessage(Log *log, const llvm::formatv_object_base &payload);
+  void LogMessageVerboseBacktrace(Log *log,
+                                  const llvm::formatv_object_base &payload);
+  void ReportWarning(const llvm::formatv_object_base &payload);
+  void ReportError(const llvm::formatv_object_base &payload);
+  void ReportErrorIfModifyDetected(const llvm::formatv_object_base &payload);
 #ifdef LLDB_ENABLE_SWIFT
   LazyBool m_is_swift_cxx_interop_enabled = eLazyBoolCalculate;
+  LazyBool m_is_embedded_swift = eLazyBoolCalculate;
 #endif
 };
 

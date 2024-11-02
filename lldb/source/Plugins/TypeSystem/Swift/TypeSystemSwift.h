@@ -115,7 +115,7 @@ public:
 
   const std::string &GetDescription() const { return m_description; }
   static LanguageSet GetSupportedLanguagesForTypes();
-  virtual SwiftASTContext *GetSwiftASTContext() const = 0;
+  virtual SwiftASTContext *GetSwiftASTContext(const SymbolContext *sc) const = 0;
   virtual TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() = 0;
   virtual const TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() const = 0;
   virtual void SetTriple(const llvm::Triple triple) = 0;
@@ -124,10 +124,13 @@ public:
 
   virtual bool IsImportedType(lldb::opaque_compiler_type_t type,
                               CompilerType *original_type) = 0;
+  virtual bool IsErrorType(lldb::opaque_compiler_type_t type) = 0;
   virtual CompilerType GetErrorType() = 0;
   virtual CompilerType GetReferentType(lldb::opaque_compiler_type_t type) = 0;
-  static CompilerType GetInstanceType(CompilerType ct);
-  virtual CompilerType GetInstanceType(lldb::opaque_compiler_type_t type) = 0;
+  static CompilerType GetInstanceType(CompilerType ct,
+                                      ExecutionContextScope *exe_scope);
+  virtual CompilerType GetInstanceType(lldb::opaque_compiler_type_t type,
+                                       ExecutionContextScope *exe_scope) = 0;
   /// Return the static type if this is a DynamicSelf type else the input type.
   virtual CompilerType GetStaticSelfType(lldb::opaque_compiler_type_t type) = 0;
   enum class TypeAllocationStrategy { eInline, ePointer, eDynamic, eUnknown };
@@ -142,12 +145,13 @@ public:
   virtual CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) = 0;
   virtual bool IsTupleType(lldb::opaque_compiler_type_t type) = 0;
+
   enum class NonTriviallyManagedReferenceKind : uint8_t {
     eWeak,
     eUnowned,
     eUnmanaged
   };
-  virtual llvm::Optional<NonTriviallyManagedReferenceKind>
+  virtual std::optional<NonTriviallyManagedReferenceKind>
   GetNonTriviallyManagedReferenceKind(lldb::opaque_compiler_type_t type) = 0;
 
   /// Creates a GenericTypeParamType with the desired depth and index.
@@ -184,7 +188,7 @@ public:
   virtual CompilerType ConvertClangTypeToSwiftType(CompilerType clang_type) = 0;
 
   void DumpValue(lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx,
-                 Stream *s, lldb::Format format, const DataExtractor &data,
+                 Stream &s, lldb::Format format, const DataExtractor &data,
                  lldb::offset_t data_offset, size_t data_byte_size,
                  uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
                  bool show_types, bool show_summary, bool verbose,
@@ -192,7 +196,7 @@ public:
 
   /// \see lldb_private::TypeSystem::Dump
   void Dump(llvm::raw_ostream &output) override;
-  
+
   lldb::Format GetFormat(lldb::opaque_compiler_type_t type) override;
 
   /// Unavailable hardcoded functions that don't make sense for Swift.
@@ -219,9 +223,6 @@ public:
                            bool &is_complex) override;
   bool IsIntegerType(lldb::opaque_compiler_type_t type,
                      bool &is_signed) override;
-  bool IsBooleanType(lldb::opaque_compiler_type_t type) override {
-    return false;
-  }
   bool IsScopedEnumerationType(lldb::opaque_compiler_type_t type) override {
     return false;
   }
@@ -305,7 +306,8 @@ public:
   /// Lookup a child given a name. This function will match base class names
   /// and member names in \p type only, not descendants.
   uint32_t GetIndexOfChildWithName(lldb::opaque_compiler_type_t type,
-                                   const char *name, ExecutionContext *exe_ctx,
+                                   llvm::StringRef name,
+                                   ExecutionContext *exe_ctx,
                                    bool omit_empty_base_classes) override;
 
   CompilerType
@@ -324,7 +326,7 @@ public:
 
   // TODO: This method appear unused. Should they be removed?
   void DumpSummary(lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx,
-                   Stream *s, const DataExtractor &data,
+                   Stream &s, const DataExtractor &data,
                    lldb::offset_t data_offset, size_t data_byte_size) override {
   }
   /// \}
@@ -333,7 +335,7 @@ protected:
   std::string m_description;
   /// The module this typesystem belongs to if any.
   Module *m_module = nullptr;
-};
+  };
 
 } // namespace lldb_private
 

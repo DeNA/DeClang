@@ -11,6 +11,7 @@
 
 #include "Cuda.h"
 #include "Gnu.h"
+#include "LazyDetector.h"
 #include "ROCm.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Driver/ToolChain.h"
@@ -65,7 +66,6 @@ public:
 
   bool HasNativeLLVMSupport() const override;
 
-  bool IsIntegratedAssemblerDefault() const override;
   UnwindTableLevel
   getDefaultUnwindTableLevel(const llvm::opt::ArgList &Args) const override;
   bool isPICDefault() const override;
@@ -103,17 +103,18 @@ protected:
   Tool *buildAssembler() const override;
 
 private:
-  CudaInstallationDetector CudaInstallation;
-  RocmInstallationDetector RocmInstallation;
+  LazyDetector<CudaInstallationDetector> CudaInstallation;
+  LazyDetector<RocmInstallationDetector> RocmInstallation;
 
   std::string Base;
   std::string GccLibDir;
   clang::driver::toolchains::Generic_GCC::GCCVersion GccVer;
   std::string Ver;
   std::string SubdirName;
+  std::string TripleDirName;
   mutable std::unique_ptr<tools::gcc::Preprocessor> Preprocessor;
   mutable std::unique_ptr<tools::gcc::Compiler> Compiler;
-  void findGccLibDir();
+  void findGccLibDir(const llvm::Triple &LiteralTriple);
 
   bool NativeLLVMSupport;
 };

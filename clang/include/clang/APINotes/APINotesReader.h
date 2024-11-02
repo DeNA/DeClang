@@ -16,7 +16,6 @@
 #define LLVM_CLANG_API_NOTES_READER_H
 
 #include "clang/APINotes/Types.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/VersionTuple.h"
 #include <memory>
@@ -62,7 +61,7 @@ public:
 
   /// Retrieve the size and modification time of the source file from
   /// which this API notes file was created, if known.
-  llvm::Optional<std::pair<off_t, time_t>> getSourceFileSizeAndModTime() const;
+  std::optional<std::pair<off_t, time_t>> getSourceFileSizeAndModTime() const;
 
   /// Retrieve the module options
   ModuleOptions getModuleOptions() const;
@@ -81,7 +80,7 @@ public:
 
   public:
     /// Form an empty set of versioned information.
-    VersionedInfo(llvm::NoneType) : Selected(0) { }
+    VersionedInfo(std::nullopt_t) : Selected(0) { }
     
     /// Form a versioned info set given the desired version and a set of
     /// results.
@@ -99,8 +98,8 @@ public:
     }
 
     /// Retrieve the selected index in the result set.
-    llvm::Optional<unsigned> getSelected() const {
-      if (Selected == Results.size()) return llvm::None;
+    std::optional<unsigned> getSelected() const {
+      if (Selected == Results.size()) return std::nullopt;
       return Selected;
     }
 
@@ -122,7 +121,7 @@ public:
   /// \param name The name of the class we're looking for.
   ///
   /// \returns The ID, if known.
-  llvm::Optional<ContextID> lookupObjCClassID(llvm::StringRef name);
+  std::optional<ContextID> lookupObjCClassID(llvm::StringRef name);
 
   /// Look for information regarding the given Objective-C class.
   ///
@@ -136,7 +135,7 @@ public:
   /// \param name The name of the protocol we're looking for.
   ///
   /// \returns The ID of the protocol, if known.
-  llvm::Optional<ContextID> lookupObjCProtocolID(llvm::StringRef name);
+  std::optional<ContextID> lookupObjCProtocolID(llvm::StringRef name);
 
   /// Look for information regarding the given Objective-C protocol.
   ///
@@ -219,9 +218,9 @@ public:
   /// \param name The name of the class we're looking for.
   ///
   /// \returns The ID, if known.
-  llvm::Optional<ContextID>
+  std::optional<ContextID>
   lookupNamespaceID(llvm::StringRef name,
-                    llvm::Optional<ContextID> parentNamespaceID = llvm::None);
+                    std::optional<ContextID> parentNamespaceID = std::nullopt);
 };
 
 } // end namespace api_notes

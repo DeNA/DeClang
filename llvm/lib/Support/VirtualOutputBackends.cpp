@@ -31,7 +31,7 @@ IntrusiveRefCntPtr<OutputBackend> vfs::makeNullOutputBackend() {
       return const_cast<NullOutputBackend *>(this);
     }
     Expected<std::unique_ptr<OutputFileImpl>>
-    createFileImpl(StringRef Path, Optional<OutputConfig>) override {
+    createFileImpl(StringRef Path, std::optional<OutputConfig>) override {
       return std::make_unique<NullOutputFileImpl>();
     }
   };
@@ -41,10 +41,11 @@ IntrusiveRefCntPtr<OutputBackend> vfs::makeNullOutputBackend() {
 
 IntrusiveRefCntPtr<OutputBackend> vfs::makeFilteringOutputBackend(
     IntrusiveRefCntPtr<OutputBackend> UnderlyingBackend,
-    std::function<bool(StringRef, Optional<OutputConfig>)> Filter) {
+    std::function<bool(StringRef, std::optional<OutputConfig>)> Filter) {
   struct FilteringOutputBackend : public ProxyOutputBackend {
     Expected<std::unique_ptr<OutputFileImpl>>
-    createFileImpl(StringRef Path, Optional<OutputConfig> Config) override {
+    createFileImpl(StringRef Path,
+                   std::optional<OutputConfig> Config) override {
       if (Filter(Path, Config))
         return ProxyOutputBackend::createFileImpl(Path, Config);
       return std::make_unique<NullOutputFileImpl>();
@@ -57,12 +58,12 @@ IntrusiveRefCntPtr<OutputBackend> vfs::makeFilteringOutputBackend(
 
     FilteringOutputBackend(
         IntrusiveRefCntPtr<OutputBackend> UnderlyingBackend,
-        std::function<bool(StringRef, Optional<OutputConfig>)> Filter)
+        std::function<bool(StringRef, std::optional<OutputConfig>)> Filter)
         : ProxyOutputBackend(std::move(UnderlyingBackend)),
           Filter(std::move(Filter)) {
       assert(this->Filter && "Expected a non-null function");
     }
-    std::function<bool(StringRef, Optional<OutputConfig>)> Filter;
+    std::function<bool(StringRef, std::optional<OutputConfig>)> Filter;
   };
 
   return makeIntrusiveRefCnt<FilteringOutputBackend>(
@@ -122,11 +123,7 @@ vfs::makeMirroringOutputBackend(IntrusiveRefCntPtr<OutputBackend> Backend1,
                     std::unique_ptr<OutputFileImpl> F2)
         : PreferredBufferSize(std::max(F1->getOS().GetBufferSize(),
                                        F1->getOS().GetBufferSize())),
-          F1(std::move(F1)), F2(std::move(F2)) {
-      // Don't double buffer.
-      this->F1->getOS().SetUnbuffered();
-      this->F2->getOS().SetUnbuffered();
-    }
+          F1(std::move(F1)), F2(std::move(F2)) {}
     size_t PreferredBufferSize;
     std::unique_ptr<OutputFileImpl> F1;
     std::unique_ptr<OutputFileImpl> F2;
@@ -134,7 +131,8 @@ vfs::makeMirroringOutputBackend(IntrusiveRefCntPtr<OutputBackend> Backend1,
   struct MirroringOutputBackend : public ProxyOutputBackend1,
                                   public ProxyOutputBackend2 {
     Expected<std::unique_ptr<OutputFileImpl>>
-    createFileImpl(StringRef Path, Optional<OutputConfig> Config) override {
+    createFileImpl(StringRef Path,
+                   std::optional<OutputConfig> Config) override {
       std::unique_ptr<OutputFileImpl> File1;
       std::unique_ptr<OutputFileImpl> File2;
       if (Error E =
@@ -180,7 +178,7 @@ vfs::makeMirroringOutputBackend(IntrusiveRefCntPtr<OutputBackend> Backend1,
 }
 
 static OutputConfig
-applySettings(Optional<OutputConfig> &&Config,
+applySettings(std::optional<OutputConfig> &&Config,
               const OnDiskOutputBackend::OutputSettings &Settings) {
   if (!Config)
     Config = Settings.DefaultConfig;
@@ -211,22 +209,22 @@ public:
   /// Config.
   ///
   /// \post FD and \a TempPath are initialized if this is successful.
-  Error tryToCreateTemporary(Optional<int> &FD);
+  Error tryToCreateTemporary(std::optional<int> &FD);
 
-  Error initializeFD(Optional<int> &FD);
+  Error initializeFD(std::optional<int> &FD);
   Error initializeStream();
   Error reset();
 
-  OnDiskOutputFile(StringRef OutputPath, Optional<OutputConfig> Config,
+  OnDiskOutputFile(StringRef OutputPath, std::optional<OutputConfig> Config,
                    const OnDiskOutputBackend::OutputSettings &Settings)
       : Config(applySettings(std::move(Config), Settings)),
         OutputPath(OutputPath.str()) {}
 
   OutputConfig Config;
   const std::string OutputPath;
-  Optional<std::string> TempPath;
-  Optional<raw_fd_ostream> FileOS;
-  Optional<buffer_ostream> BufferOS;
+  std::optional<std::string> TempPath;
+  std::optional<raw_fd_ostream> FileOS;
+  std::optional<buffer_ostream> BufferOS;
 };
 } // end namespace
 
@@ -245,7 +243,7 @@ static Error createDirectoriesOnDemand(StringRef OutputPath,
   });
 }
 
-Error OnDiskOutputFile::tryToCreateTemporary(Optional<int> &FD) {
+Error OnDiskOutputFile::tryToCreateTemporary(std::optional<int> &FD) {
   // Create a temporary file.
   // Insert -%%%%%%%% before the extension (if any), and because some tools
   // (noticeable, clang's own GlobalModuleIndex.cpp) glob for build
@@ -273,7 +271,7 @@ Error OnDiskOutputFile::tryToCreateTemporary(Optional<int> &FD) {
   });
 }
 
-Error OnDiskOutputFile::initializeFD(Optional<int> &FD) {
+Error OnDiskOutputFile::initializeFD(std::optional<int> &FD) {
   assert(OutputPath != "-" && "Unexpected request for FD of stdout");
 
   // Disable temporary file for other non-regular files, and if we get a status
@@ -329,7 +327,7 @@ Error OnDiskOutputFile::initializeStream() {
     if (EC)
       return make_error<OutputError>(OutputPath, EC);
   } else {
-    Optional<int> FD;
+    std::optional<int> FD;
     if (Error E = initializeFD(FD))
       return E;
     FileOS.emplace(*FD, /*shouldClose=*/true);
@@ -586,7 +584,7 @@ Error OnDiskOutputBackend::makeAbsolute(SmallVectorImpl<char> &Path) const {
 
 Expected<std::unique_ptr<OutputFileImpl>>
 OnDiskOutputBackend::createFileImpl(StringRef Path,
-                                    Optional<OutputConfig> Config) {
+                                    std::optional<OutputConfig> Config) {
   SmallString<256> AbsPath;
   if (Path != "-") {
     AbsPath = Path;

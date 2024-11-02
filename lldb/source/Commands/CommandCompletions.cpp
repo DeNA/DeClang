@@ -10,7 +10,6 @@
 #include "llvm/ADT/StringSet.h"
 
 #include "lldb/Breakpoint/Watchpoint.h"
-#include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/DataFormatters/DataVisualization.h"
@@ -27,6 +26,7 @@
 #include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/FileSpecList.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/TildeExpressionResolver.h"
 
@@ -224,18 +224,15 @@ public:
       function_options.include_inlines = true;
       context.module_sp->FindFunctions(m_regex, function_options, sc_list);
 
-      SymbolContext sc;
       // Now add the functions & symbols to the list - only add if unique:
-      for (uint32_t i = 0; i < sc_list.GetSize(); i++) {
-        if (sc_list.GetContextAtIndex(i, sc)) {
-          ConstString func_name = sc.GetFunctionName(Mangled::ePreferDemangled);
-          // Ensure that the function name matches the regex. This is more than
-          // a sanity check. It is possible that the demangled function name
-          // does not start with the prefix, for example when it's in an
-          // anonymous namespace.
-          if (!func_name.IsEmpty() && m_regex.Execute(func_name.GetStringRef()))
-            m_match_set.insert(func_name);
-        }
+      for (const SymbolContext &sc : sc_list) {
+        ConstString func_name = sc.GetFunctionName(Mangled::ePreferDemangled);
+        // Ensure that the function name matches the regex. This is more than
+        // a sanity check. It is possible that the demangled function name
+        // does not start with the prefix, for example when it's in an
+        // anonymous namespace.
+        if (!func_name.IsEmpty() && m_regex.Execute(func_name.GetStringRef()))
+          m_match_set.insert(func_name);
       }
     }
     return Searcher::eCallbackReturnContinue;
@@ -614,6 +611,9 @@ void CommandCompletions::Registers(CommandInterpreter &interpreter,
 
   RegisterContext *reg_ctx =
       interpreter.GetExecutionContext().GetRegisterContext();
+  if (!reg_ctx)
+    return;
+
   const size_t reg_num = reg_ctx->GetRegisterCount();
   for (size_t reg_idx = 0; reg_idx < reg_num; ++reg_idx) {
     const RegisterInfo *reg_info = reg_ctx->GetRegisterInfoAtIndex(reg_idx);
@@ -757,7 +757,7 @@ void CommandCompletions::StopHookIDs(CommandInterpreter &interpreter,
     // neater.
     strm.SetIndentLevel(11);
     const Target::StopHookSP stophook_sp = target_sp->GetStopHookAtIndex(idx);
-    stophook_sp->GetDescription(&strm, lldb::eDescriptionLevelInitial);
+    stophook_sp->GetDescription(strm, lldb::eDescriptionLevelInitial);
     request.TryCompleteCurrentArg(std::to_string(stophook_sp->GetID()),
                                   strm.GetString());
   }

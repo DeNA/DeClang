@@ -19,12 +19,14 @@
 #include "clang/Basic/SourceManager.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -119,7 +121,7 @@ static unsigned int adjustColumnPos(FullSourceLoc Loc,
   assert(!Loc.isInvalid() && "invalid Loc when adjusting column position");
 
   std::pair<FileID, unsigned> LocInfo = Loc.getDecomposedExpansionLoc();
-  Optional<MemoryBufferRef> Buf =
+  std::optional<MemoryBufferRef> Buf =
       Loc.getManager().getBufferOrNone(LocInfo.first);
   assert(Buf && "got an invalid buffer for the location's file");
   assert(Buf->getBufferSize() >= (LocInfo.second + TokenLen) &&
@@ -237,7 +239,7 @@ SarifDocumentWriter::createPhysicalLocation(const CharSourceRange &R) {
   const SarifArtifactLocation &Location = I->second.Location;
   json::Object ArtifactLocationObject{{"uri", Location.URI}};
   if (Location.Index.has_value())
-    ArtifactLocationObject["index"] = Location.Index.value();
+    ArtifactLocationObject["index"] = *Location.Index;
   return json::Object{{{"artifactLocation", std::move(ArtifactLocationObject)},
                        {"region", createTextRegion(SourceMgr, R)}}};
 }
@@ -292,22 +294,25 @@ void SarifDocumentWriter::endRun() {
   // Flush all the artifacts.
   json::Object &Run = getCurrentRun();
   json::Array *Artifacts = Run.getArray("artifacts");
-  for (const auto &Pair : CurrentArtifacts) {
-    const SarifArtifact &A = Pair.getValue();
+  SmallVector<std::pair<StringRef, SarifArtifact>, 0> Vec;
+  for (const auto &[K, V] : CurrentArtifacts)
+    Vec.emplace_back(K, V);
+  llvm::sort(Vec, llvm::less_first());
+  for (const auto &[_, A] : Vec) {
     json::Object Loc{{"uri", A.Location.URI}};
     if (A.Location.Index.has_value()) {
-      Loc["index"] = static_cast<int64_t>(A.Location.Index.value());
+      Loc["index"] = static_cast<int64_t>(*A.Location.Index);
     }
     json::Object Artifact;
     Artifact["location"] = std::move(Loc);
     if (A.Length.has_value())
-      Artifact["length"] = static_cast<int64_t>(A.Length.value());
+      Artifact["length"] = static_cast<int64_t>(*A.Length);
     if (!A.Roles.empty())
       Artifact["roles"] = json::Array(A.Roles);
     if (!A.MimeType.empty())
       Artifact["mimeType"] = A.MimeType;
     if (A.Offset.has_value())
-      Artifact["offset"] = A.Offset;
+      Artifact["offset"] = *A.Offset;
     Artifacts->push_back(json::Value(std::move(Artifact)));
   }
 

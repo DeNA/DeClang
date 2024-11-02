@@ -19,14 +19,18 @@ let Definition = "target_experimental" in {
   def SwiftEnableBareSlashRegex: Property<"swift-enable-bare-slash-regex", "Boolean">,
     DefaultFalse,
     Desc<"Passes the -enable-bare-slash-regex compiler flag to the swift compiler.">;
-  def SwiftEnableCxxInterop: Property<"swift-enable-cxx-interop", "Enum">,
-    DefaultEnumValue<"eAutoDetectSwiftCxxInterop">,
-    EnumValues<"OptionEnumValues(g_enable_swift_cxx_interop_values)">,
-    Desc<"Passes the -enable-cxx-interop flag to the swift compiler.">;
   def SwiftPluginServerForPath: Property<"swift-plugin-server-for-path",
       "Dictionary">,
     ElementType<"String">,
     Desc<"A dictionary of plugin paths as keys and swift-plugin-server binaries as values">;
+  def SwiftAllowExplicitModules: Property<"swift-allow-explicit-modules", "Boolean">,
+    DefaultTrue,
+    Desc<"Allows explicit module flags to be passed through to ClangImporter.">;
+  def SwiftPCMValidation: Property<"swift-pcm-validation", "Enum">,
+    Global,
+    DefaultEnumValue<"llvm::to_underlying(AutoBool::Auto)">,
+    EnumValues<"OptionEnumValues(g_swift_pcm_validation_values)">,
+    Desc<"Enable validation when loading Clang PCM files (-fvalidate-pch, -fmodules-check-relocated).">;
 }
 
 let Definition = "target" in {
@@ -47,6 +51,15 @@ let Definition = "target" in {
     DefaultUnsignedValue<5>,
     Desc<"The maximum amount of errors to emit while parsing an expression. "
          "A value of 0 means to always continue parsing if possible.">;
+  def ExprAllocAddress: Property<"expr-alloc-address", "UInt64">,
+    DefaultUnsignedValue<0>,
+    Desc<"Start address within the process address space of memory allocation for expression evaluation.">;
+  def ExprAllocSize: Property<"expr-alloc-size", "UInt64">,
+    DefaultUnsignedValue<0>,
+    Desc<"Amount of memory in bytes to allocate for expression evaluation.">;
+  def ExprAllocAlign: Property<"expr-alloc-align", "UInt64">,
+    DefaultUnsignedValue<0>,
+    Desc<"Alignment for each memory allocation for expression evaluation.">;
   def PreferDynamic: Property<"prefer-dynamic-value", "Enum">,
     DefaultEnumValue<"eDynamicDontRunTarget">,
     EnumValues<"OptionEnumValues(g_dynamic_value_types)">,
@@ -105,7 +118,7 @@ let Definition = "target" in {
   def MaxChildrenDepth: Property<"max-children-depth", "UInt64">,
     DefaultUnsignedValue<6>,
     Desc<"Maximum depth to expand children.">;
-  def MaxSummaryLength: Property<"max-string-summary-length", "SInt64">,
+  def MaxSummaryLength: Property<"max-string-summary-length", "UInt64">,
     DefaultUnsignedValue<1024>,
     Desc<"Maximum number of characters to show when using %s in summary strings.">;
   def MaxMemReadSize: Property<"max-memory-read-size", "SInt64">,
@@ -211,6 +224,9 @@ let Definition = "target" in {
   def SwiftExtraClangFlags: Property<"swift-extra-clang-flags", "String">,
     DefaultStringValue<"">,
     Desc<"Additional -Xcc flags to be passed to the Swift ClangImporter.">;
+  def SwiftClangOverrideOptions: Property<"swift-clang-override-options", "String">,
+    DefaultStringValue<"">,
+    Desc<"Specify CCC_OVERRIDE_OPTIONS for ClangImporter flags.">;
   def SwiftAutoImportFrameworks : Property<"swift-auto-import-frameworks", "Boolean">,
      DefaultFalse,
      Desc<"Automatically import all frameworks and dynamic libraries that are autolinked by Swift modules in the target.">;
@@ -260,7 +276,7 @@ let Definition = "process" in {
   def DisableLangRuntimeUnwindPlans: Property<"disable-language-runtime-unwindplans", "Boolean">,
     Global,
     DefaultFalse,
-    Desc<"If true, LanguageRuntime plugins' UnwindPlans will not be used when backtracing.">;
+    Desc<"If true, language runtime augmented/overidden backtraces will not be used when printing a stack trace.">;
   def DetachKeepsStopped: Property<"detach-keeps-stopped", "Boolean">,
     Global,
     DefaultFalse,

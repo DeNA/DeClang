@@ -13,8 +13,10 @@
 #ifndef MLIR_DIALECT_GPU_TRANSFORMS_PASSES_H_
 #define MLIR_DIALECT_GPU_TRANSFORMS_PASSES_H_
 
+#include "Utils.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Pass/Pass.h"
+#include <optional>
 
 namespace llvm {
 class TargetMachine;
@@ -23,6 +25,8 @@ class Module;
 } // namespace llvm
 
 namespace mlir {
+class TypeConverter;
+class ConversionTarget;
 namespace func {
 class FuncOp;
 } // namespace func
@@ -49,18 +53,23 @@ std::unique_ptr<OperationPass<func::FuncOp>> createGpuAsyncRegionPass();
 /// mapped to sequential loops.
 std::unique_ptr<OperationPass<func::FuncOp>> createGpuMapParallelLoopsPass();
 
+/// Collect a set of patterns to rewrite GlobalIdOp op within the GPU dialect.
+void populateGpuGlobalIdPatterns(RewritePatternSet &patterns);
+
+/// Collect a set of patterns to rewrite shuffle ops within the GPU dialect.
+void populateGpuShufflePatterns(RewritePatternSet &patterns);
+
 /// Collect a set of patterns to rewrite all-reduce ops within the GPU dialect.
 void populateGpuAllReducePatterns(RewritePatternSet &patterns);
 
 /// Collect all patterns to rewrite ops within the GPU dialect.
 inline void populateGpuRewritePatterns(RewritePatternSet &patterns) {
   populateGpuAllReducePatterns(patterns);
+  populateGpuGlobalIdPatterns(patterns);
+  populateGpuShufflePatterns(patterns);
 }
 
 namespace gpu {
-/// Returns the default annotation name for GPU binary blobs.
-std::string getDefaultGpuBinaryAnnotation();
-
 /// Base pass class to serialize kernel functions through LLVM into
 /// user-specified IR and add the resulting blob as module attribute.
 class SerializeToBlobPass : public OperationPass<gpu::GPUModuleOp> {
@@ -87,8 +96,8 @@ private:
   std::unique_ptr<llvm::TargetMachine> createTargetMachine();
 
   /// Translates the module to ISA
-  Optional<std::string> translateToISA(llvm::Module &llvmModule,
-                                       llvm::TargetMachine &targetMachine);
+  std::optional<std::string> translateToISA(llvm::Module &llvmModule,
+                                            llvm::TargetMachine &targetMachine);
 
   /// Serializes the target ISA to binary form.
   virtual std::unique_ptr<std::vector<char>>
@@ -101,10 +110,16 @@ protected:
                            ::llvm::cl::desc("Target architecture")};
   Option<std::string> features{*this, "features",
                                ::llvm::cl::desc("Target features")};
+  Option<int> optLevel{*this, "opt-level",
+                       llvm::cl::desc("Optimization level for compilation"),
+                       llvm::cl::init(2)};
   Option<std::string> gpuBinaryAnnotation{
       *this, "gpu-binary-annotation",
       llvm::cl::desc("Annotation attribute string for GPU binary"),
       llvm::cl::init(getDefaultGpuBinaryAnnotation())};
+  Option<bool> dumpPtx{*this, "dump-ptx",
+                       ::llvm::cl::desc("Dump generated PTX"),
+                       llvm::cl::init(false)};
 };
 } // namespace gpu
 
@@ -121,10 +136,12 @@ void registerGpuSerializeToCubinPass();
 void registerGpuSerializeToHsacoPass();
 
 /// Create an instance of the GPU kernel function to CUBIN binary serialization
-/// pass.
+/// pass with optLevel (default level 2).
 std::unique_ptr<Pass> createGpuSerializeToCubinPass(StringRef triple,
                                                     StringRef chip,
-                                                    StringRef features);
+                                                    StringRef features,
+                                                    int optLevel = 2,
+                                                    bool dumpPtx = false);
 
 /// Create an instance of the GPU kernel function to HSAco binary serialization
 /// pass.

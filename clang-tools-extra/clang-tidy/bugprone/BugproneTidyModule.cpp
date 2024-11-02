@@ -20,6 +20,7 @@
 #include "DanglingHandleCheck.h"
 #include "DynamicStaticInitializersCheck.h"
 #include "EasilySwappableParametersCheck.h"
+#include "EmptyCatchCheck.h"
 #include "ExceptionEscapeCheck.h"
 #include "FoldInitTypeCheck.h"
 #include "ForwardDeclarationNamespaceCheck.h"
@@ -36,8 +37,10 @@
 #include "MisplacedPointerArithmeticInAllocCheck.h"
 #include "MisplacedWideningCastCheck.h"
 #include "MoveForwardingReferenceCheck.h"
+#include "MultipleNewInOneExpressionCheck.h"
 #include "MultipleStatementMacroCheck.h"
 #include "NoEscapeCheck.h"
+#include "NonZeroEnumToBoolConversionCheck.h"
 #include "NotNullTerminatedResultCheck.h"
 #include "ParentVirtualCallCheck.h"
 #include "PosixReturnCheck.h"
@@ -63,6 +66,7 @@
 #include "SuspiciousSemicolonCheck.h"
 #include "SuspiciousStringCompareCheck.h"
 #include "SwappedArgumentsCheck.h"
+#include "SwitchMissingDefaultCaseCheck.h"
 #include "TerminatingContinueCheck.h"
 #include "ThrowKeywordMissingCheck.h"
 #include "TooSmallLoopVariableCheck.h"
@@ -71,13 +75,14 @@
 #include "UndelegatedConstructorCheck.h"
 #include "UnhandledExceptionAtNewCheck.h"
 #include "UnhandledSelfAssignmentCheck.h"
+#include "UniquePtrArrayMismatchCheck.h"
+#include "UnsafeFunctionsCheck.h"
 #include "UnusedRaiiCheck.h"
 #include "UnusedReturnValueCheck.h"
 #include "UseAfterMoveCheck.h"
 #include "VirtualNearMissCheck.h"
 
-namespace clang {
-namespace tidy {
+namespace clang::tidy {
 namespace bugprone {
 
 class BugproneModule : public ClangTidyModule {
@@ -102,6 +107,7 @@ public:
         "bugprone-dynamic-static-initializers");
     CheckFactories.registerCheck<EasilySwappableParametersCheck>(
         "bugprone-easily-swappable-parameters");
+    CheckFactories.registerCheck<EmptyCatchCheck>("bugprone-empty-catch");
     CheckFactories.registerCheck<ExceptionEscapeCheck>(
         "bugprone-exception-escape");
     CheckFactories.registerCheck<FoldInitTypeCheck>("bugprone-fold-init-type");
@@ -113,6 +119,8 @@ public:
         "bugprone-implicit-widening-of-multiplication-result");
     CheckFactories.registerCheck<InaccurateEraseCheck>(
         "bugprone-inaccurate-erase");
+    CheckFactories.registerCheck<SwitchMissingDefaultCaseCheck>(
+        "bugprone-switch-missing-default-case");
     CheckFactories.registerCheck<IncorrectRoundingsCheck>(
         "bugprone-incorrect-roundings");
     CheckFactories.registerCheck<InfiniteLoopCheck>("bugprone-infinite-loop");
@@ -132,6 +140,8 @@ public:
         "bugprone-misplaced-widening-cast");
     CheckFactories.registerCheck<MoveForwardingReferenceCheck>(
         "bugprone-move-forwarding-reference");
+    CheckFactories.registerCheck<MultipleNewInOneExpressionCheck>(
+        "bugprone-multiple-new-in-one-expression");
     CheckFactories.registerCheck<MultipleStatementMacroCheck>(
         "bugprone-multiple-statement-macro");
     CheckFactories.registerCheck<RedundantBranchConditionCheck>(
@@ -139,6 +149,8 @@ public:
     CheckFactories.registerCheck<cppcoreguidelines::NarrowingConversionsCheck>(
         "bugprone-narrowing-conversions");
     CheckFactories.registerCheck<NoEscapeCheck>("bugprone-no-escape");
+    CheckFactories.registerCheck<NonZeroEnumToBoolConversionCheck>(
+        "bugprone-non-zero-enum-to-bool-conversion");
     CheckFactories.registerCheck<NotNullTerminatedResultCheck>(
         "bugprone-not-null-terminated-result");
     CheckFactories.registerCheck<ParentVirtualCallCheck>(
@@ -201,6 +213,10 @@ public:
         "bugprone-unhandled-self-assignment");
     CheckFactories.registerCheck<UnhandledExceptionAtNewCheck>(
         "bugprone-unhandled-exception-at-new");
+    CheckFactories.registerCheck<UniquePtrArrayMismatchCheck>(
+        "bugprone-unique-ptr-array-mismatch");
+    CheckFactories.registerCheck<UnsafeFunctionsCheck>(
+        "bugprone-unsafe-functions");
     CheckFactories.registerCheck<UnusedRaiiCheck>("bugprone-unused-raii");
     CheckFactories.registerCheck<UnusedReturnValueCheck>(
         "bugprone-unused-return-value");
@@ -220,5 +236,4 @@ static ClangTidyModuleRegistry::Add<bugprone::BugproneModule>
 // and thus register the BugproneModule.
 volatile int BugproneModuleAnchorSource = 0;
 
-} // namespace tidy
-} // namespace clang
+} // namespace clang::tidy

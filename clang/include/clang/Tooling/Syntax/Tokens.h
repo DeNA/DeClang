@@ -34,7 +34,6 @@
 #include "clang/Lex/Token.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/raw_ostream.h"
@@ -146,6 +145,19 @@ private:
 /// For debugging purposes. Equivalent to a call to Token::str().
 llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, const Token &T);
 
+/// A list of tokens as lexed from the input file, without expanding
+/// preprocessor macros.
+class UnexpandedTokenBuffer {
+  std::vector<syntax::Token> Tokens;
+  std::unique_ptr<SourceManagerForFile> SrcMgr;
+
+public:
+  UnexpandedTokenBuffer(StringRef Code, const LangOptions &LangOpts);
+
+  ArrayRef<syntax::Token> tokens() const { return Tokens; }
+  const SourceManager &sourceManager() const { return SrcMgr->get(); }
+};
+
 /// A list of tokens obtained by preprocessing a text buffer and operations to
 /// map between the expanded and spelled tokens, i.e. TokenBuffer has
 /// information about two token streams:
@@ -204,7 +216,7 @@ public:
   /// Returns the subrange of spelled tokens corresponding to AST node spanning
   /// \p Expanded. This is the text that should be replaced if a refactoring
   /// were to rewrite the node. If \p Expanded is empty, the returned value is
-  /// llvm::None.
+  /// std::nullopt.
   ///
   /// Will fail if the expanded tokens do not correspond to a sequence of
   /// spelled tokens. E.g. for the following example:
@@ -229,7 +241,7 @@ public:
   ///
   /// EXPECTS: \p Expanded is a subrange of expandedTokens().
   /// Complexity is logarithmic.
-  llvm::Optional<llvm::ArrayRef<syntax::Token>>
+  std::optional<llvm::ArrayRef<syntax::Token>>
   spelledForExpanded(llvm::ArrayRef<syntax::Token> Expanded) const;
 
   /// Find the subranges of expanded tokens, corresponding to \p Spelled.
@@ -278,7 +290,7 @@ public:
   /// If \p Spelled starts a mapping (e.g. if it's a macro name or '#' starting
   /// a preprocessor directive) return the subrange of expanded tokens that the
   /// macro expands to.
-  llvm::Optional<Expansion>
+  std::optional<Expansion>
   expansionStartingAt(const syntax::Token *Spelled) const;
   /// Returns all expansions (partially) expanded from the specified tokens.
   /// This is the expansions whose Spelled range intersects \p Spelled.

@@ -320,10 +320,7 @@ define i64 @PR23590(i64 %x) nounwind {
 ; X64-FAST-NEXT:    movabsq $2635249153387078803, %rcx # imm = 0x2492492492492493
 ; X64-FAST-NEXT:    movq %rdi, %rax
 ; X64-FAST-NEXT:    mulq %rcx
-; X64-FAST-NEXT:    subq %rdx, %rdi
-; X64-FAST-NEXT:    shrq %rdi
-; X64-FAST-NEXT:    leaq (%rdi,%rdx), %rax
-; X64-FAST-NEXT:    shrq $2, %rax
+; X64-FAST-NEXT:    movq %rdx, %rax
 ; X64-FAST-NEXT:    retq
 ;
 ; X64-SLOW-LABEL: PR23590:
@@ -336,11 +333,6 @@ define i64 @PR23590(i64 %x) nounwind {
 ; X64-SLOW-NEXT:    subq %rax, %rdi
 ; X64-SLOW-NEXT:    imulq $613566757, %rdi, %rax # imm = 0x24924925
 ; X64-SLOW-NEXT:    shrq $32, %rax
-; X64-SLOW-NEXT:    subl %eax, %edi
-; X64-SLOW-NEXT:    shrl %edi
-; X64-SLOW-NEXT:    addl %eax, %edi
-; X64-SLOW-NEXT:    shrl $2, %edi
-; X64-SLOW-NEXT:    movq %rdi, %rax
 ; X64-SLOW-NEXT:    retq
 entry:
 	%rem = urem i64 %x, 12345
@@ -735,13 +727,24 @@ entry:
 define i64 @urem_i64_12(i64 %x) nounwind {
 ; X32-LABEL: urem_i64_12:
 ; X32:       # %bb.0: # %entry
-; X32-NEXT:    subl $12, %esp
-; X32-NEXT:    pushl $0
-; X32-NEXT:    pushl $12
-; X32-NEXT:    pushl {{[0-9]+}}(%esp)
-; X32-NEXT:    pushl {{[0-9]+}}(%esp)
-; X32-NEXT:    calll __umoddi3
-; X32-NEXT:    addl $28, %esp
+; X32-NEXT:    pushl %esi
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %esi
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; X32-NEXT:    movl %ecx, %eax
+; X32-NEXT:    shrl $2, %eax
+; X32-NEXT:    shldl $30, %esi, %ecx
+; X32-NEXT:    addl %eax, %ecx
+; X32-NEXT:    adcl $0, %ecx
+; X32-NEXT:    movl $-1431655765, %edx # imm = 0xAAAAAAAB
+; X32-NEXT:    movl %ecx, %eax
+; X32-NEXT:    mull %edx
+; X32-NEXT:    shrl %edx
+; X32-NEXT:    leal (%edx,%edx,2), %eax
+; X32-NEXT:    subl %eax, %ecx
+; X32-NEXT:    andl $3, %esi
+; X32-NEXT:    leal (%esi,%ecx,4), %eax
+; X32-NEXT:    xorl %edx, %edx
+; X32-NEXT:    popl %esi
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: urem_i64_12:
@@ -1116,13 +1119,33 @@ entry:
 define i64 @udiv_i64_12(i64 %x) nounwind {
 ; X32-LABEL: udiv_i64_12:
 ; X32:       # %bb.0: # %entry
-; X32-NEXT:    subl $12, %esp
-; X32-NEXT:    pushl $0
-; X32-NEXT:    pushl $12
-; X32-NEXT:    pushl {{[0-9]+}}(%esp)
-; X32-NEXT:    pushl {{[0-9]+}}(%esp)
-; X32-NEXT:    calll __udivdi3
-; X32-NEXT:    addl $28, %esp
+; X32-NEXT:    pushl %ebx
+; X32-NEXT:    pushl %edi
+; X32-NEXT:    pushl %esi
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %ecx
+; X32-NEXT:    movl {{[0-9]+}}(%esp), %edi
+; X32-NEXT:    shrdl $2, %edi, %ecx
+; X32-NEXT:    shrl $2, %edi
+; X32-NEXT:    movl %ecx, %esi
+; X32-NEXT:    addl %edi, %esi
+; X32-NEXT:    adcl $0, %esi
+; X32-NEXT:    movl $-1431655765, %ebx # imm = 0xAAAAAAAB
+; X32-NEXT:    movl %esi, %eax
+; X32-NEXT:    mull %ebx
+; X32-NEXT:    shrl %edx
+; X32-NEXT:    leal (%edx,%edx,2), %eax
+; X32-NEXT:    subl %eax, %esi
+; X32-NEXT:    subl %esi, %ecx
+; X32-NEXT:    sbbl $0, %edi
+; X32-NEXT:    movl %ecx, %eax
+; X32-NEXT:    mull %ebx
+; X32-NEXT:    imull $-1431655766, %ecx, %ecx # imm = 0xAAAAAAAA
+; X32-NEXT:    addl %ecx, %edx
+; X32-NEXT:    imull $-1431655765, %edi, %ecx # imm = 0xAAAAAAAB
+; X32-NEXT:    addl %ecx, %edx
+; X32-NEXT:    popl %esi
+; X32-NEXT:    popl %edi
+; X32-NEXT:    popl %ebx
 ; X32-NEXT:    retl
 ;
 ; X64-LABEL: udiv_i64_12:

@@ -7,17 +7,20 @@ what happens between launch and first stop.
 
 import lldb
 import lldbsuite.test.lldbutil as lldbutil
+from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 
 
 class TestRunLocker(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
+    @expectedFailureAll(oslist=["windows"])
     def test_run_locker(self):
         """Test that the run locker is set correctly when we launch"""
         self.build()
         self.runlocker_test(False)
 
+    @expectedFailureAll(oslist=["windows"])
     def test_run_locker_stop_at_entry(self):
         """Test that the run locker is set correctly when we launch"""
         self.build()

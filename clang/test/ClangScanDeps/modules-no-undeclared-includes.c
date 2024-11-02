@@ -1,6 +1,6 @@
 // Unsupported on AIX because we don't support the requisite "__clangast"
 // section in XCOFF yet.
-// UNSUPPORTED: aix
+// UNSUPPORTED: target={{.*}}-aix{{.*}}
 
 // RUN: rm -rf %t && mkdir %t
 // RUN: split-file %s %t
@@ -47,6 +47,7 @@ module User [no_undeclared_includes] { header "user.h" }
 // CHECK-NEXT:         "[[PREFIX]]/undeclared/module.modulemap",
 // CHECK-NEXT:         "[[PREFIX]]/user.h"
 // CHECK-NEXT:       ],
+// CHECK-NEXT:       "link-libraries": [],
 // CHECK-NEXT:       "name": "User"
 // CHECK-NEXT:     }
 // CHECK-NEXT:   ],

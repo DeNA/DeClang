@@ -12,6 +12,7 @@ macro(add_host_subdirectory group)
 endmacro()
 
 add_host_subdirectory(common
+  common/Alarm.cpp
   common/FileAction.cpp
   common/FileCache.cpp
   common/File.cpp
@@ -42,6 +43,7 @@ add_host_subdirectory(common
   common/ThreadLauncher.cpp
   common/UDPSocket.cpp
   common/XML.cpp
+  common/ZipFileResolver.cpp
   )
 
   if(LLDB_ENABLE_SWIFT_SUPPORT)
@@ -177,7 +179,7 @@ if (LLDB_ENABLE_LIBEDIT)
   endif()
 endif()
 
-add_lldb_library(lldbHost
+add_lldb_library(lldbHost NO_PLUGIN_DEPENDENCIES
   ${HOST_SOURCES}
 
   LINK_LIBS

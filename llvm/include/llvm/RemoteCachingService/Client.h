@@ -15,7 +15,7 @@
 #define LLVM_REMOTECACHINGSERVICE_CLIENT_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Error.h"
 #include <atomic>
@@ -62,22 +62,43 @@ public:
 
   using ValueTy = StringMap<std::string>;
 
-  Expected<Optional<ValueTy>> getValueSync(std::string Key) {
+  Expected<std::optional<ValueTy>> getValueSync(std::string Key) {
     return getValueSyncImpl(std::move(Key));
   }
-  Expected<Optional<ValueTy>> getValueSync(ArrayRef<uint8_t> Key) {
+  Expected<std::optional<ValueTy>> getValueSync(ArrayRef<uint8_t> Key) {
     return getValueSync(toStringRef(Key).str());
   }
+
+  using GetValueCb = std::function<void(Expected<std::optional<ValueTy>>)>;
+  void getValueAsync(std::string Key, GetValueCb Callback) {
+    return getValueAsyncImpl(std::move(Key), std::move(Callback));
+  }
+  void getValueAsync(ArrayRef<uint8_t> Key, GetValueCb Callback) {
+    return getValueAsync(toStringRef(Key).str(), std::move(Callback));
+  }
+
   Error putValueSync(std::string Key, const ValueTy &Value) {
     return putValueSyncImpl(std::move(Key), Value);
   }
   Error putValueSync(ArrayRef<uint8_t> Key, const ValueTy &Value) {
     return putValueSync(toStringRef(Key).str(), Value);
   }
+  void putValueAsync(std::string Key, const ValueTy &Value,
+                     std::function<void(Error)> Callback) {
+    return putValueAsyncImpl(std::move(Key), Value, std::move(Callback));
+  }
+  void putValueAsync(ArrayRef<uint8_t> Key, const ValueTy &Value,
+                     std::function<void(Error)> Callback) {
+    return putValueAsync(toStringRef(Key).str(), Value, std::move(Callback));
+  }
 
 protected:
-  virtual Expected<Optional<ValueTy>> getValueSyncImpl(std::string Key) = 0;
+  virtual Expected<std::optional<ValueTy>>
+  getValueSyncImpl(std::string Key) = 0;
+  virtual void getValueAsyncImpl(std::string Key, GetValueCb Callback) = 0;
   virtual Error putValueSyncImpl(std::string Key, const ValueTy &Value) = 0;
+  virtual void putValueAsyncImpl(std::string Key, const ValueTy &Value,
+                                 std::function<void(Error)> Callback) = 0;
 
 public:
   class GetValueAsyncQueue : public AsyncQueueBase {
@@ -99,7 +120,7 @@ public:
     struct Response {
       std::shared_ptr<AsyncCallerContext> CallCtx;
       // If this is \p None it means the key was not found.
-      Optional<ValueTy> Value;
+      std::optional<ValueTy> Value;
     };
     Expected<Response> receiveNext() {
       assert(NumPending);
@@ -176,25 +197,42 @@ public:
 
   struct LoadResponse {
     bool KeyNotFound = false;
-    Optional<std::string> BlobData;
+    std::optional<std::string> BlobData;
   };
   struct GetResponse {
     bool KeyNotFound = false;
-    Optional<std::string> BlobData;
+    std::optional<std::string> BlobData;
     std::vector<std::string> Refs;
   };
-  Expected<LoadResponse> loadSync(std::string CASID,
-                                  Optional<std::string> OutFilePath = None) {
+
+  Expected<LoadResponse>
+  loadSync(std::string CASID,
+           std::optional<std::string> OutFilePath = std::nullopt) {
     return loadSyncImpl(std::move(CASID), std::move(OutFilePath));
   }
+
+  using LoadCb = std::function<void(Expected<LoadResponse>)>;
+  void loadAsync(std::string CASID, std::optional<std::string> OutFilePath,
+                 LoadCb Callback) {
+    return loadAsyncImpl(std::move(CASID), std::move(OutFilePath),
+                         std::move(Callback));
+  }
+
   Expected<std::string> saveDataSync(std::string BlobData) {
     return saveDataSyncImpl(std::move(BlobData));
   }
   Expected<std::string> saveFileSync(std::string FilePath) {
     return saveFileSyncImpl(std::move(FilePath));
   }
-  Expected<GetResponse> getSync(std::string CASID,
-                                Optional<std::string> OutFilePath = None) {
+
+  using SaveFileCb = std::function<void(Expected<std::string>)>;
+  void saveFileAsync(std::string FilePath, SaveFileCb Callback) {
+    return saveFileAsyncImpl(std::move(FilePath), std::move(Callback));
+  }
+
+  Expected<GetResponse>
+  getSync(std::string CASID,
+          std::optional<std::string> OutFilePath = std::nullopt) {
     return getSyncImpl(std::move(CASID), std::move(OutFilePath));
   }
   Expected<std::string> putDataSync(std::string BlobData,
@@ -208,11 +246,17 @@ public:
 
 protected:
   virtual Expected<LoadResponse>
-  loadSyncImpl(std::string CASID, Optional<std::string> OutFilePath) = 0;
+  loadSyncImpl(std::string CASID, std::optional<std::string> OutFilePath) = 0;
+  virtual void loadAsyncImpl(std::string CASID,
+                             std::optional<std::string> OutFilePath,
+                             LoadCb Callback) = 0;
+
   virtual Expected<std::string> saveDataSyncImpl(std::string BlobData) = 0;
   virtual Expected<std::string> saveFileSyncImpl(std::string FilePath) = 0;
+  virtual void saveFileAsyncImpl(std::string FilePath, SaveFileCb Callback) = 0;
+
   virtual Expected<GetResponse>
-  getSyncImpl(std::string CASID, Optional<std::string> OutFilePath) = 0;
+  getSyncImpl(std::string CASID, std::optional<std::string> OutFilePath) = 0;
   virtual Expected<std::string> putDataSyncImpl(std::string BlobData,
                                                 ArrayRef<std::string> Refs) = 0;
   virtual Expected<std::string> putFileSyncImpl(std::string FilePath,
@@ -226,7 +270,7 @@ public:
     virtual ~LoadAsyncQueue() = default;
 
     void loadAsync(std::string CASID,
-                   Optional<std::string> OutFilePath = None,
+                   std::optional<std::string> OutFilePath = std::nullopt,
                    std::shared_ptr<AsyncCallerContext> CallCtx = nullptr) {
       loadAsyncImpl(std::move(CASID), std::move(OutFilePath),
                     std::move(CallCtx));
@@ -236,7 +280,7 @@ public:
     struct Response {
       std::shared_ptr<AsyncCallerContext> CallCtx;
       bool KeyNotFound = false;
-      Optional<std::string> BlobData;
+      std::optional<std::string> BlobData;
     };
     Expected<Response> receiveNext() {
       assert(NumPending);
@@ -246,7 +290,7 @@ public:
 
   protected:
     virtual void loadAsyncImpl(std::string CASID,
-                               Optional<std::string> OutFilePath,
+                               std::optional<std::string> OutFilePath,
                                std::shared_ptr<AsyncCallerContext> CallCtx) = 0;
     virtual Expected<Response> receiveNextImpl() = 0;
   };
@@ -296,7 +340,7 @@ public:
     virtual ~GetAsyncQueue() = default;
 
     void getAsync(std::string CASID,
-                  Optional<std::string> OutFilePath = None,
+                  std::optional<std::string> OutFilePath = std::nullopt,
                   std::shared_ptr<AsyncCallerContext> CallCtx = nullptr) {
       getAsyncImpl(std::move(CASID), std::move(OutFilePath),
                    std::move(CallCtx));
@@ -306,7 +350,7 @@ public:
     struct Response {
       std::shared_ptr<AsyncCallerContext> CallCtx;
       bool KeyNotFound = false;
-      Optional<std::string> BlobData;
+      std::optional<std::string> BlobData;
       std::vector<std::string> Refs;
     };
     Expected<Response> receiveNext() {
@@ -317,7 +361,7 @@ public:
 
   protected:
     virtual void getAsyncImpl(std::string CASID,
-                              Optional<std::string> OutFilePath,
+                              std::optional<std::string> OutFilePath,
                               std::shared_ptr<AsyncCallerContext> CallCtx) = 0;
     virtual Expected<Response> receiveNextImpl() = 0;
   };

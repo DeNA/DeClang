@@ -112,11 +112,11 @@ protected:
   friend class SBAttachInfo;
   friend class SBLaunchInfo;
   friend class SBDebugger;
+  friend class SBFrame;
   friend class SBTarget;
   friend class SBProcess;
   friend class SBThread;
   friend class SBThreadPlan;
-  friend class SBFrame;
   friend class SBBreakpoint;
   friend class SBBreakpointLocation;
   friend class SBBreakpointName;

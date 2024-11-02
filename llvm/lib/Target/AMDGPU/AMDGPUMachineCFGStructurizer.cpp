@@ -1776,7 +1776,7 @@ static void removeExternalCFGEdges(MachineBasicBlock *StartMBB,
 
   for (MachineBasicBlock *Pred : StartMBB->predecessors())
     if (Pred != EndMBB)
-      Succs.insert(std::make_pair(Pred, StartMBB));
+      Succs.insert(std::pair(Pred, StartMBB));
 
   for (auto SI : Succs) {
     std::pair<MachineBasicBlock *, MachineBasicBlock *> Edge = SI;
@@ -2072,8 +2072,7 @@ void AMDGPUMachineCFGStructurizer::prunePHIInfo(MachineBasicBlock *MBB) {
         MachineBasicBlock *SourceMBB = Source.second;
         MachineOperand *Def = &(*(MRI->def_begin(SourceReg)));
         if (Def->getParent()->getParent() != MBB) {
-          ElimiatedSources.push_back(
-              std::make_tuple(DestReg, SourceReg, SourceMBB));
+          ElimiatedSources.push_back(std::tuple(DestReg, SourceReg, SourceMBB));
         }
       }
     }
@@ -2600,9 +2599,6 @@ bool AMDGPUMachineCFGStructurizer::structurizeComplexRegion(RegionMRT *Region) {
   for (auto CI = Children->begin(), CE = Children->end(); CI != CE; ++CI) {
     LLVM_DEBUG(dbgs() << "CurrentRegion: \n");
     LLVM_DEBUG(LRegion->print(dbgs(), TRI));
-
-    auto CNI = CI;
-    ++CNI;
 
     MRT *Child = (*CI);
 

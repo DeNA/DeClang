@@ -35,7 +35,7 @@ public:
     return Underlying->getBuffer(Name, FileSize, RequiresNullTerminator,
                                  IsVolatile);
   }
-  llvm::ErrorOr<Optional<cas::ObjectRef>> getObjectRefForContent() final {
+  llvm::ErrorOr<std::optional<cas::ObjectRef>> getObjectRefForContent() final {
     return Underlying->getObjectRefForContent();
   }
   std::error_code close() final { return Underlying->close(); }
@@ -88,7 +88,7 @@ public:
   }
 
   std::error_code getRealPath(const Twine &Path,
-                              SmallVectorImpl<char> &Output) const override {
+                              SmallVectorImpl<char> &Output) override {
     PREFIX_MAP_PATH(Path, MappedPath)
     return ProxyFileSystem::getRealPath(MappedPath, Output);
   }

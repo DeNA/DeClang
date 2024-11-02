@@ -16,11 +16,11 @@
 #include "clang-c/Index.h"
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
-#include <memory>
-#include <vector>
 #include <assert.h>
+#include <memory>
+#include <optional>
+#include <vector>
 
 namespace clang {
 
@@ -57,11 +57,11 @@ public:
   void recordSourceFileContents(
       CXFile file, StringRef contents, CXSourceRange originalSourceRange);
 
-  Optional<StringRef> getSourceFileContents(
+  std::optional<StringRef> getSourceFileContents(
       CXFile file, CXSourceRange &originalSourceRange) {
     auto found = FileContents.find(file);
     if (found == FileContents.end())
-      return None;
+      return std::nullopt;
 
     originalSourceRange = found->second.OriginalSourceRange;
     return found->second.Contents;

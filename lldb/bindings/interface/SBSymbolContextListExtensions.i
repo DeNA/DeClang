@@ -13,8 +13,9 @@ STRING_EXTENSION_OUTSIDE(SBSymbolContextList)
 
         def __getitem__(self, key):
             count = len(self)
-            if type(key) is int:
-                if key < count:
+            if isinstance(key, int):
+                if -count <= key < count:
+                    key %= count
                     return self.GetContextAtIndex(key)
                 else:
                     raise IndexError

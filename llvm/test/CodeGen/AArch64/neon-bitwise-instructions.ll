@@ -1021,8 +1021,8 @@ define <4 x i16> @vselect_equivalent_shuffle_v4i16(<4 x i16> %a, <4 x i16> %b) {
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    // kill: def $d0 killed $d0 def $q0
 ; CHECK-NEXT:    // kill: def $d1 killed $d1 def $q1
-; CHECK-NEXT:    mov v0.h[2], v1.h[1]
 ; CHECK-NEXT:    mov v0.h[1], v1.h[0]
+; CHECK-NEXT:    mov v0.h[2], v1.h[1]
 ; CHECK-NEXT:    // kill: def $d0 killed $d0 killed $q0
 ; CHECK-NEXT:    ret
   %c = shufflevector <4 x i16> %a, <4 x i16> %b, <4 x i32> <i32 0, i32 4, i32 5, i32 3>
@@ -1478,6 +1478,59 @@ define <2 x i64> @and64imm8h_lsl8(<2 x i64> %a) {
 ; CHECK-NEXT:    ret
 	%tmp1 = and <2 x i64> %a, < i64 71777214294589695, i64 71777214294589695>
 	ret <2 x i64> %tmp1
+}
+
+define <8 x i16> @bic_shifted_knownbits(<8 x i16> %v) {
+; CHECK-LABEL: bic_shifted_knownbits:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    ushr v0.8h, v0.8h, #9
+; CHECK-NEXT:    bic v0.8h, #126
+; CHECK-NEXT:    ret
+entry:
+  %vshr_n = lshr <8 x i16> %v, <i16 9, i16 9, i16 9, i16 9, i16 9, i16 9, i16 9, i16 9>
+  %and.i = and <8 x i16> %vshr_n, <i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1, i16 1>
+  ret <8 x i16> %and.i
+}
+
+define <8 x i32> @bic_shifted_knownbits2(<8 x i16> %v) {
+; CHECK-LABEL: bic_shifted_knownbits2:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    ushll2 v1.4s, v0.8h, #0
+; CHECK-NEXT:    ushll v0.4s, v0.4h, #0
+; CHECK-NEXT:    bic v1.4s, #255, lsl #8
+; CHECK-NEXT:    bic v0.4s, #255, lsl #8
+; CHECK-NEXT:    ret
+entry:
+  %vshr_n = zext <8 x i16> %v to <8 x i32>
+  %and.i = and <8 x i32> %vshr_n, <i32 4293918975, i32 4293918975, i32 4293918975, i32 4293918975, i32 4293918975, i32 4293918975, i32 4293918975, i32 4293918975>
+  ret <8 x i32> %and.i
+}
+
+define <8 x i32> @bic_shifted_knownbits3(<8 x i16> %v) {
+; CHECK-LABEL: bic_shifted_knownbits3:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    bic v0.8h, #255, lsl #8
+; CHECK-NEXT:    ushll2 v1.4s, v0.8h, #0
+; CHECK-NEXT:    ushll v0.4s, v0.4h, #0
+; CHECK-NEXT:    ret
+  %a = and <8 x i16> %v, <i16 255, i16 255, i16 255, i16 255, i16 255, i16 255, i16 255, i16 255>
+  %and.i = zext <8 x i16> %a to <8 x i32>
+  ret <8 x i32> %and.i
+}
+
+
+define <8 x i32> @bic_shifted_knownbits4(<8 x i32> %v) {
+; CHECK-LABEL: bic_shifted_knownbits4:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    shl v0.4s, v0.4s, #8
+; CHECK-NEXT:    shl v1.4s, v1.4s, #8
+; CHECK-NEXT:    bic v0.4s, #255, lsl #8
+; CHECK-NEXT:    bic v1.4s, #255, lsl #8
+; CHECK-NEXT:    ret
+entry:
+  %vshr_n = shl <8 x i32> %v, <i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8, i32 8>
+  %and.i = and <8 x i32> %vshr_n, <i32 4294901760, i32 4294901760, i32 4294901760, i32 4294901760, i32 4294901760, i32 4294901760, i32 4294901760, i32 4294901760>
+  ret <8 x i32> %and.i
 }
 
 define <8 x i8> @orr8imm2s_lsl0(<8 x i8> %a) {

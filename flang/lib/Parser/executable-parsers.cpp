@@ -31,29 +31,30 @@ namespace Fortran::parser {
 //        action-stmt | associate-construct | block-construct |
 //        case-construct | change-team-construct | critical-construct |
 //        do-construct | if-construct | select-rank-construct |
-//        select-type-construct | where-construct | forall-construct
-constexpr auto executableConstruct{
-    first(construct<ExecutableConstruct>(CapturedLabelDoStmt{}),
-        construct<ExecutableConstruct>(EndDoStmtForCapturedLabelDoStmt{}),
-        construct<ExecutableConstruct>(indirect(Parser<DoConstruct>{})),
-        // Attempt DO statements before assignment statements for better
-        // error messages in cases like "DO10I=1,(error)".
-        construct<ExecutableConstruct>(statement(actionStmt)),
-        construct<ExecutableConstruct>(indirect(Parser<AssociateConstruct>{})),
-        construct<ExecutableConstruct>(indirect(Parser<BlockConstruct>{})),
-        construct<ExecutableConstruct>(indirect(Parser<CaseConstruct>{})),
-        construct<ExecutableConstruct>(indirect(Parser<ChangeTeamConstruct>{})),
-        construct<ExecutableConstruct>(indirect(Parser<CriticalConstruct>{})),
-        construct<ExecutableConstruct>(indirect(Parser<IfConstruct>{})),
-        construct<ExecutableConstruct>(indirect(Parser<SelectRankConstruct>{})),
-        construct<ExecutableConstruct>(indirect(Parser<SelectTypeConstruct>{})),
-        construct<ExecutableConstruct>(indirect(whereConstruct)),
-        construct<ExecutableConstruct>(indirect(forallConstruct)),
-        construct<ExecutableConstruct>(indirect(ompEndLoopDirective)),
-        construct<ExecutableConstruct>(indirect(openmpConstruct)),
-        construct<ExecutableConstruct>(indirect(accEndCombinedDirective)),
-        construct<ExecutableConstruct>(indirect(openaccConstruct)),
-        construct<ExecutableConstruct>(indirect(compilerDirective)))};
+//        select-type-construct | where-construct | forall-construct |
+// (CUDA) CUF-kernel-do-construct
+constexpr auto executableConstruct{first(
+    construct<ExecutableConstruct>(CapturedLabelDoStmt{}),
+    construct<ExecutableConstruct>(EndDoStmtForCapturedLabelDoStmt{}),
+    construct<ExecutableConstruct>(indirect(Parser<DoConstruct>{})),
+    // Attempt DO statements before assignment statements for better
+    // error messages in cases like "DO10I=1,(error)".
+    construct<ExecutableConstruct>(statement(actionStmt)),
+    construct<ExecutableConstruct>(indirect(Parser<AssociateConstruct>{})),
+    construct<ExecutableConstruct>(indirect(Parser<BlockConstruct>{})),
+    construct<ExecutableConstruct>(indirect(Parser<CaseConstruct>{})),
+    construct<ExecutableConstruct>(indirect(Parser<ChangeTeamConstruct>{})),
+    construct<ExecutableConstruct>(indirect(Parser<CriticalConstruct>{})),
+    construct<ExecutableConstruct>(indirect(Parser<IfConstruct>{})),
+    construct<ExecutableConstruct>(indirect(Parser<SelectRankConstruct>{})),
+    construct<ExecutableConstruct>(indirect(Parser<SelectTypeConstruct>{})),
+    construct<ExecutableConstruct>(indirect(whereConstruct)),
+    construct<ExecutableConstruct>(indirect(forallConstruct)),
+    construct<ExecutableConstruct>(indirect(ompEndLoopDirective)),
+    construct<ExecutableConstruct>(indirect(openmpConstruct)),
+    construct<ExecutableConstruct>(indirect(Parser<OpenACCConstruct>{})),
+    construct<ExecutableConstruct>(indirect(compilerDirective)),
+    construct<ExecutableConstruct>(indirect(Parser<CUFKernelDoConstruct>{})))};
 
 // R510 execution-part-construct ->
 //        executable-construct | format-stmt | entry-stmt | data-stmt
@@ -159,8 +160,8 @@ TYPE_PARSER(construct<Selector>(variable) / lookAhead(","_tok || ")"_tok) ||
     construct<Selector>(expr))
 
 // R1106 end-associate-stmt -> END ASSOCIATE [associate-construct-name]
-TYPE_PARSER(construct<EndAssociateStmt>(
-    recovery("END ASSOCIATE" >> maybe(name), endStmtErrorRecovery)))
+TYPE_PARSER(construct<EndAssociateStmt>(recovery(
+    "END ASSOCIATE" >> maybe(name), namedConstructEndStmtErrorRecovery)))
 
 // R1107 block-construct ->
 //         block-stmt [block-specification-part] block end-block-stmt
@@ -186,7 +187,7 @@ TYPE_PARSER(construct<BlockSpecificationPart>(specificationPart))
 
 // R1110 end-block-stmt -> END BLOCK [block-construct-name]
 TYPE_PARSER(construct<EndBlockStmt>(
-    recovery("END BLOCK" >> maybe(name), endStmtErrorRecovery)))
+    recovery("END BLOCK" >> maybe(name), namedConstructEndStmtErrorRecovery)))
 
 // R1111 change-team-construct -> change-team-stmt block end-change-team-stmt
 TYPE_CONTEXT_PARSER("CHANGE TEAM construct"_en_US,
@@ -226,8 +227,8 @@ TYPE_CONTEXT_PARSER("CRITICAL construct"_en_US,
         statement(Parser<EndCriticalStmt>{})))
 
 // R1118 end-critical-stmt -> END CRITICAL [critical-construct-name]
-TYPE_PARSER(construct<EndCriticalStmt>(
-    recovery("END CRITICAL" >> maybe(name), endStmtErrorRecovery)))
+TYPE_PARSER(construct<EndCriticalStmt>(recovery(
+    "END CRITICAL" >> maybe(name), namedConstructEndStmtErrorRecovery)))
 
 // R1119 do-construct -> do-stmt block end-do
 // R1120 do-stmt -> nonlabel-do-stmt | label-do-stmt
@@ -289,7 +290,7 @@ TYPE_CONTEXT_PARSER("nonlabel DO statement"_en_US,
 // R1132 end-do-stmt -> END DO [do-construct-name]
 TYPE_CONTEXT_PARSER("END DO statement"_en_US,
     construct<EndDoStmt>(
-        recovery("END DO" >> maybe(name), endStmtErrorRecovery)))
+        recovery("END DO" >> maybe(name), namedConstructEndStmtErrorRecovery)))
 
 // R1133 cycle-stmt -> CYCLE [do-construct-name]
 TYPE_CONTEXT_PARSER(
@@ -306,7 +307,8 @@ TYPE_CONTEXT_PARSER(
 TYPE_CONTEXT_PARSER("IF construct"_en_US,
     construct<IfConstruct>(
         statement(construct<IfThenStmt>(maybe(name / ":"),
-            "IF" >> parenthesized(scalarLogicalExpr) / "THEN")),
+            "IF" >> parenthesized(scalarLogicalExpr) /
+                    recovery("THEN"_tok, lookAhead(endOfStmt)))),
         block,
         many(construct<IfConstruct::ElseIfBlock>(
             unambiguousStatement(construct<ElseIfStmt>(
@@ -315,8 +317,8 @@ TYPE_CONTEXT_PARSER("IF construct"_en_US,
             block)),
         maybe(construct<IfConstruct::ElseBlock>(
             statement(construct<ElseStmt>("ELSE" >> maybe(name))), block)),
-        statement(construct<EndIfStmt>(
-            recovery("END IF" >> maybe(name), endStmtErrorRecovery)))))
+        statement(construct<EndIfStmt>(recovery(
+            "END IF" >> maybe(name), namedConstructEndStmtErrorRecovery)))))
 
 // R1139 if-stmt -> IF ( scalar-logical-expr ) action-stmt
 TYPE_CONTEXT_PARSER("IF statement"_en_US,
@@ -345,7 +347,7 @@ TYPE_CONTEXT_PARSER("CASE statement"_en_US,
 // R1151 end-select-rank-stmt -> END SELECT [select-construct-name]
 // R1155 end-select-type-stmt -> END SELECT [select-construct-name]
 TYPE_PARSER(construct<EndSelectStmt>(
-    recovery("END SELECT" >> maybe(name), endStmtErrorRecovery)))
+    recovery("END SELECT" >> maybe(name), namedConstructEndStmtErrorRecovery)))
 
 // R1145 case-selector -> ( case-value-range-list ) | DEFAULT
 constexpr auto defaultKeyword{construct<Default>("DEFAULT"_tok)};
@@ -524,5 +526,29 @@ TYPE_PARSER(
 TYPE_CONTEXT_PARSER("UNLOCK statement"_en_US,
     construct<UnlockStmt>("UNLOCK (" >> lockVariable,
         defaulted("," >> nonemptyList(statOrErrmsg)) / ")"))
+
+// CUF-kernel-do-construct -> CUF-kernel-do-directive do-construct
+// CUF-kernel-do-directive ->
+//     !$CUF KERNEL DO [ (scalar-int-constant-expr) ] <<< grid, block [, stream]
+//     >>> do-construct
+// grid -> * | scalar-int-expr | ( scalar-int-expr-list )
+// block -> * | scalar-int-expr | ( scalar-int-expr-list )
+// stream -> ( 0, | STREAM = ) scalar-int-expr
+TYPE_PARSER(sourced(beginDirective >> "$CUF KERNEL DO"_tok >>
+    construct<CUFKernelDoConstruct::Directive>(
+        maybe(parenthesized(scalarIntConstantExpr)),
+        "<<<" >>
+            ("*" >> pure<std::list<ScalarIntExpr>>() ||
+                parenthesized(nonemptyList(scalarIntExpr)) ||
+                applyFunction(singletonList<ScalarIntExpr>, scalarIntExpr)),
+        "," >> ("*" >> pure<std::list<ScalarIntExpr>>() ||
+                   parenthesized(nonemptyList(scalarIntExpr)) ||
+                   applyFunction(singletonList<ScalarIntExpr>, scalarIntExpr)),
+        maybe((", 0 ,"_tok || ", STREAM ="_tok) >> scalarIntExpr) / ">>>" /
+            endDirective)))
+TYPE_CONTEXT_PARSER("!$CUF KERNEL DO construct"_en_US,
+    extension<LanguageFeature::CUDA>(construct<CUFKernelDoConstruct>(
+        Parser<CUFKernelDoConstruct::Directive>{},
+        maybe(Parser<DoConstruct>{}))))
 
 } // namespace Fortran::parser

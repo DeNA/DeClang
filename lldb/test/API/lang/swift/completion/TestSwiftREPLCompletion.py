@@ -1,19 +1,18 @@
+
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.lldbpexpect import PExpectTest
 
-
 class SwiftCompletionTest(PExpectTest):
-    mydir = TestBase.compute_mydir(__file__)
-
     # PExpect uses many timeouts internally and doesn't play well
     # under ASAN on a loaded machine..
     @skipIfAsan
     @skipUnlessDarwin
     @swiftTest
     def test_basic_completion(self):
-        self.launch(extra_args=["--repl"], executable=None, dimensions=(100, 500))
+
+        self.launch(extra_args=["--repl"], executable=None, dimensions=(100,500))
 
         # Wait on the first prompt
         self.child.expect_exact("1>")
@@ -39,10 +38,11 @@ class SwiftCompletionTest(PExpectTest):
     # PExpect uses many timeouts internally and doesn't play well
     # under ASAN on a loaded machine..
     @skipIfAsan
-    @skipIf(oslist=["windows"])
+    @skipIf(oslist=['windows'])
     @swiftTest
     def test_lldb_command_completion(self):
-        self.launch(extra_args=["--repl"], executable=None, dimensions=(100, 500))
+
+        self.launch(extra_args=["--repl"], executable=None, dimensions=(100,500))
 
         # Wait on the first prompt
         self.child.expect_exact("1>")
@@ -84,7 +84,7 @@ class SwiftCompletionTest(PExpectTest):
         self.quit()
 
     def setUpCommands(self):
-        return []  # REPL doesn't take any setup commands.
+        return [] # REPL doesn't take any setup commands.
 
     def expect_prompt(self):
-        pass  # No constant prompt on the REPL.
+        pass # No constant prompt on the REPL.

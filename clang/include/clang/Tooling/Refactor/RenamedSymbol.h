@@ -12,7 +12,7 @@
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/LLVM.h"
 #include "clang/Basic/SourceLocation.h"
-#include "clang/Tooling/Refactor/SymbolName.h"
+#include "clang/Tooling/Refactoring/Rename/SymbolName.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringSet.h"
@@ -27,14 +27,14 @@ namespace rename {
 /// \brief A symbol that has to be renamed.
 class Symbol {
 public:
-  OldSymbolName Name;
+  SymbolName Name;
   /// The index of this symbol in a \c SymbolOperation.
   unsigned SymbolIndex;
   /// The declaration that was used to initiate a refactoring operation for this
   /// symbol. May not be the most canonical declaration.
   const NamedDecl *FoundDecl;
   /// An optional Objective-C selector.
-  llvm::Optional<Selector> ObjCSelector;
+  std::optional<Selector> ObjCSelector;
 
   Symbol(const NamedDecl *FoundDecl, unsigned SymbolIndex,
          const LangOptions &LangOpts);
@@ -108,7 +108,7 @@ public:
 
   ArrayRef<SourceLocation> locations() const {
     if (Kind == MatchingImplicitProperty && Locations.size() == 2)
-      return llvm::makeArrayRef(Locations).drop_back();
+      return ArrayRef(Locations).drop_back();
     return Locations;
   }
 

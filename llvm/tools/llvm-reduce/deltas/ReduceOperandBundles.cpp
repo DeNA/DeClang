@@ -18,7 +18,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Sequence.h"
-#include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/Support/raw_ostream.h"
@@ -95,7 +94,9 @@ static void maybeRewriteCallWithDifferentBundles(
 }
 
 /// Removes out-of-chunk operand bundles from calls.
-static void extractOperandBundesFromModule(Oracle &O, Module &Program) {
+static void extractOperandBundesFromModule(Oracle &O,
+                                           ReducerWorkItem &WorkItem) {
+  Module &Program = WorkItem.getModule();
   OperandBundleRemapper R(O);
   R.visit(Program);
 
@@ -104,6 +105,6 @@ static void extractOperandBundesFromModule(Oracle &O, Module &Program) {
 }
 
 void llvm::reduceOperandBundesDeltaPass(TestRunner &Test) {
-  outs() << "*** Reducing OperandBundes...\n";
-  runDeltaPass(Test, extractOperandBundesFromModule);
+  runDeltaPass(Test, extractOperandBundesFromModule,
+               "Reducing Operand Bundles");
 }

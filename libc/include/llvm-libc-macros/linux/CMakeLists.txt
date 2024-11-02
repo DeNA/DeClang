@@ -29,6 +29,12 @@ add_header(
 )
 
 add_header(
+  sys_socket_macros
+  HDR
+    sys-socket-macros.h
+)
+
+add_header(
   sys_wait_macros
   HDR
     sys-wait-macros.h
@@ -68,4 +74,10 @@ add_header(
   signal_macros
   HDR
     signal-macros.h
+)
+
+add_header(
+  termios_macros
+  HDR
+    termios-macros.h
 )

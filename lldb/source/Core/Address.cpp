@@ -37,8 +37,8 @@
 #include "lldb/Utility/StreamString.h"
 
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/TargetParser/Triple.h"
 
 #include <cstdint>
 #include <memory>
@@ -643,7 +643,7 @@ bool Address::Dump(Stream *s, ExecutionContextScope *exe_scope, DumpStyle style,
                     pointer_sc.symbol != nullptr) {
                   s->PutCString(": ");
                   pointer_sc.DumpStopContext(s, exe_scope, so_addr, true, false,
-                                             false, true, true);
+                                             false, true, true, false);
                 }
               }
             }
@@ -682,7 +682,8 @@ bool Address::Dump(Stream *s, ExecutionContextScope *exe_scope, DumpStyle style,
               // address.
               sc.DumpStopContext(s, exe_scope, *this, show_fullpaths,
                                  show_module, show_inlined_frames,
-                                 show_function_arguments, show_function_name);
+                                 show_function_arguments, show_function_name,
+                                 false);
             } else {
               // We found a symbol but it was in a different section so it
               // isn't the symbol we should be showing, just show the section

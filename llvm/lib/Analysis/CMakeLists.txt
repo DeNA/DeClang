@@ -1,4 +1,4 @@
-if (DEFINED LLVM_HAVE_TF_AOT OR DEFINED LLVM_HAVE_TF_API)
+if (DEFINED LLVM_HAVE_TF_AOT OR LLVM_HAVE_TFLITE)
   include(TensorFlowCompile)
   set(LLVM_INLINER_MODEL_PATH_DEFAULT "models/inliner-Oz")
 
@@ -17,25 +17,15 @@ if (DEFINED LLVM_HAVE_TF_AOT OR DEFINED LLVM_HAVE_TF_API)
     )
   endif()
 
-  if (DEFINED LLVM_HAVE_TF_API)
-    if (LLVM_HAVE_TFLITE)
-      build_proto(
-        tensorflow/core/protobuf/error_codes
-        tensorflow/core/example/feature
-        tensorflow/core/example/example)
-      list(APPEND MLLinkDeps 
-        tensorflow-lite::tensorflow-lite
-        protobuf::libprotobuf)
-    else()
-      list(APPEND MLLinkDeps ${tensorflow_c_api} ${tensorflow_fx})
-    endif()
+  if (LLVM_HAVE_TFLITE)
+    list(APPEND MLLinkDeps
+      tensorflow-lite::tensorflow-lite)
   endif()
 endif()
 
 add_llvm_component_library(LLVMAnalysis
   AliasAnalysis.cpp
   AliasAnalysisEvaluator.cpp
-  AliasAnalysisSummary.cpp
   AliasSetTracker.cpp
   Analysis.cpp
   AssumeBundleQueries.cpp
@@ -46,8 +36,7 @@ add_llvm_component_library(LLVMAnalysis
   BranchProbabilityInfo.cpp
   CFG.cpp
   CFGPrinter.cpp
-  CFLAndersAliasAnalysis.cpp
-  CFLSteensAliasAnalysis.cpp
+  CFGSCCPrinter.cpp
   CGSCCPassManager.cpp
   CallGraph.cpp
   CallGraphSCCPass.cpp
@@ -66,11 +55,9 @@ add_llvm_component_library(LLVMAnalysis
   DependenceAnalysis.cpp
   DependenceGraphBuilder.cpp
   DevelopmentModeInlineAdvisor.cpp
-  DivergenceAnalysis.cpp
   DomPrinter.cpp
   DomTreeUpdater.cpp
   DominanceFrontier.cpp
-  EHPersonalities.cpp
   FunctionPropertiesAnalysis.cpp
   GlobalsModRef.cpp
   GuardUtils.cpp
@@ -87,15 +74,16 @@ add_llvm_component_library(LLVMAnalysis
   InstCount.cpp
   InstructionPrecedenceTracking.cpp
   InstructionSimplify.cpp
+  InteractiveModelRunner.cpp
   Interval.cpp
   IntervalPartition.cpp
   LazyBranchProbabilityInfo.cpp
   LazyBlockFrequencyInfo.cpp
   LazyCallGraph.cpp
   LazyValueInfo.cpp
-  LegacyDivergenceAnalysis.cpp
   Lint.cpp
   Loads.cpp
+  Local.cpp
   LoopAccessAnalysis.cpp
   LoopAnalysisManager.cpp
   LoopCacheAnalysis.cpp
@@ -104,7 +92,6 @@ add_llvm_component_library(LLVMAnalysis
   LoopInfo.cpp
   LoopPass.cpp
   MLInlineAdvisor.cpp
-  MemDepPrinter.cpp
   MemDerefPrinter.cpp
   MemoryBuiltins.cpp
   MemoryDependenceAnalysis.cpp
@@ -137,9 +124,7 @@ add_llvm_component_library(LLVMAnalysis
   ScalarEvolutionNormalization.cpp
   StackLifetime.cpp
   StackSafetyAnalysis.cpp
-  SyncDependenceAnalysis.cpp
   SyntheticCountsUtils.cpp
-  TFUtils.cpp
   TFLiteUtils.cpp
   TargetLibraryInfo.cpp
   TargetTransformInfo.cpp
@@ -148,6 +133,7 @@ add_llvm_component_library(LLVMAnalysis
   TrainingLogger.cpp
   TypeBasedAliasAnalysis.cpp
   TypeMetadataUtils.cpp
+  UniformityAnalysis.cpp
   ScopedNoAliasAA.cpp
   ValueLattice.cpp
   ValueLatticeUtils.cpp
@@ -172,4 +158,5 @@ add_llvm_component_library(LLVMAnalysis
   Object
   ProfileData
   Support
+  TargetParser
   )

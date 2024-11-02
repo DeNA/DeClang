@@ -21,19 +21,13 @@ import unittest2
 
 
 class TestSwiftObjCImportedTypes(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @swiftTest
     @skipUnlessDarwin
     def test_swift_objc_imported_types(self):
         """Test that we are able to deal with ObjC-imported types"""
         self.build()
         lldbutil.run_to_source_breakpoint(
-            self, "Set breakpoint here", lldb.SBFileSpec("main.swift")
-        )
+            self, 'Set breakpoint here', lldb.SBFileSpec('main.swift'))
 
         nss = self.frame().FindVariable("nss")
         nsn = self.frame().FindVariable("nsn")
@@ -41,23 +35,36 @@ class TestSwiftObjCImportedTypes(TestBase):
         nsmd = self.frame().FindVariable("nsmd")
 
         lldbutil.check_variable(
-            self, nss, use_dynamic=False, typename="Foundation.NSString"
-        )
+            self,
+            nss,
+            use_dynamic=False,
+            typename="Foundation.NSString")
         lldbutil.check_variable(
-            self, nsn, use_dynamic=False, typename="Foundation.NSNumber"
-        )
+            self,
+            nsn,
+            use_dynamic=False,
+            typename="Foundation.NSNumber")
         lldbutil.check_variable(
-            self, nsmo, use_dynamic=False, typename="CoreData.NSManagedObject"
-        )
+            self,
+            nsmo,
+            use_dynamic=False,
+            typename="CoreData.NSManagedObject")
         lldbutil.check_variable(
-            self, nsmd, use_dynamic=False, typename="Foundation.NSMutableDictionary"
-        )
+            self,
+            nsmd,
+            use_dynamic=False,
+            typename="Foundation.NSMutableDictionary")
 
         lldbutil.check_variable(self, nss, use_dynamic=True, summary='"abc"')
-        lldbutil.check_variable(self, nsn, use_dynamic=True, summary="Int64(3)")
+        lldbutil.check_variable(self, nsn, use_dynamic=True, summary='Int64(3)')
         lldbutil.check_variable(
-            self, nsmo, use_dynamic=True, typename="CoreData.NSManagedObject"
-        )
+            self,
+            nsmo,
+            use_dynamic=True,
+            typename='CoreData.NSManagedObject')
         lldbutil.check_variable(
-            self, nsmd, use_dynamic=True, summary="1 key/value pair"
-        )
+            self,
+            nsmd,
+            use_dynamic=True,
+            summary='1 key/value pair')
+

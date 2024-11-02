@@ -55,6 +55,8 @@ public:
   // Return the source line corresponding to an address, or the empty string.
   // Format: Source.cpp:123 (/path/to/Source.cpp:123)
   std::string getSourceLocation(uint64_t off) const;
+  // Return the relocation at \p off, if it exists. This does a linear search.
+  const Reloc *getRelocAt(uint32_t off) const;
   // Whether the data at \p off in this InputSection is live.
   virtual bool isLive(uint64_t off) const = 0;
   virtual void markLive(uint64_t off) = 0;
@@ -64,11 +66,12 @@ public:
 protected:
   InputSection(Kind kind, const Section &section, ArrayRef<uint8_t> data,
                uint32_t align)
-      : sectionKind(kind), align(align), data(data), section(section) {}
+      : sectionKind(kind), keepUnique(false), hasAltEntry(false), align(align),
+        data(data), section(section) {}
 
   InputSection(const InputSection &rhs)
-      : sectionKind(rhs.sectionKind), align(rhs.align), data(rhs.data),
-        section(rhs.section) {}
+      : sectionKind(rhs.sectionKind), keepUnique(false), hasAltEntry(false),
+        align(rhs.align), data(rhs.data), section(rhs.section) {}
 
   Kind sectionKind;
 
@@ -77,7 +80,10 @@ public:
   bool isFinal = false;
   // keep the address of the symbol(s) in this section unique in the final
   // binary ?
-  bool keepUnique = false;
+  bool keepUnique : 1;
+  // Does this section have symbols at offsets other than zero? (NOTE: only
+  // applies to ConcatInputSections.)
+  bool hasAltEntry : 1;
   uint32_t align = 1;
 
   OutputSection *parent = nullptr;
@@ -214,6 +220,10 @@ public:
     return toStringRef(data.slice(begin, end - begin));
   }
 
+  StringRef getStringRefAtOffset(uint64_t off) const {
+    return getStringRef(getStringPieceIndex(off));
+  }
+
   // Returns i'th piece as a CachedHashStringRef. This function is very hot when
   // string merging is enabled, so we want to inline.
   LLVM_ATTRIBUTE_ALWAYS_INLINE
@@ -228,6 +238,9 @@ public:
 
   bool deduplicateLiterals = false;
   std::vector<StringPiece> pieces;
+
+private:
+  size_t getStringPieceIndex(uint64_t off) const;
 };
 
 class WordLiteralInputSection final : public InputSection {

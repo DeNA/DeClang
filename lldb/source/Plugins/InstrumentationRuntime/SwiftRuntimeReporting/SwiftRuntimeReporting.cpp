@@ -105,7 +105,8 @@ static StructuredData::ArraySP ReadThreads(ProcessSP process_sp, addr_t addr) {
     for (size_t j = 0; j < num_frames; j++) {
       addr_t frame = process_sp->ReadUnsignedIntegerFromMemory(
           frames_ptr + j * ptr_size, ptr_size, 0, read_error);
-      trace->AddIntegerItem(frame);
+      trace->AddItem(
+          StructuredData::ObjectSP(new StructuredData::UnsignedInteger(frame)));
     }
     StructuredData::DictionarySP thread(new StructuredData::Dictionary());
     thread->AddItem("trace", StructuredData::ObjectSP(trace));
@@ -285,7 +286,8 @@ SwiftRuntimeReporting::RetrieveReportData(ExecutionContextRef exe_ctx_ref) {
     }
 
     addr_t PC = addr.GetLoadAddress(&target);
-    trace->AddIntegerItem(PC);
+    trace->AddItem(
+        StructuredData::ObjectSP(new StructuredData::UnsignedInteger(PC)));
   }
 
   StructuredData::ArraySP threads(new StructuredData::Array());
@@ -417,9 +419,9 @@ SwiftRuntimeReporting::GetBacktracesFromExtendedStopInfo(
     StructuredData::ObjectSP info) {
   ThreadCollectionSP result;
   result.reset(new ThreadCollection());
-
+  
   ProcessSP process_sp = GetProcessSP();
-
+  
   if (info->GetObjectForDotSeparatedPath("instrumentation_class")
       ->GetStringValue() != "SwiftRuntimeReporting")
     return result;

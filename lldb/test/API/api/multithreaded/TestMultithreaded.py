@@ -11,6 +11,7 @@ import unittest2
 
 
 @unittest2.skip("skipping due to frequent timeouts: rdar://28183131")
+@skipIfNoSBHeaders
 class SBBreakpointCallbackCase(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
@@ -26,7 +27,6 @@ class SBBreakpointCallbackCase(TestBase):
         self.generateSource("test_stop-hook.cpp")
 
     @skipIfRemote
-    @skipIfNoSBHeaders
     # clang-cl does not support throw or catch (llvm.org/pr24538)
     @skipIfWindows
     def test_python_stop_hook(self):
@@ -34,7 +34,6 @@ class SBBreakpointCallbackCase(TestBase):
         self.build_and_test("driver.cpp test_stop-hook.cpp", "test_python_stop_hook")
 
     @skipIfRemote
-    @skipIfNoSBHeaders
     # clang-cl does not support throw or catch (llvm.org/pr24538)
     @skipIfWindows
     def test_breakpoint_callback(self):
@@ -44,7 +43,6 @@ class SBBreakpointCallbackCase(TestBase):
         )
 
     @skipIfRemote
-    @skipIfNoSBHeaders
     # clang-cl does not support throw or catch (llvm.org/pr24538)
     @skipIfWindows
     def test_breakpoint_location_callback(self):
@@ -55,7 +53,6 @@ class SBBreakpointCallbackCase(TestBase):
         )
 
     @skipIfRemote
-    @skipIfNoSBHeaders
     # clang-cl does not support throw or catch (llvm.org/pr24538)
     @skipIfWindows
     @expectedFlakeyFreeBSD
@@ -67,7 +64,6 @@ class SBBreakpointCallbackCase(TestBase):
         )
 
     @skipIfRemote
-    @skipIfNoSBHeaders
     # clang-cl does not support throw or catch (llvm.org/pr24538)
     @skipIfWindows
     @expectedFlakeyFreeBSD
@@ -81,7 +77,6 @@ class SBBreakpointCallbackCase(TestBase):
         )
 
     @skipIfRemote
-    @skipIfNoSBHeaders
     # clang-cl does not support throw or catch (llvm.org/pr24538)
     @skipIfWindows
     @expectedFlakeyFreeBSD
@@ -113,7 +108,6 @@ class SBBreakpointCallbackCase(TestBase):
         self.addTearDownHook(lambda: os.remove(self.getBuildArtifact(test_name)))
 
         test_exe = self.getBuildArtifact(test_name)
-        self.signBinary(test_exe)
         exe = [test_exe, self.getBuildArtifact(self.inferior)]
 
         env = {self.dylibPath: self.getLLDBLibraryEnvVal()}

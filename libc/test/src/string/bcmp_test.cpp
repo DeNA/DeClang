@@ -6,53 +6,55 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "memory_utils/memory_check_utils.h"
 #include "src/string/bcmp.h"
-#include "utils/UnitTest/Test.h"
+#include "test/UnitTest/Test.h"
+#include "test/UnitTest/TestLogger.h"
+
+namespace __llvm_libc {
 
 TEST(LlvmLibcBcmpTest, CmpZeroByte) {
   const char *lhs = "ab";
   const char *rhs = "bc";
-  EXPECT_EQ(__llvm_libc::bcmp(lhs, rhs, 0), 0);
+  ASSERT_EQ(__llvm_libc::bcmp(lhs, rhs, 0), 0);
 }
 
 TEST(LlvmLibcBcmpTest, LhsRhsAreTheSame) {
   const char *lhs = "ab";
   const char *rhs = "ab";
-  EXPECT_EQ(__llvm_libc::bcmp(lhs, rhs, 2), 0);
+  ASSERT_EQ(__llvm_libc::bcmp(lhs, rhs, 2), 0);
 }
 
 TEST(LlvmLibcBcmpTest, LhsBeforeRhsLexically) {
   const char *lhs = "ab";
   const char *rhs = "ac";
-  EXPECT_NE(__llvm_libc::bcmp(lhs, rhs, 2), 0);
+  ASSERT_NE(__llvm_libc::bcmp(lhs, rhs, 2), 0);
 }
 
 TEST(LlvmLibcBcmpTest, LhsAfterRhsLexically) {
   const char *lhs = "ac";
   const char *rhs = "ab";
-  EXPECT_NE(__llvm_libc::bcmp(lhs, rhs, 2), 0);
+  ASSERT_NE(__llvm_libc::bcmp(lhs, rhs, 2), 0);
 }
 
-TEST(LlvmLibcBcmpTest, Sweep) {
-  static constexpr size_t K_MAX_SIZE = 1024;
-  char lhs[K_MAX_SIZE];
-  char rhs[K_MAX_SIZE];
+// Adapt CheckBcmp signature to bcmp.
+static inline int Adaptor(cpp::span<char> p1, cpp::span<char> p2, size_t size) {
+  return __llvm_libc::bcmp(p1.begin(), p2.begin(), size);
+}
 
-  const auto reset = [](char *const ptr) {
-    for (size_t i = 0; i < K_MAX_SIZE; ++i)
-      ptr[i] = 'a';
-  };
-
-  reset(lhs);
-  reset(rhs);
-  for (size_t i = 0; i < K_MAX_SIZE; ++i)
-    EXPECT_EQ(__llvm_libc::bcmp(lhs, rhs, i), 0);
-
-  reset(lhs);
-  reset(rhs);
-  for (size_t i = 0; i < K_MAX_SIZE; ++i) {
-    rhs[i] = 'b';
-    EXPECT_NE(__llvm_libc::bcmp(lhs, rhs, K_MAX_SIZE), 0);
-    rhs[i] = 'a';
+TEST(LlvmLibcBcmpTest, SizeSweep) {
+  static constexpr size_t kMaxSize = 400;
+  Buffer Buffer1(kMaxSize);
+  Buffer Buffer2(kMaxSize);
+  Randomize(Buffer1.span());
+  for (size_t size = 0; size < kMaxSize; ++size) {
+    auto span1 = Buffer1.span().subspan(0, size);
+    auto span2 = Buffer2.span().subspan(0, size);
+    const bool OK = CheckBcmp<Adaptor>(span1, span2, size);
+    if (!OK)
+      testing::tlog << "Failed at size=" << size << '\n';
+    ASSERT_TRUE(OK);
   }
 }
+
+} // namespace __llvm_libc

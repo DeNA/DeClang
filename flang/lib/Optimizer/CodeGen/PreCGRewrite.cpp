@@ -17,8 +17,9 @@
 #include "flang/Optimizer/Dialect/FIRDialect.h"
 #include "flang/Optimizer/Dialect/FIROps.h"
 #include "flang/Optimizer/Dialect/FIRType.h"
-#include "flang/Optimizer/Support/FIRContext.h"
+#include "flang/Optimizer/Dialect/Support/FIRContext.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
@@ -106,8 +107,9 @@ public:
       shapeOpers.push_back(extVal);
     }
     auto xbox = rewriter.create<fir::cg::XEmboxOp>(
-        loc, embox.getType(), embox.getMemref(), shapeOpers, llvm::None,
-        llvm::None, llvm::None, llvm::None, embox.getTypeparams());
+        loc, embox.getType(), embox.getMemref(), shapeOpers, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt, embox.getTypeparams(),
+        embox.getSourceBox());
     LLVM_DEBUG(llvm::dbgs() << "rewriting " << embox << " to " << xbox << '\n');
     rewriter.replaceOp(embox, xbox.getOperation()->getResults());
     return mlir::success();
@@ -142,7 +144,8 @@ public:
       }
     auto xbox = rewriter.create<fir::cg::XEmboxOp>(
         loc, embox.getType(), embox.getMemref(), shapeOpers, shiftOpers,
-        sliceOpers, subcompOpers, substrOpers, embox.getTypeparams());
+        sliceOpers, subcompOpers, substrOpers, embox.getTypeparams(),
+        embox.getSourceBox());
     LLVM_DEBUG(llvm::dbgs() << "rewriting " << embox << " to " << xbox << '\n');
     rewriter.replaceOp(embox, xbox.getOperation()->getResults());
     return mlir::success();
@@ -266,35 +269,47 @@ public:
   }
 };
 
+class DeclareOpConversion : public mlir::OpRewritePattern<fir::DeclareOp> {
+public:
+  using OpRewritePattern::OpRewritePattern;
+
+  mlir::LogicalResult
+  matchAndRewrite(fir::DeclareOp declareOp,
+                  mlir::PatternRewriter &rewriter) const override {
+    rewriter.replaceOp(declareOp, declareOp.getMemref());
+    return mlir::success();
+  }
+};
+
 class CodeGenRewrite : public fir::impl::CodeGenRewriteBase<CodeGenRewrite> {
 public:
   void runOn(mlir::Operation *op, mlir::Region &region) {
     auto &context = getContext();
-    mlir::OpBuilder rewriter(&context);
     mlir::ConversionTarget target(context);
     target.addLegalDialect<mlir::arith::ArithDialect, fir::FIROpsDialect,
                            fir::FIRCodeGenDialect, mlir::func::FuncDialect>();
     target.addIllegalOp<fir::ArrayCoorOp>();
     target.addIllegalOp<fir::ReboxOp>();
+    target.addIllegalOp<fir::DeclareOp>();
     target.addDynamicallyLegalOp<fir::EmboxOp>([](fir::EmboxOp embox) {
-      if (embox.getType().isa<fir::ClassType>())
-        TODO(embox.getLoc(), "fir.class type CodeGenRewrite");
       return !(embox.getShape() || embox.getType()
-                                       .cast<fir::BoxType>()
+                                       .cast<fir::BaseBoxType>()
                                        .getEleTy()
                                        .isa<fir::SequenceType>());
     });
     mlir::RewritePatternSet patterns(&context);
-    patterns.insert<EmboxConversion, ArrayCoorConversion, ReboxConversion>(
-        &context);
+    patterns.insert<EmboxConversion, ArrayCoorConversion, ReboxConversion,
+                    DeclareOpConversion>(&context);
     if (mlir::failed(
             mlir::applyPartialConversion(op, target, std::move(patterns)))) {
       mlir::emitError(mlir::UnknownLoc::get(&context),
                       "error in running the pre-codegen conversions");
       signalPassFailure();
+      return;
     }
-    // Erase any residual.
-    simplifyRegion(region);
+    // Erase any residual (fir.shape, fir.slice...).
+    mlir::IRRewriter rewriter(&context);
+    (void)mlir::runRegionDCE(rewriter, op->getRegions());
   }
 
   void runOnOperation() override final {
@@ -305,48 +320,6 @@ public:
     for (auto global : mod.getOps<fir::GlobalOp>())
       runOn(global, global.getRegion());
   }
-
-  // Clean up the region.
-  void simplifyRegion(mlir::Region &region) {
-    for (auto &block : region.getBlocks())
-      for (auto &op : block.getOperations()) {
-        for (auto &reg : op.getRegions())
-          simplifyRegion(reg);
-        maybeEraseOp(&op);
-      }
-    doDCE();
-  }
-
-  /// Run a simple DCE cleanup to remove any dead code after the rewrites.
-  void doDCE() {
-    std::vector<mlir::Operation *> workList;
-    workList.swap(opsToErase);
-    while (!workList.empty()) {
-      for (auto *op : workList) {
-        std::vector<mlir::Value> opOperands(op->operand_begin(),
-                                            op->operand_end());
-        LLVM_DEBUG(llvm::dbgs() << "DCE on " << *op << '\n');
-        ++numDCE;
-        op->erase();
-        for (auto opnd : opOperands)
-          maybeEraseOp(opnd.getDefiningOp());
-      }
-      workList.clear();
-      workList.swap(opsToErase);
-    }
-  }
-
-  void maybeEraseOp(mlir::Operation *op) {
-    if (!op)
-      return;
-    if (op->hasTrait<mlir::OpTrait::IsTerminator>())
-      return;
-    if (mlir::isOpTriviallyDead(op))
-      opsToErase.push_back(op);
-  }
-
-private:
-  std::vector<mlir::Operation *> opsToErase;
 };
 
 } // namespace

@@ -21,22 +21,25 @@ namespace tensor {
 PadOp createPadHighOp(RankedTensorType type, Value source, Value pad,
                       bool nofold, Location loc, OpBuilder &builder);
 
-// Return a PadOp that pads `source to `type` size with `pad` value.
-// I.e., a block will be created and the `pad` value will be yielded
-// directly. If the type passed is nullptr, it is inferred.
-PadOp createPadScalarOp(Type type, Value source, Value pad,
-                        ArrayRef<OpFoldResult> low, ArrayRef<OpFoldResult> high,
-                        bool nofold, Location loc, OpBuilder &builder);
-
 // Creates dim ops for each dynamic dimension of the ranked tensor argument and
 // returns these as values.
 SmallVector<Value> createDynamicDimValues(OpBuilder &b, Location loc,
                                           Value rankedTensor);
 
-// Creates dim ops or constant ops for each dimension of the ranked tensor
-// argument and returns these as values.
-SmallVector<Value> createDimValues(OpBuilder &b, Location loc,
-                                   Value rankedTensor);
+/// Returns the transposed `rankedTensorType` if `transposeVector` is non-empty.
+/// Fail if `transposeVector` is not a permutation matching the tensor rank.
+FailureOr<RankedTensorType>
+computeTransposedType(RankedTensorType rankedTensorType,
+                      ArrayRef<int64_t> transposeVector);
+
+/// A tensor.insert_slice is a cast-like operation if it merely rank-extends the
+/// source tensor or inserts the source tensor into a destination tensor with
+/// the same shape.
+bool isCastLikeInsertSliceOp(InsertSliceOp op);
+
+/// A tensor.extract_slice is a cast-like operation if it merely rank-reduces
+/// the source tensor or extracts the entire source tensor.
+bool isCastLikeExtractSliceOp(ExtractSliceOp op);
 
 } // namespace tensor
 } // namespace mlir

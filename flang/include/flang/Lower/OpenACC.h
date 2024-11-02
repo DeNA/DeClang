@@ -13,6 +13,25 @@
 #ifndef FORTRAN_LOWER_OPENACC_H
 #define FORTRAN_LOWER_OPENACC_H
 
+#include "mlir/Dialect/OpenACC/OpenACC.h"
+
+namespace llvm {
+template <typename T, unsigned N>
+class SmallVector;
+class StringRef;
+}
+
+namespace mlir {
+class Location;
+class Type;
+class OpBuilder;
+class Value;
+} // namespace mlir
+
+namespace fir {
+class FirOpBuilder;
+}
+
 namespace Fortran {
 namespace parser {
 struct OpenACCConstruct;
@@ -37,6 +56,26 @@ void genOpenACCConstruct(AbstractConverter &,
 void genOpenACCDeclarativeConstruct(
     AbstractConverter &, pft::Evaluation &,
     const parser::OpenACCDeclarativeConstruct &);
+
+/// Get a acc.private.recipe op for the given type or create it if it does not
+/// exist yet.
+mlir::acc::PrivateRecipeOp createOrGetPrivateRecipe(mlir::OpBuilder &,
+                                                    llvm::StringRef,
+                                                    mlir::Location, mlir::Type);
+
+/// Get a acc.reduction.recipe op for the given type or create it if it does not
+/// exist yet.
+mlir::acc::ReductionRecipeOp
+createOrGetReductionRecipe(fir::FirOpBuilder &, llvm::StringRef, mlir::Location,
+                           mlir::Type, mlir::acc::ReductionOperator,
+                           llvm::SmallVector<mlir::Value> &);
+
+/// Get a acc.firstprivate.recipe op for the given type or create it if it does
+/// not exist yet.
+mlir::acc::FirstprivateRecipeOp createOrGetFirstprivateRecipe(mlir::OpBuilder &,
+                                                              llvm::StringRef,
+                                                              mlir::Location,
+                                                              mlir::Type);
 
 } // namespace lower
 } // namespace Fortran

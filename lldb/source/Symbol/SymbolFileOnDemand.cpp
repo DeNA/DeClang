@@ -12,6 +12,7 @@
 #include "lldb/Symbol/SymbolFile.h"
 
 #include <memory>
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -114,7 +115,7 @@ bool SymbolFileOnDemand::ForEachExternalModule(
 }
 
 bool SymbolFileOnDemand::ParseSupportFiles(CompileUnit &comp_unit,
-                                           FileSpecList &support_files) {
+                                           SupportFileList &support_files) {
   LLDB_LOG(GetLog(),
            "[{0}] {1} is not skipped: explicitly allowed to support breakpoint",
            GetSymbolFileName(), __FUNCTION__);
@@ -197,13 +198,13 @@ Type *SymbolFileOnDemand::ResolveTypeUID(lldb::user_id_t type_uid) {
   return m_sym_file_impl->ResolveTypeUID(type_uid);
 }
 
-llvm::Optional<SymbolFile::ArrayInfo>
+std::optional<SymbolFile::ArrayInfo>
 SymbolFileOnDemand::GetDynamicArrayInfoForUID(
     lldb::user_id_t type_uid, const lldb_private::ExecutionContext *exe_ctx) {
   if (!m_debug_info_enabled) {
     LLDB_LOG(GetLog(), "[{0}] {1} is skipped", GetSymbolFileName(),
              __FUNCTION__);
-    return llvm::None;
+    return std::nullopt;
   }
   return m_sym_file_impl->GetDynamicArrayInfoForUID(type_uid, exe_ctx);
 }
@@ -272,6 +273,15 @@ SymbolFileOnDemand::ResolveSymbolContext(const Address &so_addr,
     return 0;
   }
   return m_sym_file_impl->ResolveSymbolContext(so_addr, resolve_scope, sc);
+}
+
+Status SymbolFileOnDemand::CalculateFrameVariableError(StackFrame &frame) {
+  if (!m_debug_info_enabled) {
+    LLDB_LOG(GetLog(), "[{0}] {1} is skipped", GetSymbolFileName(),
+             __FUNCTION__);
+    return Status();
+  }
+  return m_sym_file_impl->CalculateFrameVariableError(frame);
 }
 
 uint32_t SymbolFileOnDemand::ResolveSymbolContext(
@@ -421,31 +431,14 @@ void SymbolFileOnDemand::GetMangledNamesForFunction(
                                                      mangled_names);
 }
 
-void SymbolFileOnDemand::FindTypes(
-    ConstString name, const CompilerDeclContext &parent_decl_ctx,
-    uint32_t max_matches,
-    llvm::DenseSet<lldb_private::SymbolFile *> &searched_symbol_files,
-    TypeMap &types) {
-  if (!m_debug_info_enabled) {
-    Log *log = GetLog();
-    LLDB_LOG(log, "[{0}] {1}({2}) is skipped", GetSymbolFileName(),
-             __FUNCTION__, name);
-    return;
-  }
-  return m_sym_file_impl->FindTypes(name, parent_decl_ctx, max_matches,
-                                    searched_symbol_files, types);
-}
-
-void SymbolFileOnDemand::FindTypes(
-    llvm::ArrayRef<CompilerContext> pattern, LanguageSet languages,
-    llvm::DenseSet<SymbolFile *> &searched_symbol_files, TypeMap &types) {
+void SymbolFileOnDemand::FindTypes(const TypeQuery &match,
+                                   TypeResults &results) {
   if (!m_debug_info_enabled) {
     LLDB_LOG(GetLog(), "[{0}] {1} is skipped", GetSymbolFileName(),
              __FUNCTION__);
     return;
   }
-  return m_sym_file_impl->FindTypes(pattern, languages, searched_symbol_files,
-                                    types);
+  return m_sym_file_impl->FindTypes(match, results);
 }
 
 void SymbolFileOnDemand::GetTypes(SymbolContextScope *sc_scope,
@@ -464,9 +457,8 @@ SymbolFileOnDemand::GetTypeSystemForLanguage(LanguageType language) {
     Log *log = GetLog();
     LLDB_LOG(log, "[{0}] {1} is skipped for language type {2}",
              GetSymbolFileName(), __FUNCTION__, language);
-    return llvm::make_error<llvm::StringError>(
-        "GetTypeSystemForLanguage is skipped by SymbolFileOnDemand",
-        llvm::inconvertibleErrorCode());
+    return llvm::createStringError(
+        "GetTypeSystemForLanguage is skipped by SymbolFileOnDemand");
   }
   return m_sym_file_impl->GetTypeSystemForLanguage(language);
 }

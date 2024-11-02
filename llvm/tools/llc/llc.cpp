@@ -14,8 +14,8 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/CAS/ObjectStore.h"
 #include "llvm/CodeGen/CommandFlags.h"
 #include "llvm/CodeGen/LinkAllAsmWriterComponents.h"
 #include "llvm/CodeGen/LinkAllCodegenComponents.h"
@@ -28,7 +28,6 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/DiagnosticPrinter.h"
-#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/LLVMRemarkStreamer.h"
 #include "llvm/IR/LegacyPassManager.h"
@@ -37,7 +36,6 @@
 #include "llvm/IRReader/IRReader.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/MC/MCTargetOptionsCommandFlags.h"
-#include "llvm/MC/SubtargetFeature.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Pass.h"
 #include "llvm/Remarks/HotnessThresholdParser.h"
@@ -45,9 +43,9 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/PluginLoader.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/TimeProfiler.h"
@@ -55,8 +53,12 @@
 #include "llvm/Support/WithColor.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
+#include "llvm/TargetParser/Host.h"
+#include "llvm/TargetParser/SubtargetFeature.h"
+#include "llvm/TargetParser/Triple.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include <memory>
+#include <optional>
 using namespace llvm;
 
 static codegen::RegisterCodeGenFlags CGF;
@@ -107,10 +109,6 @@ static cl::opt<std::string>
                              "regardless of binutils support"));
 
 static cl::opt<bool>
-NoIntegratedAssembler("no-integrated-as", cl::Hidden,
-                      cl::desc("Disable integrated assembler"));
-
-static cl::opt<bool>
     PreserveComments("preserve-as-comments", cl::Hidden,
                      cl::desc("Preserve Comments in outputted assembly"),
                      cl::init(true));
@@ -120,7 +118,7 @@ static cl::opt<char>
     OptLevel("O",
              cl::desc("Optimization level. [-O0, -O1, -O2, or -O3] "
                       "(default = '-O2')"),
-             cl::Prefix, cl::init(' '));
+             cl::Prefix, cl::init('2'));
 
 static cl::opt<std::string>
 TargetTriple("mtriple", cl::desc("Override target triple for module"));
@@ -166,7 +164,7 @@ static cl::opt<bool> RemarksWithHotness(
     cl::desc("With PGO, include profile count in optimization remarks"),
     cl::Hidden);
 
-static cl::opt<Optional<uint64_t>, false, remarks::HotnessThresholdParser>
+static cl::opt<std::optional<uint64_t>, false, remarks::HotnessThresholdParser>
     RemarksHotnessThreshold(
         "pass-remarks-hotness-threshold",
         cl::desc("Minimum profile count required for "
@@ -189,6 +187,28 @@ static cl::opt<std::string> RemarksFormat(
     "pass-remarks-format",
     cl::desc("The format used for serializing remarks (default: YAML)"),
     cl::value_desc("format"), cl::init("yaml"));
+
+// BEGIN MCCAS
+static cl::opt<std::string> CASPath("cas", cl::desc("CAS Path"));
+
+static cl::opt<bool> UseMCCASBackend("cas-backend",
+                                     cl::desc("Use MCCAS backend"));
+
+static cl::opt<CASBackendMode> MCCASBackendMode(
+    cl::desc("MC CAS Backend Mode"), cl::init(CASBackendMode::Verify),
+    cl::values(clEnumValN(CASBackendMode::Verify, "mccas-verify",
+                          "Native object with verifier"),
+               clEnumValN(CASBackendMode::Native, "mccas-native",
+                          "Native object without verifier"),
+               clEnumValN(CASBackendMode::CASID, "mccas-casid",
+                          "CASID file output")));
+
+static cl::opt<bool>
+    EmitCASIDFile("mccas-emit-casid-file",
+                  cl::desc("Emit a .casid file next to the generated .o file "
+                           "when MC CAS is enabled"),
+                  cl::init(false));
+// END MCCAS
 
 namespace {
 
@@ -338,6 +358,38 @@ struct LLCDiagnosticHandler : public DiagnosticHandler {
   }
 };
 
+// BEGIN MCCAS
+/// Returns a pointer to a CAS using the CLI parameters.
+static std::shared_ptr<cas::ObjectStore> getCAS() {
+  if (CASPath.empty())
+    return cas::createInMemoryCAS();
+  auto MaybeCAS =
+      CASPath == "auto"
+          ? cas::createCASFromIdentifier(cas::getDefaultOnDiskCASPath())
+          : cas::createCASFromIdentifier(CASPath);
+  if (MaybeCAS)
+    return std::move(*MaybeCAS);
+  reportError(toString(MaybeCAS.takeError()));
+}
+
+/// Returns true if the LLC should use a CAS backend.
+static bool shouldUseCASBackend(const Triple &TheTriple) {
+  return UseMCCASBackend ||
+         ((TheTriple.getObjectFormat() == Triple::MachO) &&
+          llvm::sys::Process::GetEnv("LLVM_TEST_CAS_BACKEND"));
+}
+
+/// Exits the program if a CAS backend is requested but would not be honored.
+static void verifyCASOptions(const Triple &TheTriple) {
+  bool CASRequested = shouldUseCASBackend(TheTriple);
+
+  if (CASRequested && codegen::getFileType() != CGFT_ObjectFile)
+    reportError("CAS Backend requires .obj output");
+  if (CASRequested && TheTriple.getObjectFormat() != Triple::MachO)
+    reportError("CAS Backend requires MachO format");
+}
+// END MCCAS
+
 // main - Entry point for the llc compiler.
 //
 int main(int argc, char **argv) {
@@ -366,7 +418,7 @@ int main(int argc, char **argv) {
   initializeScalarizeMaskedMemIntrinLegacyPassPass(*Registry);
   initializeExpandReductionsPass(*Registry);
   initializeExpandVectorPredicationPass(*Registry);
-  initializeHardwareLoopsPass(*Registry);
+  initializeHardwareLoopsLegacyPass(*Registry);
   initializeTransformUtils(*Registry);
   initializeReplaceWithVeclibLegacyPass(*Registry);
   initializeTLSVariableHoistLegacyPassPass(*Registry);
@@ -374,6 +426,8 @@ int main(int argc, char **argv) {
   // Initialize debugging passes.
   initializeScavengerTestPass(*Registry);
 
+  // Register the Target and CPU printer for --version.
+  cl::AddExtraVersionPrinter(sys::printDefaultTargetAndDetectedCPU);
   // Register the target printer for --version.
   cl::AddExtraVersionPrinter(TargetRegistry::printRegisteredTargetsForVersion);
 
@@ -470,16 +524,12 @@ static int compileModule(char **argv, LLVMContext &Context) {
   bool SkipModule =
       CPUStr == "help" || (!MAttrs.empty() && MAttrs.front() == "help");
 
-  CodeGenOpt::Level OLvl = CodeGenOpt::Default;
-  switch (OptLevel) {
-  default:
+  CodeGenOpt::Level OLvl;
+  if (auto Level = CodeGenOpt::parseLevel(OptLevel)) {
+    OLvl = *Level;
+  } else {
     WithColor::error(errs(), argv[0]) << "invalid optimization level.\n";
     return 1;
-  case ' ': break;
-  case '0': OLvl = CodeGenOpt::None; break;
-  case '1': OLvl = CodeGenOpt::Less; break;
-  case '2': OLvl = CodeGenOpt::Default; break;
-  case '3': OLvl = CodeGenOpt::Aggressive; break;
   }
 
   // Parse 'none' or '$major.$minor'. Disallow -binutils-version=0 because we
@@ -498,9 +548,27 @@ static int compileModule(char **argv, LLVMContext &Context) {
   TargetOptions Options;
   auto InitializeOptions = [&](const Triple &TheTriple) {
     Options = codegen::InitTargetOptionsFromCodeGenFlags(TheTriple);
+
+    if (Options.XCOFFReadOnlyPointers) {
+      if (!TheTriple.isOSAIX())
+        reportError("-mxcoff-roptr option is only supported on AIX",
+                    InputFilename);
+
+      // Since the storage mapping class is specified per csect,
+      // without using data sections, it is less effective to use read-only
+      // pointers. Using read-only pointers may cause other RO variables in the
+      // same csect to become RW when the linker acts upon `-bforceimprw`;
+      // therefore, we require that separate data sections are used in the
+      // presence of ReadOnlyPointers. We respect the setting of data-sections
+      // since we have not found reasons to do otherwise that overcome the user
+      // surprise of not respecting the setting.
+      if (!Options.DataSections)
+        reportError("-mxcoff-roptr option must be used with -data-sections",
+                    InputFilename);
+    }
+
     Options.BinutilsVersion =
         TargetMachine::parseBinutilsVersion(BinutilsVersion);
-    Options.DisableIntegratedAS = NoIntegratedAssembler;
     Options.MCOptions.ShowMCEncoding = ShowMCEncoding;
     Options.MCOptions.AsmVerbose = AsmVerbose;
     Options.MCOptions.PreserveAsmComments = PreserveComments;
@@ -518,18 +586,26 @@ static int compileModule(char **argv, LLVMContext &Context) {
       Options.MCOptions.MCUseDwarfDirectory =
           MCTargetOptions::DefaultDwarfDirectory;
     }
+
+    // BEGIN MCCAS
+    // This is used for testing llc with a CAS backend.
+    verifyCASOptions(TheTriple);
+    Options.UseCASBackend = shouldUseCASBackend(TheTriple);
+    Options.MCOptions.CAS = getCAS();
+    Options.MCOptions.CASObjMode = MCCASBackendMode;
+    // END MCCAS
   };
 
-  Optional<Reloc::Model> RM = codegen::getExplicitRelocModel();
-  Optional<CodeModel::Model> CM = codegen::getExplicitCodeModel();
+  std::optional<Reloc::Model> RM = codegen::getExplicitRelocModel();
+  std::optional<CodeModel::Model> CM = codegen::getExplicitCodeModel();
 
   const Target *TheTarget = nullptr;
   std::unique_ptr<TargetMachine> Target;
 
   // If user just wants to list available options, skip module loading
   if (!SkipModule) {
-    auto SetDataLayout =
-        [&](StringRef DataLayoutTargetTriple) -> Optional<std::string> {
+    auto SetDataLayout = [&](StringRef DataLayoutTargetTriple,
+                             StringRef OldDLStr) -> std::optional<std::string> {
       // If we are supposed to override the target triple, do so now.
       std::string IRTargetTriple = DataLayoutTargetTriple.str();
       if (!TargetTriple.empty())
@@ -566,7 +642,8 @@ static int compileModule(char **argv, LLVMContext &Context) {
       if (MIR)
         M = MIR->parseIRModule(SetDataLayout);
     } else {
-      M = parseIRFile(InputFilename, Err, Context, SetDataLayout);
+      M = parseIRFile(InputFilename, Err, Context,
+                      ParserCallbacks(SetDataLayout));
     }
     if (!M) {
       Err.print(argv[0], WithColor::error(errs(), argv[0]));
@@ -575,9 +652,9 @@ static int compileModule(char **argv, LLVMContext &Context) {
     if (!TargetTriple.empty())
       M->setTargetTriple(Triple::normalize(TargetTriple));
 
-    Optional<CodeModel::Model> CM_IR = M->getCodeModel();
+    std::optional<CodeModel::Model> CM_IR = M->getCodeModel();
     if (!CM && CM_IR)
-      Target->setCodeModel(CM_IR.value());
+      Target->setCodeModel(*CM_IR);
   } else {
     TheTriple = Triple(Triple::normalize(TargetTriple));
     if (TheTriple.getTriple().empty())
@@ -622,6 +699,23 @@ static int compileModule(char **argv, LLVMContext &Context) {
 
   // Ensure the filename is passed down to CodeViewDebug.
   Target->Options.ObjectFilenameForDebug = Out->outputFilename();
+
+  std::unique_ptr<ToolOutputFile> CasIDOS;
+  std::string OutputPathCASIDFile;
+  StringRef OutputFile = StringRef(Out->outputFilename());
+  if (UseMCCASBackend && EmitCASIDFile &&
+      MCCASBackendMode != CASBackendMode::CASID &&
+      codegen::getFileType() == CGFT_ObjectFile && OutputFile != "-") {
+    OutputPathCASIDFile = std::string(OutputFile);
+    OutputPathCASIDFile.append(".casid");
+    std::error_code EC;
+    CasIDOS = std::make_unique<ToolOutputFile>(OutputPathCASIDFile, EC,
+                                               sys::fs::OF_None);
+    if (EC) {
+      reportError(EC.message());
+      return 1;
+    }
+  }
 
   std::unique_ptr<ToolOutputFile> DwoOut;
   if (!SplitDwarfOutputFile.empty()) {
@@ -681,13 +775,17 @@ static int compileModule(char **argv, LLVMContext &Context) {
       if (!MIR) {
         WithColor::warning(errs(), argv[0])
             << "run-pass is for .mir file only.\n";
+        delete MMIWP;
         return 1;
       }
-      TargetPassConfig &TPC = *LLVMTM.createPassConfig(PM);
+      TargetPassConfig *PTPC = LLVMTM.createPassConfig(PM);
+      TargetPassConfig &TPC = *PTPC;
       if (TPC.hasLimitedCodeGenPipeline()) {
         WithColor::warning(errs(), argv[0])
             << "run-pass cannot be used with "
             << TPC.getLimitedCodeGenPipelineReason(" and ") << ".\n";
+        delete PTPC;
+        delete MMIWP;
         return 1;
       }
 
@@ -704,7 +802,8 @@ static int compileModule(char **argv, LLVMContext &Context) {
       PM.add(createFreeMachineFunctionPass());
     } else if (Target->addPassesToEmitFile(
                    PM, *OS, DwoOut ? &DwoOut->os() : nullptr,
-                   codegen::getFileType(), NoVerify, MMIWP)) {
+                   codegen::getFileType(), NoVerify, MMIWP,
+                   CasIDOS ? &CasIDOS->os() : nullptr)) {
       reportError("target does not support generation of this file type");
     }
 
@@ -763,6 +862,8 @@ static int compileModule(char **argv, LLVMContext &Context) {
   Out->keep();
   if (DwoOut)
     DwoOut->keep();
+  if (CasIDOS)
+    CasIDOS->keep();
 
   return 0;
 }

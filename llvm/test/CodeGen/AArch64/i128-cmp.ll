@@ -6,10 +6,8 @@ declare void @call()
 define i1 @cmp_i128_eq(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_eq:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    eor x8, x1, x3
-; CHECK-NEXT:    eor x9, x0, x2
-; CHECK-NEXT:    orr x8, x9, x8
-; CHECK-NEXT:    cmp x8, #0
+; CHECK-NEXT:    cmp x0, x2
+; CHECK-NEXT:    ccmp x1, x3, #0, eq
 ; CHECK-NEXT:    cset w0, eq
 ; CHECK-NEXT:    ret
     %cmp = icmp eq i128 %a, %b
@@ -19,10 +17,8 @@ define i1 @cmp_i128_eq(i128 %a, i128 %b) {
 define i1 @cmp_i128_ne(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_ne:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    eor x8, x1, x3
-; CHECK-NEXT:    eor x9, x0, x2
-; CHECK-NEXT:    orr x8, x9, x8
-; CHECK-NEXT:    cmp x8, #0
+; CHECK-NEXT:    cmp x0, x2
+; CHECK-NEXT:    ccmp x1, x3, #0, eq
 ; CHECK-NEXT:    cset w0, ne
 ; CHECK-NEXT:    ret
     %cmp = icmp ne i128 %a, %b
@@ -32,11 +28,9 @@ define i1 @cmp_i128_ne(i128 %a, i128 %b) {
 define i1 @cmp_i128_ugt(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_ugt:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hi
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, hi
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    cset w0, lo
 ; CHECK-NEXT:    ret
     %cmp = icmp ugt i128 %a, %b
     ret i1 %cmp
@@ -46,10 +40,8 @@ define i1 @cmp_i128_uge(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_uge:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hs
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, hs
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    cset w0, hs
 ; CHECK-NEXT:    ret
     %cmp = icmp uge i128 %a, %b
     ret i1 %cmp
@@ -59,10 +51,8 @@ define i1 @cmp_i128_ult(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_ult:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, lo
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, lo
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    cset w0, lo
 ; CHECK-NEXT:    ret
     %cmp = icmp ult i128 %a, %b
     ret i1 %cmp
@@ -71,11 +61,9 @@ define i1 @cmp_i128_ult(i128 %a, i128 %b) {
 define i1 @cmp_i128_ule(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_ule:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, ls
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, ls
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    cset w0, hs
 ; CHECK-NEXT:    ret
     %cmp = icmp ule i128 %a, %b
     ret i1 %cmp
@@ -84,11 +72,9 @@ define i1 @cmp_i128_ule(i128 %a, i128 %b) {
 define i1 @cmp_i128_sgt(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_sgt:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hi
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, gt
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    cset w0, lt
 ; CHECK-NEXT:    ret
     %cmp = icmp sgt i128 %a, %b
     ret i1 %cmp
@@ -98,10 +84,8 @@ define i1 @cmp_i128_sge(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_sge:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hs
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, ge
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    cset w0, ge
 ; CHECK-NEXT:    ret
     %cmp = icmp sge i128 %a, %b
     ret i1 %cmp
@@ -111,10 +95,8 @@ define i1 @cmp_i128_slt(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_slt:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, lo
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, lt
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    cset w0, lt
 ; CHECK-NEXT:    ret
     %cmp = icmp slt i128 %a, %b
     ret i1 %cmp
@@ -123,11 +105,9 @@ define i1 @cmp_i128_slt(i128 %a, i128 %b) {
 define i1 @cmp_i128_sle(i128 %a, i128 %b) {
 ; CHECK-LABEL: cmp_i128_sle:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, ls
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, le
-; CHECK-NEXT:    csel w0, w8, w9, eq
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    cset w0, ge
 ; CHECK-NEXT:    ret
     %cmp = icmp sle i128 %a, %b
     ret i1 %cmp
@@ -136,10 +116,9 @@ define i1 @cmp_i128_sle(i128 %a, i128 %b) {
 define void @br_on_cmp_i128_eq(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_eq:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    eor x8, x1, x3
-; CHECK-NEXT:    eor x9, x0, x2
-; CHECK-NEXT:    orr x8, x9, x8
-; CHECK-NEXT:    cbnz x8, .LBB10_2
+; CHECK-NEXT:    cmp x1, x3
+; CHECK-NEXT:    ccmp x0, x2, #0, eq
+; CHECK-NEXT:    b.ne .LBB10_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -158,10 +137,9 @@ exit:
 define void @br_on_cmp_i128_ne(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_ne:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    eor x8, x1, x3
-; CHECK-NEXT:    eor x9, x0, x2
-; CHECK-NEXT:    orr x8, x9, x8
-; CHECK-NEXT:    cbz x8, .LBB11_2
+; CHECK-NEXT:    cmp x1, x3
+; CHECK-NEXT:    ccmp x0, x2, #0, eq
+; CHECK-NEXT:    b.eq .LBB11_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -180,12 +158,9 @@ exit:
 define void @br_on_cmp_i128_ugt(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_ugt:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, ls
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, ls
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB12_2
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    b.hs .LBB12_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -205,11 +180,8 @@ define void @br_on_cmp_i128_uge(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_uge:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, lo
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, lo
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB13_2
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    b.lo .LBB13_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -229,11 +201,8 @@ define void @br_on_cmp_i128_ult(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_ult:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hs
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, hs
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB14_2
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    b.hs .LBB14_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -252,12 +221,9 @@ exit:
 define void @br_on_cmp_i128_ule(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_ule:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hi
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, hi
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB15_2
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    b.lo .LBB15_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -276,12 +242,9 @@ exit:
 define void @br_on_cmp_i128_sgt(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_sgt:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, ls
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, le
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB16_2
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    b.ge .LBB16_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -301,11 +264,8 @@ define void @br_on_cmp_i128_sge(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_sge:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, lo
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, lt
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB17_2
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    b.lt .LBB17_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -325,11 +285,8 @@ define void @br_on_cmp_i128_slt(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_slt:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hs
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, ge
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB18_2
+; CHECK-NEXT:    sbcs xzr, x1, x3
+; CHECK-NEXT:    b.ge .LBB18_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call
@@ -348,12 +305,9 @@ exit:
 define void @br_on_cmp_i128_sle(i128 %a, i128 %b) nounwind {
 ; CHECK-LABEL: br_on_cmp_i128_sle:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    cmp x0, x2
-; CHECK-NEXT:    cset w8, hi
-; CHECK-NEXT:    cmp x1, x3
-; CHECK-NEXT:    cset w9, gt
-; CHECK-NEXT:    csel w8, w8, w9, eq
-; CHECK-NEXT:    tbnz w8, #0, .LBB19_2
+; CHECK-NEXT:    cmp x2, x0
+; CHECK-NEXT:    sbcs xzr, x3, x1
+; CHECK-NEXT:    b.lt .LBB19_2
 ; CHECK-NEXT:  // %bb.1: // %call
 ; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
 ; CHECK-NEXT:    bl call

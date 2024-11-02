@@ -6,7 +6,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-format
 
 // <format>
 
@@ -36,7 +35,9 @@ constexpr void test(const CharT* fmt) {
 
 constexpr bool test() {
   test("abc");
+#ifndef TEST_HAS_NO_WIDE_CHARACTERS
   test(L"abc");
+#endif
 #ifndef TEST_HAS_NO_CHAR8_T
   test(u8"abc");
 #endif

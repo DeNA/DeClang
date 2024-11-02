@@ -226,6 +226,11 @@ void USRGenerator::VisitFunctionDecl(const FunctionDecl *D) {
   if (ShouldGenerateLocation(D) && GenLoc(D, /*IncludeOffset=*/isLocal(D)))
     return;
 
+  if (D->getType().isNull()) {
+    IgnoreResults = true;
+    return;
+  }
+
   const unsigned StartSize = Buf.size();
   VisitDeclContext(D->getDeclContext());
   if (Buf.size() == StartSize)
@@ -744,6 +749,8 @@ void USRGenerator::VisitType(QualType T) {
         case BuiltinType::Id: \
           Out << "@BT@" << Name; break;
 #include "clang/Basic/RISCVVTypes.def"
+#define WASM_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/WebAssemblyReferenceTypes.def"
         case BuiltinType::ShortAccum:
           Out << "@BT@ShortAccum"; break;
         case BuiltinType::Accum:
@@ -895,9 +902,9 @@ void USRGenerator::VisitType(QualType T) {
                                     = T->getAs<TemplateSpecializationType>()) {
       Out << '>';
       VisitTemplateName(Spec->getTemplateName());
-      Out << Spec->getNumArgs();
-      for (unsigned I = 0, N = Spec->getNumArgs(); I != N; ++I)
-        VisitTemplateArgument(Spec->getArg(I));
+      Out << Spec->template_arguments().size();
+      for (const auto &Arg : Spec->template_arguments())
+        VisitTemplateArgument(Arg);
       return;
     }
     if (const DependentNameType *DNT = T->getAs<DependentNameType>()) {

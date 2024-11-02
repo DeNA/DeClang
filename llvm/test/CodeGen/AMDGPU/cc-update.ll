@@ -57,11 +57,10 @@ define amdgpu_kernel void @test_kern_stack() local_unnamed_addr #0 {
 ; GFX1100-NEXT:    v_mov_b32_e32 v0, 0
 ; GFX1100-NEXT:    scratch_store_b32 off, v0, off offset:4 dlc
 ; GFX1100-NEXT:    s_waitcnt_vscnt null, 0x0
-; GFX1100-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX1100-NEXT:    s_endpgm
 entry:
   %x = alloca i32, align 4, addrspace(5)
-  store volatile i32 0, i32 addrspace(5)* %x, align 4
+  store volatile i32 0, ptr addrspace(5) %x, align 4
   ret void
 }
 
@@ -238,12 +237,11 @@ define amdgpu_kernel void @test_kern_stack_and_call() local_unnamed_addr #0 {
 ; GFX1100-NEXT:    s_add_u32 s16, s16, ex@rel32@lo+4
 ; GFX1100-NEXT:    s_addc_u32 s17, s17, ex@rel32@hi+12
 ; GFX1100-NEXT:    s_swappc_b64 s[30:31], s[16:17]
-; GFX1100-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX1100-NEXT:    s_endpgm
 
 entry:
   %x = alloca i32, align 4, addrspace(5)
-  store volatile i32 0, i32 addrspace(5)* %x, align 4
+  store volatile i32 0, ptr addrspace(5) %x, align 4
   tail call void @ex() #0
   ret void
 }
@@ -310,11 +308,10 @@ define amdgpu_kernel void @test_force_fp_kern_stack() local_unnamed_addr #2 {
 ; GFX1100-NEXT:    s_mov_b32 s33, 0
 ; GFX1100-NEXT:    scratch_store_b32 off, v0, s33 offset:4 dlc
 ; GFX1100-NEXT:    s_waitcnt_vscnt null, 0x0
-; GFX1100-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX1100-NEXT:    s_endpgm
 entry:
   %x = alloca i32, align 4, addrspace(5)
-  store volatile i32 0, i32 addrspace(5)* %x, align 4
+  store volatile i32 0, ptr addrspace(5) %x, align 4
   ret void
 }
 
@@ -517,11 +514,10 @@ define amdgpu_kernel void @test_force_fp_kern_stack_and_call() local_unnamed_add
 ; GFX1100-NEXT:    s_add_u32 s16, s16, ex@rel32@lo+4
 ; GFX1100-NEXT:    s_addc_u32 s17, s17, ex@rel32@hi+12
 ; GFX1100-NEXT:    s_swappc_b64 s[30:31], s[16:17]
-; GFX1100-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX1100-NEXT:    s_endpgm
 entry:
   %x = alloca i32, align 4, addrspace(5)
-  store volatile i32 0, i32 addrspace(5)* %x, align 4
+  store volatile i32 0, ptr addrspace(5) %x, align 4
   tail call void @ex() #2
   ret void
 }
@@ -537,7 +533,6 @@ define amdgpu_kernel void @test_sgpr_offset_kernel() #1 {
 ; GFX803-NEXT:    buffer_store_dword v0, off, s[0:3], s4 ; 4-byte Folded Spill
 ; GFX803-NEXT:    ;;#ASMSTART
 ; GFX803-NEXT:    ;;#ASMEND
-; GFX803-NEXT:    s_mov_b32 s4, 0x40000
 ; GFX803-NEXT:    buffer_load_dword v0, off, s[0:3], s4 ; 4-byte Folded Reload
 ; GFX803-NEXT:    s_waitcnt vmcnt(0)
 ; GFX803-NEXT:    buffer_store_dword v0, off, s[0:3], 0 offset:8
@@ -554,7 +549,6 @@ define amdgpu_kernel void @test_sgpr_offset_kernel() #1 {
 ; GFX900-NEXT:    buffer_store_dword v0, off, s[0:3], s4 ; 4-byte Folded Spill
 ; GFX900-NEXT:    ;;#ASMSTART
 ; GFX900-NEXT:    ;;#ASMEND
-; GFX900-NEXT:    s_mov_b32 s4, 0x40000
 ; GFX900-NEXT:    buffer_load_dword v0, off, s[0:3], s4 ; 4-byte Folded Reload
 ; GFX900-NEXT:    s_waitcnt vmcnt(0)
 ; GFX900-NEXT:    buffer_store_dword v0, off, s[0:3], 0 offset:8
@@ -569,8 +563,6 @@ define amdgpu_kernel void @test_sgpr_offset_kernel() #1 {
 ; GFX1010-NEXT:    buffer_load_dword v0, off, s[0:3], 0 offset:8 glc dlc
 ; GFX1010-NEXT:    s_waitcnt vmcnt(0)
 ; GFX1010-NEXT:    buffer_store_dword v0, off, s[0:3], s4 ; 4-byte Folded Spill
-; GFX1010-NEXT:    s_waitcnt_depctr 0xffe3
-; GFX1010-NEXT:    s_mov_b32 s4, 0x20000
 ; GFX1010-NEXT:    ;;#ASMSTART
 ; GFX1010-NEXT:    ;;#ASMEND
 ; GFX1010-NEXT:    buffer_load_dword v0, off, s[0:3], s4 ; 4-byte Folded Reload
@@ -585,32 +577,29 @@ define amdgpu_kernel void @test_sgpr_offset_kernel() #1 {
 ; GFX1100-NEXT:    s_waitcnt vmcnt(0)
 ; GFX1100-NEXT:    s_movk_i32 s0, 0x1000
 ; GFX1100-NEXT:    scratch_store_b32 off, v0, s0 ; 4-byte Folded Spill
-; GFX1100-NEXT:    s_movk_i32 s0, 0x1000
 ; GFX1100-NEXT:    ;;#ASMSTART
 ; GFX1100-NEXT:    ;;#ASMEND
 ; GFX1100-NEXT:    scratch_load_b32 v0, off, s0 ; 4-byte Folded Reload
 ; GFX1100-NEXT:    s_waitcnt vmcnt(0)
 ; GFX1100-NEXT:    scratch_store_b32 off, v0, off offset:8 dlc
 ; GFX1100-NEXT:    s_waitcnt_vscnt null, 0x0
-; GFX1100-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX1100-NEXT:    s_endpgm
 entry:
   ; Occupy 4096 bytes of scratch, so the offset of the spill of %a does not
   ; fit in the instruction, and has to live in the SGPR offset.
   %alloca = alloca i8, i32 4092, align 4, addrspace(5)
-  %buf = bitcast i8 addrspace(5)* %alloca to i32 addrspace(5)*
 
-  %aptr = getelementptr i32, i32 addrspace(5)* %buf, i32 1
+  %aptr = getelementptr i32, ptr addrspace(5) %alloca, i32 1
   ; 0x40000 / 64 = 4096 (for wave64)
   ; CHECK: s_add_u32 s6, s7, 0x40000
   ; CHECK: buffer_store_dword v{{[0-9]+}}, off, s[{{[0-9]+:[0-9]+}}], s6 ; 4-byte Folded Spill
-  %a = load volatile i32, i32 addrspace(5)* %aptr
+  %a = load volatile i32, ptr addrspace(5) %aptr
 
   ; Force %a to spill
   call void asm sideeffect "", "~{v0},~{v1},~{v2},~{v3},~{v4},~{v5},~{v6},~{v7}" ()
 
-  %outptr = getelementptr i32, i32 addrspace(5)* %buf, i32 1
-  store volatile i32 %a, i32 addrspace(5)* %outptr
+  %outptr = getelementptr i32, ptr addrspace(5) %alloca, i32 1
+  store volatile i32 %a, ptr addrspace(5) %outptr
 
   ret void
 }

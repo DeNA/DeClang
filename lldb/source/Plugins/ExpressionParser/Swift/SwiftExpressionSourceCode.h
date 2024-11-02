@@ -18,7 +18,7 @@
 namespace lldb_private {
 
 /// Parse a name such as "$τ_0_0".
-llvm::Optional<std::pair<unsigned, unsigned>>
+std::optional<std::pair<unsigned, unsigned>>
 ParseSwiftGenericParameter(llvm::StringRef name);
 
 class SwiftExpressionSourceCode : public ExpressionSourceCode {
@@ -38,21 +38,21 @@ public:
   // passed to CreateWrapped. Return true if the bounds could be found.  This
   // will also work on text with FixItHints applied.
   static bool GetOriginalBodyBounds(std::string transformed_text,
-                                    size_t &start_loc, size_t &end_loc);
+                                    uint32_t &start_loc, uint32_t &end_loc);
 
   uint32_t GetNumBodyLines();
 
   Status GetText(
-      std::string &text, lldb::LanguageType wrapping_language,
+      std::string &text, SourceLanguage wrapping_language,
       bool needs_object_ptr, bool static_method, bool is_class, bool weak_self,
       const EvaluateExpressionOptions &options,
-      const llvm::Optional<SwiftLanguageRuntime::GenericSignature> &generic_sig,
+      const std::optional<SwiftLanguageRuntime::GenericSignature> &generic_sig,
       ExecutionContext &exe_ctx, uint32_t &first_body_line,
       llvm::ArrayRef<SwiftASTManipulator::VariableInfo> local_variables) const;
 
 private:
-  SwiftExpressionSourceCode(const char *name, const char *prefix, const char *body,
-                       Wrapping wrap)
+  SwiftExpressionSourceCode(const char *name, const char *prefix,
+                            const char *body, Wrapping wrap)
       : ExpressionSourceCode(name, prefix, body, wrap) {}
   uint32_t m_num_body_lines = 0;
 };

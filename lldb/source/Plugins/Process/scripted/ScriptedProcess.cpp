@@ -42,7 +42,7 @@ static constexpr lldb::ScriptLanguage g_supported_script_languages[] = {
 
 bool ScriptedProcess::IsScriptLanguageSupported(lldb::ScriptLanguage language) {
   llvm::ArrayRef<lldb::ScriptLanguage> supported_languages =
-      llvm::makeArrayRef(g_supported_script_languages);
+      llvm::ArrayRef(g_supported_script_languages);
 
   return llvm::is_contained(supported_languages, language);
 }
@@ -151,7 +151,7 @@ Status ScriptedProcess::DoLoadCore() {
 Status ScriptedProcess::DoLaunch(Module *exe_module,
                                  ProcessLaunchInfo &launch_info) {
   LLDB_LOGF(GetLog(LLDBLog::Process), "ScriptedProcess::%s launching process", __FUNCTION__);
-
+  
   /* MARK: This doesn't reflect how lldb actually launches a process.
            In reality, it attaches to debugserver, then resume the process.
            That's not true in all cases.  If debugserver is remote, lldb
@@ -235,7 +235,7 @@ size_t ScriptedProcess::DoWriteMemory(lldb::addr_t vm_addr, const void *buf,
   if (!data_extractor_sp || !data_extractor_sp->GetByteSize())
     return 0;
 
-  size_t bytes_written =
+  lldb::offset_t bytes_written =
       GetInterface().WriteMemoryAtAddress(vm_addr, data_extractor_sp, error);
 
   if (!bytes_written || bytes_written == LLDB_INVALID_OFFSET)

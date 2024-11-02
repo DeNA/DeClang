@@ -13,6 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CMakeFileAPI.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Config/config.h"
 #include "llvm/Support/CommandLine.h"
@@ -173,9 +174,10 @@ int main(int Argc, const char **Argv) {
   }
 
   std::string ErrMsg;
-  int Result = sys::ExecuteAndWait(RefArgs.front(), RefArgs, /*Env*/ None,
-                                   /*Redirects*/ {}, /*SecondsToWait*/ 0,
-                                   /*MemoryLimit*/ 0, &ErrMsg);
+  int Result =
+      sys::ExecuteAndWait(RefArgs.front(), RefArgs, /*Env*/ std::nullopt,
+                          /*Redirects*/ {}, /*SecondsToWait*/ 0,
+                          /*MemoryLimit*/ 0, &ErrMsg);
   if (!ErrMsg.empty()) {
     errs() << "error: failed executing command: " << ErrMsg << '\n';
   }

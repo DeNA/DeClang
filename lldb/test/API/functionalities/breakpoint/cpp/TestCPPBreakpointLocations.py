@@ -11,14 +11,23 @@ from lldbsuite.test import lldbutil
 class TestCPPBreakpointLocations(TestBase):
     @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24764")
     def test(self):
-        self.build()
+        self.do_test(dict())
+
+    @expectedFailureAll(oslist=["windows"], bugnumber="llvm.org/pr24764")
+    @skipIf(compiler=no_match("clang"))
+    @skipIf(compiler_version=["<", "15.0"])
+    def test_simple_template_names(self):
+        self.do_test(dict(CFLAGS_EXTRAS="-gsimple-template-names"))
+
+    def do_test(self, debug_flags):
+        self.build(dictionary=debug_flags)
         self.breakpoint_id_tests()
 
     def verify_breakpoint_locations(self, target, bp_dict):
         name = bp_dict["name"]
         names = bp_dict["loc_names"]
         bp = target.BreakpointCreateByName(name)
-        self.assertEquals(
+        self.assertEqual(
             bp.GetNumLocations(),
             len(names),
             "Make sure we find the right number of breakpoint locations for {}".format(
@@ -70,7 +79,17 @@ class TestCPPBreakpointLocations(TestBase):
             {"name": "c::d::func2()", "loc_names": ["c::d::func2()"]},
             # Template cases
             {"name": "func<float>", "loc_names": []},
+            {"name": "Foo::func<float>", "loc_names": []},
+            {"name": "ns::Foo::func<float>", "loc_names": []},
             {"name": "func<int>", "loc_names": ["auto ns::Foo<double>::func<int>()"]},
+            {
+                "name": "Foo<double>::func<int>",
+                "loc_names": ["auto ns::Foo<double>::func<int>()"],
+            },
+            {
+                "name": "ns::Foo<double>::func<int>",
+                "loc_names": ["auto ns::Foo<double>::func<int>()"],
+            },
             {
                 "name": "func",
                 "loc_names": [
@@ -103,6 +122,14 @@ class TestCPPBreakpointLocations(TestBase):
                     "void ns::Foo<double>::operator<<<ns::Foo<int>>(ns::Foo<int>)",
                 ],
             },
+            {"name": "g<float>", "loc_names": []},
+            {"name": "g<int>", "loc_names": ["void ns::g<int>()"]},
+            {"name": "g<char>", "loc_names": ["void ns::g<char>()"]},
+            {"name": "g", "loc_names": ["void ns::g<int>()", "void ns::g<char>()"]},
+            {"name": "ns::g<float>", "loc_names": []},
+            {"name": "ns::g<int>", "loc_names": ["void ns::g<int>()"]},
+            {"name": "ns::g<char>", "loc_names": ["void ns::g<char>()"]},
+            {"name": "ns::g", "loc_names": ["void ns::g<int>()", "void ns::g<char>()"]},
         ]
 
         for bp_dict in bp_dicts:
@@ -130,7 +157,7 @@ class TestCPPBreakpointLocations(TestBase):
                 bp_loc_names = {
                     bp_loc.GetAddress().GetFunction().GetName() for bp_loc in bp
                 }
-                self.assertEquals(
+                self.assertEqual(
                     bp_loc_names, loc_names, "Breakpoint set on the correct symbol"
                 )
 
@@ -138,13 +165,13 @@ class TestCPPBreakpointLocations(TestBase):
                 symbol_addresses = set()
                 for symbol in symbols:
                     sc_list = target.FindSymbols(symbol, lldb.eSymbolTypeCode)
-                    self.assertEquals(sc_list.GetSize(), 1, "Found symbol " + symbol)
+                    self.assertEqual(sc_list.GetSize(), 1, "Found symbol " + symbol)
                     symbol = sc_list.GetContextAtIndex(0).GetSymbol()
                     symbol_addresses.add(
                         symbol.GetStartAddress().GetLoadAddress(target)
                     )
 
-                self.assertEquals(
+                self.assertEqual(
                     symbol_addresses, bp_addresses, "Breakpoint set on correct address"
                 )
         finally:

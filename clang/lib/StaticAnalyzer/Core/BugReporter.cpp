@@ -12,12 +12,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/StaticAnalyzer/Core/BugReporter/BugReporter.h"
+#include "clang/AST/ASTTypeTraits.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ParentMap.h"
+#include "clang/AST/ParentMapContext.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
@@ -46,8 +49,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/None.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
@@ -66,6 +67,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <string>
 #include <tuple>
@@ -297,26 +299,24 @@ std::string StackHintGeneratorForSymbol::getMessage(const ExplodedNode *N){
     return {};
 
   // Check if one of the parameters are set to the interesting symbol.
-  unsigned ArgIndex = 0;
-  for (CallExpr::const_arg_iterator I = CE->arg_begin(),
-                                    E = CE->arg_end(); I != E; ++I, ++ArgIndex){
-    SVal SV = N->getSVal(*I);
+  for (auto [Idx, ArgExpr] : llvm::enumerate(CE->arguments())) {
+    SVal SV = N->getSVal(ArgExpr);
 
     // Check if the variable corresponding to the symbol is passed by value.
     SymbolRef AS = SV.getAsLocSymbol();
     if (AS == Sym) {
-      return getMessageForArg(*I, ArgIndex);
+      return getMessageForArg(ArgExpr, Idx);
     }
 
     // Check if the parameter is a pointer to the symbol.
-    if (Optional<loc::MemRegionVal> Reg = SV.getAs<loc::MemRegionVal>()) {
+    if (std::optional<loc::MemRegionVal> Reg = SV.getAs<loc::MemRegionVal>()) {
       // Do not attempt to dereference void*.
-      if ((*I)->getType()->isVoidPointerType())
+      if (ArgExpr->getType()->isVoidPointerType())
         continue;
       SVal PSV = N->getState()->getSVal(Reg->getRegion());
       SymbolRef AS = PSV.getAsLocSymbol();
       if (AS == Sym) {
-        return getMessageForArg(*I, ArgIndex);
+        return getMessageForArg(ArgExpr, Idx);
       }
     }
   }
@@ -767,7 +767,7 @@ PathDiagnosticPieceRef PathDiagnosticBuilder::generateDiagForSwitchOP(
     case Stmt::CaseStmtClass: {
       os << "Control jumps to 'case ";
       const auto *Case = cast<CaseStmt>(S);
-      const Expr *LHS = Case->getLHS()->IgnoreParenCasts();
+      const Expr *LHS = Case->getLHS()->IgnoreParenImpCasts();
 
       // Determine if it is an enum.
       bool GetRawInt = true;
@@ -1033,7 +1033,7 @@ static bool isContainedByStmt(const ParentMap &PM, const Stmt *S,
 static const Stmt *getStmtBeforeCond(const ParentMap &PM, const Stmt *Term,
                                      const ExplodedNode *N) {
   while (N) {
-    Optional<StmtPoint> SP = N->getLocation().getAs<StmtPoint>();
+    std::optional<StmtPoint> SP = N->getLocation().getAs<StmtPoint>();
     if (SP) {
       const Stmt *S = SP->getStmt();
       if (!isContainedByStmt(PM, Term, S))
@@ -1194,7 +1194,7 @@ void PathDiagnosticBuilder::generatePathDiagnosticsForNode(
          "location context associated with the active path!");
 
   // Have we encountered an exit from a function call?
-  if (Optional<CallExitEnd> CE = P.getAs<CallExitEnd>()) {
+  if (std::optional<CallExitEnd> CE = P.getAs<CallExitEnd>()) {
 
     // We are descending into a call (backwards).  Construct
     // a new call piece to contain the path pieces for that call.
@@ -1566,7 +1566,8 @@ static void simplifySimpleBranches(PathPieces &pieces) {
 
 /// Returns the number of bytes in the given (character-based) SourceRange.
 ///
-/// If the locations in the range are not on the same line, returns None.
+/// If the locations in the range are not on the same line, returns
+/// std::nullopt.
 ///
 /// Note that this does not do a precise user-visible character or column count.
 static std::optional<size_t> getLengthOnSingleLine(const SourceManager &SM,
@@ -1578,7 +1579,7 @@ static std::optional<size_t> getLengthOnSingleLine(const SourceManager &SM,
   if (FID != SM.getFileID(ExpansionRange.getEnd()))
     return std::nullopt;
 
-  Optional<MemoryBufferRef> Buffer = SM.getBufferOrNone(FID);
+  std::optional<MemoryBufferRef> Buffer = SM.getBufferOrNone(FID);
   if (!Buffer)
     return std::nullopt;
 
@@ -2310,7 +2311,7 @@ void PathSensitiveBugReport::markInteresting(const LocationContext *LC) {
   InterestingLocationContexts.insert(LC);
 }
 
-Optional<bugreporter::TrackingKind>
+std::optional<bugreporter::TrackingKind>
 PathSensitiveBugReport::getInterestingnessKind(SVal V) const {
   auto RKind = getInterestingnessKind(V.getAsRegion());
   auto SKind = getInterestingnessKind(V.getAsSymbol());
@@ -2335,7 +2336,7 @@ PathSensitiveBugReport::getInterestingnessKind(SVal V) const {
   return std::nullopt;
 }
 
-Optional<bugreporter::TrackingKind>
+std::optional<bugreporter::TrackingKind>
 PathSensitiveBugReport::getInterestingnessKind(SymbolRef sym) const {
   if (!sym)
     return std::nullopt;
@@ -2347,7 +2348,7 @@ PathSensitiveBugReport::getInterestingnessKind(SymbolRef sym) const {
   return It->getSecond();
 }
 
-Optional<bugreporter::TrackingKind>
+std::optional<bugreporter::TrackingKind>
 PathSensitiveBugReport::getInterestingnessKind(const MemRegion *R) const {
   if (!R)
     return std::nullopt;
@@ -2387,7 +2388,7 @@ const Stmt *PathSensitiveBugReport::getStmt() const {
   ProgramPoint ProgP = ErrorNode->getLocation();
   const Stmt *S = nullptr;
 
-  if (Optional<BlockEntrance> BE = ProgP.getAs<BlockEntrance>()) {
+  if (std::optional<BlockEntrance> BE = ProgP.getAs<BlockEntrance>()) {
     CFGBlock &Exit = ProgP.getLocationContext()->getCFG()->getExit();
     if (BE->getBlock() == &Exit)
       S = ErrorNode->getPreviousStmtForDiagnostics();
@@ -2419,7 +2420,7 @@ PathSensitiveBugReport::getLocation() const {
 
   if (!S) {
     // If this is an implicit call, return the implicit call point location.
-    if (Optional<PreImplicitCall> PIE = P.getAs<PreImplicitCall>())
+      if (std::optional<PreImplicitCall> PIE = P.getAs<PreImplicitCall>())
       return PathDiagnosticLocation(PIE->getLocation(), SM);
     if (auto FE = P.getAs<FunctionExitPoint>()) {
       if (const ReturnStmt *RS = FE->getStmt())
@@ -2429,6 +2430,12 @@ PathSensitiveBugReport::getLocation() const {
   }
 
   if (S) {
+    // Attributed statements usually have corrupted begin locations,
+    // it's OK to ignore attributes for our purposes and deal with
+    // the actual annotated statement.
+    if (const auto *AS = dyn_cast<AttributedStmt>(S))
+      S = AS->getSubStmt();
+
     // For member expressions, return the location of the '.' or '->'.
     if (const auto *ME = dyn_cast<MemberExpr>(S))
       return PathDiagnosticLocation::createMemberLoc(ME, SM);
@@ -2463,7 +2470,9 @@ ProgramStateManager &PathSensitiveBugReporter::getStateManager() const {
   return Eng.getStateManager();
 }
 
-BugReporter::BugReporter(BugReporterData &d) : D(d) {}
+BugReporter::BugReporter(BugReporterData &D)
+    : D(D), UserSuppressions(D.getASTContext()) {}
+
 BugReporter::~BugReporter() {
   // Make sure reports are flushed.
   assert(StrBugTypes.empty() &&
@@ -2627,8 +2636,7 @@ BugPathInfo *BugPathGetter::getNextBugPath() {
 
   const ExplodedNode *OrigN;
   std::tie(CurrentBugPath.Report, OrigN) = ReportNodes.pop_back_val();
-  assert(PriorityMap.find(OrigN) != PriorityMap.end() &&
-         "error node not accessible from root");
+  assert(PriorityMap.contains(OrigN) && "error node not accessible from root");
 
   // Create a new graph with a single path. This is the graph that will be
   // returned to the caller.
@@ -2902,6 +2910,10 @@ void BugReporter::emitReport(std::unique_ptr<BugReport> R) {
   if (!ValidSourceLoc)
     return;
 
+  // If the user asked to suppress this report, we should skip it.
+  if (UserSuppressions.isSuppressed(*R))
+    return;
+
   // Compute the bug report's hash to determine its equivalence class.
   llvm::FoldingSetNodeID ID;
   R->Profile(ID);
@@ -3097,9 +3109,8 @@ void BugReporter::FlushReport(BugReportEquivClass& EQ) {
     if (getAnalyzerOptions().ShouldDisplayNotesAsEvents) {
       // For path diagnostic consumers that don't support extra notes,
       // we may optionally convert those to path notes.
-      for (auto I = report->getNotes().rbegin(),
-           E = report->getNotes().rend(); I != E; ++I) {
-        PathDiagnosticNotePiece *Piece = I->get();
+      for (const auto &I : llvm::reverse(report->getNotes())) {
+        PathDiagnosticNotePiece *Piece = I.get();
         auto ConvertedPiece = std::make_shared<PathDiagnosticEventPiece>(
           Piece->getLocation(), Piece->getString());
         for (const auto &R: Piece->getRanges())
@@ -3108,9 +3119,8 @@ void BugReporter::FlushReport(BugReportEquivClass& EQ) {
         Pieces.push_front(std::move(ConvertedPiece));
       }
     } else {
-      for (auto I = report->getNotes().rbegin(),
-           E = report->getNotes().rend(); I != E; ++I)
-        Pieces.push_front(*I);
+      for (const auto &I : llvm::reverse(report->getNotes()))
+        Pieces.push_front(I);
     }
 
     for (const auto &I : report->getFixits())

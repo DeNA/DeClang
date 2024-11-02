@@ -10,12 +10,11 @@
 #define LLDB_UTILITY_ARCHSPEC_H
 
 #include "lldb/Utility/CompletionRequest.h"
-#include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-private-enumerations.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Triple.h"
+#include "llvm/TargetParser/Triple.h"
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -108,6 +107,12 @@ public:
     eRISCVSubType_riscv64,
   };
 
+  enum LoongArchSubType {
+    eLoongArchSubType_unknown,
+    eLoongArchSubType_loongarch32,
+    eLoongArchSubType_loongarch64,
+  };
+
   enum Core {
     eCore_arm_generic,
     eCore_arm_armv4,
@@ -166,6 +171,8 @@ public:
     eCore_mips64r5el,
     eCore_mips64r6el,
 
+    eCore_msp430,
+
     eCore_ppc_generic,
     eCore_ppc_ppc601,
     eCore_ppc_ppc602,
@@ -203,6 +210,9 @@ public:
 
     eCore_riscv32,
     eCore_riscv64,
+
+    eCore_loongarch32,
+    eCore_loongarch64,
 
     eCore_uknownMach32,
     eCore_uknownMach64,
@@ -330,20 +340,6 @@ public:
   ///
   /// \return An LLVM arch type.
   llvm::Triple::ArchType GetMachine() const;
-
-  /// Returns the distribution id of the architecture.
-  ///
-  /// This will be something like "ubuntu", "fedora", etc. on Linux.
-  ///
-  /// \return A ConstString ref containing the distribution id,
-  ///         potentially empty.
-  ConstString GetDistributionId() const;
-
-  /// Set the distribution id of the architecture.
-  ///
-  /// This will be something like "ubuntu", "fedora", etc. on Linux. This
-  /// should be the same value returned by HostInfo::GetDistributionId ().
-  void SetDistributionId(const char *distribution_id);
 
   /// Tests if this ArchSpec is valid.
   ///
@@ -509,11 +505,6 @@ public:
 
   bool IsFullySpecifiedTriple() const;
 
-  void PiecewiseTripleCompare(const ArchSpec &other, bool &arch_different,
-                              bool &vendor_different, bool &os_different,
-                              bool &os_version_different,
-                              bool &env_different) const;
-
   /// Detect whether this architecture uses thumb code exclusively
   ///
   /// Some embedded ARM chips (e.g. the ARM Cortex M0-7 line) can only execute
@@ -543,8 +534,6 @@ protected:
   // Additional arch flags which we cannot get from triple and core For MIPS
   // these are application specific extensions like micromips, mips16 etc.
   uint32_t m_flags = 0;
-
-  ConstString m_distribution_id;
 
   // Called when m_def or m_entry are changed.  Fills in all remaining members
   // with default values.

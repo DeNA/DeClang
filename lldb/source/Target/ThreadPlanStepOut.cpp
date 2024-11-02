@@ -30,6 +30,7 @@
 
 #ifdef LLDB_ENABLE_SWIFT
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #endif // LLDB_ENABLE_SWIFT
 
 using namespace lldb;
@@ -179,7 +180,7 @@ ThreadPlanStepOut::ThreadPlanStepOut(
   if (frame_idx == 0) {
     StackFrameSP frame_sp = GetThread().GetStackFrameAtIndex(0);
 #ifdef LLDB_ENABLE_SWIFT
-    if (frame_sp->GuessLanguage() == eLanguageTypeSwift) {
+    if (frame_sp->GuessLanguage().name == llvm::dwarf::DW_LNAME_Swift) {
       auto *swift_runtime 
           = SwiftLanguageRuntime::Get(m_process.shared_from_this());
       if (swift_runtime) {
@@ -334,12 +335,12 @@ bool ThreadPlanStepOut::DoPlanExplainsStop(Event *event_ptr) {
 
         if (m_step_out_to_id == frame_zero_id)
           done = true;
-        else if (m_step_out_to_id < frame_zero_id) {
+        else if (IsYounger(m_step_out_to_id, frame_zero_id)) {
           // Either we stepped past the breakpoint, or the stack ID calculation
           // was incorrect and we should probably stop.
           done = true;
         } else {
-          done = (m_immediate_step_from_id < frame_zero_id);
+          done = IsYounger(m_immediate_step_from_id, frame_zero_id);
         }
 
         if (done) {
@@ -355,7 +356,7 @@ bool ThreadPlanStepOut::DoPlanExplainsStop(Event *event_ptr) {
         // important to report the user breakpoint than the step out
         // completion.
 
-        if (site_sp->GetNumberOfOwners() == 1)
+        if (site_sp->GetNumberOfConstituents() == 1)
           return true;
       }
       return false;
@@ -398,7 +399,7 @@ bool ThreadPlanStepOut::ShouldStop(Event *event_ptr) {
 
   if (!done) {
     StackID frame_zero_id = GetThread().GetStackFrameAtIndex(0)->GetStackID();
-    done = !(frame_zero_id < m_step_out_to_id);
+    done = !IsYounger(frame_zero_id, m_step_out_to_id);
   }
 
   // The normal step out computations think we are done, so all we need to do
@@ -579,7 +580,7 @@ void ThreadPlanStepOut::CalculateReturnValue() {
       ConstString name("swift_thrown_error");
 
       m_return_valobj_sp = swift_runtime->CalculateErrorValueObjectFromValue(
-          m_swift_error_return.getValue(), name, true);
+          m_swift_error_return.value(), name, true);
       // Even if we couldn't figure out what the error return was, we
       // were told there was an error, so don't show the user a false return value
       // instead.
@@ -608,5 +609,5 @@ bool ThreadPlanStepOut::IsPlanStale() {
   // then there's something for us to do.  Otherwise, we're stale.
 
   StackID frame_zero_id = GetThread().GetStackFrameAtIndex(0)->GetStackID();
-  return !(frame_zero_id < m_step_out_to_id);
+  return !IsYounger(frame_zero_id, m_step_out_to_id);
 }

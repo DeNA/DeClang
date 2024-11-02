@@ -5,7 +5,7 @@
 ; RUN: llc -march=amdgcn -mcpu=gfx1010 -verify-machineinstrs < %s | FileCheck -enable-var-scope --check-prefix=GFX10 %s
 ; RUN: llc -march=amdgcn -mcpu=gfx1100 -verify-machineinstrs < %s | FileCheck -enable-var-scope --check-prefix=GFX11 %s
 
-define amdgpu_kernel void @s_lshr_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> %lhs, <2 x i16> %rhs) #0 {
+define amdgpu_kernel void @s_lshr_v2i16(ptr addrspace(1) %out, <2 x i16> %lhs, <2 x i16> %rhs) #0 {
 ; GFX9-LABEL: s_lshr_v2i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -68,14 +68,15 @@ define amdgpu_kernel void @s_lshr_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> 
 ; GFX11-NEXT:    s_waitcnt lgkmcnt(0)
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v1, s3, s2
 ; GFX11-NEXT:    global_store_b32 v0, v1, s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %result = lshr <2 x i16> %lhs, %rhs
-  store <2 x i16> %result, <2 x i16> addrspace(1)* %out
+  store <2 x i16> %result, ptr addrspace(1) %out
   ret void
 }
 
-define amdgpu_kernel void @v_lshr_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> addrspace(1)* %in) #0 {
+define amdgpu_kernel void @v_lshr_v2i16(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
 ; GFX9-LABEL: v_lshr_v2i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -148,21 +149,22 @@ define amdgpu_kernel void @v_lshr_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> 
 ; GFX11-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v0, v1, v0
 ; GFX11-NEXT:    global_store_b32 v2, v0, s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
-  %in.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %in, i64 %tid.ext
-  %out.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %out, i64 %tid.ext
-  %b_ptr = getelementptr <2 x i16>, <2 x i16> addrspace(1)* %in.gep, i32 1
-  %a = load <2 x i16>, <2 x i16> addrspace(1)* %in.gep
-  %b = load <2 x i16>, <2 x i16> addrspace(1)* %b_ptr
+  %in.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %in, i64 %tid.ext
+  %out.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %out, i64 %tid.ext
+  %b_ptr = getelementptr <2 x i16>, ptr addrspace(1) %in.gep, i32 1
+  %a = load <2 x i16>, ptr addrspace(1) %in.gep
+  %b = load <2 x i16>, ptr addrspace(1) %b_ptr
   %result = lshr <2 x i16> %a, %b
-  store <2 x i16> %result, <2 x i16> addrspace(1)* %out.gep
+  store <2 x i16> %result, ptr addrspace(1) %out.gep
   ret void
 }
 
-define amdgpu_kernel void @lshr_v_s_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> addrspace(1)* %in, <2 x i16> %sgpr) #0 {
+define amdgpu_kernel void @lshr_v_s_v2i16(ptr addrspace(1) %out, ptr addrspace(1) %in, <2 x i16> %sgpr) #0 {
 ; GFX9-LABEL: lshr_v_s_v2i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[4:7], s[0:1], 0x24
@@ -242,19 +244,20 @@ define amdgpu_kernel void @lshr_v_s_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16
 ; GFX11-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v1, s0, v1
 ; GFX11-NEXT:    global_store_b32 v0, v1, s[4:5]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
-  %in.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %in, i64 %tid.ext
-  %out.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %out, i64 %tid.ext
-  %vgpr = load <2 x i16>, <2 x i16> addrspace(1)* %in.gep
+  %in.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %in, i64 %tid.ext
+  %out.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %out, i64 %tid.ext
+  %vgpr = load <2 x i16>, ptr addrspace(1) %in.gep
   %result = lshr <2 x i16> %vgpr, %sgpr
-  store <2 x i16> %result, <2 x i16> addrspace(1)* %out.gep
+  store <2 x i16> %result, ptr addrspace(1) %out.gep
   ret void
 }
 
-define amdgpu_kernel void @lshr_s_v_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> addrspace(1)* %in, <2 x i16> %sgpr) #0 {
+define amdgpu_kernel void @lshr_s_v_v2i16(ptr addrspace(1) %out, ptr addrspace(1) %in, <2 x i16> %sgpr) #0 {
 ; GFX9-LABEL: lshr_s_v_v2i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[4:7], s[0:1], 0x24
@@ -334,19 +337,20 @@ define amdgpu_kernel void @lshr_s_v_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16
 ; GFX11-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v1, v1, s0
 ; GFX11-NEXT:    global_store_b32 v0, v1, s[4:5]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
-  %in.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %in, i64 %tid.ext
-  %out.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %out, i64 %tid.ext
-  %vgpr = load <2 x i16>, <2 x i16> addrspace(1)* %in.gep
+  %in.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %in, i64 %tid.ext
+  %out.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %out, i64 %tid.ext
+  %vgpr = load <2 x i16>, ptr addrspace(1) %in.gep
   %result = lshr <2 x i16> %sgpr, %vgpr
-  store <2 x i16> %result, <2 x i16> addrspace(1)* %out.gep
+  store <2 x i16> %result, ptr addrspace(1) %out.gep
   ret void
 }
 
-define amdgpu_kernel void @lshr_imm_v_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> addrspace(1)* %in) #0 {
+define amdgpu_kernel void @lshr_imm_v_v2i16(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
 ; GFX9-LABEL: lshr_imm_v_v2i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -418,19 +422,20 @@ define amdgpu_kernel void @lshr_imm_v_v2i16(<2 x i16> addrspace(1)* %out, <2 x i
 ; GFX11-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v1, v1, 8 op_sel_hi:[1,0]
 ; GFX11-NEXT:    global_store_b32 v0, v1, s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
-  %in.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %in, i64 %tid.ext
-  %out.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %out, i64 %tid.ext
-  %vgpr = load <2 x i16>, <2 x i16> addrspace(1)* %in.gep
+  %in.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %in, i64 %tid.ext
+  %out.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %out, i64 %tid.ext
+  %vgpr = load <2 x i16>, ptr addrspace(1) %in.gep
   %result = lshr <2 x i16> <i16 8, i16 8>, %vgpr
-  store <2 x i16> %result, <2 x i16> addrspace(1)* %out.gep
+  store <2 x i16> %result, ptr addrspace(1) %out.gep
   ret void
 }
 
-define amdgpu_kernel void @lshr_v_imm_v2i16(<2 x i16> addrspace(1)* %out, <2 x i16> addrspace(1)* %in) #0 {
+define amdgpu_kernel void @lshr_v_imm_v2i16(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
 ; GFX9-LABEL: lshr_v_imm_v2i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -498,19 +503,20 @@ define amdgpu_kernel void @lshr_v_imm_v2i16(<2 x i16> addrspace(1)* %out, <2 x i
 ; GFX11-NEXT:    s_waitcnt vmcnt(0)
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v1, 8, v1 op_sel_hi:[0,1]
 ; GFX11-NEXT:    global_store_b32 v0, v1, s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
-  %in.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %in, i64 %tid.ext
-  %out.gep = getelementptr inbounds <2 x i16>, <2 x i16> addrspace(1)* %out, i64 %tid.ext
-  %vgpr = load <2 x i16>, <2 x i16> addrspace(1)* %in.gep
+  %in.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %in, i64 %tid.ext
+  %out.gep = getelementptr inbounds <2 x i16>, ptr addrspace(1) %out, i64 %tid.ext
+  %vgpr = load <2 x i16>, ptr addrspace(1) %in.gep
   %result = lshr <2 x i16> %vgpr, <i16 8, i16 8>
-  store <2 x i16> %result, <2 x i16> addrspace(1)* %out.gep
+  store <2 x i16> %result, ptr addrspace(1) %out.gep
   ret void
 }
 
-define amdgpu_kernel void @v_lshr_v4i16(<4 x i16> addrspace(1)* %out, <4 x i16> addrspace(1)* %in) #0 {
+define amdgpu_kernel void @v_lshr_v4i16(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
 ; GFX9-LABEL: v_lshr_v4i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -596,21 +602,22 @@ define amdgpu_kernel void @v_lshr_v4i16(<4 x i16> addrspace(1)* %out, <4 x i16> 
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v1, v3, v1
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v0, v2, v0
 ; GFX11-NEXT:    global_store_b64 v4, v[0:1], s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
-  %in.gep = getelementptr inbounds <4 x i16>, <4 x i16> addrspace(1)* %in, i64 %tid.ext
-  %out.gep = getelementptr inbounds <4 x i16>, <4 x i16> addrspace(1)* %out, i64 %tid.ext
-  %b_ptr = getelementptr <4 x i16>, <4 x i16> addrspace(1)* %in.gep, i32 1
-  %a = load <4 x i16>, <4 x i16> addrspace(1)* %in.gep
-  %b = load <4 x i16>, <4 x i16> addrspace(1)* %b_ptr
+  %in.gep = getelementptr inbounds <4 x i16>, ptr addrspace(1) %in, i64 %tid.ext
+  %out.gep = getelementptr inbounds <4 x i16>, ptr addrspace(1) %out, i64 %tid.ext
+  %b_ptr = getelementptr <4 x i16>, ptr addrspace(1) %in.gep, i32 1
+  %a = load <4 x i16>, ptr addrspace(1) %in.gep
+  %b = load <4 x i16>, ptr addrspace(1) %b_ptr
   %result = lshr <4 x i16> %a, %b
-  store <4 x i16> %result, <4 x i16> addrspace(1)* %out.gep
+  store <4 x i16> %result, ptr addrspace(1) %out.gep
   ret void
 }
 
-define amdgpu_kernel void @lshr_v_imm_v4i16(<4 x i16> addrspace(1)* %out, <4 x i16> addrspace(1)* %in) #0 {
+define amdgpu_kernel void @lshr_v_imm_v4i16(ptr addrspace(1) %out, ptr addrspace(1) %in) #0 {
 ; GFX9-LABEL: lshr_v_imm_v4i16:
 ; GFX9:       ; %bb.0:
 ; GFX9-NEXT:    s_load_dwordx4 s[0:3], s[0:1], 0x24
@@ -686,15 +693,16 @@ define amdgpu_kernel void @lshr_v_imm_v4i16(<4 x i16> addrspace(1)* %out, <4 x i
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v1, 8, v1 op_sel_hi:[0,1]
 ; GFX11-NEXT:    v_pk_lshrrev_b16 v0, 8, v0 op_sel_hi:[0,1]
 ; GFX11-NEXT:    global_store_b64 v2, v[0:1], s[0:1]
+; GFX11-NEXT:    s_nop 0
 ; GFX11-NEXT:    s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
 ; GFX11-NEXT:    s_endpgm
   %tid = call i32 @llvm.amdgcn.workitem.id.x()
   %tid.ext = sext i32 %tid to i64
-  %in.gep = getelementptr inbounds <4 x i16>, <4 x i16> addrspace(1)* %in, i64 %tid.ext
-  %out.gep = getelementptr inbounds <4 x i16>, <4 x i16> addrspace(1)* %out, i64 %tid.ext
-  %vgpr = load <4 x i16>, <4 x i16> addrspace(1)* %in.gep
+  %in.gep = getelementptr inbounds <4 x i16>, ptr addrspace(1) %in, i64 %tid.ext
+  %out.gep = getelementptr inbounds <4 x i16>, ptr addrspace(1) %out, i64 %tid.ext
+  %vgpr = load <4 x i16>, ptr addrspace(1) %in.gep
   %result = lshr <4 x i16> %vgpr, <i16 8, i16 8, i16 8, i16 8>
-  store <4 x i16> %result, <4 x i16> addrspace(1)* %out.gep
+  store <4 x i16> %result, ptr addrspace(1) %out.gep
   ret void
 }
 

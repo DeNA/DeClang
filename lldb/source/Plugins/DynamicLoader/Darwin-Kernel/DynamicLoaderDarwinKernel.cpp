@@ -16,7 +16,6 @@
 #include "lldb/Core/Section.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
-#include "lldb/Symbol/LocateSymbolFile.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/OperatingSystem.h"
 #include "lldb/Target/RegisterContext.h"
@@ -24,6 +23,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadPlanRunToAddress.h"
+#include "lldb/Utility/AddressableBits.h"
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/LLDBLog.h"
@@ -113,16 +113,17 @@ public:
 
   bool GetLoadKexts() const {
     const uint32_t idx = ePropertyLoadKexts;
-    return m_collection_sp->GetPropertyAtIndexAsBoolean(
-        nullptr, idx,
+    return GetPropertyAtIndexAs<bool>(
+        idx,
         g_dynamicloaderdarwinkernel_properties[idx].default_uint_value != 0);
   }
 
   KASLRScanType GetScanType() const {
     const uint32_t idx = ePropertyScanType;
-    return (KASLRScanType)m_collection_sp->GetPropertyAtIndexAsEnumeration(
-        nullptr, idx,
-        g_dynamicloaderdarwinkernel_properties[idx].default_uint_value);
+    return GetPropertyAtIndexAs<KASLRScanType>(
+        idx,
+        static_cast<KASLRScanType>(
+            g_dynamicloaderdarwinkernel_properties[idx].default_uint_value));
   }
 };
 
@@ -167,6 +168,7 @@ DynamicLoader *DynamicLoaderDarwinKernel::CreateInstance(Process *process,
     case llvm::Triple::IOS:
     case llvm::Triple::TvOS:
     case llvm::Triple::WatchOS:
+    case llvm::Triple::XROS:
     // NEED_BRIDGEOS_TRIPLE case llvm::Triple::BridgeOS:
       if (triple_ref.getVendor() != llvm::Triple::Apple) {
         return nullptr;
@@ -322,8 +324,8 @@ DynamicLoaderDarwinKernel::SearchForKernelNearPC(Process *process) {
   // Round the current pc down to the nearest page boundary.
   addr_t addr = pc & ~(pagesize - 1ULL);
 
-  // Search backwards for 32 megabytes, or first memory read error.
-  while (pc - addr < 32 * 0x100000) {
+  // Search backwards for 128 megabytes, or first memory read error.
+  while (pc - addr < 128 * 0x100000) {
     bool read_error;
     if (CheckForKernelImageAtAddress(addr, process, &read_error).IsValid())
       return addr;
@@ -414,13 +416,13 @@ DynamicLoaderDarwinKernel::ReadMachHeader(addr_t addr, Process *process, llvm::M
 
   if (header.magic == llvm::MachO::MH_CIGAM ||
       header.magic == llvm::MachO::MH_CIGAM_64) {
-    header.magic = llvm::ByteSwap_32(header.magic);
-    header.cputype = llvm::ByteSwap_32(header.cputype);
-    header.cpusubtype = llvm::ByteSwap_32(header.cpusubtype);
-    header.filetype = llvm::ByteSwap_32(header.filetype);
-    header.ncmds = llvm::ByteSwap_32(header.ncmds);
-    header.sizeofcmds = llvm::ByteSwap_32(header.sizeofcmds);
-    header.flags = llvm::ByteSwap_32(header.flags);
+    header.magic = llvm::byteswap<uint32_t>(header.magic);
+    header.cputype = llvm::byteswap<uint32_t>(header.cputype);
+    header.cpusubtype = llvm::byteswap<uint32_t>(header.cpusubtype);
+    header.filetype = llvm::byteswap<uint32_t>(header.filetype);
+    header.ncmds = llvm::byteswap<uint32_t>(header.ncmds);
+    header.sizeofcmds = llvm::byteswap<uint32_t>(header.sizeofcmds);
+    header.flags = llvm::byteswap<uint32_t>(header.flags);
   }
 
   return true;
@@ -762,28 +764,13 @@ bool DynamicLoaderDarwinKernel::KextImageInfo::LoadImageUsingMemoryModule(
       module_spec.GetUUID() = m_uuid;
       module_spec.GetArchitecture() = target.GetArchitecture();
 
-      // For the kernel, we really do need an on-disk file copy of the binary
-      // to do anything useful. This will force a call to dsymForUUID if it
-      // exists, instead of depending on the DebugSymbols preferences being
-      // set.
-      Status kernel_search_error;
-      if (IsKernel()) {
-        if (Symbols::DownloadObjectAndSymbolFile(module_spec,
-                                                 kernel_search_error, true)) {
-          if (FileSystem::Instance().Exists(module_spec.GetFileSpec())) {
-            m_module_sp = std::make_shared<Module>(module_spec.GetFileSpec(),
-                                                   target.GetArchitecture());
-          }
-        }
-      }
-
       // If the current platform is PlatformDarwinKernel, create a ModuleSpec
       // with the filename set to be the bundle ID for this kext, e.g.
       // "com.apple.filesystems.msdosfs", and ask the platform to find it.
       // PlatformDarwinKernel does a special scan for kexts on the local
       // system.
       PlatformSP platform_sp(target.GetPlatform());
-      if (!m_module_sp && platform_sp) {
+      if (platform_sp) {
         static ConstString g_platform_name(
             PlatformDarwinKernel::GetPluginNameStatic());
         if (platform_sp->GetPluginName() == g_platform_name.GetStringRef()) {
@@ -804,6 +791,22 @@ bool DynamicLoaderDarwinKernel::KextImageInfo::LoadImageUsingMemoryModule(
       // search methods.
       if (!m_module_sp) {
         m_module_sp = target.GetOrCreateModule(module_spec, true /* notify */);
+      }
+
+      // For the kernel, we really do need an on-disk file copy of the binary
+      // to do anything useful. This will force a call to dsymForUUID if it
+      // exists, instead of depending on the DebugSymbols preferences being
+      // set.
+      Status kernel_search_error;
+      if (IsKernel() &&
+          (!m_module_sp || !m_module_sp->GetSymbolFileFileSpec())) {
+        if (PluginManager::DownloadObjectAndSymbolFile(
+                module_spec, kernel_search_error, true)) {
+          if (FileSystem::Instance().Exists(module_spec.GetFileSpec())) {
+            m_module_sp = std::make_shared<Module>(module_spec.GetFileSpec(),
+                                                   target.GetArchitecture());
+          }
+        }
       }
 
       if (IsKernel() && !m_module_sp) {
@@ -1110,7 +1113,7 @@ void DynamicLoaderDarwinKernel::LoadKernelModuleIfNeeded() {
           // T1Sz is 25, then 64-25 == 39, bits 0..38 are used for
           // addressing, bits 39..63 are used for PAC/TBI or whatever.
           uint32_t virt_addr_bits = 64 - sym_value;
-          addr_t mask = ~((1ULL << virt_addr_bits) - 1);
+          addr_t mask = AddressableBits::AddressableBitToMask(virt_addr_bits);
           m_process->SetCodeAddressMask(mask);
           m_process->SetDataAddressMask(mask);
         } else {
@@ -1619,7 +1622,7 @@ void DynamicLoaderDarwinKernel::DebuggerInitialize(
     const bool is_global_setting = true;
     PluginManager::CreateSettingForDynamicLoaderPlugin(
         debugger, GetGlobalProperties().GetValueProperties(),
-        ConstString("Properties for the DynamicLoaderDarwinKernel plug-in."),
+        "Properties for the DynamicLoaderDarwinKernel plug-in.",
         is_global_setting);
   }
 }

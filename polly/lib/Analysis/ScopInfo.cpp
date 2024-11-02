@@ -34,6 +34,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/Loads.h"
@@ -1599,7 +1600,7 @@ Scop::Scop(Region &R, ScalarEvolution &ScalarEvolution, LoopInfo &LI,
            DominatorTree &DT, ScopDetection::DetectionContext &DC,
            OptimizationRemarkEmitter &ORE, int ID)
     : IslCtx(isl_ctx_alloc(), isl_ctx_free), SE(&ScalarEvolution), DT(&DT),
-      R(R), name(None), HasSingleExitEdge(R.getExitingBlock()), DC(DC),
+      R(R), name(std::nullopt), HasSingleExitEdge(R.getExitingBlock()), DC(DC),
       ORE(ORE), Affinator(this, LI), ID(ID) {
 
   // Options defaults that are different from ISL's.

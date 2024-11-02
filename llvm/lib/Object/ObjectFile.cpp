@@ -79,7 +79,7 @@ uint32_t ObjectFile::getSymbolAlignment(DataRefImpl DRI) const { return 0; }
 bool ObjectFile::isSectionBitcode(DataRefImpl Sec) const {
   Expected<StringRef> NameOrErr = getSectionName(Sec);
   if (NameOrErr)
-    return *NameOrErr == ".llvmbc";
+    return *NameOrErr == ".llvmbc" || *NameOrErr == ".llvm.lto";
   consumeError(NameOrErr.takeError());
   return false;
 }
@@ -130,6 +130,10 @@ Triple ObjectFile::makeTriple() const {
     TheTriple.setOS(Triple::AIX);
     TheTriple.setObjectFormat(Triple::XCOFF);
   }
+  else if (isGOFF()) {
+    TheTriple.setOS(Triple::ZOS);
+    TheTriple.setObjectFormat(Triple::GOFF);
+  }
 
   return TheTriple;
 }
@@ -152,6 +156,7 @@ ObjectFile::createObjectFile(MemoryBufferRef Object, file_magic Type,
   case file_magic::minidump:
   case file_magic::goff_object:
   case file_magic::cuda_fatbinary:
+  case file_magic::cas_id: // MCCAS
   case file_magic::offload_binary:
   case file_magic::dxcontainer_object:
     return errorCodeToError(object_error::invalid_file_type);

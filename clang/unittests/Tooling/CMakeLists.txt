@@ -4,6 +4,7 @@ set(LLVM_LINK_COMPONENTS
   Option
   FrontendOpenMP
   Support
+  TargetParser
   )
 
 
@@ -12,17 +13,19 @@ add_clang_unittest(ToolingTests
   CastExprTest.cpp
   CommentHandlerTest.cpp
   CompilationDatabaseTest.cpp
-  DependencyScannerTest.cpp
-  DependencyScanningCASFilesystemTest.cpp
   DiagnosticsYamlTest.cpp
   ExecutionTest.cpp
   FixItTest.cpp
+  HeaderAnalysisTest.cpp
   HeaderIncludesTest.cpp
   StandardLibraryTest.cpp
   LexicallyOrderedRecursiveASTVisitorTest.cpp
   LookupTest.cpp
   QualTypeNamesTest.cpp
   RangeSelectorTest.cpp
+  DependencyScanning/DependencyScannerTest.cpp
+  DependencyScanning/DependencyScanningCASFilesystemTest.cpp
+  DependencyScanning/DependencyScanningFilesystemTest.cpp
   RecursiveASTVisitorTests/Attr.cpp
   RecursiveASTVisitorTests/CallbacksLeaf.cpp
   RecursiveASTVisitorTests/CallbacksUnaryOperator.cpp
@@ -89,6 +92,7 @@ clang_target_link_libraries(ToolingTests
 
 target_link_libraries(ToolingTests
   PRIVATE
+  LLVMTestingAnnotations
   LLVMTestingSupport
   clangTesting
 )

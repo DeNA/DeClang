@@ -17,6 +17,7 @@
 #include "lldb/Utility/Log.h"
 #include "llvm/DebugInfo/DIContext.h"
 #include "llvm/DebugInfo/DWARF/DWARFExpression.h"
+#include <optional>
 
 using namespace lldb;
 using namespace lldb_private;
@@ -45,6 +46,8 @@ operator==(const UnwindPlan::Row::RegisterLocation &rhs) const {
         return !memcmp(m_location.expr.opcodes, rhs.m_location.expr.opcodes,
                        m_location.expr.length);
       break;
+    case isConstant:
+      return m_location.constant_value == rhs.m_location.constant_value;
     }
   }
   return false;
@@ -68,13 +71,13 @@ void UnwindPlan::Row::RegisterLocation::SetIsDWARFExpression(
   m_location.expr.length = len;
 }
 
-static llvm::Optional<std::pair<lldb::ByteOrder, uint32_t>>
+static std::optional<std::pair<lldb::ByteOrder, uint32_t>>
 GetByteOrderAndAddrSize(Thread *thread) {
   if (!thread)
-    return llvm::None;
+    return std::nullopt;
   ProcessSP process_sp = thread->GetProcess();
   if (!process_sp)
-    return llvm::None;
+    return std::nullopt;
   ArchSpec arch = process_sp->GetTarget().GetArchitecture();
   return std::make_pair(arch.GetByteOrder(), arch.GetAddressByteSize());
 }
@@ -84,7 +87,7 @@ static void DumpDWARFExpr(Stream &s, llvm::ArrayRef<uint8_t> expr, Thread *threa
     llvm::DataExtractor data(expr, order_and_width->first == eByteOrderLittle,
                              order_and_width->second);
     llvm::DWARFExpression(data, order_and_width->second, llvm::dwarf::DWARF32)
-        .print(s.AsRawOstream(), llvm::DIDumpOptions(), nullptr, nullptr);
+        .print(s.AsRawOstream(), llvm::DIDumpOptions(), nullptr);
   } else
     s.PutCString("dwarf-expr");
 }
@@ -147,11 +150,14 @@ void UnwindPlan::Row::RegisterLocation::Dump(Stream &s,
     if (m_type == atDWARFExpression)
       s.PutChar('[');
     DumpDWARFExpr(
-        s, llvm::makeArrayRef(m_location.expr.opcodes, m_location.expr.length),
+        s, llvm::ArrayRef(m_location.expr.opcodes, m_location.expr.length),
         thread);
     if (m_type == atDWARFExpression)
       s.PutChar(']');
   } break;
+  case isConstant:
+    s.Printf("=0x%" PRIx64, m_location.constant_value);
+    break;
   }
 }
 
@@ -201,8 +207,7 @@ void UnwindPlan::Row::FAValue::Dump(Stream &s, const UnwindPlan *unwind_plan,
     s.PutChar(']');
     break;
   case isDWARFExpression:
-    DumpDWARFExpr(s,
-                  llvm::makeArrayRef(m_value.expr.opcodes, m_value.expr.length),
+    DumpDWARFExpr(s, llvm::ArrayRef(m_value.expr.opcodes, m_value.expr.length),
                   thread);
     break;
   case unspecified:
@@ -362,6 +367,17 @@ bool UnwindPlan::Row::SetRegisterLocationToIsDWARFExpression(
   return true;
 }
 
+bool UnwindPlan::Row::SetRegisterLocationToIsConstant(uint32_t reg_num,
+                                                      uint64_t constant,
+                                                      bool can_replace) {
+  if (!can_replace &&
+      m_register_locations.find(reg_num) != m_register_locations.end())
+    return false;
+  RegisterLocation reg_loc;
+  reg_loc.SetIsConstant(constant);
+  m_register_locations[reg_num] = reg_loc;
+  return true;
+}
 
 bool UnwindPlan::Row::operator==(const UnwindPlan::Row &rhs) const {
   return m_offset == rhs.m_offset && m_cfa_value == rhs.m_cfa_value &&

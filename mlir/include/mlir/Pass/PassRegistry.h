@@ -18,6 +18,7 @@
 #include "mlir/Support/TypeID.h"
 #include <functional>
 #include <utility>
+#include <optional>
 
 namespace mlir {
 class OpPassManager;
@@ -231,11 +232,14 @@ struct PassPipelineCLParserImpl;
 /// options for each of the passes and pipelines that have been registered with
 /// the pass registry; Meaning that `-cse` will refer to the CSE pass in MLIR.
 /// It also registers an argument, `pass-pipeline`, that supports parsing a
-/// textual description of a pipeline.
+/// textual description of a pipeline. This option is mutually exclusive with
+/// the individual pass options.
 class PassPipelineCLParser {
 public:
   /// Construct a pass pipeline parser with the given command line description.
+  /// Optionally registers an alias for the `pass-pipeline` option.
   PassPipelineCLParser(StringRef arg, StringRef description);
+  PassPipelineCLParser(StringRef arg, StringRef description, StringRef alias);
   ~PassPipelineCLParser();
 
   /// Returns true if this parser contains any valid options to add.
@@ -254,6 +258,9 @@ public:
 
 private:
   std::unique_ptr<detail::PassPipelineCLParserImpl> impl;
+
+  llvm::cl::opt<std::string> passPipeline;
+  std::optional<llvm::cl::alias> passPipelineAlias;
 };
 
 /// This class implements a command-line parser specifically for MLIR pass
@@ -289,9 +296,9 @@ struct PassReproducerOptions {
   LogicalResult apply(PassManager &pm) const;
 
 private:
-  Optional<std::string> pipeline;
-  Optional<bool> verifyEach;
-  Optional<bool> disableThreading;
+  std::optional<std::string> pipeline;
+  std::optional<bool> verifyEach;
+  std::optional<bool> disableThreading;
 };
 
 } // namespace mlir

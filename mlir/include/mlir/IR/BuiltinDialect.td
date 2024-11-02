@@ -23,6 +23,7 @@ def Builtin_Dialect : Dialect {
   let cppNamespace = "::mlir";
   let useDefaultAttributePrinterParser = 0;
   let useDefaultTypePrinterParser = 0;
+  let usePropertiesForAttributes = 1;
   let extraClassDeclaration = [{
   private:
     // Register the builtin Attributes.
@@ -34,6 +35,7 @@ def Builtin_Dialect : Dialect {
 
   public:
   }];
+
 }
 
 #endif // BUILTIN_BASE

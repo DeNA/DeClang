@@ -193,18 +193,18 @@ clang::tooling::initiateExtractRepeatedExpressionIntoVariableOperation(
   if (SelectionRange.isValid()) {
     auto SelectedStmt = Slice.getSelectedStmtSet();
     if (!SelectedStmt)
-      return None;
+      return std::nullopt;
     if (!SelectedStmt->containsSelectionRange)
-      return None;
+      return std::nullopt;
     if (!isRepeatableExpression(SelectedStmt->containsSelectionRange))
-      return None;
+      return std::nullopt;
     S = SelectedStmt->containsSelectionRange;
     ParentDecl =
         Slice.parentDeclForIndex(*SelectedStmt->containsSelectionRangeIndex);
   } else {
     auto SelectedStmt = Slice.nearestSelectedStmt(isRepeatableExpression);
     if (!SelectedStmt)
-      return None;
+      return std::nullopt;
     S = SelectedStmt->getStmt();
     ParentDecl = SelectedStmt->getParentDecl();
   }
@@ -214,12 +214,12 @@ clang::tooling::initiateExtractRepeatedExpressionIntoVariableOperation(
   QualType T = returnTypeOfCall(E);
   if (!T.getTypePtrOrNull() ||
       (!T->isAnyPointerType() && !T->isReferenceType()))
-    return None;
+    return std::nullopt;
 
   DuplicateExprFinder DupFinder(E, Context, Context.getPrintingPolicy());
   DupFinder.TraverseDecl(const_cast<Decl *>(ParentDecl));
   if (DupFinder.DuplicateExpressions.size() < 2)
-    return None;
+    return std::nullopt;
 
   RefactoringOperationResult Result;
   Result.Initiated = true;
@@ -257,7 +257,7 @@ ExtractRepeatedExpressionIntoVariableOperation::perform(
   StringRef Name = nameForExtractedVariable(E);
   Result.AssociatedSymbols.push_back(
       std::make_unique<RefactoringResultAssociatedSymbol>(
-          OldSymbolName(Name)));
+          SymbolName(Name, /*IsObjectiveCSelector=*/false)));
   RefactoringResultAssociatedSymbol *CreatedSymbol =
       Result.AssociatedSymbols.back().get();
 
@@ -282,7 +282,7 @@ ExtractRepeatedExpressionIntoVariableOperation::perform(
   Replacements.push_back(RefactoringReplacement(
       SourceRange(InsertionLoc, InsertionLoc), OS.str(), CreatedSymbol,
       RefactoringReplacement::AssociatedSymbolLocation(
-          llvm::makeArrayRef(NameOffset), /*IsDeclaration=*/true)));
+          ArrayRef(NameOffset), /*IsDeclaration=*/true)));
 
   // Replace the duplicates with a reference to the variable.
   for (const Expr *E : DuplicateExpressions) {
@@ -291,7 +291,7 @@ ExtractRepeatedExpressionIntoVariableOperation::perform(
                     getPreciseTokenLocEnd(SM.getSpellingLoc(E->getEndLoc()), SM,
                                           Context.getLangOpts())),
         Name, CreatedSymbol,
-        /*NameOffset=*/llvm::makeArrayRef(unsigned(0))));
+        /*NameOffset=*/ArrayRef(unsigned(0))));
   }
 
   return std::move(Result);

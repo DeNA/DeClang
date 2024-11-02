@@ -317,28 +317,27 @@ namespace llvm {
     }
   };
 
-  template <> struct DenseMapInfo<clang::api_notes::ContextTableKey> {
-    static inline clang::api_notes::ContextTableKey getEmptyKey() {
-      return clang::api_notes::ContextTableKey();
-    }
+template <> struct DenseMapInfo<clang::api_notes::ContextTableKey> {
+  static inline clang::api_notes::ContextTableKey getEmptyKey() {
+    return clang::api_notes::ContextTableKey();
+  }
 
-    static inline clang::api_notes::ContextTableKey getTombstoneKey() {
-      return clang::api_notes::ContextTableKey{
-          DenseMapInfo<uint32_t>::getTombstoneKey(),
-          DenseMapInfo<uint8_t>::getTombstoneKey(),
-          DenseMapInfo<uint32_t>::getTombstoneKey()};
-    }
+  static inline clang::api_notes::ContextTableKey getTombstoneKey() {
+    return clang::api_notes::ContextTableKey{
+        DenseMapInfo<uint32_t>::getTombstoneKey(),
+        DenseMapInfo<uint8_t>::getTombstoneKey(),
+        DenseMapInfo<uint32_t>::getTombstoneKey()};
+  }
 
-    static unsigned
-    getHashValue(const clang::api_notes::ContextTableKey &value) {
-      return value.hashValue();
-    }
+  static unsigned getHashValue(const clang::api_notes::ContextTableKey &value) {
+    return value.hashValue();
+  }
 
-    static bool isEqual(const clang::api_notes::ContextTableKey &lhs,
-                        const clang::api_notes::ContextTableKey &rhs) {
-      return lhs == rhs;
-    }
-  };
+  static bool isEqual(const clang::api_notes::ContextTableKey &lhs,
+                      const clang::api_notes::ContextTableKey &rhs) {
+    return lhs == rhs;
+  }
+};
 } // namespace llvm
 
 #endif

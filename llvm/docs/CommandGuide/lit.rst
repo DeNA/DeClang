@@ -96,7 +96,7 @@ OUTPUT OPTIONS
 
 .. option:: -vv, --echo-all-commands
 
- Echo all commands to stdout, as they are being executed.
+ On test failure, echo all commands to stdout as they are being executed.
  This can be valuable for debugging test failures, as the last echoed command
  will be the one which has failed.
  :program:`lit` normally inserts a no-op command (``:`` in the case of bash)
@@ -162,11 +162,6 @@ EXECUTION OPTIONS
 .. option:: --ignore-fail
 
  Exit with status zero even if some tests fail.
-
-.. option:: --no-indirectly-run-check
-
- Do not error if a test would not be run if the user had specified the
- containing directory instead of naming the test directly.
 
 .. _selection-options:
 
@@ -458,9 +453,8 @@ executed, two important global variables are predefined:
  tests in the suite.
 
  **standalone_tests** When true, mark a directory with tests expected to be run
- standalone. Test discovery is disabled for that directory and
- *--no-indirectly-run-check* is in effect. *lit.suffixes* and *lit.excludes*
- must be empty when this variable is true.
+ standalone. Test discovery is disabled for that directory. *lit.suffixes* and
+ *lit.excludes* must be empty when this variable is true.
 
  **suffixes** For **lit** test formats which scan directories for tests, this
  variable is a list of suffixes to identify test files.  Used by: *ShTest*.

@@ -7,6 +7,7 @@ set(LLDB_INCLUDE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 set(LLDB_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(LLDB_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
+set(LLDB_OBJ_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR
@@ -56,7 +57,7 @@ macro(add_optional_dependency variable description package found)
   message(STATUS "${description}: ${${variable}}")
 endmacro()
 
-add_optional_dependency(LLDB_ENABLE_SWIG "Enable SWIG to generate LLDB bindings" SWIG SWIG_FOUND VERSION 3)
+add_optional_dependency(LLDB_ENABLE_SWIG "Enable SWIG to generate LLDB bindings" SWIG SWIG_FOUND VERSION 4)
 
 # BEGIN SWIFT MOD
 if (LLDB_ENABLE_SWIG)
@@ -75,7 +76,6 @@ add_optional_dependency(LLDB_ENABLE_PYTHON "Enable Python scripting support in L
 add_optional_dependency(LLDB_ENABLE_LIBXML2 "Enable Libxml 2 support in LLDB" LibXml2 LIBXML2_FOUND VERSION 2.8)
 add_optional_dependency(LLDB_ENABLE_FBSDVMCORE "Enable libfbsdvmcore support in LLDB" FBSDVMCore FBSDVMCore_FOUND QUIET)
 
-option(LLDB_USE_SYSTEM_SIX "Use six.py shipped with system and do not install a copy of it" OFF)
 option(LLDB_USE_ENTITLEMENTS "When codesigning, use entitlements if available" ON)
 option(LLDB_BUILD_FRAMEWORK "Build LLDB.framework (Darwin only)" OFF)
 option(LLDB_NO_INSTALL_DEFAULT_RPATH "Disable default RPATH settings in binaries" OFF)
@@ -337,30 +337,6 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
   if (NOT CMAKE_CONFIGURATION_TYPES)
     add_llvm_install_targets(install-lldb-headers
                              COMPONENT lldb-headers)
-  endif()
-endif()
-
-
-# If LLDB is building against a prebuilt Clang, then the Clang resource
-# directory that LLDB is using for its embedded Clang instance needs to point
-# to the resource directory of the used Clang installation.
-if (NOT TARGET clang-resource-headers)
-  set(LLDB_CLANG_RESOURCE_DIR_NAME "${LLVM_VERSION_MAJOR}.${LLVM_VERSION_MINOR}.${LLVM_VERSION_PATCH}")
-  # Iterate over the possible places where the external resource directory
-  # could be and pick the first that exists.
-  foreach(CANDIDATE "${Clang_DIR}/../.." "${LLVM_DIR}" "${LLVM_LIBRARY_DIRS}"
-                    "${LLVM_BUILD_LIBRARY_DIR}"
-                    "${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX}")
-    # Build the resource directory path by appending 'clang/<version number>'.
-    set(CANDIDATE_RESOURCE_DIR "${CANDIDATE}/clang/${LLDB_CLANG_RESOURCE_DIR_NAME}")
-    if (IS_DIRECTORY "${CANDIDATE_RESOURCE_DIR}")
-      set(LLDB_EXTERNAL_CLANG_RESOURCE_DIR "${CANDIDATE_RESOURCE_DIR}")
-      break()
-    endif()
-  endforeach()
-
-  if (NOT LLDB_EXTERNAL_CLANG_RESOURCE_DIR)
-    message(FATAL_ERROR "Expected directory for clang-resource headers not found: ${LLDB_EXTERNAL_CLANG_RESOURCE_DIR}")
   endif()
 endif()
 

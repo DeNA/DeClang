@@ -13,24 +13,21 @@
 #ifndef MLIR_DIALECT_NVGPU_UTILS_MMAUTILS_H
 #define MLIR_DIALECT_NVGPU_UTILS_MMAUTILS_H
 
+#include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Types.h"
 
 namespace mlir {
-namespace vector {
-enum class IteratorType : uint32_t;
-class ContractionOp;
-} // namespace vector
-
-namespace NVVM {
-enum class MMALayout : uint32_t;
-} // namespace NVVM
-
 namespace nvgpu {
 
 /// Represents the role of an operand in an MMA instruction:
 /// `result := matmul(A, B) + C`
 enum class MatMulOperandRole : int32_t { A = 0, B, C };
+
+/// Returns the first user of the `op` that is vector.contract. If no
+/// vector.contract user exists, return failure.
+FailureOr<vector::ContractionOp> getUserContract(Operation *op);
 
 /// Collects information about a warp-level matrix operand represented by a
 /// VectorType.
@@ -72,7 +69,7 @@ getMmaSyncRegisterType(const WarpMatrixInfo &type);
 /// please see NVIDIA's PTX documentation:
 /// https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-instructions-for-mma
 FailureOr<AffineMap>
-getLaneIdAndValueIdToOperandCoord(Location loc, OpBuilder &builder,
+getLaneIdAndValueIdToOperandCoord(OpBuilder &builder, Location loc,
                                   const WarpMatrixInfo &fragmentType);
 
 /// Encapsulates the parameters needed to lower a `nvgpu.ldmatrix` operation to
@@ -93,20 +90,8 @@ FailureOr<LdMatrixParams> getLdMatrixParams(const WarpMatrixInfo &type,
 /// to two results representing offsets within the matrix operand that should
 /// be the pointer locations a thread should pass to the ldmatrix instruction.
 FailureOr<AffineMap>
-getLaneIdToLdMatrixMatrixCoord(Location loc, OpBuilder &builder,
+getLaneIdToLdMatrixMatrixCoord(OpBuilder &builder, Location loc,
                                const LdMatrixParams &params);
-
-/// Transform `vector.contract` into (m,k)x(n,k)x(m,n) form so that it can be
-/// converted to `nvgpu.mma.sync`. This specific form is meant to indicate that
-/// the vector operands are organized such that the reduction dimension is
-/// contiguous.
-struct PrepareContractToGPUMMASync
-    : public OpRewritePattern<vector::ContractionOp> {
-  using OpRewritePattern<vector::ContractionOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(vector::ContractionOp op,
-                                PatternRewriter &rewriter) const override;
-};
 
 } // namespace nvgpu
 } // namespace mlir

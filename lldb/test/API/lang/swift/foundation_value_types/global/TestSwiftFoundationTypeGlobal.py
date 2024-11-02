@@ -5,13 +5,7 @@ import lldbsuite.test.lldbutil as lldbutil
 import os
 import unittest2
 
-
 class TestSwiftFoundationValueTypeGlobal(TestBase):
-    mydir = TestBase.compute_mydir(__file__)
-
-    def setUp(self):
-        TestBase.setUp(self)
-
     @swiftTest
     @skipUnlessFoundation
     def test(self):

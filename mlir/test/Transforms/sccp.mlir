@@ -1,4 +1,4 @@
-// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="func.func(sccp)" -split-input-file | FileCheck %s
+// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="builtin.module(func.func(sccp))" -split-input-file | FileCheck %s
 
 /// Check simple forward constant propagation without any control flow.
 
@@ -204,7 +204,7 @@ func.func @simple_produced_operand() -> (i32, i32) {
   // CHECK: %[[ONE:.*]] = arith.constant 1
   %1 = arith.constant 1 : i32
   "test.internal_br"(%1) [^bb1, ^bb2] {
-    operand_segment_sizes = array<i32: 0, 1>
+    operandSegmentSizes = array<i32: 0, 1>
   } : (i32) -> ()
 
 ^bb1:

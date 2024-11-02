@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/CodeGen/CodeGenAction.h"
+#include "CGCall.h"
 #include "CodeGenModule.h"
 #include "CoverageMappingGen.h"
 #include "MacroPPCallbacks.h"
@@ -49,6 +50,7 @@
 #include "llvm/Transforms/IPO/Internalize.h"
 
 #include <memory>
+#include <optional>
 using namespace clang;
 using namespace llvm;
 
@@ -85,7 +87,7 @@ namespace clang {
   };
 
   static void reportOptRecordError(Error E, DiagnosticsEngine &Diags,
-                                   const CodeGenOptions CodeGenOpts) {
+                                   const CodeGenOptions &CodeGenOpts) {
     handleAllErrors(
         std::move(E),
       [&](const LLVMRemarkSetupFileError &E) {
@@ -112,7 +114,9 @@ namespace clang {
     const CodeGenOptions &CodeGenOpts;
     const TargetOptions &TargetOpts;
     const LangOptions &LangOpts;
+    const CASOptions &CASOpts; // MCCAS
     std::unique_ptr<raw_pwrite_stream> AsmOutStream;
+    std::unique_ptr<raw_pwrite_stream> CasIDStream;
     ASTContext *Context;
     IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS;
 
@@ -152,13 +156,18 @@ namespace clang {
                     const PreprocessorOptions &PPOpts,
                     const CodeGenOptions &CodeGenOpts,
                     const TargetOptions &TargetOpts,
-                    const LangOptions &LangOpts, const std::string &InFile,
+                    const LangOptions &LangOpts,
+                    const CASOptions &CASOpts, // MCCAS
+                    const std::string &InFile,
                     SmallVector<LinkModule, 4> LinkModules,
                     std::unique_ptr<raw_pwrite_stream> OS, LLVMContext &C,
-                    CoverageSourceInfo *CoverageInfo = nullptr)
+                    CoverageSourceInfo *CoverageInfo = nullptr,
+                    std::unique_ptr<raw_pwrite_stream> CasIDOS = nullptr)
         : Diags(Diags), Action(Action), HeaderSearchOpts(HeaderSearchOpts),
           CodeGenOpts(CodeGenOpts), TargetOpts(TargetOpts), LangOpts(LangOpts),
-          AsmOutStream(std::move(OS)), Context(nullptr), FS(VFS),
+          CASOpts(CASOpts), // MCCAS
+          AsmOutStream(std::move(OS)), CasIDStream(std::move(CasIDOS)),
+          Context(nullptr), FS(VFS),
           LLVMIRGeneration("irgen", "LLVM IR Generation Time"),
           LLVMIRGenerationRefCount(0),
           Gen(CreateLLVMCodeGen(Diags, InFile, std::move(VFS), HeaderSearchOpts,
@@ -178,11 +187,14 @@ namespace clang {
                     const PreprocessorOptions &PPOpts,
                     const CodeGenOptions &CodeGenOpts,
                     const TargetOptions &TargetOpts,
-                    const LangOptions &LangOpts, llvm::Module *Module,
+                    const LangOptions &LangOpts,
+                    const CASOptions &CASOpts, // MCCAS
+                    llvm::Module *Module,
                     SmallVector<LinkModule, 4> LinkModules, LLVMContext &C,
                     CoverageSourceInfo *CoverageInfo = nullptr)
         : Diags(Diags), Action(Action), HeaderSearchOpts(HeaderSearchOpts),
           CodeGenOpts(CodeGenOpts), TargetOpts(TargetOpts), LangOpts(LangOpts),
+          CASOpts(CASOpts), // MCCAS
           Context(nullptr), FS(VFS),
           LLVMIRGeneration("irgen", "LLVM IR Generation Time"),
           LLVMIRGenerationRefCount(0),
@@ -261,15 +273,17 @@ namespace clang {
     }
 
     // Links each entry in LinkModules into our module.  Returns true on error.
-    bool LinkInModules() {
+    bool LinkInModules(llvm::Module *M) {
       for (auto &LM : LinkModules) {
+        assert(LM.Module && "LinkModule does not actually have a module");
         if (LM.PropagateAttrs)
           for (Function &F : *LM.Module) {
             // Skip intrinsics. Keep consistent with how intrinsics are created
             // in LLVM IR.
             if (F.isIntrinsic())
               continue;
-            Gen->CGM().addDefaultFunctionDefinitionAttributes(F);
+            CodeGen::mergeDefaultFunctionDefinitionAttributes(
+                F, CodeGenOpts, LangOpts, TargetOpts, LM.Internalize);
           }
 
         CurLinkModule = LM.Module.get();
@@ -277,20 +291,20 @@ namespace clang {
         bool Err;
         if (LM.Internalize) {
           Err = Linker::linkModules(
-              *getModule(), std::move(LM.Module), LM.LinkFlags,
+              *M, std::move(LM.Module), LM.LinkFlags,
               [](llvm::Module &M, const llvm::StringSet<> &GVS) {
                 internalizeModule(M, [&GVS](const llvm::GlobalValue &GV) {
                   return !GV.hasName() || (GVS.count(GV.getName()) == 0);
                 });
               });
         } else {
-          Err = Linker::linkModules(*getModule(), std::move(LM.Module),
-                                    LM.LinkFlags);
+          Err = Linker::linkModules(*M, std::move(LM.Module), LM.LinkFlags);
         }
 
         if (Err)
           return true;
       }
+      LinkModules.clear();
       return false; // success
     }
 
@@ -353,7 +367,7 @@ namespace clang {
       }
 
       // Link each LinkModule into our module.
-      if (LinkInModules())
+      if (LinkInModules(getModule()))
         return;
 
       for (auto &F : getModule()->functions()) {
@@ -380,8 +394,10 @@ namespace clang {
       EmbedBitcode(getModule(), CodeGenOpts, llvm::MemoryBufferRef());
 
       EmitBackendOutput(Diags, HeaderSearchOpts, CodeGenOpts, TargetOpts,
-                        LangOpts, C.getTargetInfo().getDataLayoutString(),
-                        getModule(), Action, FS, std::move(AsmOutStream));
+                        LangOpts, CASOpts, // MCCAS
+                        C.getTargetInfo().getDataLayoutString(), getModule(),
+                        Action, FS, std::move(AsmOutStream),
+                        std::move(CasIDStream));
 
       Ctx.setDiagnosticHandler(std::move(OldDiagnosticHandler));
 
@@ -423,7 +439,8 @@ namespace clang {
                                 bool &BadDebugInfo, StringRef &Filename,
                                 unsigned &Line, unsigned &Column) const;
 
-    Optional<FullSourceLoc> getFunctionSourceLocation(const Function &F) const;
+    std::optional<FullSourceLoc>
+    getFunctionSourceLocation(const Function &F) const;
 
     void DiagnosticHandlerImpl(const llvm::DiagnosticInfo &DI);
     /// Specialized handler for InlineAsm diagnostic.
@@ -436,6 +453,11 @@ namespace clang {
     /// \return True if the diagnostic has been successfully reported, false
     /// otherwise.
     bool StackSizeDiagHandler(const llvm::DiagnosticInfoStackSize &D);
+    /// Specialized handler for ResourceLimit diagnostic.
+    /// \return True if the diagnostic has been successfully reported, false
+    /// otherwise.
+    bool ResourceLimitDiagHandler(const llvm::DiagnosticInfoResourceLimit &D);
+
     /// Specialized handler for unsupported backend feature diagnostic.
     void UnsupportedDiagHandler(const llvm::DiagnosticInfoUnsupported &D);
     /// Specialized handlers for optimization remarks.
@@ -624,11 +646,23 @@ BackendConsumer::StackSizeDiagHandler(const llvm::DiagnosticInfoStackSize &D) {
   if (!Loc)
     return false;
 
-  // FIXME: Shouldn't need to truncate to uint32_t
   Diags.Report(*Loc, diag::warn_fe_frame_larger_than)
-      << static_cast<uint32_t>(D.getStackSize())
-      << static_cast<uint32_t>(D.getStackLimit())
-      << llvm::demangle(D.getFunction().getName().str());
+      << D.getStackSize() << D.getStackLimit()
+      << llvm::demangle(D.getFunction().getName());
+  return true;
+}
+
+bool BackendConsumer::ResourceLimitDiagHandler(
+    const llvm::DiagnosticInfoResourceLimit &D) {
+  auto Loc = getFunctionSourceLocation(D.getFunction());
+  if (!Loc)
+    return false;
+  unsigned DiagID = diag::err_fe_backend_resource_limit;
+  ComputeDiagID(D.getSeverity(), backend_resource_limit, DiagID);
+
+  Diags.Report(*Loc, DiagID)
+      << D.getResourceName() << D.getResourceSize() << D.getResourceLimit()
+      << llvm::demangle(D.getFunction().getName());
   return true;
 }
 
@@ -674,14 +708,14 @@ const FullSourceLoc BackendConsumer::getBestLocationFromDebugLoc(
   return Loc;
 }
 
-Optional<FullSourceLoc>
+std::optional<FullSourceLoc>
 BackendConsumer::getFunctionSourceLocation(const Function &F) const {
   auto Hash = llvm::hash_value(F.getName());
   for (const auto &Pair : ManglingFullSourceLocs) {
     if (Pair.first == Hash)
       return Pair.second;
   }
-  return Optional<FullSourceLoc>();
+  return std::nullopt;
 }
 
 void BackendConsumer::UnsupportedDiagHandler(
@@ -833,7 +867,7 @@ void BackendConsumer::DontCallDiagHandler(const DiagnosticInfoDontCall &D) {
   Diags.Report(LocCookie, D.getSeverity() == DiagnosticSeverity::DS_Error
                               ? diag::err_fe_backend_error_attr
                               : diag::warn_fe_backend_warning_attr)
-      << llvm::demangle(D.getFunctionName().str()) << D.getNote();
+      << llvm::demangle(D.getFunctionName()) << D.getNote();
 }
 
 void BackendConsumer::MisExpectDiagHandler(
@@ -874,6 +908,11 @@ void BackendConsumer::DiagnosticHandlerImpl(const DiagnosticInfo &DI) {
     if (StackSizeDiagHandler(cast<DiagnosticInfoStackSize>(DI)))
       return;
     ComputeDiagID(Severity, backend_frame_larger_than, DiagID);
+    break;
+  case llvm::DK_ResourceLimit:
+    if (ResourceLimitDiagHandler(cast<DiagnosticInfoResourceLimit>(DI)))
+      return;
+    ComputeDiagID(Severity, backend_resource_limit, DiagID);
     break;
   case DK_Linker:
     ComputeDiagID(Severity, linking_module, DiagID);
@@ -966,6 +1005,36 @@ CodeGenAction::~CodeGenAction() {
     delete VMContext;
 }
 
+bool CodeGenAction::loadLinkModules(CompilerInstance &CI) {
+  if (!LinkModules.empty())
+    return false;
+
+  for (const CodeGenOptions::BitcodeFileToLink &F :
+       CI.getCodeGenOpts().LinkBitcodeFiles) {
+    auto BCBuf = CI.getFileManager().getBufferForFile(F.Filename);
+    if (!BCBuf) {
+      CI.getDiagnostics().Report(diag::err_cannot_open_file)
+          << F.Filename << BCBuf.getError().message();
+      LinkModules.clear();
+      return true;
+    }
+
+    Expected<std::unique_ptr<llvm::Module>> ModuleOrErr =
+        getOwningLazyBitcodeModule(std::move(*BCBuf), *VMContext);
+    if (!ModuleOrErr) {
+      handleAllErrors(ModuleOrErr.takeError(), [&](ErrorInfoBase &EIB) {
+        CI.getDiagnostics().Report(diag::err_cannot_open_file)
+            << F.Filename << EIB.message();
+      });
+      LinkModules.clear();
+      return true;
+    }
+    LinkModules.push_back({std::move(ModuleOrErr.get()), F.PropagateAttrs,
+                           F.Internalize, F.LinkFlags});
+  }
+  return false;
+}
+
 bool CodeGenAction::hasIRSupport() const { return true; }
 
 void CodeGenAction::EndSourceFileAction() {
@@ -1014,39 +1083,30 @@ std::unique_ptr<ASTConsumer>
 CodeGenAction::CreateASTConsumer(CompilerInstance &CI, StringRef InFile) {
   BackendAction BA = static_cast<BackendAction>(Act);
   std::unique_ptr<raw_pwrite_stream> OS = CI.takeOutputStream();
-  if (!OS)
+  std::unique_ptr<raw_pwrite_stream> CasIDOS = nullptr;
+  if (!OS) {
     OS = GetOutputStream(CI, InFile, BA);
+    auto OutputFile = StringRef(CI.getFrontendOpts().OutputFile);
+    if (CI.getCodeGenOpts().UseCASBackend &&
+        CI.getCodeGenOpts().EmitCASIDFile &&
+        CI.getCodeGenOpts().getCASObjMode() != llvm::CASBackendMode::CASID &&
+        BA == Backend_EmitObj && OutputFile != "-") {
+      std::string OutputPathCASIDFile = std::string(OutputFile);
+      OutputPathCASIDFile.append(".casid");
+      std::error_code EC;
+      CasIDOS = std::make_unique<raw_fd_ostream>(OutputPathCASIDFile, EC);
+      if (EC)
+        CI.getDiagnostics().Report(diag::err_fe_unable_to_open_output)
+            << EC.message();
+    }
+  }
 
   if (BA != Backend_EmitNothing && !OS)
     return nullptr;
 
-  VMContext->setOpaquePointers(CI.getCodeGenOpts().OpaquePointers);
-
   // Load bitcode modules to link with, if we need to.
-  if (LinkModules.empty())
-    for (const CodeGenOptions::BitcodeFileToLink &F :
-         CI.getCodeGenOpts().LinkBitcodeFiles) {
-      auto BCBuf = CI.getFileManager().getBufferForFile(F.Filename);
-      if (!BCBuf) {
-        CI.getDiagnostics().Report(diag::err_cannot_open_file)
-            << F.Filename << BCBuf.getError().message();
-        LinkModules.clear();
-        return nullptr;
-      }
-
-      Expected<std::unique_ptr<llvm::Module>> ModuleOrErr =
-          getOwningLazyBitcodeModule(std::move(*BCBuf), *VMContext);
-      if (!ModuleOrErr) {
-        handleAllErrors(ModuleOrErr.takeError(), [&](ErrorInfoBase &EIB) {
-          CI.getDiagnostics().Report(diag::err_cannot_open_file)
-              << F.Filename << EIB.message();
-        });
-        LinkModules.clear();
-        return nullptr;
-      }
-      LinkModules.push_back({std::move(ModuleOrErr.get()), F.PropagateAttrs,
-                             F.Internalize, F.LinkFlags});
-    }
+  if (loadLinkModules(CI))
+    return nullptr;
 
   CoverageSourceInfo *CoverageInfo = nullptr;
   // Add the preprocessor callback only when the coverage mapping is generated.
@@ -1057,8 +1117,11 @@ CodeGenAction::CreateASTConsumer(CompilerInstance &CI, StringRef InFile) {
   std::unique_ptr<BackendConsumer> Result(new BackendConsumer(
       BA, CI.getDiagnostics(), &CI.getVirtualFileSystem(),
       CI.getHeaderSearchOpts(), CI.getPreprocessorOpts(), CI.getCodeGenOpts(),
-      CI.getTargetOpts(), CI.getLangOpts(), std::string(InFile),
-      std::move(LinkModules), std::move(OS), *VMContext, CoverageInfo));
+      CI.getTargetOpts(), CI.getLangOpts(),
+      CI.getCASOpts(), // MCCAS
+      std::string(InFile), std::move(LinkModules), std::move(OS), *VMContext,
+      CoverageInfo, std::move(CasIDOS)));
+
   BEConsumer = Result.get();
 
   // Enable generating macro debug info only when debug info is not disabled and
@@ -1079,20 +1142,20 @@ CodeGenAction::loadModule(MemoryBufferRef MBRef) {
   CompilerInstance &CI = getCompilerInstance();
   SourceManager &SM = CI.getSourceManager();
 
+  auto DiagErrors = [&](Error E) -> std::unique_ptr<llvm::Module> {
+    unsigned DiagID =
+        CI.getDiagnostics().getCustomDiagID(DiagnosticsEngine::Error, "%0");
+    handleAllErrors(std::move(E), [&](ErrorInfoBase &EIB) {
+      CI.getDiagnostics().Report(DiagID) << EIB.message();
+    });
+    return {};
+  };
+
   // For ThinLTO backend invocations, ensure that the context
   // merges types based on ODR identifiers. We also need to read
   // the correct module out of a multi-module bitcode file.
   if (!CI.getCodeGenOpts().ThinLTOIndexFile.empty()) {
     VMContext->enableDebugTypeODRUniquing();
-
-    auto DiagErrors = [&](Error E) -> std::unique_ptr<llvm::Module> {
-      unsigned DiagID =
-          CI.getDiagnostics().getCustomDiagID(DiagnosticsEngine::Error, "%0");
-      handleAllErrors(std::move(E), [&](ErrorInfoBase &EIB) {
-        CI.getDiagnostics().Report(DiagID) << EIB.message();
-      });
-      return {};
-    };
 
     Expected<std::vector<BitcodeModule>> BMsOrErr = getBitcodeModuleList(MBRef);
     if (!BMsOrErr)
@@ -1114,9 +1177,38 @@ CodeGenAction::loadModule(MemoryBufferRef MBRef) {
     return std::move(*MOrErr);
   }
 
+  // Load bitcode modules to link with, if we need to.
+  if (loadLinkModules(CI))
+    return nullptr;
+
+  // Handle textual IR and bitcode file with one single module.
   llvm::SMDiagnostic Err;
   if (std::unique_ptr<llvm::Module> M = parseIR(MBRef, Err, *VMContext))
     return M;
+
+  // If MBRef is a bitcode with multiple modules (e.g., -fsplit-lto-unit
+  // output), place the extra modules (actually only one, a regular LTO module)
+  // into LinkModules as if we are using -mlink-bitcode-file.
+  Expected<std::vector<BitcodeModule>> BMsOrErr = getBitcodeModuleList(MBRef);
+  if (BMsOrErr && BMsOrErr->size()) {
+    std::unique_ptr<llvm::Module> FirstM;
+    for (auto &BM : *BMsOrErr) {
+      Expected<std::unique_ptr<llvm::Module>> MOrErr =
+          BM.parseModule(*VMContext);
+      if (!MOrErr)
+        return DiagErrors(MOrErr.takeError());
+      if (FirstM)
+        LinkModules.push_back({std::move(*MOrErr), /*PropagateAttrs=*/false,
+                               /*Internalize=*/false, /*LinkFlags=*/{}});
+      else
+        FirstM = std::move(*MOrErr);
+    }
+    if (FirstM)
+      return FirstM;
+  }
+  // If BMsOrErr fails, consume the error and use the error message from
+  // parseIR.
+  consumeError(BMsOrErr.takeError());
 
   // Translate from the diagnostic info to the SourceManager location if
   // available.
@@ -1158,7 +1250,7 @@ void CodeGenAction::ExecuteAction() {
 
   SourceManager &SM = CI.getSourceManager();
   FileID FID = SM.getMainFileID();
-  Optional<MemoryBufferRef> MainFile = SM.getBufferOrNone(FID);
+  std::optional<MemoryBufferRef> MainFile = SM.getBufferOrNone(FID);
   if (!MainFile)
     return;
 
@@ -1191,8 +1283,15 @@ void CodeGenAction::ExecuteAction() {
   BackendConsumer Result(BA, CI.getDiagnostics(), &CI.getVirtualFileSystem(),
                          CI.getHeaderSearchOpts(), CI.getPreprocessorOpts(),
                          CI.getCodeGenOpts(), CI.getTargetOpts(),
-                         CI.getLangOpts(), TheModule.get(),
-                         std::move(LinkModules), *VMContext, nullptr);
+                         CI.getLangOpts(),
+                         CI.getCASOpts(),
+                         TheModule.get(), std::move(LinkModules), *VMContext,
+                         nullptr);
+  
+  // Link in each pending link module.
+  if (Result.LinkInModules(&*TheModule))
+    return;
+
   // PR44896: Force DiscardValueNames as false. DiscardValueNames cannot be
   // true here because the valued names are needed for reading textual IR.
   Ctx.setDiscardValueNames(false);
@@ -1212,10 +1311,12 @@ void CodeGenAction::ExecuteAction() {
   std::unique_ptr<llvm::ToolOutputFile> OptRecordFile =
       std::move(*OptRecordFileOrErr);
 
-  EmitBackendOutput(
-      Diagnostics, CI.getHeaderSearchOpts(), CodeGenOpts, TargetOpts,
-      CI.getLangOpts(), CI.getTarget().getDataLayoutString(), TheModule.get(),
-      BA, CI.getFileManager().getVirtualFileSystemPtr(), std::move(OS));
+  EmitBackendOutput(Diagnostics, CI.getHeaderSearchOpts(), CodeGenOpts,
+                    TargetOpts, CI.getLangOpts(),
+                    CI.getCASOpts(), // MCCAS
+                    CI.getTarget().getDataLayoutString(), TheModule.get(), BA,
+                    CI.getFileManager().getVirtualFileSystemPtr(),
+                    std::move(OS));
   if (OptRecordFile)
     OptRecordFile->keep();
 }
