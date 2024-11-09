@@ -13,6 +13,12 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(CLANG_BUILT_STANDALONE TRUE)
 endif()
 
+#DECLANG CODES BEGIN  
+if(MSVC)
+  add_compile_options("/utf-8")
+endif()
+#DECLANG CODES END  
+
 # Make sure that our source directory is on the current cmake module path so that
 # we can include cmake files from this directory.
 list(INSERT CMAKE_MODULE_PATH 0
