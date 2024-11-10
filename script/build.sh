@@ -39,19 +39,19 @@ cd ../
 rm -f clang/lib/Driver/DeClangExtraProcess.cpp
 rm -rf llvm/lib/Transforms/AntiHack
 rm -rf llvm/include/llvm/Transforms/AntiHack
-rm -rf tools
+rm -rf AntiHack
 
 if [[ -e AntiHackDeNA ]]; then
   ln -s ../../../AntiHackDeNA/clang/DeClangExtraProcess.cpp clang/lib/Driver/DeClangExtraProcess.cpp
   ln -s ../../../AntiHackDeNA/src llvm/lib/Transforms/AntiHack
   ln -s ../../../../AntiHackDeNA/include llvm/include/llvm/Transforms/AntiHack
-  ln -s AntiHackDeNA/tools tools
-  bash tools/script/gen_dummy_files.sh
+  ln -s AntiHackDeNA AntiHack
+  bash AntiHack/tools/script/gen_dummy_files.sh
 else
   ln -s ../../../AntiHackOSS/clang/DeClangExtraProcess.cpp clang/lib/Driver/DeClangExtraProcess.cpp
   ln -s ../../../AntiHackOSS/src llvm/lib/Transforms/AntiHack
   ln -s ../../../../AntiHackOSS/include llvm/include/llvm/Transforms/AntiHack
-  ln -s AntiHackOSS/tools tools
+  ln -s AntiHackOSS AntiHack
 fi
 
 if [[ $# -eq 1 && $1 == "toolchain" ]]; then

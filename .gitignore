@@ -86,6 +86,7 @@ pythonenv*
 /llvm/cmake-build-debug
 /clang/cmake-build-debug
 /AntiHackOSS/tools/config/gen_config_*
+/AntiHack
 /tools
 .DS_Store
 /Release*
