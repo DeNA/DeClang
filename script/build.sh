@@ -113,10 +113,11 @@ else
 
   if [[ "_$OS" = "_Windows_NT" ]]; then
     echo "Build Release x64 in Visual Studio"
-    cmd /c '"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild  /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj'
+    echo '"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" && msbuild  /p:Configuration=Release;Platform=x64 tools\clang\tools\driver\clang.vcxproj' > build.bat
+    MSYS_NO_PATHCONV=1 cmd /c build.bat
   else
-   make llvm-headers
-   make -j 16
+    make llvm-headers
+    make -j 16
   fi
 fi
  
