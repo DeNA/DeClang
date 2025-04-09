@@ -267,7 +267,7 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   Args.AddAllArgValues(CmdArgs, options::OPT_Zlinker_input);
 
   //DECLANG CODES BEGIN
-  if (TC.getTriple().isAndroid()) {
+  if (TC.getTriple().isAndroid() && Args.hasArg(options::OPT_shared)) {
     CmdArgs.push_back("-Bsymbolic");
   }
   //DECLANG CODES END
