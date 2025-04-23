@@ -50,7 +50,8 @@ _Unwind_Reason_Code stop(int version, _Unwind_Action actions,
   // Unwind until the main is reached, above frames depend on the platform and
   // architecture.
   uintptr_t ip = _Unwind_GetIP(context);
-  if (ip >= (uintptr_t)&__start_main_func && ip < (uintptr_t)&__stop_main_func) {
+  if (ip >= (uintptr_t)&__start_main_func &&
+      ip < (uintptr_t)&__stop_main_func) {
     _Exit(0);
   }
 
@@ -66,7 +67,7 @@ __attribute__((noinline)) void foo() {
 #if defined(_LIBUNWIND_ARM_EHABI)
   // Create a mock exception object.
   memset(e, '\0', sizeof(*e));
-  strcpy(reinterpret_cast<char *>(&e->exception_class), "CLNGUNW");
+  memcpy(&e->exception_class, "CLNGUNW", sizeof(e->exception_class));
 #endif
   _Unwind_ForcedUnwind(e, stop, (void *)&foo);
 }

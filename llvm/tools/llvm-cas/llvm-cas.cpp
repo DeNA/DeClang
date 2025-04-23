@@ -527,7 +527,7 @@ static Expected<ObjectProxy> ingestFileSystemImpl(ObjectStore &CAS,
   llvm::DenseSet<llvm::sys::fs::UniqueID> SeenDirectories;
   for (auto &Path : Paths)
     if (Error E = recursiveAccess(**FS, Path, SeenDirectories))
-      return std::move(E);
+      return E;
 
   return (*FS)->createTreeFromNewAccesses(
       [&](const llvm::vfs::CachedDirectoryEntry &Entry,
@@ -544,7 +544,7 @@ Error checkCASIngestPath(StringRef CASPath, StringRef DataPath) {
     return createFileError(CASPath, EC);
   if (std::error_code EC = sys::fs::real_path(StringRef(DataPath), RealData))
     return createFileError(DataPath, EC);
-  if (RealCAS.startswith(RealData) &&
+  if (RealCAS.starts_with(RealData) &&
       (RealCAS.size() == RealData.size() ||
        sys::path::is_separator(RealCAS[RealData.size()])))
     return createStringError(inconvertibleErrorCode(),
@@ -687,7 +687,7 @@ static int checkLockFiles(StringRef CASPath) {
   // Get the normal size of an open CAS data pool to compare against later.
   uint64_t OpenSize = ExitOnErr(OpenCASAndGetDataPoolSize());
 
-  ThreadPool Pool;
+  DefaultThreadPool Pool;
   for (int i = 0; i < 1000; ++i) {
     Pool.async([&, i] {
       uint64_t DataPoolSize = ExitOnErr(OpenCASAndGetDataPoolSize());

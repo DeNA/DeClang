@@ -53,6 +53,7 @@ add_lldb_library(lldbPluginSymbolFileDWARF PLUGIN
     lldbSymbol
     lldbTarget
     lldbUtility
+    lldbValueObject
     lldbPluginObjCLanguage
     lldbPluginCPlusPlusLanguage
     lldbPluginExpressionParserClang

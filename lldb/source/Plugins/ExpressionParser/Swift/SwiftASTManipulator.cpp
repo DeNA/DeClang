@@ -124,13 +124,13 @@ void SwiftASTManipulatorBase::DoInitialization() {
         }
       }
       // Not in an extension.
-      if (FD->getNameStr().equals("$__lldb_trampoline"))
+      if (FD->getNameStr() == "$__lldb_trampoline")
         trampoline_decl = FD;
-      else if (FD->getNameStr().equals("$__lldb_expr"))
+      else if (FD->getNameStr() == "$__lldb_expr")
         entrypoint_decl = FD;
-      else if (FD->getNameStr().equals("$__lldb_sink"))
+      else if (FD->getNameStr() == "$__lldb_sink")
         sink_decl = FD;
-      else if (FD->getNameStr().equals("$__lldb_user_expr"))
+      else if (FD->getNameStr() == "$__lldb_user_expr")
         user_expr_decl = FD;
       return Action::SkipChildren();
     }
@@ -210,7 +210,7 @@ void SwiftASTManipulator::FindSpecialNames(
       if (auto *UDRE = llvm::dyn_cast<swift::UnresolvedDeclRefExpr>(E)) {
         swift::Identifier name = UDRE->getName().getBaseIdentifier();
 
-        if (m_prefix.empty() || name.str().startswith(m_prefix))
+        if (m_prefix.empty() || name.str().starts_with(m_prefix))
           m_names.push_back(name);
       }
 
@@ -540,7 +540,7 @@ void SwiftASTManipulator::FindVariableDeclarations(
   if (m_repl) {
     for (swift::Decl *decl : m_source_file.getTopLevelDecls()) {
       if (swift::VarDecl *var_decl = llvm::dyn_cast<swift::VarDecl>(decl)) {
-        if (!var_decl->getName().str().startswith("$")) {
+        if (!var_decl->getName().str().starts_with("$")) {
           register_one_var(var_decl);
         }
       }
@@ -562,7 +562,7 @@ void SwiftASTManipulator::FindVariableDeclarations(
           {
             swift::Identifier name = var_decl->getName();
 
-            if (name.str().startswith("$")) {
+            if (name.str().starts_with("$")) {
               var_decl->setDebuggerVar(true);
               register_one_var(var_decl);
             }
@@ -897,7 +897,7 @@ llvm::Expected<swift::Type> SwiftASTManipulator::GetSwiftTypeForVariable(
   // When injecting a value pack or pack count into the outer
   // lldb_expr function, treat it as an opaque raw pointer.
   if (m_bind_generic_types == lldb::eDontBind && variable.IsUnboundPack()) {
-    auto swift_ast_ctx = type_system_swift->GetSwiftASTContext(&m_sc);
+    auto swift_ast_ctx = type_system_swift->GetSwiftASTContext(m_sc);
     if (!swift_ast_ctx)
       return llvm::createStringError("no typesystem for variable " +
                                      variable.GetName().str());

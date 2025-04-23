@@ -74,9 +74,9 @@ void BreakpointSite::Dump(Stream *s) const {
     return;
 
   s->Printf("BreakpointSite %u: addr = 0x%8.8" PRIx64
-            "  type = %s breakpoint  hw_index = %i  hit_count = %-4u",
+            "  type = %s breakpoint  hit_count = %-4u",
             GetID(), (uint64_t)m_addr, IsHardware() ? "hardware" : "software",
-            GetHardwareIndex(), GetHitCount());
+            GetHitCount());
 }
 
 void BreakpointSite::GetDescription(Stream *s, lldb::DescriptionLevel level) {
@@ -85,6 +85,23 @@ void BreakpointSite::GetDescription(Stream *s, lldb::DescriptionLevel level) {
     s->Printf("breakpoint site: %d at 0x%8.8" PRIx64, GetID(),
               GetLoadAddress());
   m_constituents.GetDescription(s, level);
+}
+
+std::optional<uint32_t> BreakpointSite::GetSuggestedStackFrameIndex() {
+
+  std::optional<uint32_t> result;
+  std::lock_guard<std::recursive_mutex> guard(m_constituents_mutex);
+  for (BreakpointLocationSP loc_sp : m_constituents.BreakpointLocations()) {
+    std::optional<uint32_t> loc_frame_index =
+        loc_sp->GetSuggestedStackFrameIndex();
+    if (loc_frame_index) {
+      if (result)
+        result = std::max(*loc_frame_index, *result);
+      else
+        result = loc_frame_index;
+    }
+  }
+  return result;
 }
 
 bool BreakpointSite::IsInternal() const { return m_constituents.IsInternal(); }

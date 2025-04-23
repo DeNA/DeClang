@@ -26,11 +26,13 @@ add_lldb_library(lldbSymbol ${PLUGIN_DEPENDENCY_ARG}
   CompilerDecl.cpp
   CompilerDeclContext.cpp
   CompilerType.cpp
+  SaveCoreOptions.cpp
   DWARFCallFrameInfo.cpp
   DebugMacros.cpp
   DeclVendor.cpp
   FuncUnwinders.cpp
   Function.cpp
+  ImportedDeclaration.cpp
   LineEntry.cpp
   LineTable.cpp
   ObjectContainer.cpp
@@ -63,6 +65,7 @@ add_lldb_library(lldbSymbol ${PLUGIN_DEPENDENCY_ARG}
     lldbHost
     lldbTarget
     lldbUtility
+    lldbValueObject
     ${LLDB_PLUGIN_DEPENDENCIES}
     ${SWIFT_LIBS}
 

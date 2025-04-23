@@ -2,7 +2,6 @@ import lldb
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 
 class TestSwiftErrorHandlingMissingTypes(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
@@ -20,7 +19,7 @@ class TestSwiftErrorHandlingMissingTypes(TestBase):
         val = var_object.GetChildAtIndex(1)
         # FIXME: Should be True, for now it's just a string
         self.assertFalse(val.GetError().Fail())
-        self.expect('v object',
+        self.expect('frame var object',
                     substrs=['missing debug info for Clang type', 'FromC'])
-        self.expect('v enm',
+        self.expect('frame var enm',
                     substrs=['missing debug info for Clang type', 'ImportedEnum'])

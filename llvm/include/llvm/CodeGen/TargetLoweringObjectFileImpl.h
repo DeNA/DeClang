@@ -312,6 +312,8 @@ public:
                                     const TargetMachine &TM) const override;
   MCSection *getExplicitSectionGlobal(const GlobalObject *GO, SectionKind Kind,
                                       const TargetMachine &TM) const override;
+  MCSection *getSectionForLSDA(const Function &F, const MCSymbol &FnSym,
+                               const TargetMachine &TM) const override;
 };
 
 } // end namespace llvm

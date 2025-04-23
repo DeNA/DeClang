@@ -672,7 +672,7 @@ Expected<IFPtr> parseToInterfaceFile(const Object *File) {
       F->addParentUmbrella(Target, Lib);
   for (auto &[Path, Targets] : RPaths)
     for (auto Target : Targets)
-      F->addRPath(Target, Path);
+      F->addRPath(Path, Target);
   for (auto &[Targets, Symbols] : Exports)
     for (auto &Sym : Symbols)
       F->addSymbol(Sym.Kind, Sym.Name, Targets, Sym.Flags);
@@ -758,9 +758,9 @@ std::vector<std::string> serializeTargets(const AggregateT Targets,
   if (Targets.size() == ActiveTargets.size())
     return TargetsStr;
 
-  llvm::for_each(Targets, [&TargetsStr](const MachO::Target &Target) {
+  for (const MachO::Target &Target : Targets)
     TargetsStr.emplace_back(getFormattedStr(Target));
-  });
+
   return TargetsStr;
 }
 

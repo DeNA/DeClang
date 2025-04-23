@@ -21,6 +21,8 @@
 
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLForwardCompat.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include <optional>
 #include <set>
@@ -60,6 +62,8 @@ struct CompilerContext {
   CompilerContextKind kind;
   ConstString name;
 };
+llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                              const CompilerContext &rhs);
 
 /// Match \p context_chain against \p pattern, which may contain "Any"
 /// kinds. The \p context_chain should *not* contain any "Any" kinds.
@@ -78,7 +82,10 @@ FLAGS_ENUM(TypeQueryOptions){
     /// When true, the find types call should stop the query as soon as a single
     /// matching type is found. When false, the type query should find all
     /// matching types.
-    e_find_one = (1u << 2),
+    e_find_one = (1u << 4),
+    // If set, treat TypeQuery::m_name as a mangled name that should be
+    // searched.
+    e_search_by_mangled_name = (1u << 5),
 };
 LLDB_MARK_AS_BITMASK_ENUM(TypeQueryOptions)
 
@@ -276,6 +283,19 @@ public:
       m_options &= (e_exact_match | e_find_one);
   }
 
+  /// Returns true if the type query is supposed to treat the name to be
+  /// searched as a mangled name.
+  bool GetSearchByMangledName() const {
+    return (m_options & e_search_by_mangled_name) != 0;
+  }
+
+  void SetSearchByMangledName(bool b) {
+    if (b)
+      m_options |= e_search_by_mangled_name;
+    else
+      m_options &= ~e_search_by_mangled_name;
+  }
+
   /// Access the internal compiler context array.
   ///
   /// Clients can use this to populate the context manually.
@@ -401,7 +421,9 @@ public:
     /// This type is the type whose UID is m_encoding_uid as an atomic type.
     eEncodingIsAtomicUID,
     /// This type is the synthetic type whose UID is m_encoding_uid.
-    eEncodingIsSyntheticUID
+    eEncodingIsSyntheticUID,
+    /// This type is a signed pointer.
+    eEncodingIsLLVMPtrAuthUID
   };
 
   enum class ResolveState : unsigned char {
@@ -457,15 +479,6 @@ public:
 
   ConstString GetQualifiedName();
 
-  void DumpValue(ExecutionContext *exe_ctx, Stream *s,
-                 const DataExtractor &data, uint32_t data_offset,
-                 bool show_type, bool show_summary, bool verbose,
-                 lldb::Format format = lldb::eFormatDefault);
-
-  bool DumpValueInMemory(ExecutionContext *exe_ctx, Stream *s,
-                         lldb::addr_t address, AddressType address_type,
-                         bool show_types, bool show_summary, bool verbose);
-
   bool ReadFromMemory(ExecutionContext *exe_ctx, lldb::addr_t address,
                       AddressType address_type, DataExtractor &data);
 
@@ -501,12 +514,37 @@ public:
 
   static int Compare(const Type &a, const Type &b);
 
+  // Represents a parsed type name coming out of GetTypeScopeAndBasename. The
+  // structure holds StringRefs pointing to portions of the original name, and
+  // so must not be used after the name is destroyed.
+  struct ParsedName {
+    lldb::TypeClass type_class = lldb::eTypeClassAny;
+
+    // Scopes of the type, starting with the outermost. Absolute type references
+    // have a "::" as the first scope.
+    llvm::SmallVector<llvm::StringRef> scope;
+
+    llvm::StringRef basename;
+
+    friend bool operator==(const ParsedName &lhs, const ParsedName &rhs) {
+      return lhs.type_class == rhs.type_class && lhs.scope == rhs.scope &&
+             lhs.basename == rhs.basename;
+    }
+
+    friend llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
+                                         const ParsedName &name) {
+      return os << llvm::formatv(
+                 "Type::ParsedName({0:x}, [{1}], {2})",
+                 llvm::to_underlying(name.type_class),
+                 llvm::make_range(name.scope.begin(), name.scope.end()),
+                 name.basename);
+    }
+  };
   // From a fully qualified typename, split the type into the type basename and
   // the remaining type scope (namespaces/classes).
-  static bool GetTypeScopeAndBasename(llvm::StringRef name,
-                                      llvm::StringRef &scope,
-                                      llvm::StringRef &basename,
-                                      lldb::TypeClass &type_class);
+  static std::optional<ParsedName>
+  GetTypeScopeAndBasename(llvm::StringRef name);
+
   void SetEncodingType(Type *encoding_type) { m_encoding_type = encoding_type; }
 
   uint32_t GetEncodingMask();
@@ -623,6 +661,8 @@ public:
 
   bool GetDescription(lldb_private::Stream &strm,
                       lldb::DescriptionLevel description_level);
+
+  CompilerType FindDirectNestedType(llvm::StringRef name);
 
 private:
   bool CheckModule(lldb::ModuleSP &module_sp) const;

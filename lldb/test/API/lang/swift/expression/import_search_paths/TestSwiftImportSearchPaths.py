@@ -2,19 +2,16 @@ import lldb
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 
 class TestSwiftImportSearchPaths(lldbtest.TestBase):
 
     NO_DEBUG_INFO_TESTCASE = True
     mydir = lldbtest.TestBase.compute_mydir(__file__)
 
-    @skipIf(bugnumber='rdar://135553659')
     @swiftTest
     def test_positive(self):
         self.do_test('true')
 
-    @skipIf(bugnumber='rdar://135553659')
     @swiftTest
     def test_negative(self):
         self.do_test('false')
@@ -40,11 +37,7 @@ class TestSwiftImportSearchPaths(lldbtest.TestBase):
         else:
             prefix = 'NEGATIVE'
         self.filecheck('platform shell cat "%s"' % types_log, __file__,
-                       '--check-prefix=CHECK_MOD_'+prefix)
-        self.filecheck('platform shell cat "%s"' % types_log, __file__,
                        '--check-prefix=CHECK_EXP_'+prefix)
-# CHECK_MOD_POSITIVE: SwiftASTContextForModule("a.out")::LogConfiguration(){{.*hidden$}}
-# CHECK_MOD_NEGATIVE: SwiftASTContextForModule("a.out")::LogConfiguration(){{.*hidden$}}
-# CHECK_EXP_POSITIVE: SwiftASTContextForExpressions::LogConfiguration(){{.*hidden$}}
-# CHECK_EXP_NEGATIVE-NOT: SwiftASTContextForExpressions::LogConfiguration(){{.*hidden$}}
-# CHECK_EXP_NEGATIVE: SwiftASTContextForExpressions::LogConfiguration(){{.*}}Extra clang arguments
+# CHECK_EXP_POSITIVE: SwiftASTContextForExpressions{{.*}}::LogConfiguration(){{.*hidden$}}
+# CHECK_EXP_NEGATIVE-NOT: SwiftASTContextForExpressions{{.*}}::LogConfiguration(){{.*hidden$}}
+# CHECK_EXP_NEGATIVE: SwiftASTContextForExpressions{{.*}}::LogConfiguration(){{.*}}Extra clang arguments

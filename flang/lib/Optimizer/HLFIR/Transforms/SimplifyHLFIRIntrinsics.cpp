@@ -35,7 +35,7 @@ class TransposeAsElementalConversion
 public:
   using mlir::OpRewritePattern<hlfir::TransposeOp>::OpRewritePattern;
 
-  mlir::LogicalResult
+  llvm::LogicalResult
   matchAndRewrite(hlfir::TransposeOp transpose,
                   mlir::PatternRewriter &rewriter) const override {
     mlir::Location loc = transpose.getLoc();
@@ -50,7 +50,9 @@ public:
     auto genKernel = [&array](mlir::Location loc, fir::FirOpBuilder &builder,
                               mlir::ValueRange inputIndices) -> hlfir::Entity {
       assert(inputIndices.size() == 2 && "checked in TransposeOp::validate");
-      mlir::ValueRange transposedIndices{{inputIndices[1], inputIndices[0]}};
+      const std::initializer_list<mlir::Value> initList = {inputIndices[1],
+                                                           inputIndices[0]};
+      mlir::ValueRange transposedIndices(initList);
       hlfir::Entity element =
           hlfir::getElementAt(loc, builder, array, transposedIndices);
       hlfir::Entity val = hlfir::loadTrivialScalar(loc, builder, element);
@@ -58,7 +60,8 @@ public:
     };
     hlfir::ElementalOp elementalOp = hlfir::genElementalOp(
         loc, builder, elementType, resultShape, typeParams, genKernel,
-        /*isUnordered=*/true, transpose.getResult().getType());
+        /*isUnordered=*/true, /*polymorphicMold=*/nullptr,
+        transpose.getResult().getType());
 
     // it wouldn't be safe to replace block arguments with a different
     // hlfir.expr type. Types can differ due to differing amounts of shape
@@ -91,7 +94,6 @@ class SimplifyHLFIRIntrinsics
     : public hlfir::impl::SimplifyHLFIRIntrinsicsBase<SimplifyHLFIRIntrinsics> {
 public:
   void runOnOperation() override {
-    mlir::func::FuncOp func = this->getOperation();
     mlir::MLIRContext *context = &getContext();
     mlir::RewritePatternSet patterns(context);
     patterns.insert<TransposeAsElementalConversion>(context);
@@ -100,20 +102,17 @@ public:
     // by hlfir.elemental)
     target.addDynamicallyLegalOp<hlfir::TransposeOp>(
         [](hlfir::TransposeOp transpose) {
-          return transpose.getType().cast<hlfir::ExprType>().isPolymorphic();
+          return mlir::cast<hlfir::ExprType>(transpose.getType())
+              .isPolymorphic();
         });
     target.markUnknownOpDynamicallyLegal(
         [](mlir::Operation *) { return true; });
-    if (mlir::failed(
-            mlir::applyFullConversion(func, target, std::move(patterns)))) {
-      mlir::emitError(func->getLoc(),
+    if (mlir::failed(mlir::applyFullConversion(getOperation(), target,
+                                               std::move(patterns)))) {
+      mlir::emitError(getOperation()->getLoc(),
                       "failure in HLFIR intrinsic simplification");
       signalPassFailure();
     }
   }
 };
 } // namespace
-
-std::unique_ptr<mlir::Pass> hlfir::createSimplifyHLFIRIntrinsicsPass() {
-  return std::make_unique<SimplifyHLFIRIntrinsics>();
-}

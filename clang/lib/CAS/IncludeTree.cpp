@@ -139,7 +139,7 @@ Expected<IncludeTree> IncludeTree::create(
   Buffer += Kind;
 
   llvm::raw_svector_ostream BufOS(Buffer);
-  llvm::support::endian::Writer Writer(BufOS, llvm::support::little);
+  llvm::support::endian::Writer Writer(BufOS, llvm::endianness::little);
 
   for (const auto &Include : Includes) {
     assert((Include.Kind == NodeKind::Tree &&
@@ -185,7 +185,7 @@ uint32_t IncludeTree::getIncludeOffset(size_t I) const {
   StringRef Data = dataSkippingFlags();
   assert(Data.size() >= (I + 1) * sizeof(uint32_t));
   uint32_t Offset =
-      llvm::support::endian::read<uint32_t, llvm::support::little>(
+      llvm::support::endian::read<uint32_t, llvm::endianness::little>(
           Data.data() + I * (sizeof(uint32_t) + 1));
   return Offset;
 }
@@ -233,7 +233,7 @@ IncludeTree::ModuleImport::create(ObjectStore &DB, StringRef ModuleName,
 }
 
 size_t IncludeTree::FileList::getNumFilesCurrentList() const {
-  return llvm::support::endian::read<uint32_t, llvm::support::little>(
+  return llvm::support::endian::read<uint32_t, llvm::endianness::little>(
       getData().data());
 }
 
@@ -242,7 +242,7 @@ IncludeTree::FileList::getFileSize(size_t I) const {
   assert(I < getNumFilesCurrentList());
   StringRef Data = getData().drop_front(sizeof(uint32_t));
   assert(Data.size() >= (I + 1) * sizeof(FileSizeTy));
-  return llvm::support::endian::read<FileSizeTy, llvm::support::little>(
+  return llvm::support::endian::read<FileSizeTy, llvm::endianness::little>(
       Data.data() + I * sizeof(FileSizeTy));
 }
 
@@ -257,7 +257,7 @@ llvm::Error IncludeTree::FileList::forEachFileImpl(
       return llvm::Error::success();
 
     if (Index < FileCount) {
-      auto Include = getFile(Ref);
+      auto Include = File::get(getCAS(), Ref);
       if (!Include)
         return Include.takeError();
       return Callback(std::move(*Include), getFileSize(Index));
@@ -287,7 +287,7 @@ IncludeTree::FileList::create(ObjectStore &DB, ArrayRef<FileEntry> Files,
   Buffer.reserve(sizeof(uint32_t) + Files.size() * sizeof(FileSizeTy));
 
   llvm::raw_svector_ostream BufOS(Buffer);
-  llvm::support::endian::Writer Writer(BufOS, llvm::support::little);
+  llvm::support::endian::Writer Writer(BufOS, llvm::endianness::little);
   Writer.write(static_cast<uint32_t>(Files.size()));
 
   for (const FileEntry &Entry : Files) {
@@ -320,7 +320,7 @@ bool IncludeTree::FileList::isValid(const ObjectProxy &Node) {
   if (Data.size() < sizeof(uint32_t))
     return false;
   unsigned NumFiles =
-      llvm::support::endian::read<uint32_t, llvm::support::little>(Data.data());
+      llvm::support::endian::read<uint32_t, llvm::endianness::little>(Data.data());
   return NumFiles != 0 && NumFiles <= Base.getNumReferences() &&
          Data.size() == sizeof(uint32_t) + NumFiles * sizeof(FileSizeTy);
 }
@@ -412,7 +412,7 @@ IncludeTree::Module::create(ObjectStore &DB, StringRef ModuleName,
 
   SmallString<64> Buffer;
   llvm::raw_svector_ostream BufOS(Buffer);
-  llvm::support::endian::Writer Writer(BufOS, llvm::support::little);
+  llvm::support::endian::Writer Writer(BufOS, llvm::endianness::little);
   Writer.write(RawFlags);
 
   Buffer.append(ModuleName);
@@ -429,7 +429,7 @@ IncludeTree::Module::create(ObjectStore &DB, StringRef ModuleName,
 }
 
 uint16_t IncludeTree::Module::rawFlags() const {
-  return llvm::support::endian::read<uint16_t, llvm::support::little>(
+  return llvm::support::endian::read<uint16_t, llvm::endianness::little>(
       getData().data());
 }
 
@@ -512,7 +512,7 @@ IncludeTree::Module::ExportList::create(ObjectStore &DB,
   // Refs: export names
   SmallString<64> Buffer;
   llvm::raw_svector_ostream BufOS(Buffer);
-  llvm::support::endian::Writer Writer(BufOS, llvm::support::little);
+  llvm::support::endian::Writer Writer(BufOS, llvm::endianness::little);
   SmallVector<ObjectRef> Refs;
   llvm::SmallBitVector WildcardBits;
   for (Export E : Exports) {
@@ -553,7 +553,7 @@ IncludeTree::Module::LinkLibraryList::create(ObjectStore &DB,
   // Refs: library names
   SmallString<64> Buffer;
   llvm::raw_svector_ostream BufOS(Buffer);
-  llvm::support::endian::Writer Writer(BufOS, llvm::support::little);
+  llvm::support::endian::Writer Writer(BufOS, llvm::endianness::little);
   SmallVector<ObjectRef> Refs;
   llvm::SmallBitVector FrameworkBits;
   for (LinkLibrary L : Libraries) {
@@ -1036,54 +1036,66 @@ cas::createIncludeTreeFileSystem(IncludeTreeRoot &Root) {
   if (!FileList)
     return FileList.takeError();
 
-  return createIncludeTreeFileSystem(Root.getCAS(), *FileList);
+  std::vector<IncludeTree::FileList::FileEntry> Files;
+  Files.reserve(FileList->getNumReferences());
+
+  if (auto Err = FileList->forEachFile(
+          [&](IncludeTree::File File, IncludeTree::FileList::FileSizeTy Size) {
+            Files.push_back({File.getRef(), Size});
+            return llvm::Error::success();
+          }))
+    return std::move(Err);
+
+  return createIncludeTreeFileSystem(Root.getCAS(), Files);
 }
 
 Expected<IntrusiveRefCntPtr<llvm::vfs::FileSystem>>
-cas::createIncludeTreeFileSystem(llvm::cas::ObjectStore &CAS,
-                                 IncludeTree::FileList &FileList) {
+cas::createIncludeTreeFileSystem(
+    llvm::cas::ObjectStore &CAS,
+    llvm::ArrayRef<IncludeTree::FileList::FileEntry> List) {
   // Map from FilenameRef to ContentsRef.
   llvm::DenseMap<ObjectRef, ObjectRef> SeenContents;
 
   IntrusiveRefCntPtr<IncludeTreeFileSystem> IncludeTreeFS =
       new IncludeTreeFileSystem(CAS);
-  llvm::Error E = FileList.forEachFile(
-      [&](IncludeTree::File File,
-          IncludeTree::FileList::FileSizeTy Size) -> llvm::Error {
-        auto InsertPair = SeenContents.insert(
-            std::make_pair(File.getFilenameRef(), File.getContentsRef()));
-        if (!InsertPair.second) {
-          if (InsertPair.first->second != File.getContentsRef())
-            return diagnoseFileChange(File, InsertPair.first->second);
-          return llvm::Error::success();
-        }
 
-        auto FilenameBlob = File.getFilename();
-        if (!FilenameBlob)
-          return FilenameBlob.takeError();
+  for (auto &Entry : List) {
+    auto File = IncludeTree::File::get(CAS, Entry.FileRef);
 
-        SmallString<128> Filename(FilenameBlob->getData());
-        // Strip './' in the filename to match the behaviour of ASTWriter; we
-        // also strip './' in IncludeTreeFileSystem::getPath.
-        assert(Filename != ".");
-        llvm::sys::path::remove_dots(Filename);
+    if (!File)
+      return File.takeError();
 
-        StringRef DirName = llvm::sys::path::parent_path(Filename);
-        if (DirName.empty())
-          DirName = ".";
-        auto &DirEntry = IncludeTreeFS->Directories[DirName];
-        if (DirEntry == llvm::sys::fs::UniqueID()) {
-          DirEntry = llvm::vfs::getNextVirtualUniqueID();
-        }
+    auto InsertPair = SeenContents.insert(
+        std::make_pair(File->getFilenameRef(), File->getContentsRef()));
+    if (!InsertPair.second) {
+      if (InsertPair.first->second != File->getContentsRef())
+        return diagnoseFileChange(*File, InsertPair.first->second);
+      continue;
+    }
 
-        IncludeTreeFS->Files.insert(
-            std::make_pair(Filename, IncludeTreeFileSystem::FileEntry{
-                                         File.getContentsRef(), Size,
+    auto FilenameBlob = File->getFilename();
+    if (!FilenameBlob)
+      return FilenameBlob.takeError();
+
+    SmallString<128> Filename(FilenameBlob->getData());
+    // Strip './' in the filename to match the behaviour of ASTWriter; we
+    // also strip './' in IncludeTreeFileSystem::getPath.
+    assert(Filename != ".");
+    llvm::sys::path::remove_dots(Filename);
+
+    StringRef DirName = llvm::sys::path::parent_path(Filename);
+    if (DirName.empty())
+      DirName = ".";
+    auto &DirEntry = IncludeTreeFS->Directories[DirName];
+    if (DirEntry == llvm::sys::fs::UniqueID()) {
+      DirEntry = llvm::vfs::getNextVirtualUniqueID();
+    }
+
+    IncludeTreeFS->Files.insert(std::make_pair(
+        Filename,
+        IncludeTreeFileSystem::FileEntry{File->getContentsRef(), Entry.Size,
                                          llvm::vfs::getNextVirtualUniqueID()}));
-        return llvm::Error::success();
-      });
-  if (E)
-    return std::move(E);
+  }
 
   return IncludeTreeFS;
 }

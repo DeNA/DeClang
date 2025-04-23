@@ -273,17 +273,16 @@ protected:
 
   PointerType *GetI8PtrTy() {
     if (!m_i8ptr_ty)
-      m_i8ptr_ty = llvm::Type::getInt8PtrTy(m_module.getContext());
+      m_i8ptr_ty = llvm::PointerType::getUnqual(m_module.getContext());
 
     return m_i8ptr_ty;
   }
 
   IntegerType *GetIntptrTy() {
     if (!m_intptr_ty) {
-      llvm::DataLayout data_layout(&m_module);
-
-      m_intptr_ty = llvm::Type::getIntNTy(m_module.getContext(),
-                                          data_layout.getPointerSizeInBits());
+      m_intptr_ty = llvm::Type::getIntNTy(
+          m_module.getContext(),
+          m_module.getDataLayout().getPointerSizeInBits());
     }
 
     return m_intptr_ty;
@@ -332,7 +331,8 @@ protected:
       return false;
 
     // Insert an instruction to call the helper with the result
-    CallInst::Create(m_valid_pointer_check_func, dereferenced_ptr, "", inst);
+    CallInst::Create(m_valid_pointer_check_func, dereferenced_ptr, "",
+                     inst->getIterator());
 
     return true;
   }
@@ -419,7 +419,7 @@ protected:
 
     ArrayRef<llvm::Value *> args(arg_array, 2);
 
-    CallInst::Create(m_objc_object_check_func, args, "", inst);
+    CallInst::Create(m_objc_object_check_func, args, "", inst->getIterator());
 
     return true;
   }

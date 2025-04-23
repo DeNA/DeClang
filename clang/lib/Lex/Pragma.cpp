@@ -426,7 +426,7 @@ void Preprocessor::HandlePragmaOnce(Token &OnceTok) {
 
   // Get the current file lexer we're looking at.  Ignore _Pragma 'files' etc.
   // Mark the file as a once-only file now.
-  HeaderInfo.MarkFileIncludeOnce(getCurrentFileLexer()->getFileEntry());
+  HeaderInfo.MarkFileIncludeOnce(*getCurrentFileLexer()->getFileEntry());
 }
 
 void Preprocessor::HandlePragmaMark(Token &MarkTok) {
@@ -491,7 +491,7 @@ void Preprocessor::HandlePragmaSystemHeader(Token &SysHeaderTok) {
   PreprocessorLexer *TheLexer = getCurrentFileLexer();
 
   // Mark the file as a system header.
-  HeaderInfo.MarkFileSystemHeader(TheLexer->getFileEntry());
+  HeaderInfo.MarkFileSystemHeader(*TheLexer->getFileEntry());
 
   PresumedLoc PLoc = SourceMgr.getPresumedLoc(SysHeaderTok.getLocation());
   if (PLoc.isInvalid())
@@ -548,7 +548,7 @@ void Preprocessor::HandlePragmaDependency(Token &DependencyTok) {
     return;
   }
 
-  const FileEntry *CurFile = getCurrentFileLexer()->getFileEntry();
+  OptionalFileEntryRef CurFile = getCurrentFileLexer()->getFileEntry();
 
   // If this file is older than the file it depends on, emit a diagnostic.
   if (CurFile && CurFile->getModificationTime() < File->getModificationTime()) {
@@ -1444,7 +1444,8 @@ struct PragmaWarningHandler : public PragmaHandler {
                                  .Case("once", PPCallbacks::PWS_Once)
                                  .Case("suppress", PPCallbacks::PWS_Suppress)
                                  .Default(-1);
-          if ((SpecifierValid = SpecifierInt != -1))
+          SpecifierValid = SpecifierInt != -1;
+          if (SpecifierValid)
             Specifier =
                 static_cast<PPCallbacks::PragmaWarningSpecifier>(SpecifierInt);
 
@@ -1751,6 +1752,7 @@ struct PragmaModuleBeginHandler : public PragmaHandler {
     // Find the module we're entering. We require that a module map for it
     // be loaded or implicitly loadable.
     auto &HSI = PP.getHeaderSearchInfo();
+    auto &MM = HSI.getModuleMap();
     Module *M = HSI.lookupModule(Current, ModuleName.front().second);
     if (!M) {
       PP.Diag(ModuleName.front().second,
@@ -1758,7 +1760,7 @@ struct PragmaModuleBeginHandler : public PragmaHandler {
       return;
     }
     for (unsigned I = 1; I != ModuleName.size(); ++I) {
-      auto *NewM = M->findOrInferSubmodule(ModuleName[I].first->getName());
+      auto *NewM = MM.findOrInferSubmodule(M, ModuleName[I].first->getName());
       if (!NewM) {
         PP.Diag(ModuleName[I].second, diag::err_pp_module_begin_no_submodule)
           << M->getFullModuleName() << ModuleName[I].first;
@@ -1769,7 +1771,7 @@ struct PragmaModuleBeginHandler : public PragmaHandler {
 
     // If the module isn't available, it doesn't make sense to enter it.
     if (Preprocessor::checkModuleIsAvailable(
-            PP.getLangOpts(), PP.getTargetInfo(), PP.getDiagnostics(), M)) {
+            PP.getLangOpts(), PP.getTargetInfo(), *M, PP.getDiagnostics())) {
       PP.Diag(BeginLoc, diag::note_pp_module_begin_here)
         << M->getTopLevelModuleName();
       return;

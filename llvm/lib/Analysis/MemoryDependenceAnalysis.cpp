@@ -360,11 +360,46 @@ MemoryDependenceResults::getInvariantGroupPointerDependency(LoadInst *LI,
   return MemDepResult::getNonLocal();
 }
 
+// Check if SI that may alias with MemLoc can be safely skipped. This is
+// possible in case if SI can only must alias or no alias with MemLoc (no
+// partial overlapping possible) and it writes the same value that MemLoc
+// contains now (it was loaded before this store and was not modified in
+// between).
+static bool canSkipClobberingStore(const StoreInst *SI,
+                                   const MemoryLocation &MemLoc,
+                                   Align MemLocAlign, BatchAAResults &BatchAA,
+                                   unsigned ScanLimit) {
+  if (!MemLoc.Size.hasValue())
+    return false;
+  if (MemoryLocation::get(SI).Size != MemLoc.Size)
+    return false;
+  if (MemLoc.Size.isScalable())
+    return false;
+  if (std::min(MemLocAlign, SI->getAlign()).value() <
+      MemLoc.Size.getValue().getKnownMinValue())
+    return false;
+
+  auto *LI = dyn_cast<LoadInst>(SI->getValueOperand());
+  if (!LI || LI->getParent() != SI->getParent())
+    return false;
+  if (BatchAA.alias(MemoryLocation::get(LI), MemLoc) != AliasResult::MustAlias)
+    return false;
+  unsigned NumVisitedInsts = 0;
+  for (const Instruction *I = LI; I != SI; I = I->getNextNonDebugInstruction())
+    if (++NumVisitedInsts > ScanLimit ||
+        isModSet(BatchAA.getModRefInfo(I, MemLoc)))
+      return false;
+
+  return true;
+}
+
 MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
     const MemoryLocation &MemLoc, bool isLoad, BasicBlock::iterator ScanIt,
     BasicBlock *BB, Instruction *QueryInst, unsigned *Limit,
     BatchAAResults &BatchAA) {
   bool isInvariantLoad = false;
+  Align MemLocAlign =
+      MemLoc.Ptr->getPointerAlignment(BB->getDataLayout());
 
   unsigned DefaultLimit = getDefaultBlockScanLimit();
   if (!Limit)
@@ -402,11 +437,12 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
   // do want to respect mustalias results since defs are useful for value
   // forwarding, but any mayalias write can be assumed to be noalias.
   // Arguably, this logic should be pushed inside AliasAnalysis itself.
-  if (isLoad && QueryInst) {
-    LoadInst *LI = dyn_cast<LoadInst>(QueryInst);
-    if (LI && LI->hasMetadata(LLVMContext::MD_invariant_load))
-      isInvariantLoad = true;
-  }
+  if (isLoad && QueryInst)
+    if (LoadInst *LI = dyn_cast<LoadInst>(QueryInst)) {
+      if (LI->hasMetadata(LLVMContext::MD_invariant_load))
+        isInvariantLoad = true;
+      MemLocAlign = LI->getAlign();
+    }
 
   // True for volatile instruction.
   // For Load/Store return true if atomic ordering is stronger than AO,
@@ -576,6 +612,8 @@ MemDepResult MemoryDependenceResults::getSimplePointerDependencyFrom(
       if (R == AliasResult::MustAlias)
         return MemDepResult::getDef(Inst);
       if (isInvariantLoad)
+        continue;
+      if (canSkipClobberingStore(SI, MemLoc, MemLocAlign, BatchAA, *Limit))
         continue;
       return MemDepResult::getClobber(Inst);
     }
@@ -872,7 +910,7 @@ void MemoryDependenceResults::getNonLocalPointerDependency(
                                        const_cast<Value *>(Loc.Ptr)));
     return;
   }
-  const DataLayout &DL = FromBB->getModule()->getDataLayout();
+  const DataLayout &DL = FromBB->getDataLayout();
   PHITransAddr Address(const_cast<Value *>(Loc.Ptr), DL, &AC);
 
   // This is the set of blocks we've inspected, and the pointer we consider in
@@ -1064,7 +1102,8 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
         // be conservative.
         ThrowOutEverything =
             CacheInfo->Size.isPrecise() != Loc.Size.isPrecise() ||
-            CacheInfo->Size.getValue() < Loc.Size.getValue();
+            !TypeSize::isKnownGE(CacheInfo->Size.getValue(),
+                                 Loc.Size.getValue());
       } else {
         // For our purposes, unknown size > all others.
         ThrowOutEverything = !Loc.Size.hasValue();
@@ -1253,16 +1292,16 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
         if (InsertRes.first->second != Pointer.getAddr()) {
           // Make sure to clean up the Visited map before continuing on to
           // PredTranslationFailure.
-          for (unsigned i = 0; i < NewBlocks.size(); i++)
-            Visited.erase(NewBlocks[i]);
+          for (auto *NewBlock : NewBlocks)
+            Visited.erase(NewBlock);
           goto PredTranslationFailure;
         }
       }
       if (NewBlocks.size() > WorklistEntries) {
         // Make sure to clean up the Visited map before continuing on to
         // PredTranslationFailure.
-        for (unsigned i = 0; i < NewBlocks.size(); i++)
-          Visited.erase(NewBlocks[i]);
+        for (auto *NewBlock : NewBlocks)
+          Visited.erase(NewBlock);
         GotWorklistLimit = true;
         goto PredTranslationFailure;
       }
@@ -1320,8 +1359,8 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
 
         // Make sure to clean up the Visited map before continuing on to
         // PredTranslationFailure.
-        for (unsigned i = 0, n = PredList.size(); i < n; ++i)
-          Visited.erase(PredList[i].first);
+        for (const auto &Pred : PredList)
+          Visited.erase(Pred.first);
 
         goto PredTranslationFailure;
       }
@@ -1332,9 +1371,9 @@ bool MemoryDependenceResults::getNonLocalPointerDepFromBB(
     // any results for.  (getNonLocalPointerDepFromBB will modify our
     // datastructures in ways the code after the PredTranslationFailure label
     // doesn't expect.)
-    for (unsigned i = 0, n = PredList.size(); i < n; ++i) {
-      BasicBlock *Pred = PredList[i].first;
-      PHITransAddr &PredPointer = PredList[i].second;
+    for (auto &I : PredList) {
+      BasicBlock *Pred = I.first;
+      PHITransAddr &PredPointer = I.second;
       Value *PredPtrVal = PredPointer.getAddr();
 
       bool CanTranslate = true;

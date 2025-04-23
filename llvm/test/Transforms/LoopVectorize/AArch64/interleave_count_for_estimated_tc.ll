@@ -181,10 +181,10 @@ define void @loop_with_profile_tc_128(ptr noalias %p, ptr noalias %q, i64 %n) {
 ; CHECK-IR-SAME: ptr noalias [[P:%.*]], ptr noalias [[Q:%.*]], i64 [[N:%.*]]) {
 ; CHECK-IR-NEXT:  iter.check:
 ; CHECK-IR-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ult i64 [[N]], 8
-; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[VEC_EPILOG_SCALAR_PH:%.*]], label [[VECTOR_MAIN_LOOP_ITER_CHECK:%.*]]
+; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[VEC_EPILOG_SCALAR_PH:%.*]], label [[VECTOR_MAIN_LOOP_ITER_CHECK:%.*]], !prof [[PROF6:![0-9]+]]
 ; CHECK-IR:       vector.main.loop.iter.check:
 ; CHECK-IR-NEXT:    [[MIN_ITERS_CHECK1:%.*]] = icmp ult i64 [[N]], 64
-; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK1]], label [[VEC_EPILOG_PH:%.*]], label [[VECTOR_PH:%.*]]
+; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK1]], label [[VEC_EPILOG_PH:%.*]], label [[VECTOR_PH:%.*]], !prof [[PROF6]]
 ;
 entry:
   br label %for.body
@@ -218,10 +218,10 @@ define void @loop_with_profile_tc_128_scalar_epilogue_reqd(ptr noalias %p, ptr n
 ; CHECK-IR-SAME: ptr noalias [[P:%.*]], ptr noalias [[Q:%.*]], i64 [[N:%.*]]) {
 ; CHECK-IR-NEXT:  iter.check:
 ; CHECK-IR-NEXT:    [[MIN_ITERS_CHECK:%.*]] = icmp ule i64 [[N]], 8
-; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[VEC_EPILOG_SCALAR_PH:%.*]], label [[VECTOR_MAIN_LOOP_ITER_CHECK:%.*]]
+; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK]], label [[VEC_EPILOG_SCALAR_PH:%.*]], label [[VECTOR_MAIN_LOOP_ITER_CHECK:%.*]], !prof [[PROF6]]
 ; CHECK-IR:       vector.main.loop.iter.check:
 ; CHECK-IR-NEXT:    [[MIN_ITERS_CHECK1:%.*]] = icmp ule i64 [[N]], 32
-; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK1]], label [[VEC_EPILOG_PH:%.*]], label [[VECTOR_PH:%.*]]
+; CHECK-IR-NEXT:    br i1 [[MIN_ITERS_CHECK1]], label [[VEC_EPILOG_PH:%.*]], label [[VECTOR_PH:%.*]], !prof [[PROF6]]
 ;
 entry:
   br label %for.body

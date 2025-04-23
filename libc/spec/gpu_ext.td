@@ -6,14 +6,17 @@ def GPUExtensions : StandardSpec<"GPUExtensions"> {
     [], // Enumerations
     [
         FunctionSpec<
-            "rpc_reset",
-            RetValSpec<VoidType>,
-            [ArgSpec<UnsignedIntType>, ArgSpec<VoidPtr>]
-        >,
-        FunctionSpec<
             "rpc_host_call",
             RetValSpec<VoidType>,
             [ArgSpec<VoidPtr>, ArgSpec<VoidPtr>, ArgSpec<SizeTType>]
+        >,
+        FunctionSpec<
+            "rpc_fprintf",
+            RetValSpec<IntType>,
+            [ArgSpec<FILERestrictedPtr>,
+             ArgSpec<ConstCharRestrictedPtr>,
+             ArgSpec<VoidPtr>,
+             ArgSpec<SizeTType>]
         >,
     ]
   >;

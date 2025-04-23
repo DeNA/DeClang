@@ -1,4 +1,4 @@
-//===--- APINotesWriter.h - API Notes Writer ----------------------*- C++ -*-===//
+//===-- APINotesWriter.h - API Notes Writer ---------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,18 +12,17 @@
 // method parameters.
 //
 //===----------------------------------------------------------------------===//
-#ifndef LLVM_CLANG_API_NOTES_WRITER_H
-#define LLVM_CLANG_API_NOTES_WRITER_H
+#ifndef LLVM_CLANG_APINOTES_WRITER_H
+#define LLVM_CLANG_APINOTES_WRITER_H
 
 #include "clang/APINotes/Types.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/VersionTuple.h"
+#include "llvm/Support/raw_ostream.h"
 
-namespace llvm {
-  class raw_ostream;
-}
+#include <memory>
 
 namespace clang {
-
 class FileEntry;
 
 namespace api_notes {
@@ -32,98 +31,110 @@ namespace api_notes {
 /// read by the \c APINotesReader.
 class APINotesWriter {
   class Implementation;
-  Implementation &Impl;
+  std::unique_ptr<Implementation> Implementation;
 
 public:
   /// Create a new API notes writer with the given module name and
   /// (optional) source file.
-  APINotesWriter(llvm::StringRef moduleName, const FileEntry *sourceFile);
+  APINotesWriter(llvm::StringRef ModuleName, const FileEntry *SF);
   ~APINotesWriter();
 
   APINotesWriter(const APINotesWriter &) = delete;
   APINotesWriter &operator=(const APINotesWriter &) = delete;
 
-  /// Write the API notes data to the given stream.
-  void writeToStream(llvm::raw_ostream &os);
+  void writeToStream(llvm::raw_ostream &OS);
 
   /// Add information about a specific Objective-C class or protocol or a C++
   /// namespace.
   ///
-  /// \param name The name of this class/protocol/namespace.
-  /// \param contextKind Whether this is a class, a protocol, or a namespace.
-  /// \param info Information about this class/protocol/namespace.
+  /// \param Name The name of this class/protocol/namespace.
+  /// \param Kind Whether this is a class, a protocol, or a namespace.
+  /// \param Info Information about this class/protocol/namespace.
   ///
   /// \returns the ID of the class, protocol, or namespace, which can be used to
   /// add properties and methods to the class/protocol/namespace.
-  ContextID addObjCContext(std::optional<ContextID> parentContextID,
-                           llvm::StringRef name, ContextKind contextKind,
-                           const ObjCContextInfo &info,
-                           llvm::VersionTuple swiftVersion);
+  ContextID addContext(std::optional<ContextID> ParentCtxID,
+                       llvm::StringRef Name, ContextKind Kind,
+                       const ContextInfo &Info,
+                       llvm::VersionTuple SwiftVersion);
 
   /// Add information about a specific Objective-C property.
   ///
-  /// \param contextID The context in which this property resides.
-  /// \param name The name of this property.
-  /// \param info Information about this property.
-  void addObjCProperty(ContextID contextID, llvm::StringRef name,
-                       bool isInstanceProperty,
-                       const ObjCPropertyInfo &info,
-                       llvm::VersionTuple swiftVersion);
+  /// \param CtxID The context in which this property resides.
+  /// \param Name The name of this property.
+  /// \param Info Information about this property.
+  void addObjCProperty(ContextID CtxID, llvm::StringRef Name,
+                       bool IsInstanceProperty, const ObjCPropertyInfo &Info,
+                       llvm::VersionTuple SwiftVersion);
 
   /// Add information about a specific Objective-C method.
   ///
-  /// \param contextID The context in which this method resides.
-  /// \param selector The selector that names this method.
-  /// \param isInstanceMethod Whether this method is an instance method
+  /// \param CtxID The context in which this method resides.
+  /// \param Selector The selector that names this method.
+  /// \param IsInstanceMethod Whether this method is an instance method
   /// (vs. a class method).
-  /// \param info Information about this method.
-  void addObjCMethod(ContextID contextID, ObjCSelectorRef selector,
-                     bool isInstanceMethod, const ObjCMethodInfo &info,
-                     llvm::VersionTuple swiftVersion);
+  /// \param Info Information about this method.
+  void addObjCMethod(ContextID CtxID, ObjCSelectorRef Selector,
+                     bool IsInstanceMethod, const ObjCMethodInfo &Info,
+                     llvm::VersionTuple SwiftVersion);
+
+  /// Add information about a specific C++ method.
+  ///
+  /// \param CtxID The context in which this method resides, i.e. a C++ tag.
+  /// \param Name The name of the method.
+  /// \param Info Information about this method.
+  void addCXXMethod(ContextID CtxID, llvm::StringRef Name,
+                    const CXXMethodInfo &Info, llvm::VersionTuple SwiftVersion);
+
+  /// Add information about a specific C record field.
+  ///
+  /// \param CtxID The context in which this field resides, i.e. a C/C++ tag.
+  /// \param Name The name of the field.
+  /// \param Info Information about this field.
+  void addField(ContextID CtxID, llvm::StringRef Name, const FieldInfo &Info,
+                llvm::VersionTuple SwiftVersion);
 
   /// Add information about a global variable.
   ///
-  /// \param name The name of this global variable.
-  /// \param info Information about this global variable.
-  void addGlobalVariable(std::optional<Context> context, llvm::StringRef name,
-                         const GlobalVariableInfo &info,
-                         llvm::VersionTuple swiftVersion);
+  /// \param Name The name of this global variable.
+  /// \param Info Information about this global variable.
+  void addGlobalVariable(std::optional<Context> Ctx, llvm::StringRef Name,
+                         const GlobalVariableInfo &Info,
+                         llvm::VersionTuple SwiftVersion);
 
   /// Add information about a global function.
   ///
-  /// \param name The name of this global function.
-  /// \param info Information about this global function.
-  void addGlobalFunction(std::optional<Context> context, llvm::StringRef name,
-                         const GlobalFunctionInfo &info,
-                         llvm::VersionTuple swiftVersion);
+  /// \param Name The name of this global function.
+  /// \param Info Information about this global function.
+  void addGlobalFunction(std::optional<Context> Ctx, llvm::StringRef Name,
+                         const GlobalFunctionInfo &Info,
+                         llvm::VersionTuple SwiftVersion);
 
   /// Add information about an enumerator.
   ///
-  /// \param name The name of this enumerator.
-  /// \param info Information about this enumerator.
-  void addEnumConstant(llvm::StringRef name, const EnumConstantInfo &info,
-                       llvm::VersionTuple swiftVersion);
+  /// \param Name The name of this enumerator.
+  /// \param Info Information about this enumerator.
+  void addEnumConstant(llvm::StringRef Name, const EnumConstantInfo &Info,
+                       llvm::VersionTuple SwiftVersion);
 
   /// Add information about a tag (struct/union/enum/C++ class).
   ///
-  /// \param name The name of this tag.
-  /// \param info Information about this tag.
-  void addTag(std::optional<Context> context, llvm::StringRef name,
-              const TagInfo &info, llvm::VersionTuple swiftVersion);
+  /// \param Name The name of this tag.
+  /// \param Info Information about this tag.
+  void addTag(std::optional<Context> Ctx, llvm::StringRef Name,
+              const TagInfo &Info, llvm::VersionTuple SwiftVersion);
 
   /// Add information about a typedef.
   ///
-  /// \param name The name of this typedef.
-  /// \param info Information about this typedef.
-  void addTypedef(std::optional<Context> context, llvm::StringRef name,
-                  const TypedefInfo &info, llvm::VersionTuple swiftVersion);
+  /// \param Name The name of this typedef.
+  /// \param Info Information about this typedef.
+  void addTypedef(std::optional<Context> Ctx, llvm::StringRef Name,
+                  const TypedefInfo &Info, llvm::VersionTuple SwiftVersion);
 
   /// Add module options
   void addModuleOptions(ModuleOptions opts);
 };
+} // namespace api_notes
+} // namespace clang
 
-} // end namespace api_notes
-} // end namespace clang
-
-#endif // LLVM_CLANG_API_NOTES_WRITER_H
-
+#endif // LLVM_CLANG_APINOTES_WRITER_H

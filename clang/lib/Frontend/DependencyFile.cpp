@@ -63,6 +63,19 @@ struct DepCollectorPPCallbacks : public PPCallbacks {
                                     /*IsMissing=*/false);
   }
 
+  void EmbedDirective(SourceLocation, StringRef, bool,
+                      OptionalFileEntryRef File,
+                      const LexEmbedParametersResult &) override {
+    assert(File && "expected to only be called when the file is found");
+    StringRef FileName =
+        llvm::sys::path::remove_leading_dotslash(File->getName());
+    DepCollector.maybeAddDependency(FileName,
+                                    /*FromModule*/ false,
+                                    /*IsSystem*/ false,
+                                    /*IsModuleFile*/ false,
+                                    /*IsMissing*/ false);
+  }
+
   void InclusionDirective(SourceLocation HashLoc, const Token &IncludeTok,
                           StringRef FileName, bool IsAngled,
                           CharSourceRange FilenameRange,
@@ -76,6 +89,18 @@ struct DepCollectorPPCallbacks : public PPCallbacks {
                                       /*IsModuleFile*/ false,
                                       /*IsMissing*/ true);
     // Files that actually exist are handled by FileChanged.
+  }
+
+  void HasEmbed(SourceLocation, StringRef, bool,
+                OptionalFileEntryRef File) override {
+    if (!File)
+      return;
+    StringRef Filename =
+        llvm::sys::path::remove_leading_dotslash(File->getName());
+    DepCollector.maybeAddDependency(Filename,
+                                    /*FromModule=*/false, false,
+                                    /*IsModuleFile=*/false,
+                                    /*IsMissing=*/false);
   }
 
   void HasInclude(SourceLocation Loc, StringRef SpelledFilename, bool IsAngled,
@@ -100,7 +125,7 @@ struct DepCollectorMMCallbacks : public ModuleMapCallbacks {
   DependencyCollector &DepCollector;
   DepCollectorMMCallbacks(DependencyCollector &DC) : DepCollector(DC) {}
 
-  void moduleMapFileRead(SourceLocation Loc, const FileEntry &Entry,
+  void moduleMapFileRead(SourceLocation Loc, FileEntryRef Entry,
                          bool IsSystem) override {
     StringRef Filename = Entry.getName();
     DepCollector.maybeAddDependency(Filename, /*FromModule*/ false,
@@ -118,7 +143,7 @@ struct DFGMMCallback : public ModuleMapCallbacks {
   DFGMMCallback(DependencyCollector &DC, bool SkipUnusedModuleMaps)
       : DepCollector(DC), SkipUnusedModuleMaps(SkipUnusedModuleMaps) {}
 
-  void moduleMapFileRead(SourceLocation Loc, const FileEntry &Entry,
+  void moduleMapFileRead(SourceLocation Loc, FileEntryRef Entry,
                          bool IsSystem) override {
     if (SkipUnusedModuleMaps)
       return;
@@ -129,7 +154,7 @@ struct DFGMMCallback : public ModuleMapCallbacks {
                                     /*IsMissing*/ false);
   }
 
-  void moduleMapFoundForModule(const FileEntry &Entry, const Module *M,
+  void moduleMapFoundForModule(FileEntryRef Entry, const Module *M,
                                bool IsSystem) override {
     if (!SkipUnusedModuleMaps)
       return;

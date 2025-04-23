@@ -109,38 +109,55 @@ public:
     swift::VarDecl *GetDecl() const { return m_decl; }
     swift::VarDecl::Introducer GetVarIntroducer() const;
     bool IsCaptureList() const;
-    bool IsMetadataPointer() const { return m_name.str().startswith("$τ"); }
+    bool IsMetadataPointer() const { return m_name.str().starts_with("$τ"); }
     bool IsOutermostMetadataPointer() const {
-      return m_name.str().startswith("$τ_0_");
+      return m_name.str().starts_with("$τ_0_");
     }
     bool IsSelf() const {
-      return m_name.str().equals("$__lldb_injected_self");
+      return m_name.str() == "$__lldb_injected_self";
     }
     bool IsPackCount() const {
-      return m_name.str().startswith("$pack_count_");
+      return m_name.str().starts_with("$pack_count_");
     }
     bool IsUnboundPack() const { return m_is_unbound_pack; }
 
-    VariableInfo() : m_lookup_error(llvm::Error::success()) {}
+    VariableInfo() = default;
     VariableInfo(CompilerType type, swift::Identifier name,
                  VariableMetadataSP metadata,
                  swift::VarDecl::Introducer introducer,
                  bool is_capture_list = false, bool is_unbound_pack = false)
         : m_type(type), m_name(name), m_metadata(metadata),
-          m_var_introducer(introducer), m_lookup_error(llvm::Error::success()),
-          m_is_capture_list(is_capture_list),
+          m_var_introducer(introducer), m_is_capture_list(is_capture_list),
           m_is_unbound_pack(is_unbound_pack) {}
+    VariableInfo(const VariableInfo &other)
+        : m_type(other.m_type), m_name(other.m_name),
+          m_metadata(other.m_metadata), m_decl(other.m_decl),
+          m_var_introducer(other.m_var_introducer),
+          m_lookup_error(other.m_lookup_error.Clone()),
+          m_is_capture_list(other.m_is_capture_list),
+          m_is_unbound_pack(other.m_is_unbound_pack) {}
 
     VariableInfo(CompilerType type, swift::Identifier name,
                  swift::VarDecl *decl)
-        : m_type(type), m_name(name), m_decl(decl),
-          m_lookup_error(llvm::Error::success()) {}
+        : m_type(type), m_name(name), m_decl(decl) {}
+
+    VariableInfo &operator=(const VariableInfo &other) {
+      m_type = other.m_type;
+      m_name = other.m_name;
+      m_metadata = other.m_metadata;
+      m_decl = other.m_decl;
+      m_var_introducer = other.m_var_introducer;
+      m_lookup_error = other.m_lookup_error.Clone();
+      m_is_capture_list = other.m_is_capture_list;
+      m_is_unbound_pack = other.m_is_unbound_pack;
+      return *this;
+    }
 
     void Print(Stream &stream) const;
 
     void SetType(CompilerType new_type) { m_type = new_type; }
     void SetLookupError(llvm::Error &&error) {
-      m_lookup_error = std::move(error);
+      m_lookup_error = Status::FromError(std::move(error));
     }
     llvm::Error TakeLookupError() { return m_lookup_error.ToError(); }
 

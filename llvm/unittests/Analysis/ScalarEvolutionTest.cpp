@@ -19,7 +19,6 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Support/SourceMgr.h"
@@ -353,7 +352,7 @@ TEST_F(ScalarEvolutionsTest, CompareSCEVComplexity) {
 
 TEST_F(ScalarEvolutionsTest, CompareValueComplexity) {
   IntegerType *IntPtrTy = M.getDataLayout().getIntPtrType(Context);
-  PointerType *IntPtrPtrTy = IntPtrTy->getPointerTo();
+  PointerType *IntPtrPtrTy = PointerType::getUnqual(Context);
 
   FunctionType *FTy =
       FunctionType::get(Type::getVoidTy(Context), {IntPtrTy, IntPtrTy}, false);
@@ -678,7 +677,7 @@ TEST_F(ScalarEvolutionsTest, SCEVZeroExtendExpr) {
 
   Type *I64Ty = Type::getInt64Ty(Context);
   Type *I8Ty = Type::getInt8Ty(Context);
-  Type *I8PtrTy = Type::getInt8PtrTy(Context);
+  Type *I8PtrTy = PointerType::getUnqual(Context);
   Value *Accum = Constant::getNullValue(I8PtrTy);
   int Iters = 20;
   for (int i = 0; i < Iters; i++) {
@@ -741,7 +740,7 @@ TEST_F(ScalarEvolutionsTest, SCEVExitLimitForgetLoop) {
   NIM.setDataLayout(DataLayout);
 
   Type *T_int64 = Type::getInt64Ty(Context);
-  Type *T_pint64 = T_int64->getPointerTo(10);
+  Type *T_pint64 = PointerType::get(Context, 10);
 
   FunctionType *FTy =
       FunctionType::get(Type::getVoidTy(Context), {T_pint64}, false);
@@ -839,7 +838,7 @@ TEST_F(ScalarEvolutionsTest, SCEVExitLimitForgetValue) {
   NIM.setDataLayout(DataLayout);
 
   Type *T_int64 = Type::getInt64Ty(Context);
-  Type *T_pint64 = T_int64->getPointerTo(10);
+  Type *T_pint64 = PointerType::get(Context, 10);
 
   FunctionType *FTy =
       FunctionType::get(Type::getVoidTy(Context), {T_pint64}, false);
@@ -1587,6 +1586,42 @@ TEST_F(ScalarEvolutionsTest, ApplyLoopGuards) {
     auto *Max = SE.getUMaxExpr(TCScev, Constant4);
     auto *Mul = SE.getMulExpr(SE.getUDivExpr(Max, Constant4), Constant4);
     ASSERT_TRUE(Mul == ApplyLoopGuardsTC);
+  });
+}
+
+TEST_F(ScalarEvolutionsTest, ForgetValueWithOverflowInst) {
+  LLVMContext C;
+  SMDiagnostic Err;
+  std::unique_ptr<Module> M = parseAssemblyString(
+      "declare { i32, i1 } @llvm.smul.with.overflow.i32(i32, i32) "
+      "define void @foo(i32 %i) { "
+      "entry: "
+      "  br label %loop.body "
+      "loop.body: "
+      "  %iv = phi i32 [ %iv.next, %loop.body ], [ 0, %entry ] "
+      "  %iv.next = add nsw i32 %iv, 1 "
+      "  %call = call {i32, i1} @llvm.smul.with.overflow.i32(i32 %iv, i32 -2) "
+      "  %extractvalue = extractvalue {i32, i1} %call, 0 "
+      "  %cmp = icmp eq i32 %iv.next, 16 "
+      "  br i1 %cmp, label %exit, label %loop.body "
+      "exit: "
+      "  ret void "
+      "} ",
+      Err, C);
+
+  ASSERT_TRUE(M && "Could not parse module?");
+  ASSERT_TRUE(!verifyModule(*M) && "Must have been well formed!");
+
+  runWithSE(*M, "foo", [](Function &F, LoopInfo &LI, ScalarEvolution &SE) {
+    auto *ExtractValue = getInstructionByName(F, "extractvalue");
+    auto *IV = getInstructionByName(F, "iv");
+
+    auto *ExtractValueScev = SE.getSCEV(ExtractValue);
+    EXPECT_NE(ExtractValueScev, nullptr);
+
+    SE.forgetValue(IV);
+    auto *ExtractValueScevForgotten = SE.getExistingSCEV(ExtractValue);
+    EXPECT_EQ(ExtractValueScevForgotten, nullptr);
   });
 }
 

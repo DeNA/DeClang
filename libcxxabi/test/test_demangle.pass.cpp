@@ -6,13 +6,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-// The demangler does not pass all these tests with the system dylibs on macOS.
-// XFAIL: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// This test is too big for most embedded devices.
+// XFAIL: LIBCXX-PICOLIBC-FIXME
 
 // https://llvm.org/PR51407 was not fixed in some previously-released
 // demanglers, which causes them to run into the infinite loop.
-// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
-// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx11.0
+// UNSUPPORTED: using-built-library-before-llvm-14
+
+// Android's long double on x86[-64] is (64/128)-bits instead of Linux's usual
+// 80-bit format, and this demangling test is failing on it.
+// XFAIL: LIBCXX-ANDROID-FIXME && target={{i686|x86_64}}-{{.+}}-android{{.*}}
 
 #include "support/timer.h"
 #include <algorithm>
@@ -28,6 +31,7 @@
 // Is long double fp128?
 #define LDBL_FP128 (__LDBL_MANT_DIG__ == 113)
 
+// clang-format off
 const char* cases[][2] =
 {
     {"_Z1A", "A"},
@@ -29995,10 +29999,10 @@ const char* cases[][2] =
     {"_Z15test_uuidofTypeI10TestStructEvDTu8__uuidofT_EE", "void test_uuidofType<TestStruct>(decltype(__uuidof(TestStruct)))"},
     {"_Z15test_uuidofExprI9HasMemberEvDTu8__uuidofXsrT_6memberEEE", "void test_uuidofExpr<HasMember>(decltype(__uuidof(HasMember::member)))"},
 
-    // C++2a char8_t:
+    // C++20 char8_t:
     {"_ZTSPDu", "typeinfo name for char8_t*"},
 
-    // C++2a lambda-expressions:
+    // C++20 lambda-expressions:
     {"_ZNK1xMUlTyT_E_clIiEEDaS_", "auto x::'lambda'<typename $T>($T)::operator()<int>(x) const"},
     {"_ZNK1xMUlTnPA3_ivE_clILS0_0EEEDav", "auto x::'lambda'<int (*$N) [3]>()::operator()<(int [3])0>() const"},
     {"_ZNK1xMUlTyTtTyTnT_TpTnPA3_TL0__ETpTyvE_clIi1XJfEEEDav", "auto x::'lambda'<typename $T, template<typename $T0, $T $N, $T0 (*...$N0) [3]> typename $TT, typename ...$T1>()::operator()<int, X, float>() const"},
@@ -30015,8 +30019,10 @@ const char* cases[][2] =
     // See https://github.com/itanium-cxx-abi/cxx-abi/issues/106.
     {"_ZN1XIZ1fIiEvOT_EUlS2_DpT0_E_EclIJEEEvDpT_", "void X<void f<int>(int&&)::'lambda'(int&&, auto...)>::operator()<>()"},
     {"_ZZZZN6abcdef9abcdefghi29abcdefabcdefabcdefabcefabcdef27xxxxxxxxxxxxxxxxxxxxxxxxxxxEN4absl8DurationERKNSt3__u12basic_stringIcNS4_11char_traitsIcEENS4_9allocatorIcEEEEPNS1_19yyyyyyyyyyyyyyyyyyyEENK3$_5clEvENKUlvE_clEvE6zzzzzz", "abcdef::abcdefghi::abcdefabcdefabcdefabcefabcdef::xxxxxxxxxxxxxxxxxxxxxxxxxxx(absl::Duration, std::__u::basic_string<char, std::__u::char_traits<char>, std::__u::allocator<char>> const&, abcdef::abcdefghi::abcdefabcdefabcdefabcefabcdef::yyyyyyyyyyyyyyyyyyy*)::$_5::operator()() const::'lambda'()::operator()() const::zzzzzz"},
+    // See https://github.com/itanium-cxx-abi/cxx-abi/issues/165.
+    {"_ZN1C1fIiEEvDTtlNS_UlT_TL0__E_EEE", "void C::f<int>(decltype(C::'lambda'(int, auto){}))"},
 
-    // C++2a class type non-type template parameters:
+    // C++20 class type non-type template parameters:
     {"_Z1fIXtl1BLPi0ELi1EEEEvv", "void f<B{(int*)0, 1}>()"},
     {"_Z1fIXtl1BLPi32EEEEvv", "void f<B{(int*)32}>()"},
     {"_Z1fIXtl1BrcPiLi0EEEEvv", "void f<B{reinterpret_cast<int*>(0)}>()"},
@@ -30089,6 +30095,51 @@ const char* cases[][2] =
     {"_ZW1ML4Oink", "Oink@M"},
     {"_ZW1ML1fi", "f@M(int)"},
 
+    // C++20 concepts, see https://github.com/itanium-cxx-abi/cxx-abi/issues/24.
+    {"_Z2f0IiE1SIX1CIT_EEEv", "S<C<int>> f0<int>()"},
+    {"_ZN5test21AIiEF1fEzQ4TrueIT_E", "test2::A<int>::friend f(...) requires True<T>"},
+    {"_ZN5test2F1gIvEEvzQaa4TrueIT_E4TrueITL0__E", "void test2::friend g<void>(...) requires True<T> && True<TL0_>"},
+    {"_ZN5test21hIvEEvzQ4TrueITL0__E", "void test2::h<void>(...) requires True<TL0_>"},
+    {"_ZN5test2F1iIvQaa4TrueIT_E4TrueITL0__EEEvz", "void test2::friend i<void>(...)"},
+    {"_ZN5test21jIvQ4TrueITL0__EEEvz", "void test2::j<void>(...)"},
+    {"_ZN5test2F1kITk4TruevQ4TrueIT_EEEvz", "void test2::friend k<void>(...)"},
+    {"_ZN5test21lITk4TruevEEvz", "void test2::l<void>(...)"},
+    {"_ZN5test31dITnDaLi0EEEvv", "void test3::d<0>()"},
+    {"_ZN5test31eITnDcLi0EEEvv", "void test3::e<0>()"},
+    {"_ZN5test31fITnDk1CLi0EEEvv", "void test3::f<0>()"},
+    {"_ZN5test31gITnDk1DIiELi0EEEvv", "void test3::g<0>()"},
+    {"_ZN5test31hIiTnDk1DIT_ELi0EEEvv", "void test3::h<int, 0>()"},
+    {"_ZN5test31iIiEEvDTnw_Dk1CpicvT__EEE", "void test3::i<int>(decltype(new C auto((int)())))"},
+    {"_ZN5test31jIiEEvDTnw_DK1CpicvT__EEE", "void test3::j<int>(decltype(new C decltype(auto)((int)())))"},
+    {"_ZN5test41fITk1CiEEvv", "void test4::f<int>()"},
+    {"_ZN5test41gITk1DIiEiEEvv", "void test4::g<int>()"},
+    {"_ZN5test51fINS_1XEEEvv", "void test5::f<test5::X>()"},
+    {"_ZN5test51fITtTyTnTL0__ENS_1YEEEvv", "void test5::f<test5::Y>()"},
+    {"_ZN5test51fITtTyTnTL0__ENS_1ZEEEvv", "void test5::f<test5::Z>()"},
+    {"_ZN5test51gITtTyTnTL0__Q1CIS1_EENS_1XEEEvv", "void test5::g<test5::X>()"},
+    {"_ZN5test51gINS_1YEEEvv", "void test5::g<test5::Y>()"},
+    {"_ZN5test51gITtTyTnTL0__Q1CIS1_EENS_1ZEEEvv", "void test5::g<test5::Z>()"},
+    {"_ZN5test51hITtTk1CTnTL0__ENS_1XEEEvv", "void test5::h<test5::X>()"},
+    {"_ZN5test51hITtTk1CTnTL0__ENS_1YEEEvv", "void test5::h<test5::Y>()"},
+    {"_ZN5test51hINS_1ZEEEvv", "void test5::h<test5::Z>()"},
+    {"_ZN5test51iITpTtTk1CTnTL0__EJNS_1XENS_1YENS_1ZEEEEvv", "void test5::i<test5::X, test5::Y, test5::Z>()"},
+    {"_ZN5test51iITpTtTk1CTnTL0__EJNS_1YENS_1ZENS_1XEEEEvv", "void test5::i<test5::Y, test5::Z, test5::X>()"},
+    {"_ZN5test51iIJNS_1ZENS_1XENS_1YEEEEvv", "void test5::i<test5::Z, test5::X, test5::Y>()"},
+    {"_ZN5test51pINS_1AEEEvv", "void test5::p<test5::A>()"},
+    {"_ZN5test51pITtTpTyENS_1BEEEvv", "void test5::p<test5::B>()"},
+    {"_ZN5test51qITtTyTyENS_1AEEEvv", "void test5::q<test5::A>()"},
+    {"_ZN5test51qINS_1BEEEvv", "void test5::q<test5::B>()"},
+    {"_ZN5test61fITk1CiEEvT_", "void test6::f<int>(int)"},
+    {"_ZN5test61gIiTk1DIT_EiEEvT0_", "void test6::g<int, int>(int)"},
+    {"_ZZN5test71fIiEEvvENKUlTyQaa1CIT_E1CITL0__ET0_E_clIiiEEDaS3_Q1CIDtfp_EE", "auto void test7::f<int>()::'lambda'<typename $T> requires C<T> && C<TL0_> (auto)::operator()<int, int>(auto) const requires C<decltype(fp)>"},
+    {"_ZZN5test71fIiEEvvENKUlTyQaa1CIT_E1CITL0__ET0_E0_clIiiEEDaS3_Qaa1CIDtfp_EELb1E", "auto void test7::f<int>()::'lambda0'<typename $T> requires C<T> && C<TL0_> (auto)::operator()<int, int>(auto) const requires C<decltype(fp)> && true"},
+    {"_ZZN5test71fIiEEvvENKUlTyQaa1CIT_E1CITL0__ET0_E1_clIiiEEDaS3_Q1CIDtfp_EE", "auto void test7::f<int>()::'lambda1'<typename $T> requires C<T> && C<TL0_> (auto)::operator()<int, int>(auto) const requires C<decltype(fp)>"},
+    {"_ZZN5test71fIiEEvvENKUlTyT0_E_clIiiEEDaS1_", "auto void test7::f<int>()::'lambda'<typename $T>(auto)::operator()<int, int>(auto) const"},
+
+    // C++20 requires expressions, see https://github.com/itanium-cxx-abi/cxx-abi/issues/24.
+    {"_Z1fIiEviQrqXcvT__EXfp_Xeqfp_cvS0__EXplcvS0__ELi1ER5SmallXmicvS0__ELi1ENXmlcvS0__ELi2ENR11SmallerThanILi1234EETS0_T1XIS0_ETNS3_4typeETS2_IiEQ11SmallerThanIS0_Li256EEE", "void f<int>(int) requires requires { (T)(); fp; fp == (T)(); {(T)() + 1} -> Small; {(T)() - 1} noexcept; {(T)() * 2} noexcept -> SmallerThan<1234>; typename T; typename X<T>; typename X<T>::type; typename X<int>; requires SmallerThan<T, 256>; }"},
+    {"_Z1gIiEviQrQT__XplfL0p_fp_E", "void g<int>(int) requires requires (T) { fp + fp; }"},
+
     // Special Substs a, b, d, i, o, s (not including std::)
     {"_Z1fSaIiE", "f(std::allocator<int>)"},
     {"_Z1fSbIiE", "f(std::basic_string<int>)"},
@@ -30114,7 +30165,27 @@ const char* cases[][2] =
      " std::allocator<char>>::basic_string()"},
     {"_ZN1SB8ctor_tagC2Ev", "S[abi:ctor_tag]::S()"},
     {"_ZN1SB8ctor_tagD2Ev", "S[abi:ctor_tag]::~S()"},
+
+    // clang builtin type transform
+    {"_Z2f5IiEvu22__add_lvalue_referenceIT_E", "void f5<int>(__add_lvalue_reference(int))"},
+    {"_Z2f5IiEvu13__add_pointerIT_E", "void f5<int>(__add_pointer(int))"},
+    {"_Z2f5IiEvu7__decayIT_E", "void f5<int>(__decay(int))"},
+    {"_Z2f5IjEvu13__make_signedIT_E", "void f5<unsigned int>(__make_signed(unsigned int))"},
+    {"_Z2f5IKiEvu14__remove_constIT_E", "void f5<int const>(__remove_const(int const))"},
+    {"_Z2f5IPiEvu16__remove_pointerIT_E", "void f5<int*>(__remove_pointer(int*))"},
+    {"_Z2f5IiEvu14__remove_cvrefIT_E", "void f5<int>(__remove_cvref(int))"},
+
+    // C++23 explicit object parameter
+    {"_ZNH3Foo3fooES_i", "Foo::foo(this Foo, int)"},
+    {"_ZNH3Foo3fooERKS_i", "Foo::foo(this Foo const&, int)"},
+    {"_ZNH1X3fooIRS_EEvOT_i", "void X::foo<X&>(this X&, int)"},
+    {"_ZZNH2ns3Foo3fooES0_iENH4Foo24foo2EOKS1_", "ns::Foo::foo(this ns::Foo, int)::Foo2::foo2(this Foo2 const&&)" },
+    {"_ZNH2ns3FooB7Foo_tag3fooB7foo_tagERKS0_i", "ns::Foo[abi:Foo_tag]::foo[abi:foo_tag](this ns::Foo[abi:Foo_tag] const&, int)" },
+    {"_ZZN3Foo3fooEiENH4Foo24foo2EOKS0_", "Foo::foo(int)::Foo2::foo2(this Foo2 const&&)"},
+    {"_ZZNH3Foo3fooES_iENK4Foo24foo2Ev", "Foo::foo(this Foo, int)::Foo2::foo2() const" },
+    {"_ZNH3FooclERKS_", "Foo::operator()(this Foo const&)"},
 };
+// clang-format on
 
 const unsigned N = sizeof(cases) / sizeof(cases[0]);
 
@@ -30147,9 +30218,8 @@ struct FPLiteralCase {
      }},
 #endif
 #if LDBL_FP128
-    // This was found by libFuzzer+HWASan on aarch64 Android.
-    {"1\006ILeeeEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
-     {"\x6<-0x1.cecececececececececececececep+11983L>"}},
+    // A 32-character FP literal of long double type
+    {"3FooILeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeEE", {"Foo<-0x1.eeeeeeeeeeeeeeeeeeeeeeeeeeeep+12015L>"}},
 #endif
 };
 const unsigned NF = sizeof(fp_literal_cases) / sizeof(fp_literal_cases[0]);
@@ -30163,6 +30233,8 @@ const char* invalid_cases[] =
     "NSoERj5E=Y1[uM:ga",
     "Aon_PmKVPDk7?fg4XP5smMUL6;<WsI_mgbf23cCgsHbT<l8EE\0uVRkNOoXDrgdA4[8IU>Vl<>IL8ayHpiVDDDXTY;^o9;i",
     "_ZNSt16allocator_traitsISaIN4llvm3sys2fs18directory_iteratorEEE9constructIS3_IS3_EEEDTcl12_S_constructfp_fp0_spcl7forwardIT0_Efp1_EEERS4_PT_DpOS7_",
+    "3FooILdaaaaaaaaaaAAAAaaEE",
+    "3FooILdaaaaaaaaaaaaaaEE",
 #if !LDBL_FP80
     "_ZN5test01hIfEEvRAcvjplstT_Le4001a000000000000000E_c",
 #endif

@@ -34,7 +34,7 @@
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/FormattedStream.h"
-#include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/LLVMDriver.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
@@ -82,7 +82,7 @@ static Triple GetTriple(StringRef ProgName, opt::InputArgList &Args) {
   StringRef DefaultBitness = "32";
   SmallString<255> Program = ProgName;
   sys::path::replace_extension(Program, "");
-  if (Program.endswith("ml64"))
+  if (Program.ends_with("ml64"))
     DefaultBitness = "64";
 
   StringRef TripleName =
@@ -185,8 +185,7 @@ static int AssembleInput(StringRef ProgName, const Target *TheTarget,
   return Res;
 }
 
-int main(int Argc, char **Argv) {
-  InitLLVM X(Argc, Argv);
+int llvm_ml_main(int Argc, char **Argv, const llvm::ToolContext &) {
   StringRef ProgName = sys::path::filename(Argv[0]);
 
   // Initialize targets and assembly printers/parsers.
@@ -264,6 +263,9 @@ int main(int Argc, char **Argv) {
   MCTargetOptions MCOptions;
   MCOptions.AssemblyLanguage = "masm";
   MCOptions.MCFatalWarnings = InputArgs.hasArg(OPT_fatal_warnings);
+  MCOptions.MCSaveTempLabels = InputArgs.hasArg(OPT_save_temp_labels);
+  MCOptions.ShowMCInst = InputArgs.hasArg(OPT_show_inst);
+  MCOptions.AsmVerbose = true;
 
   Triple TheTriple = GetTriple(ProgName, InputArgs);
   std::string Error;
@@ -331,9 +333,6 @@ int main(int Argc, char **Argv) {
       Ctx, /*PIC=*/false, /*LargeCodeModel=*/true));
   Ctx.setObjectFileInfo(MOFI.get());
 
-  if (InputArgs.hasArg(OPT_save_temp_labels))
-    Ctx.setAllowTemporaryLabels(false);
-
   // Set compilation information.
   SmallString<128> CWD;
   if (!sys::fs::current_path(CWD))
@@ -388,10 +387,8 @@ int main(int Argc, char **Argv) {
     std::unique_ptr<MCAsmBackend> MAB(
         TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions));
     auto FOut = std::make_unique<formatted_raw_ostream>(*OS);
-    Str.reset(TheTarget->createAsmStreamer(
-        Ctx, std::move(FOut), /*asmverbose*/ true,
-        /*useDwarfDirectory*/ true, IP, std::move(CE), std::move(MAB),
-        InputArgs.hasArg(OPT_show_inst)));
+    Str.reset(TheTarget->createAsmStreamer(Ctx, std::move(FOut), IP,
+                                           std::move(CE), std::move(MAB)));
 
   } else if (FileType == "null") {
     Str.reset(TheTarget->createNullStreamer(Ctx));
@@ -405,9 +402,8 @@ int main(int Argc, char **Argv) {
     MCAsmBackend *MAB = TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions);
     Str.reset(TheTarget->createMCObjectStreamer(
         TheTriple, Ctx, std::unique_ptr<MCAsmBackend>(MAB),
-        MAB->createObjectWriter(*OS), std::unique_ptr<MCCodeEmitter>(CE), *STI,
-        MCOptions.MCRelaxAll, MCOptions.MCIncrementalLinkerCompatible,
-        /*DWARFMustBeAtTheEnd*/ false));
+        MAB->createObjectWriter(*OS), std::unique_ptr<MCCodeEmitter>(CE),
+        *STI));
   } else {
     llvm_unreachable("Invalid file type!");
   }
@@ -428,9 +424,6 @@ int main(int Argc, char **Argv) {
     Str->emitSymbolAttribute(Feat00Sym, MCSA_Global);
     Str->emitAssignment(Feat00Sym, MCConstantExpr::create(Feat00Flags, Ctx));
   }
-
-  // Use Assembler information for parsing.
-  Str->setUseAssemblerInfoForParsing(true);
 
   int Res = 1;
   if (InputArgs.hasArg(OPT_as_lex)) {

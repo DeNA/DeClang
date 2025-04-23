@@ -35,6 +35,7 @@ Type AbstractType::replaceImmediateSubElements(Type type,
 MLIRContext *Type::getContext() const { return getDialect().getContext(); }
 
 bool Type::isFloat8E5M2() const { return llvm::isa<Float8E5M2Type>(*this); }
+bool Type::isFloat8E4M3() const { return llvm::isa<Float8E4M3Type>(*this); }
 bool Type::isFloat8E4M3FN() const { return llvm::isa<Float8E4M3FNType>(*this); }
 bool Type::isFloat8E5M2FNUZ() const {
   return llvm::isa<Float8E5M2FNUZType>(*this);
@@ -54,6 +55,8 @@ bool Type::isF80() const { return llvm::isa<Float80Type>(*this); }
 bool Type::isF128() const { return llvm::isa<Float128Type>(*this); }
 
 bool Type::isIndex() const { return llvm::isa<IndexType>(*this); }
+
+bool Type::isInteger() const { return llvm::isa<IntegerType>(*this); }
 
 /// Return true if this is an integer type with the specified width.
 bool Type::isInteger(unsigned width) const {

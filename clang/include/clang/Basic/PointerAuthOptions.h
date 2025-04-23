@@ -15,15 +15,20 @@
 #define LLVM_CLANG_BASIC_POINTERAUTHOPTIONS_H
 
 #include "clang/Basic/LLVM.h"
-#include "llvm/Target/TargetOptions.h"
-#include <map>
-#include <memory>
-#include <optional>
-#include <string>
-#include <vector>
+#include "clang/Basic/LangOptions.h"
+#include "llvm/ADT/STLForwardCompat.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Target/TargetOptions.h"
+#include <optional>
 
 namespace clang {
+
+constexpr unsigned PointerAuthKeyNone = -1;
+
+/// Constant discriminator for std::type_info vtable pointers: 0xB1EA/45546
+/// The value is ptrauth_string_discriminator("_ZTVSt9type_info"), i.e.,
+/// the vtable type discriminator for classes derived from std::type_info.
+constexpr uint16_t StdTypeInfoVTablePointerConstantDiscrimination = 0xB1EA;
 
 class PointerAuthSchema {
 public:
@@ -73,6 +78,9 @@ public:
 private:
   Kind TheKind : 2;
   unsigned IsAddressDiscriminated : 1;
+  unsigned IsIsaPointer : 1;
+  unsigned AuthenticatesNullValues : 1;
+  PointerAuthenticationMode SelectedAuthenticationMode : 2;
   Discrimination DiscriminationKind : 2;
   unsigned Key : 3;
   unsigned ConstantDiscriminator : 16;
@@ -81,30 +89,61 @@ public:
   PointerAuthSchema() : TheKind(Kind::None) {}
 
   PointerAuthSchema(
-      SoftKey key, bool isAddressDiscriminated,
-      Discrimination otherDiscrimination,
-      std::optional<uint16_t> constantDiscriminator = std::nullopt)
-      : TheKind(Kind::Soft), IsAddressDiscriminated(isAddressDiscriminated),
-        DiscriminationKind(otherDiscrimination), Key(unsigned(key)) {
+      ARM8_3Key Key, bool IsAddressDiscriminated,
+      PointerAuthenticationMode AuthenticationMode,
+      Discrimination OtherDiscrimination,
+      std::optional<uint16_t> ConstantDiscriminatorOrNone = std::nullopt,
+      bool IsIsaPointer = false, bool AuthenticatesNullValues = false)
+      : TheKind(Kind::ARM8_3), IsAddressDiscriminated(IsAddressDiscriminated),
+        IsIsaPointer(IsIsaPointer),
+        AuthenticatesNullValues(AuthenticatesNullValues),
+        SelectedAuthenticationMode(AuthenticationMode),
+        DiscriminationKind(OtherDiscrimination), Key(llvm::to_underlying(Key)) {
     assert((getOtherDiscrimination() != Discrimination::Constant ||
-            constantDiscriminator) &&
+            ConstantDiscriminatorOrNone) &&
            "constant discrimination requires a constant!");
-    if (constantDiscriminator)
-      ConstantDiscriminator = *constantDiscriminator;
+    if (ConstantDiscriminatorOrNone)
+      ConstantDiscriminator = *ConstantDiscriminatorOrNone;
   }
 
   PointerAuthSchema(
-      ARM8_3Key key, bool isAddressDiscriminated,
-      Discrimination otherDiscrimination,
-      std::optional<uint16_t> constantDiscriminator = std::nullopt)
-      : TheKind(Kind::ARM8_3), IsAddressDiscriminated(isAddressDiscriminated),
-        DiscriminationKind(otherDiscrimination), Key(unsigned(key)) {
+      SoftKey Key, bool IsAddressDiscriminated,
+      PointerAuthenticationMode AuthenticationMode,
+      Discrimination OtherDiscrimination,
+      std::optional<uint16_t> ConstantDiscriminatorOrNone = std::nullopt,
+      bool IsIsaPointer = false, bool AuthenticatesNullValues = false)
+      : TheKind(Kind::Soft), IsAddressDiscriminated(IsAddressDiscriminated),
+        IsIsaPointer(IsIsaPointer),
+        AuthenticatesNullValues(AuthenticatesNullValues),
+        SelectedAuthenticationMode(AuthenticationMode),
+        DiscriminationKind(OtherDiscrimination), Key(unsigned(Key)) {
     assert((getOtherDiscrimination() != Discrimination::Constant ||
-            constantDiscriminator) &&
+            ConstantDiscriminatorOrNone) &&
            "constant discrimination requires a constant!");
-    if (constantDiscriminator)
-      ConstantDiscriminator = *constantDiscriminator;
+    if (ConstantDiscriminatorOrNone)
+      ConstantDiscriminator = *ConstantDiscriminatorOrNone;
   }
+
+  PointerAuthSchema(
+      ARM8_3Key Key, bool IsAddressDiscriminated,
+      Discrimination OtherDiscrimination,
+      std::optional<uint16_t> ConstantDiscriminatorOrNone = std::nullopt,
+      bool IsIsaPointer = false, bool AuthenticatesNullValues = false)
+      : PointerAuthSchema(Key, IsAddressDiscriminated,
+                          PointerAuthenticationMode::SignAndAuth,
+                          OtherDiscrimination, ConstantDiscriminatorOrNone,
+                          IsIsaPointer, AuthenticatesNullValues) {}
+
+  PointerAuthSchema(
+      SoftKey Key, bool IsAddressDiscriminated,
+      Discrimination OtherDiscrimination,
+      std::optional<uint16_t> ConstantDiscriminatorOrNone = std::nullopt,
+      bool IsIsaPointer = false, bool AuthenticatesNullValues = false)
+      : PointerAuthSchema(Key, IsAddressDiscriminated,
+                          PointerAuthenticationMode::SignAndAuth,
+                          OtherDiscrimination, ConstantDiscriminatorOrNone,
+                          IsIsaPointer, AuthenticatesNullValues) {}
+
 
   Kind getKind() const { return TheKind; }
 
@@ -115,6 +154,16 @@ public:
   bool isAddressDiscriminated() const {
     assert(getKind() != Kind::None);
     return IsAddressDiscriminated;
+  }
+
+  bool isIsaPointer() const {
+    assert(getKind() != Kind::None);
+    return IsIsaPointer;
+  }
+
+  bool authenticatesNullValues() const {
+    assert(getKind() != Kind::None);
+    return AuthenticatesNullValues;
   }
 
   bool hasOtherDiscrimination() const {
@@ -128,7 +177,7 @@ public:
 
   uint16_t getConstantDiscrimination() const {
     assert(getOtherDiscrimination() == Discrimination::Constant);
-    return (uint16_t)ConstantDiscriminator;
+    return ConstantDiscriminator;
   }
 
   unsigned getKey() const {
@@ -138,9 +187,13 @@ public:
     case Kind::Soft:
       return unsigned(getSoftKey());
     case Kind::ARM8_3:
-      return unsigned(getARM8_3Key());
+      return llvm::to_underlying(getARM8_3Key());
     }
     llvm_unreachable("bad key kind");
+  }
+
+  PointerAuthenticationMode getAuthenticationMode() const {
+    return SelectedAuthenticationMode;
   }
 
   SoftKey getSoftKey() const {
@@ -162,30 +215,24 @@ struct PointerAuthOptions {
   /// Should return addresses be authenticated?
   bool ReturnAddresses = false;
 
-  /// Do indirect goto label addresses need to be authenticated?
-  bool IndirectGotos = false;
-
   /// Do authentication failures cause a trap?
   bool AuthTraps = false;
+
+  /// Do indirect goto label addresses need to be authenticated?
+  bool IndirectGotos = false;
 
   /// The ABI for C function pointers.
   PointerAuthSchema FunctionPointers;
 
-  /// The ABI for block invocation function pointers.
-  PointerAuthSchema BlockInvocationFunctionPointers;
-
-  /// The ABI for block object copy/destroy function pointers.
-  PointerAuthSchema BlockHelperFunctionPointers;
-
-  /// The ABI for __block variable copy/destroy function pointers.
-  PointerAuthSchema BlockByrefHelperFunctionPointers;
-
-  /// The ABI for Objective-C method lists.
-  PointerAuthSchema ObjCMethodListFunctionPointers;
-
   /// The ABI for C++ virtual table pointers (the pointer to the table
   /// itself) as installed in an actual class instance.
   PointerAuthSchema CXXVTablePointers;
+
+  /// TypeInfo has external ABI requirements and is emitted without
+  /// actually having parsed the libcxx definition, so we can't simply
+  /// perform a look up. The settings for this should match the exact
+  /// specification in type_info.h
+  PointerAuthSchema CXXTypeInfoVTablePointer;
 
   /// The ABI for C++ virtual table pointers as installed in a VTT.
   PointerAuthSchema CXXVTTVTablePointers;
@@ -198,8 +245,20 @@ struct PointerAuthOptions {
 
   /// The ABI for C++ member function pointers.
   PointerAuthSchema CXXMemberFunctionPointers;
+
+  /// The ABI for block invocation function pointers.
+  PointerAuthSchema BlockInvocationFunctionPointers;
+
+  /// The ABI for block object copy/destroy function pointers.
+  PointerAuthSchema BlockHelperFunctionPointers;
+
+  /// The ABI for __block variable copy/destroy function pointers.
+  PointerAuthSchema BlockByrefHelperFunctionPointers;
+
+  /// The ABI for Objective-C method lists.
+  PointerAuthSchema ObjCMethodListFunctionPointers;
 };
 
-}  // end namespace clang
+} // end namespace clang
 
 #endif

@@ -148,16 +148,17 @@ def TestType : Test_Type<"Test", [
 }
 
 def TestTypeWithLayoutType : Test_Type<"TestTypeWithLayout", [
-  DeclareTypeInterfaceMethods<DataLayoutTypeInterface, ["areCompatible"]>
+  DeclareTypeInterfaceMethods<DataLayoutTypeInterface, ["getIndexBitwidth",
+                                                        "areCompatible"]>
 ]> {
   let mnemonic = "test_type_with_layout";
   let parameters = (ins "unsigned":$key);
   let extraClassDeclaration = [{
-    ::mlir::LogicalResult verifyEntries(::mlir::DataLayoutEntryListRef params,
+    ::llvm::LogicalResult verifyEntries(::mlir::DataLayoutEntryListRef params,
                                 ::mlir::Location loc) const;
 
   private:
-    unsigned extractKind(::mlir::DataLayoutEntryListRef params,
+    uint64_t extractKind(::mlir::DataLayoutEntryListRef params,
                          ::llvm::StringRef expectedKind) const;
 
   public:

@@ -180,12 +180,13 @@ static int getItineraryLatency(LLVMDisasmContext *DC, const MCInst &Inst) {
   const MCInstrDesc& Desc = DC->getInstrInfo()->get(Inst.getOpcode());
   unsigned SCClass = Desc.getSchedClass();
 
-  int Latency = 0;
-  for (unsigned OpIdx = 0, OpIdxEnd = Inst.getNumOperands(); OpIdx != OpIdxEnd;
-       ++OpIdx)
-    Latency = std::max(Latency, IID.getOperandCycle(SCClass, OpIdx));
+  unsigned Latency = 0;
 
-  return Latency;
+  for (unsigned Idx = 0, IdxEnd = Inst.getNumOperands(); Idx != IdxEnd; ++Idx)
+    if (std::optional<unsigned> OperCycle = IID.getOperandCycle(SCClass, Idx))
+      Latency = std::max(Latency, *OperCycle);
+
+  return (int)Latency;
 }
 
 /// Gets latency information for \p Inst, based on \p DC information.
@@ -276,6 +277,12 @@ size_t LLVMDisasmInstruction(LLVMDisasmContextRef DCR, uint8_t *Bytes,
     SmallVector<char, 64> InsnStr;
     raw_svector_ostream OS(InsnStr);
     formatted_raw_ostream FormattedOS(OS);
+
+    if (DC->getOptions() & LLVMDisassembler_Option_Color) {
+      FormattedOS.enable_colors(true);
+      IP->setUseColor(true);
+    }
+
     IP->printInst(&Inst, PC, AnnotationsStr, *DC->getSubtargetInfo(),
                   FormattedOS);
 
@@ -341,6 +348,11 @@ int LLVMSetDisasmOptions(LLVMDisasmContextRef DCR, uint64_t Options){
     LLVMDisasmContext *DC = static_cast<LLVMDisasmContext *>(DCR);
     DC->addOptions(LLVMDisassembler_Option_PrintLatency);
     Options &= ~LLVMDisassembler_Option_PrintLatency;
+  }
+  if (Options & LLVMDisassembler_Option_Color) {
+    LLVMDisasmContext *DC = static_cast<LLVMDisasmContext *>(DCR);
+    DC->addOptions(LLVMDisassembler_Option_Color);
+    Options &= ~LLVMDisassembler_Option_Color;
   }
   return (Options == 0);
 }

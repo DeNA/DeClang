@@ -2,9 +2,8 @@ import lldb
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 
-class TestSwiftExpressionErrorReportingy(TestBase):
+class TestSwiftExpressionErrorReporting(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
     @swiftTest
@@ -57,5 +56,5 @@ class TestSwiftExpressionErrorReportingy(TestBase):
                     substrs=['Missing type'])
         
         process.Continue()
-        self.expect('dwim-print -O -- number', error=True,
+        self.expect('expression -O -- number', error=True,
                     substrs=['self', 'not', 'found'])

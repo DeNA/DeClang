@@ -3,11 +3,8 @@ from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
 
-
 class TestSwiftAnonymousClangTypes(lldbtest.TestBase):
     @swiftTest
-    # FIXME: This broke when adapting the swift-driver based Makefile.rules
-    @expectedFailureAll(oslist=['linux'])
     def test(self):
         self.build()
 

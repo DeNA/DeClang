@@ -151,7 +151,7 @@ void testIgnoredSmall() {
 void testParamLarge(Large a) noexcept {
 }
 
-// CHECK: define{{.*}} void @_Z15testReturnLargev(ptr noalias sret(%[[STRUCT_LARGE]]) align 8 %[[AGG_RESULT:.*]])
+// CHECK: define{{.*}} void @_Z15testReturnLargev(ptr dead_on_unwind noalias writable sret(%[[STRUCT_LARGE]]) align 8 %[[AGG_RESULT:.*]])
 // CHECK: %[[CALL:.*]] = call noundef ptr @_ZN5LargeC1Ev(ptr {{[^,]*}} %[[AGG_RESULT]])
 // CHECK: ret void
 // CHECK: }
@@ -178,7 +178,7 @@ void testCallLarge0() {
 
 // CHECK: define{{.*}} void @_Z14testCallLarge1v()
 // CHECK: %[[AGG_TMP:.*]] = alloca %[[STRUCT_LARGE:.*]], align 8
-// CHECK: call void @_Z15testReturnLargev(ptr sret(%[[STRUCT_LARGE]]) align 8 %[[AGG_TMP]])
+// CHECK: call void @_Z15testReturnLargev(ptr dead_on_unwind writable sret(%[[STRUCT_LARGE]]) align 8 %[[AGG_TMP]])
 // CHECK: call void @_Z14testParamLarge5Large(ptr noundef %[[AGG_TMP]])
 // CHECK: ret void
 // CHECK: }
@@ -189,7 +189,7 @@ void testCallLarge1() {
 
 // CHECK: define{{.*}} void @_Z16testIgnoredLargev()
 // CHECK: %[[AGG_TMP_ENSURED:.*]] = alloca %[[STRUCT_LARGE:.*]], align 8
-// CHECK: call void @_Z15testReturnLargev(ptr sret(%[[STRUCT_LARGE]]) align 8 %[[AGG_TMP_ENSURED]])
+// CHECK: call void @_Z15testReturnLargev(ptr dead_on_unwind writable sret(%[[STRUCT_LARGE]]) align 8 %[[AGG_TMP_ENSURED]])
 // CHECK: %[[CALL:.*]] = call noundef ptr @_ZN5LargeD1Ev(ptr {{[^,]*}} %[[AGG_TMP_ENSURED]])
 // CHECK: ret void
 // CHECK: }
@@ -210,7 +210,7 @@ Trivial testReturnHasTrivial() {
   return t;
 }
 
-// CHECK: define{{.*}} void @_Z23testReturnHasNonTrivialv(ptr noalias sret(%[[STRUCT_NONTRIVIAL:.*]]) align 4 %[[AGG_RESULT:.*]])
+// CHECK: define{{.*}} void @_Z23testReturnHasNonTrivialv(ptr dead_on_unwind noalias writable sret(%[[STRUCT_NONTRIVIAL:.*]]) align 4 %[[AGG_RESULT:.*]])
 // CHECK: %[[CALL:.*]] = call noundef ptr @_ZN10NonTrivialC1Ev(ptr {{[^,]*}} %[[AGG_RESULT]])
 // CHECK: ret void
 // CHECK: }
@@ -261,6 +261,26 @@ void calleeExceptionLarge(Large, Large);
 void testExceptionLarge() {
   calleeExceptionLarge(Large(), Large());
 }
+
+// CHECK: define void @_ZN7GH930401gEPNS_1SE
+// CHECK: [[CALL:%.*]] = call i64 @_ZN7GH930401fEv
+// CHECK-NEXT: [[TRUNC:%.*]] = trunc i64 [[CALL]] to i56
+// CHECK-NEXT: store i56 [[TRUNC]]
+// CHECK-NEXT: ret void
+void* operator new(unsigned long, void*);
+namespace GH93040 {
+struct [[clang::trivial_abi]] S {
+  char a;
+  int x;
+  __attribute((aligned(2))) char y;
+  S();
+} __attribute((packed));
+S f();
+void g(S* s) { new(s) S(f()); }
+struct S2 { [[no_unique_address]] S s; char c;};
+static_assert(sizeof(S) == 8 && sizeof(S2) == 8, "");
+}
+
 
 // PR42961
 

@@ -491,6 +491,7 @@ LLVM_16 {
     clang_experimental_cas_Databases_set_size_limit;
     clang_experimental_cas_getCachedCompilation;
     clang_experimental_cas_getCachedCompilation_async;
+    clang_experimental_cas_isMaterialized;
     clang_experimental_cas_loadObjectByString;
     clang_experimental_cas_loadObjectByString_async;
     clang_experimental_cas_ObjectStore_dispose;
@@ -518,6 +519,7 @@ LLVM_16 {
     clang_experimental_DepGraph_dispose;
     clang_experimental_DepGraph_getDiagnostics;
     clang_experimental_DepGraph_getModule;
+    clang_experimental_DepGraph_getModuleTopological;
     clang_experimental_DepGraph_getNumModules;
     clang_experimental_DepGraph_getNumTUCommands;
     clang_experimental_DepGraph_getTUCommand;
@@ -559,6 +561,12 @@ LLVM_17 {
     clang_getCursorBinaryOperatorKind;
     clang_getUnaryOperatorKindSpelling;
     clang_getCursorUnaryOperatorKind;
+};
+
+LLVM_19 {
+  global:
+    clang_Cursor_getBinaryOpcode;
+    clang_Cursor_getBinaryOpcodeStr;
 };
 
 # Example of how to add a new symbol version entry.  If you do add a new symbol

@@ -7,6 +7,7 @@ import platform
 import shlex
 import shutil
 import subprocess
+import sys
 
 import lit.formats
 
@@ -45,7 +46,7 @@ def find_sanitizer_runtime(name):
 
 
 def find_shlibpath_var():
-    if platform.system() in ["Linux", "FreeBSD", "NetBSD", "SunOS"]:
+    if platform.system() in ["Linux", "FreeBSD", "NetBSD", "OpenBSD", "SunOS"]:
         yield "LD_LIBRARY_PATH"
     elif platform.system() == "Darwin":
         yield "DYLD_LIBRARY_PATH"
@@ -58,8 +59,18 @@ def find_shlibpath_var():
 # enabled, we can't inject libraries into system binaries at all, so we need a
 # copy of the "real" python to work with.
 def find_python_interpreter():
+    # This is only necessary when using DYLD_INSERT_LIBRARIES.
+    if "DYLD_INSERT_LIBRARIES" not in config.environment:
+        return None
+
+    # If we're running in a virtual environment, we have to copy Python into
+    # the virtual environment for it to work.
+    if sys.prefix != sys.base_prefix:
+        copied_python = os.path.join(sys.prefix, "bin", "copied-python")
+    else:
+        copied_python = os.path.join(config.lldb_build_directory, "copied-python")
+
     # Avoid doing any work if we already copied the binary.
-    copied_python = os.path.join(config.lldb_build_directory, "copied-python")
     if os.path.isfile(copied_python):
         return copied_python
 
@@ -84,14 +95,15 @@ def find_python_interpreter():
     # RPATH and cannot be copied.
     try:
         # We don't care about the output, just make sure it runs.
-        subprocess.check_output([copied_python, "-V"], stderr=subprocess.STDOUT)
+        subprocess.check_call([copied_python, "-V"])
     except subprocess.CalledProcessError:
         # The copied Python didn't work. Assume we're dealing with the Python
         # interpreter in Xcode. Given that this is not a system binary SIP
-        # won't prevent us form injecting the interceptors so we get away with
-        # not copying the executable.
+        # won't prevent us form injecting the interceptors, but when running in
+        # a virtual environment, we can't use it directly. Create a symlink
+        # instead.
         os.remove(copied_python)
-        return real_python
+        os.symlink(real_python, copied_python)
 
     # The copied Python works.
     return copied_python
@@ -123,6 +135,11 @@ if is_configured("llvm_use_sanitizer"):
         config.environment[
             "ASAN_OPTIONS"
         ] = "detect_container_overflow=0:detect_stack_use_after_return=1"
+        # FIXME: This is the wrong place to disable this. This is working
+        # around the fact that the ci.swift.org scripts build only LLDB with
+        # asan and this creates an ODR violation in Allocator.h that breaks
+        # poisoning.
+        config.environment['ASAN_OPTIONS'] += ':' + 'allow_user_poisoning=0'
         # End Swift mod.
         if "Darwin" in config.host_os:
             config.environment["DYLD_INSERT_LIBRARIES"] = find_sanitizer_runtime(
@@ -131,13 +148,19 @@ if is_configured("llvm_use_sanitizer"):
             config.environment["MallocNanoZone"] = "0"
 
     if "Thread" in config.llvm_use_sanitizer:
+        config.environment["TSAN_OPTIONS"] = "halt_on_error=1"
         if "Darwin" in config.host_os:
             config.environment["DYLD_INSERT_LIBRARIES"] = find_sanitizer_runtime(
                 "libclang_rt.tsan_osx_dynamic.dylib"
             )
 
-if "DYLD_INSERT_LIBRARIES" in config.environment and platform.system() == "Darwin":
-    config.python_executable = find_python_interpreter()
+if platform.system() == "Darwin":
+    python_executable = find_python_interpreter()
+    if python_executable:
+        lit_config.note(
+            "Using {} instead of {}".format(python_executable, config.python_executable)
+        )
+        config.python_executable = python_executable
 
 # Shared library build of LLVM may require LD_LIBRARY_PATH or equivalent.
 if is_configured("shared_libs"):

@@ -12,7 +12,7 @@
 #include "clang/Basic/DiagnosticFrontend.h"
 #include "clang/Basic/Stack.h"
 #include "clang/Basic/TargetOptions.h"
-#include "clang/CodeGen/ObjectFilePCHContainerOperations.h"
+#include "clang/CodeGen/ObjectFilePCHContainerWriter.h"
 #include "clang/Config/config.h"
 #include "clang/Driver/Options.h"
 #include "clang/Frontend/CompileJobCacheKey.h"
@@ -22,6 +22,7 @@
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Frontend/Utils.h"
 #include "clang/FrontendTool/Utils.h"
+#include "clang/Serialization/ObjectFilePCHContainerReader.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningService.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningTool.h"
 #include "clang/Tooling/DependencyScanning/ScanAndUpdateArgs.h"
@@ -284,7 +285,7 @@ makeDepscanDaemonKey(StringRef Mode, const DepscanSharing &Sharing) {
     // Using same hash size as the module cache hash.
     auto Hash = Hasher.final<sizeof(uint64_t)>();
     uint64_t HashVal =
-        llvm::support::endian::read<uint64_t, llvm::support::native>(
+        llvm::support::endian::read<uint64_t, llvm::endianness::native>(
             Hash.data());
     return toString(llvm::APInt(64, HashVal), 36, /*Signed=*/false);
   };
@@ -370,7 +371,7 @@ static Expected<llvm::cas::CASID> scanAndUpdateCC1InlineWithTool(
 static llvm::Expected<llvm::cas::CASID> scanAndUpdateCC1UsingDaemon(
     const char *Exec, ArrayRef<const char *> OldArgs,
     StringRef WorkingDirectory, SmallVectorImpl<const char *> &NewArgs,
-    bool &DiagnosticErrorOccurred, StringRef Path,
+    std::string &DiagnosticOutput, StringRef Path,
     const DepscanSharing &Sharing,
     llvm::function_ref<const char *(const Twine &)> SaveArg,
     llvm::cas::ObjectStore &CAS) {
@@ -394,13 +395,16 @@ static llvm::Expected<llvm::cas::CASID> scanAndUpdateCC1UsingDaemon(
   llvm::BumpPtrAllocator Alloc;
   llvm::StringSaver Saver(Alloc);
   SmallVector<const char *> RawNewArgs;
-  StringRef DiagnosticOutput;
   CC1DepScanDProtocol::ResultKind Result;
   StringRef FailedReason;
   StringRef RootID;
+  StringRef DiagOut;
   if (auto E = Comms.getScanResult(Saver, Result, FailedReason, RootID,
-                                   RawNewArgs, DiagnosticOutput))
+                                   RawNewArgs, DiagOut)) {
+    DiagnosticOutput = DiagOut;
     return std::move(E);
+  }
+  DiagnosticOutput = DiagOut;
 
   if (Result != CC1DepScanDProtocol::SuccessResult)
     return llvm::createStringError(llvm::inconvertibleErrorCode(),
@@ -410,11 +414,6 @@ static llvm::Expected<llvm::cas::CASID> scanAndUpdateCC1UsingDaemon(
   NewArgs.resize(RawNewArgs.size());
   for (int I = 0, E = RawNewArgs.size(); I != E; ++I)
     NewArgs[I] = SaveArg(RawNewArgs[I]);
-
-  DiagnosticErrorOccurred = !DiagnosticOutput.empty();
-  if (DiagnosticErrorOccurred) {
-    llvm::errs() << DiagnosticOutput;
-  }
 
   return CAS.parseID(RootID);
 }
@@ -510,19 +509,22 @@ static int scanAndUpdateCC1(const char *Exec, ArrayRef<const char *> OldArgs,
   if (ProduceIncludeTree)
     Sharing.CASArgs.push_back("-fdepscan-include-tree");
 
+  std::string DiagnosticOutput;
   bool DiagnosticErrorOccurred = false;
   auto ScanAndUpdate = [&]() {
     if (std::optional<std::string> DaemonPath =
             makeDepscanDaemonPath(Mode, Sharing))
       return scanAndUpdateCC1UsingDaemon(Exec, OldArgs, WorkingDirectory,
-                                         NewArgs, DiagnosticErrorOccurred,
-                                         *DaemonPath, Sharing, SaveArg, *DB);
+                                         NewArgs, DiagnosticOutput, *DaemonPath,
+                                         Sharing, SaveArg, *DB);
     return scanAndUpdateCC1Inline(Exec, OldArgs, WorkingDirectory, NewArgs,
                                   ProduceIncludeTree, DiagnosticErrorOccurred,
                                   SaveArg, CASOpts, DB, Cache);
   };
   if (llvm::Error E = ScanAndUpdate().moveInto(RootID)) {
     Diag.Report(diag::err_cas_depscan_failed) << std::move(E);
+    if (!DiagnosticOutput.empty())
+      llvm::errs() << DiagnosticOutput;
     return 1;
   }
   return DiagnosticErrorOccurred;
@@ -534,7 +536,7 @@ int cc1depscan_main(ArrayRef<const char *> Argv, const char *Argv0,
   {
     auto FoundCC1Args =
         std::find_if(Argv.begin(), Argv.end(), [](const char *Arg) -> bool {
-          return StringRef(Arg).equals("-cc1-args");
+          return (StringRef(Arg) == "-cc1-args");
         });
     if (FoundCC1Args != Argv.end()) {
       SmallVector<const char *, 8> WarnOpts{Argv0};
@@ -823,7 +825,7 @@ void ScanServer::start(bool Exclusive) {
 }
 
 int ScanServer::listen() {
-  llvm::ThreadPool Pool;
+  llvm::DefaultThreadPool Pool;
 
   DiagnosticsEngine Diags(new DiagnosticIDs(), new DiagnosticOptions());
   CASOptions CASOpts;
@@ -959,7 +961,8 @@ int ScanServer::listen() {
           *Tool, *DiagsConsumer, &DiagsOS, Argv0, Args, WorkingDirectory,
           NewArgs, *CAS, [&](const Twine &T) { return Saver.save(T).data(); });
       if (!RootID) {
-        consumeError(Comms.putScanResultFailed(toString(RootID.takeError())));
+        consumeError(Comms.putScanResultFailed(toString(RootID.takeError()),
+                                               DiagsOS.str()));
         SharedOS.applyLocked([&](raw_ostream &OS) {
           printScannedCC1(OS);
           OS << I << ": failed to create compiler invocation\n";
@@ -995,7 +998,7 @@ int ScanServer::listen() {
     }
   };
 
-  for (unsigned I = 0; I < Pool.getThreadCount(); ++I)
+  for (unsigned I = 0; I < Pool.getMaxConcurrency(); ++I)
     Pool.async(ServiceLoop, I);
 
   if (!TimeoutSeconds) {

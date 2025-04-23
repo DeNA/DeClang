@@ -19,6 +19,8 @@
 #include <vector>
 
 #include "UniqueDWARFASTType.h"
+#include "lldb/Utility/StructuredData.h"
+#include "lldb/lldb-private-enumerations.h"
 
 class DWARFASTParserClang;
 class DWARFASTParserSwift;
@@ -63,7 +65,8 @@ public:
   void InitializeObject() override;
 
   // Compile Unit function calls
-  llvm::VersionTuple GetProducerVersion(CompileUnit &comp_unit) override;
+  llvm::VersionTuple
+  GetProducerVersion(CompileUnit &comp_unit) override;
   lldb::LanguageType ParseLanguage(CompileUnit &comp_unit) override;
   XcodeSDK ParseXcodeSDK(CompileUnit &comp_unit) override;
   llvm::SmallSet<lldb::LanguageType, 4>
@@ -120,6 +123,9 @@ public:
                      bool include_inlines, SymbolContextList &sc_list) override;
   void FindFunctions(const RegularExpression &regex, bool include_inlines,
                      SymbolContextList &sc_list) override;
+  void FindImportedDeclaration(ConstString name,
+                               std::vector<ImportedDeclaration> &declarations,
+                               bool find_one) override;
   void FindTypes(const lldb_private::TypeQuery &match,
                  lldb_private::TypeResults &results) override;
   CompilerDeclContext FindNamespace(ConstString name,
@@ -133,9 +139,14 @@ public:
   std::vector<lldb::DataBufferSP>
   GetASTData(lldb::LanguageType language) override;
 
+  void DumpClangAST(Stream &s) override;
+
+  /// List separate oso files.
+  bool GetSeparateDebugInfo(StructuredData::Dictionary &d,
+                            bool errors_only) override;
+
   bool GetCompileOption(const char *option, std::string &value,
                         CompileUnit *cu) override;
-  void DumpClangAST(Stream &s) override;
 
   // PluginInterface protocol
   llvm::StringRef GetPluginName() override { return GetPluginNameStatic(); }
@@ -150,8 +161,8 @@ protected:
   enum { kHaveInitializedOSOs = (1 << 0), kNumFlags };
 
   friend class DebugMapModule;
+  friend class DWARFASTParserSwift;
   friend class ::DWARFASTParserClang;
-  friend class ::DWARFASTParserSwift;
   friend class DWARFCompileUnit;
   friend class SymbolFileDWARF;
   struct OSOInfo {
@@ -237,13 +248,14 @@ protected:
 
   SymbolFileDWARF *GetSymbolFileByOSOIndex(uint32_t oso_idx);
 
-  // If closure returns "false", iteration continues.  If it returns
-  // "true", iteration terminates.
-  void ForEachSymbolFile(std::function<bool(SymbolFileDWARF *)> closure) {
+  /// If closure returns \ref IterationAction::Continue, iteration
+  /// continues. Otherwise, iteration terminates.
+  void
+  ForEachSymbolFile(std::function<IterationAction(SymbolFileDWARF *)> closure) {
     for (uint32_t oso_idx = 0, num_oso_idxs = m_compile_unit_infos.size();
          oso_idx < num_oso_idxs; ++oso_idx) {
       if (SymbolFileDWARF *oso_dwarf = GetSymbolFileByOSOIndex(oso_idx)) {
-        if (closure(oso_dwarf))
+        if (closure(oso_dwarf) == IterationAction::Stop)
           return;
       }
     }
@@ -279,15 +291,22 @@ protected:
 
   CompileUnitInfo *GetCompileUnitInfo(SymbolFileDWARF *oso_dwarf);
 
-  lldb::TypeSP FindDefinitionTypeForDWARFDeclContext(const DWARFDIE &die);
-
-  bool Supports_DW_AT_APPLE_objc_complete_type(SymbolFileDWARF *skip_dwarf_oso);
+  DWARFDIE FindDefinitionDIE(const DWARFDIE &die);
 
   lldb::TypeSP FindCompleteObjCDefinitionTypeForDIE(
       const DWARFDIE &die, ConstString type_name, bool must_be_implementation);
 
+  llvm::DenseMap<lldb::opaque_compiler_type_t, DIERef> &
+  GetForwardDeclCompilerTypeToDIE() {
+    return m_forward_decl_compiler_type_to_die;
+  }
+
   UniqueDWARFASTTypeMap &GetUniqueDWARFASTTypeMap() {
     return m_unique_ast_type_map;
+  }
+
+  llvm::DenseMap<const DWARFDebugInfoEntry *, Type *> &GetDIEToType() {
+    return m_die_to_type;
   }
 
   // OSOEntry
@@ -323,8 +342,13 @@ protected:
   std::vector<uint32_t> m_func_indexes; // Sorted by address
   std::vector<uint32_t> m_glob_indexes;
   std::map<std::pair<ConstString, llvm::sys::TimePoint<>>, OSOInfoSP> m_oso_map;
+  // A map from CompilerType to the struct/class/union/enum DIE (might be a
+  // declaration or a definition) that is used to construct it.
+  llvm::DenseMap<lldb::opaque_compiler_type_t, DIERef>
+      m_forward_decl_compiler_type_to_die;
   UniqueDWARFASTTypeMap m_unique_ast_type_map;
-  LazyBool m_supports_DW_AT_APPLE_objc_complete_type;
+  llvm::DenseMap<const DWARFDebugInfoEntry *, Type *> m_die_to_type;
+
   DebugMap m_debug_map;
 
   // When an object file from the debug map gets parsed in

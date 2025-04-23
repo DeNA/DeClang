@@ -69,11 +69,6 @@ static cl::opt<bool> ShowEncoding("show-encoding",
                                   cl::desc("Show instruction encodings"),
                                   cl::cat(MCCategory));
 
-static cl::opt<bool> RelaxELFRel(
-    "relax-relocations", cl::init(true),
-    cl::desc("Emit R_X86_64_GOTPCRELX instead of R_X86_64_GOTPCREL"),
-    cl::cat(MCCategory));
-
 static cl::opt<DebugCompressionType> CompressDebugSections(
     "compress-debug-sections", cl::ValueOptional,
     cl::init(DebugCompressionType::None),
@@ -190,10 +185,6 @@ static cl::opt<std::string> MainFileName(
     "main-file-name",
     cl::desc("Specifies the name we should consider the input file"),
     cl::cat(MCCategory));
-
-static cl::opt<bool> SaveTempLabels("save-temp-labels",
-                                    cl::desc("Don't discard temporary labels"),
-                                    cl::cat(MCCategory));
 
 static cl::opt<bool> LexMasmIntegers(
     "masm-integers",
@@ -391,9 +382,13 @@ int main(int argc, char **argv) {
 
   cl::HideUnrelatedOptions({&MCCategory, &getColorCategory()});
   cl::ParseCommandLineOptions(argc, argv, "llvm machine code playground\n");
-  const MCTargetOptions MCOptions = mc::InitMCTargetOptionsFromFlags();
-  setDwarfDebugFlags(argc, argv);
+  MCTargetOptions MCOptions = mc::InitMCTargetOptionsFromFlags();
+  MCOptions.CompressDebugSections = CompressDebugSections.getValue();
+  MCOptions.ShowMCInst = ShowInst;
+  MCOptions.AsmVerbose = true;
+  MCOptions.MCUseDwarfDirectory = MCTargetOptions::EnableDwarfDirectory;
 
+  setDwarfDebugFlags(argc, argv);
   setDwarfDebugProducer();
 
   const char *ProgName = argv[0];
@@ -429,7 +424,6 @@ int main(int argc, char **argv) {
       TheTarget->createMCAsmInfo(*MRI, TripleName, MCOptions));
   assert(MAI && "Unable to create target asm info!");
 
-  MAI->setRelaxELFRelocations(RelaxELFRel);
   if (CompressDebugSections != DebugCompressionType::None) {
     if (const char *Reason = compression::getReasonIfUnsupported(
             compression::formatFor(CompressDebugSections))) {
@@ -438,7 +432,6 @@ int main(int argc, char **argv) {
       return 1;
     }
   }
-  MAI->setCompressDebugSections(CompressDebugSections);
   MAI->setPreserveAsmComments(PreserveComments);
 
   // Package up features to be passed to target/subtarget
@@ -461,9 +454,6 @@ int main(int argc, char **argv) {
   std::unique_ptr<MCObjectFileInfo> MOFI(
       TheTarget->createMCObjectFileInfo(Ctx, PIC, LargeCodeModel));
   Ctx.setObjectFileInfo(MOFI.get());
-
-  if (SaveTempLabels)
-    Ctx.setAllowTemporaryLabels(false);
 
   Ctx.setGenDwarfForAssembly(GenDwarfForAssembly);
   // Default to 4 for dwarf version.
@@ -601,10 +591,8 @@ int main(int argc, char **argv) {
     std::unique_ptr<MCAsmBackend> MAB(
         TheTarget->createMCAsmBackend(*STI, *MRI, MCOptions));
     auto FOut = std::make_unique<formatted_raw_ostream>(*OS);
-    Str.reset(
-        TheTarget->createAsmStreamer(Ctx, std::move(FOut), /*asmverbose*/ true,
-                                     /*useDwarfDirectory*/ true, IP,
-                                     std::move(CE), std::move(MAB), ShowInst));
+    Str.reset(TheTarget->createAsmStreamer(Ctx, std::move(FOut), IP,
+                                           std::move(CE), std::move(MAB)));
 
   } else if (FileType == OFT_Null) {
     Str.reset(TheTarget->createNullStreamer(Ctx));
@@ -626,16 +614,15 @@ int main(int argc, char **argv) {
                           llvm::sys::Process::GetEnv("LLVM_TEST_CAS_BACKEND"));
 
     if (UseCASBackend) {
-      std::function<const cas::ObjectProxy(
-          llvm::MachOCASWriter &, llvm::MCAssembler &,
-          const llvm::MCAsmLayout &, cas::ObjectStore &, raw_ostream *)>
+      std::function<const cas::ObjectProxy(llvm::MachOCASWriter &,
+                                           llvm::MCAssembler &,
+                                           cas::ObjectStore &, raw_ostream *)>
           CreateFromMcAssembler =
               [](llvm::MachOCASWriter &Writer, llvm::MCAssembler &Asm,
-                 const llvm::MCAsmLayout &Layout, cas::ObjectStore &CAS,
+                 cas::ObjectStore &CAS,
                  raw_ostream *DebugOS = nullptr) -> const cas::ObjectProxy {
         auto Schema = std::make_unique<mccasformats::v1::MCSchema>(CAS);
-        return cantFail(
-            Schema->createFromMCAssembler(Writer, Asm, Layout, DebugOS));
+        return cantFail(Schema->createFromMCAssembler(Writer, Asm, DebugOS));
       };
       std::function<Error(cas::ObjectProxy, cas::ObjectStore &, raw_ostream &)>
           SerializeObjectFile = [](cas::ObjectProxy RootNode,
@@ -655,15 +642,10 @@ int main(int argc, char **argv) {
         UseCASBackend ? std::move(CASBackendWriter) // MCCAS
         : DwoOut ? MAB->createDwoObjectWriter(*OS, DwoOut->os())
                : MAB->createObjectWriter(*OS),
-        std::unique_ptr<MCCodeEmitter>(CE), *STI, MCOptions.MCRelaxAll,
-        MCOptions.MCIncrementalLinkerCompatible,
-        /*DWARFMustBeAtTheEnd*/ false));
+        std::unique_ptr<MCCodeEmitter>(CE), *STI));
     if (NoExecStack)
       Str->initSections(true, *STI);
   }
-
-  // Use Assembler information for parsing.
-  Str->setUseAssemblerInfoForParsing(true);
 
   int Res = 1;
   bool disassemble = false;

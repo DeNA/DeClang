@@ -53,6 +53,7 @@
 #include "OnDiskCommon.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/CAS/OnDiskKeyValueDB.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -114,9 +115,11 @@ UnifiedOnDiskCache::faultInFromUpstreamKV(ArrayRef<uint8_t> Key) {
   assert(UpstreamValue->size() == sizeof(uint64_t));
   ObjectID UpstreamID = ObjectID::fromOpaqueData(
       support::endian::read64le(UpstreamValue->data()));
-  ObjectID PrimaryID =
+  auto PrimaryID =
       PrimaryGraphDB->getReference(UpstreamGraphDB->getDigest(UpstreamID));
-  return KVPut(Key, PrimaryID);
+  if (LLVM_UNLIKELY(!PrimaryID))
+    return PrimaryID.takeError();
+  return KVPut(Key, *PrimaryID);
 }
 
 /// \returns all the 'v<version>.<x>' names of sub-directories, sorted with
@@ -135,7 +138,7 @@ static Error getAllDBDirs(StringRef Path,
     if (DirI->type() != sys::fs::file_type::directory_file)
       continue;
     StringRef SubDir = sys::path::filename(DirI->path());
-    if (!SubDir.startswith(DBDirPrefix))
+    if (!SubDir.starts_with(DBDirPrefix))
       continue;
     uint64_t Order;
     if (SubDir.substr(DBDirPrefix.size()).getAsInteger(10, Order))
@@ -157,7 +160,7 @@ static Error getAllDBDirs(StringRef Path,
 /// \returns Given a sub-directory named 'v<version>.<x>', it outputs the
 /// 'v<version>.<x+1>' name.
 static void getNextDBDirName(StringRef DBDir, llvm::raw_ostream &OS) {
-  assert(DBDir.startswith(DBDirPrefix));
+  assert(DBDir.starts_with(DBDirPrefix));
   uint64_t Count;
   bool Failed = DBDir.substr(DBDirPrefix.size()).getAsInteger(10, Count);
   assert(!Failed);
@@ -268,6 +271,14 @@ bool UnifiedOnDiskCache::hasExceededSizeLimit() const {
   uint64_t CurSizeLimit = SizeLimit;
   if (!CurSizeLimit)
     return false;
+
+  // If the hard limit is beyond 85%, declare above limit and request clean up.
+  unsigned CurrentPrecent =
+      std::max(PrimaryGraphDB->getHardStorageLimitUtilization(),
+               PrimaryKVDB->getHardStorageLimitUtilization());
+  if (CurrentPrecent > 85)
+    return true;
+
   // We allow each of the directories in the chain to reach up to half the
   // intended size limit. Check whether the primary directory has exceeded half
   // the limit or not, in order to decide whether we need to start a new chain.

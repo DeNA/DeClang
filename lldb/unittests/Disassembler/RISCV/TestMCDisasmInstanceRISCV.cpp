@@ -20,6 +20,7 @@
 using namespace lldb;
 using namespace lldb_private;
 
+namespace {
 class TestMCDisasmInstanceRISCV : public testing::Test {
 public:
   static void SetUpTestCase();
@@ -39,6 +40,7 @@ void TestMCDisasmInstanceRISCV::SetUpTestCase() {
 void TestMCDisasmInstanceRISCV::TearDownTestCase() {
   DisassemblerLLVMC::Terminate();
 }
+} // namespace
 
 TEST_F(TestMCDisasmInstanceRISCV, TestRISCV32Instruction) {
   ArchSpec arch("riscv32-*-linux");
@@ -54,9 +56,9 @@ TEST_F(TestMCDisasmInstanceRISCV, TestRISCV32Instruction) {
 
   DisassemblerSP disass_sp;
   Address start_addr(0x100);
-  disass_sp =
-      Disassembler::DisassembleBytes(arch, nullptr, nullptr, start_addr, &data,
-                                    sizeof (data), num_of_instructions, false);
+  disass_sp = Disassembler::DisassembleBytes(
+      arch, nullptr, nullptr, nullptr, nullptr, start_addr, &data, sizeof(data),
+      num_of_instructions, false);
 
   // If we failed to get a disassembler, we can assume it is because
   // the llvm we linked against was not built with the riscv target,

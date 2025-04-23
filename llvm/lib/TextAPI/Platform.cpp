@@ -49,6 +49,8 @@ PlatformType mapToPlatformType(const Triple &Target) {
   case Triple::WatchOS:
     return Target.isSimulatorEnvironment() ? PLATFORM_WATCHOSSIMULATOR
                                            : PLATFORM_WATCHOS;
+  case Triple::BridgeOS:
+    return PLATFORM_BRIDGEOS;
   case Triple::DriverKit:
     return PLATFORM_DRIVERKIT;
   case Triple::XROS:
@@ -80,7 +82,7 @@ PlatformType getPlatformFromName(StringRef Name) {
       .Case("osx", PLATFORM_MACOS)
 #define PLATFORM(platform, id, name, build_name, target, tapi_target,          \
                  marketing)                                                    \
-  .Case(#tapi_target, PLATFORM_##platform)
+  .Case(#target, PLATFORM_##platform)
 #include "llvm/BinaryFormat/MachO.def"
       .Default(PLATFORM_UNKNOWN);
 }

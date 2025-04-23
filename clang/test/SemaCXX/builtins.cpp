@@ -13,7 +13,6 @@ void f() {
 
 void a() { __builtin_va_list x, y; ::__builtin_va_copy(x, y); }
 
-// <rdar://problem/10063539>
 template<int (*Compare)(const char *s1, const char *s2)>
 int equal(const char *s1, const char *s2) {
   return Compare(s1, s2) == 0;
@@ -76,6 +75,11 @@ using MemFnType = int (Dummy::*)(char);
 using ConstMemFnType = int (Dummy::*)() const;
 
 void foo() {}
+
+void test_builtin_empty_parentheses_diags() {
+  __is_trivially_copyable(); // expected-error {{expected a type}}
+  __is_trivially_copyable(1); // expected-error {{expected a type}}
+}
 
 void test_builtin_launder_diags(void *vp, const void *cvp, FnType *fnp,
                                 MemFnType mfp, ConstMemFnType cmfp, int (&Arr)[5]) {

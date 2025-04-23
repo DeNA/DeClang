@@ -58,6 +58,7 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/NoFolder.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
@@ -100,7 +101,7 @@ static Value *createByteGEP(IRBuilderBase &IRB, const DataLayout &DL,
                             Value *Ptr, Type *ResElemTy, int64_t Offset) {
   if (Offset != 0) {
     APInt APOffset(DL.getIndexTypeSizeInBits(Ptr->getType()), Offset);
-    Ptr = IRB.CreateGEP(IRB.getInt8Ty(), Ptr, IRB.getInt(APOffset));
+    Ptr = IRB.CreatePtrAdd(Ptr, IRB.getInt(APOffset));
   }
   return Ptr;
 }
@@ -121,19 +122,24 @@ doPromotion(Function *F, FunctionAnalysisManager &FAM,
   // that we are *not* promoting. For the ones that we do promote, the parameter
   // attributes are lost
   SmallVector<AttributeSet, 8> ArgAttrVec;
+  // Mapping from old to new argument indices. -1 for promoted or removed
+  // arguments.
+  SmallVector<unsigned> NewArgIndices;
   AttributeList PAL = F->getAttributes();
 
   // First, determine the new argument list
-  unsigned ArgNo = 0;
+  unsigned ArgNo = 0, NewArgNo = 0;
   for (Function::arg_iterator I = F->arg_begin(), E = F->arg_end(); I != E;
        ++I, ++ArgNo) {
     if (!ArgsToPromote.count(&*I)) {
       // Unchanged argument
       Params.push_back(I->getType());
       ArgAttrVec.push_back(PAL.getParamAttrs(ArgNo));
+      NewArgIndices.push_back(NewArgNo++);
     } else if (I->use_empty()) {
       // Dead argument (which are always marked as promotable)
       ++NumArgumentsDead;
+      NewArgIndices.push_back((unsigned)-1);
     } else {
       const auto &ArgParts = ArgsToPromote.find(&*I)->second;
       for (const auto &Pair : ArgParts) {
@@ -141,6 +147,8 @@ doPromotion(Function *F, FunctionAnalysisManager &FAM,
         ArgAttrVec.push_back(AttributeSet());
       }
       ++NumArgumentsPromoted;
+      NewArgIndices.push_back((unsigned)-1);
+      NewArgNo += ArgParts.size();
     }
   }
 
@@ -154,6 +162,7 @@ doPromotion(Function *F, FunctionAnalysisManager &FAM,
                                   F->getName());
   NF->copyAttributesFrom(F);
   NF->copyMetadata(F, 0);
+  NF->setIsNewDbgInfoFormat(F->IsNewDbgInfoFormat);
 
   // The new function will have the !dbg metadata copied from the original
   // function. The original function may not be deleted, and dbg metadata need
@@ -173,6 +182,19 @@ doPromotion(Function *F, FunctionAnalysisManager &FAM,
   // the function.
   NF->setAttributes(AttributeList::get(F->getContext(), PAL.getFnAttrs(),
                                        PAL.getRetAttrs(), ArgAttrVec));
+
+  // Remap argument indices in allocsize attribute.
+  if (auto AllocSize = NF->getAttributes().getFnAttrs().getAllocSizeArgs()) {
+    unsigned Arg1 = NewArgIndices[AllocSize->first];
+    assert(Arg1 != (unsigned)-1 && "allocsize cannot be promoted argument");
+    std::optional<unsigned> Arg2;
+    if (AllocSize->second) {
+      Arg2 = NewArgIndices[*AllocSize->second];
+      assert(Arg2 != (unsigned)-1 && "allocsize cannot be promoted argument");
+    }
+    NF->addFnAttr(Attribute::getWithAllocSizeArgs(F->getContext(), Arg1, Arg2));
+  }
+
   AttributeFuncs::updateMinLegalVectorWidthAttr(*NF, LargestVectorWidth);
   ArgAttrVec.clear();
 
@@ -182,7 +204,7 @@ doPromotion(Function *F, FunctionAnalysisManager &FAM,
   // Loop over all the callers of the function, transforming the call sites to
   // pass in the loaded pointers.
   SmallVector<Value *, 16> Args;
-  const DataLayout &DL = F->getParent()->getDataLayout();
+  const DataLayout &DL = F->getDataLayout();
   SmallVector<WeakTrackingVH, 16> DeadArgs;
 
   while (!F->use_empty()) {
@@ -245,9 +267,10 @@ doPromotion(Function *F, FunctionAnalysisManager &FAM,
     CallBase *NewCS = nullptr;
     if (InvokeInst *II = dyn_cast<InvokeInst>(&CB)) {
       NewCS = InvokeInst::Create(NF, II->getNormalDest(), II->getUnwindDest(),
-                                 Args, OpBundles, "", &CB);
+                                 Args, OpBundles, "", CB.getIterator());
     } else {
-      auto *NewCall = CallInst::Create(NF, Args, OpBundles, "", &CB);
+      auto *NewCall =
+          CallInst::Create(NF, Args, OpBundles, "", CB.getIterator());
       NewCall->setTailCallKind(cast<CallInst>(&CB)->getTailCallKind());
       NewCS = NewCall;
     }
@@ -400,11 +423,11 @@ doPromotion(Function *F, FunctionAnalysisManager &FAM,
 
 /// Return true if we can prove that all callees pass in a valid pointer for the
 /// specified function argument.
-static bool allCallersPassValidPointerForArgument(Argument *Arg,
-                                                  Align NeededAlign,
-                                                  uint64_t NeededDerefBytes) {
+static bool allCallersPassValidPointerForArgument(
+    Argument *Arg, SmallPtrSetImpl<CallBase *> &RecursiveCalls,
+    Align NeededAlign, uint64_t NeededDerefBytes) {
   Function *Callee = Arg->getParent();
-  const DataLayout &DL = Callee->getParent()->getDataLayout();
+  const DataLayout &DL = Callee->getDataLayout();
   APInt Bytes(64, NeededDerefBytes);
 
   // Check if the argument itself is marked dereferenceable and aligned.
@@ -415,6 +438,33 @@ static bool allCallersPassValidPointerForArgument(Argument *Arg,
   // direct callees.
   return all_of(Callee->users(), [&](User *U) {
     CallBase &CB = cast<CallBase>(*U);
+    // In case of functions with recursive calls, this check
+    // (isDereferenceableAndAlignedPointer) will fail when it tries to look at
+    // the first caller of this function. The caller may or may not have a load,
+    // incase it doesn't load the pointer being passed, this check will fail.
+    // So, it's safe to skip the check incase we know that we are dealing with a
+    // recursive call. For example we have a IR given below.
+    //
+    // def fun(ptr %a) {
+    //   ...
+    //   %loadres = load i32, ptr %a, align 4
+    //   %res = call i32 @fun(ptr %a)
+    //   ...
+    // }
+    //
+    // def bar(ptr %x) {
+    //   ...
+    //   %resbar = call i32 @fun(ptr %x)
+    //   ...
+    // }
+    //
+    // Since we record processed recursive calls, we check if the current
+    // CallBase has been processed before. If yes it means that it is a
+    // recursive call and we can skip the check just for this call. So, just
+    // return true.
+    if (RecursiveCalls.contains(&CB))
+      return true;
+
     return isDereferenceableAndAlignedPointer(CB.getArgOperand(Arg->getArgNo()),
                                               NeededAlign, Bytes, DL);
   });
@@ -548,6 +598,7 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
   SmallVector<const Use *, 16> Worklist;
   SmallPtrSet<const Use *, 16> Visited;
   SmallVector<LoadInst *, 16> Loads;
+  SmallPtrSet<CallBase *, 4> RecursiveCalls;
   auto AppendUses = [&](const Value *V) {
     for (const Use &U : V->uses())
       if (Visited.insert(&U).second)
@@ -588,6 +639,33 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
       // unknown users
     }
 
+    auto *CB = dyn_cast<CallBase>(V);
+    Value *PtrArg = U->get();
+    if (CB && CB->getCalledFunction() == CB->getFunction()) {
+      if (PtrArg != Arg) {
+        LLVM_DEBUG(dbgs() << "ArgPromotion of " << *Arg << " failed: "
+                          << "pointer offset is not equal to zero\n");
+        return false;
+      }
+
+      unsigned int ArgNo = Arg->getArgNo();
+      if (U->getOperandNo() != ArgNo) {
+        LLVM_DEBUG(dbgs() << "ArgPromotion of " << *Arg << " failed: "
+                          << "arg position is different in callee\n");
+        return false;
+      }
+
+      // We limit promotion to only promoting up to a fixed number of elements
+      // of the aggregate.
+      if (MaxElements > 0 && ArgParts.size() > MaxElements) {
+        LLVM_DEBUG(dbgs() << "ArgPromotion of " << *Arg << " failed: "
+                          << "more than " << MaxElements << " parts\n");
+        return false;
+      }
+
+      RecursiveCalls.insert(CB);
+      continue;
+    }
     // Unknown user.
     LLVM_DEBUG(dbgs() << "ArgPromotion of " << *Arg << " failed: "
                       << "unknown user " << *V << "\n");
@@ -596,7 +674,7 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
 
   if (NeededDerefBytes || NeededAlign > 1) {
     // Try to prove a required deref / aligned requirement.
-    if (!allCallersPassValidPointerForArgument(Arg, NeededAlign,
+    if (!allCallersPassValidPointerForArgument(Arg, RecursiveCalls, NeededAlign,
                                                NeededDerefBytes)) {
       LLVM_DEBUG(dbgs() << "ArgPromotion of " << *Arg << " failed: "
                         << "not dereferenceable or aligned\n");
@@ -631,10 +709,6 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
   // check to see if the pointer is guaranteed to not be modified from entry of
   // the function to each of the load instructions.
 
-  // Because there could be several/many load instructions, remember which
-  // blocks we know to be transparent to the load.
-  df_iterator_default_set<BasicBlock *, 16> TranspBlocks;
-
   for (LoadInst *Load : Loads) {
     // Check to see if the load is invalidated from the start of the block to
     // the load itself.
@@ -648,7 +722,7 @@ static bool findArgParts(Argument *Arg, const DataLayout &DL, AAResults &AAR,
     // To do this, we perform a depth first search on the inverse CFG from the
     // loading block.
     for (BasicBlock *P : predecessors(BB)) {
-      for (BasicBlock *TranspBB : inverse_depth_first_ext(P, TranspBlocks))
+      for (BasicBlock *TranspBB : inverse_depth_first(P))
         if (AAR.canBasicBlockModify(*TranspBB, Loc))
           return false;
     }
@@ -736,7 +810,7 @@ static Function *promoteArguments(Function *F, FunctionAnalysisManager &FAM,
     if (BB.getTerminatingMustTailCall())
       return nullptr;
 
-  const DataLayout &DL = F->getParent()->getDataLayout();
+  const DataLayout &DL = F->getDataLayout();
   auto &AAR = FAM.getResult<AAManager>(*F);
   const auto &TTI = FAM.getResult<TargetIRAnalysis>(*F);
 

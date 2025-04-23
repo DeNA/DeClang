@@ -153,11 +153,8 @@ const char *Section::GetTypeAsCString() const {
     return "lldb-type-summaries";
   case eSectionTypeOther:
     return "regular";
-
-  // BEGIN SWIFT
   case eSectionTypeSwiftModules:
-    break;
-  // END SWIFT
+    return "swift-modules";
   }
   return "unknown";
 }
@@ -282,7 +279,7 @@ bool Section::ContainsFileAddress(addr_t vm_addr) const {
 void Section::Dump(llvm::raw_ostream &s, unsigned indent, Target *target,
                    uint32_t depth) const {
   s.indent(indent);
-  s << llvm::format("0x%8.8" PRIx64 " %-16s ", GetID(), GetTypeAsCString());
+  s << llvm::format("0x%16.16" PRIx64 " %-22s ", GetID(), GetTypeAsCString());
   bool resolved = true;
   addr_t addr = LLDB_INVALID_ADDRESS;
 
@@ -429,9 +426,6 @@ bool Section::ContainsOnlyDebugInfo() const {
   case eSectionTypeDebug:
     return false;
 
-#ifdef LLDB_ENABLE_SWIFT
-  case eSectionTypeSwiftModules:
-#endif
   case eSectionTypeDWARFDebugAbbrev:
   case eSectionTypeDWARFDebugAbbrevDwo:
   case eSectionTypeDWARFDebugAddr:
@@ -468,6 +462,7 @@ bool Section::ContainsOnlyDebugInfo() const {
   case eSectionTypeDWARFGNUDebugAltLink:
   case eSectionTypeCTF:
   case eSectionTypeLLDBTypeSummaries:
+  case eSectionTypeSwiftModules:
     return true;
   }
   return false;
@@ -652,14 +647,12 @@ void SectionList::Dump(llvm::raw_ostream &s, unsigned indent, Target *target,
   if (show_header && !m_sections.empty()) {
     s.indent(indent);
     s << llvm::formatv(
-        "SectID     Type             {0} Address                          "
-        "   Perm File Off.  File Size  Flags "
-        "     Section Name\n",
+        "SectID             Type                   {0} Address                "
+        "             Perm File Off.  File Size  Flags      Section Name\n",
         target_has_loaded_sections ? "Load" : "File");
     s.indent(indent);
-    s << "---------- ---------------- "
-         "---------------------------------------  ---- ---------- "
-         "---------- "
+    s << "------------------ ---------------------- "
+         "---------------------------------------  ---- ---------- ---------- "
          "---------- ----------------------------\n";
   }
 

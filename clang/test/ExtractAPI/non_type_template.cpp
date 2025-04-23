@@ -121,7 +121,7 @@ template <typename T> class Foo <T, 4> { };
 // FOO-SPEC-NEXT: ]
 
 // RUN: FileCheck %s --input-file %t/output.symbols.json --check-prefix NEST
-template <template <template <typename> typename> typename... Bs> class NestedTemplateTemplateParamPack{ };
+template <template <template <typename> typename> class... Bs> class NestedTemplateTemplateParamPack{ };
 // NEST-LABEL: "!testLabel": "c:@ST>1#pt>1#t>1#T@NestedTemplateTemplateParamPack"
 // NEST:      "declarationFragments": [
 // NEST-NEXT:   {
@@ -166,7 +166,7 @@ template <template <template <typename> typename> typename... Bs> class NestedTe
 // NEST-NEXT:   },
 // NEST-NEXT:   {
 // NEST-NEXT:     "kind": "keyword",
-// NEST-NEXT:     "spelling": "typename"
+// NEST-NEXT:     "spelling": "class"
 // NEST-NEXT:   },
 // NEST-NEXT:   {
 // NEST-NEXT:     "kind": "text",

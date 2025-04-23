@@ -99,7 +99,7 @@ private:
   Expected<cas::ObjectRef>
   getObjectForFileNonCached(FileManager &FM, const SrcMgr::FileInfo &FI);
   Expected<cas::ObjectRef> getObjectForBuffer(const SrcMgr::FileInfo &FI);
-  Expected<cas::ObjectRef> addToFileList(FileManager &FM, const FileEntry *FE);
+  Expected<cas::ObjectRef> addToFileList(FileManager &FM, FileEntryRef FE);
   Expected<cas::IncludeTree> getCASTreeForFileIncludes(FilePPState &&PPState);
   Expected<cas::IncludeTree::File> createIncludeFile(StringRef Filename,
                                                      cas::ObjectRef Contents);
@@ -391,7 +391,7 @@ Error IncludeTreeActionController::finalizeModuleBuild(
   if (!Tree)
     return Tree.takeError();
 
-  ModuleScanInstance.getASTContext().setCASIncludeTreeID(
+  ModuleScanInstance.getPreprocessor().setCASIncludeTreeID(
       Tree->getID().toString());
 
   return Error::success();
@@ -424,13 +424,18 @@ void IncludeTreeBuilder::enteredInclude(Preprocessor &PP, FileID FID) {
   if (!StartedEnteringIncludes) {
     StartedEnteringIncludes = true;
 
+    SmallVector<OptionalFileEntryRef> UIDToFE;
+    PP.getFileManager().GetUniqueIDMapping(UIDToFE);
+
     // Get the included files (coming from a PCH), and keep track of the
     // filenames that were recorded in the PCH.
     for (const FileEntry *FE : PP.getIncludedFiles()) {
       unsigned UID = FE->getUID();
       if (UID >= PreIncludedFileNames.size())
         PreIncludedFileNames.resize(UID + 1);
-      PreIncludedFileNames[UID] = FE->getName();
+      OptionalFileEntryRef FERef = UIDToFE[FE->getUID()];
+      assert(FERef && "No FileEntryRef with given UID");
+      PreIncludedFileNames[UID] = FERef->getName();
     }
   }
 
@@ -595,11 +600,14 @@ IncludeTreeBuilder::finishIncludeTree(CompilerInstance &ScanInstance,
                      bool IgnoreFileError = false) -> Error {
     if (FilePath.empty())
       return Error::success();
-    llvm::ErrorOr<const FileEntry *> FE = FM.getFile(FilePath);
+    llvm::Expected<FileEntryRef> FE = FM.getFileRef(FilePath);
     if (!FE) {
-      if (IgnoreFileError)
+      auto Err = FE.takeError();
+      if (IgnoreFileError) {
+        llvm::consumeError(std::move(Err));
         return Error::success();
-      return llvm::errorCodeToError(FE.getError());
+      }
+      return Err;
     }
     std::optional<cas::ObjectRef> Ref;
     return addToFileList(FM, *FE).moveInto(Ref);
@@ -695,7 +703,7 @@ IncludeTreeBuilder::finishIncludeTree(CompilerInstance &ScanInstance,
       auto Notes = ANM.getCurrentModuleAPINotes(
           M, ScanInstance.getLangOpts().APINotesModules,
           ScanInstance.getAPINotesOpts().ModuleSearchPaths);
-      for (auto *File : Notes) {
+      for (auto File : Notes) {
         if (auto Buf =
                 ScanInstance.getSourceManager().getMemoryBufferForFileOrNone(
                     File)) {
@@ -791,7 +799,7 @@ Expected<cas::ObjectRef> IncludeTreeBuilder::getObjectForFile(Preprocessor &PP,
     return *ModuleIncludesBufferRef;
   }
   assert(FI.getContentCache().OrigEntry);
-  auto &FileRef = ObjectForFile[FI.getContentCache().OrigEntry];
+  auto &FileRef = ObjectForFile[*FI.getContentCache().OrigEntry];
   if (!FileRef) {
     auto Ref = getObjectForFileNonCached(SM.getFileManager(), FI);
     if (!Ref)
@@ -804,7 +812,7 @@ Expected<cas::ObjectRef> IncludeTreeBuilder::getObjectForFile(Preprocessor &PP,
 Expected<cas::ObjectRef>
 IncludeTreeBuilder::getObjectForFileNonCached(FileManager &FM,
                                               const SrcMgr::FileInfo &FI) {
-  const FileEntry *FE = FI.getContentCache().OrigEntry;
+  OptionalFileEntryRef FE = FI.getContentCache().OrigEntry;
   assert(FE);
 
   // Mark the include as already seen.
@@ -812,7 +820,7 @@ IncludeTreeBuilder::getObjectForFileNonCached(FileManager &FM,
     SeenIncludeFiles.resize(FE->getUID() + 1);
   SeenIncludeFiles.set(FE->getUID());
 
-  return addToFileList(FM, FE);
+  return addToFileList(FM, *FE);
 }
 
 Expected<cas::ObjectRef>
@@ -829,10 +837,10 @@ IncludeTreeBuilder::getObjectForBuffer(const SrcMgr::FileInfo &FI) {
   return FileNode->getRef();
 }
 
-Expected<cas::ObjectRef>
-IncludeTreeBuilder::addToFileList(FileManager &FM, const FileEntry *FE) {
+Expected<cas::ObjectRef> IncludeTreeBuilder::addToFileList(FileManager &FM,
+                                                           FileEntryRef FE) {
   SmallString<128> PathStorage;
-  StringRef Filename = FE->getName();
+  StringRef Filename = FE.getName();
   // Apply -working-directory to relative paths. This option causes filesystem
   // lookups to use absolute paths, so make paths in the include-tree filesystem
   // absolute to match.
@@ -856,13 +864,13 @@ IncludeTreeBuilder::addToFileList(FileManager &FM, const FileEntry *FE) {
       return FileNode.takeError();
     IncludedFiles.push_back(
         {FileNode->getRef(),
-         static_cast<cas::IncludeTree::FileList::FileSizeTy>(FE->getSize())});
+         static_cast<cas::IncludeTree::FileList::FileSizeTy>(FE.getSize())});
     return FileNode->getRef();
   };
 
   // Check whether another path coming from the PCH is associated with the same
   // file.
-  unsigned UID = FE->getUID();
+  unsigned UID = FE.getUID();
   if (UID < PreIncludedFileNames.size() && !PreIncludedFileNames[UID].empty() &&
       PreIncludedFileNames[UID] != Filename) {
     auto FileNode = addFile(PreIncludedFileNames[UID]);

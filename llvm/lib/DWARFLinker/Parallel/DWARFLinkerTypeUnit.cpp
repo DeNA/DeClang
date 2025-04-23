@@ -17,7 +17,7 @@ using namespace dwarf_linker::parallel;
 
 TypeUnit::TypeUnit(LinkingGlobalData &GlobalData, unsigned ID,
                    std::optional<uint16_t> Language, dwarf::FormParams Format,
-                   support::endianness Endianess)
+                   endianness Endianess)
     : DwarfUnit(GlobalData, ID, ""), Language(Language),
       AcceleratorRecords(&GlobalData.getAllocator()) {
 

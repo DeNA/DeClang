@@ -40,7 +40,7 @@ public:
   ValueObjectSP GetChildAtIndex(uint32_t idx) override;
 
 private:
-  ConstString GetDataContainerMemberName();
+  llvm::StringRef GetDataContainerMemberName();
 
   // The lifetime of a ValueObject and all its derivative ValueObjects
   // (children, clones, etc.) is managed by a ClusterManager. These
@@ -68,12 +68,14 @@ GenericBitsetFrontEnd::GenericBitsetFrontEnd(ValueObject &valobj, StdLib stdlib)
   }
 }
 
-ConstString GenericBitsetFrontEnd::GetDataContainerMemberName() {
+llvm::StringRef GenericBitsetFrontEnd::GetDataContainerMemberName() {
+  static constexpr llvm::StringLiteral s_libcxx_case("__first_");
+  static constexpr llvm::StringLiteral s_libstdcpp_case("_M_w");
   switch (m_stdlib) {
   case StdLib::LibCxx:
-    return ConstString("__first_");
+    return s_libcxx_case;
   case StdLib::LibStdcpp:
-    return ConstString("_M_w");
+    return s_libstdcpp_case;
   }
   llvm_unreachable("Unknown StdLib enum");
 }

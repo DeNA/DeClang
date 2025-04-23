@@ -42,7 +42,7 @@ struct TargetMachineBuilder {
   std::string MAttr;
   TargetOptions Options;
   std::optional<Reloc::Model> RelocModel;
-  CodeGenOpt::Level CGOptLevel = CodeGenOpt::Aggressive;
+  CodeGenOptLevel CGOptLevel = CodeGenOptLevel::Aggressive;
 
   std::unique_ptr<TargetMachine> create() const;
 };
@@ -235,6 +235,12 @@ public:
   /// the processing.
   void setSaveTempsDir(std::string Path) { SaveTempsDir = std::move(Path); }
 
+  /// Set the path to a directory where to save temporaries from the remote
+  /// service.
+  void setRemoteServiceTempsDir(std::string Path) {
+    RemoteServiceTempsDir = std::move(Path);
+  }
+
   /// Set the path to a directory where to save generated object files. This
   /// path can be used by a linker to request on-disk files instead of in-memory
   /// buffers. When set, results are available through getProducedBinaryFiles()
@@ -264,7 +270,7 @@ public:
   }
 
   /// CodeGen optimization level
-  void setCodeGenOptLevel(CodeGenOpt::Level CGOptLevel) {
+  void setCodeGenOptLevel(CodeGenOptLevel CGOptLevel) {
     TMBuilder.CGOptLevel = CGOptLevel;
   }
 
@@ -319,12 +325,13 @@ public:
                          const lto::InputFile &File);
 
   /**
-   * Compute the list of summaries needed for importing into module.
+   * Compute the list of summaries and the subset of declaration summaries
+   * needed for importing into module.
    */
   void gatherImportedSummariesForModule(
       Module &Module, ModuleSummaryIndex &Index,
       std::map<std::string, GVSummaryMapTy> &ModuleToSummariesForIndex,
-      const lto::InputFile &File);
+      GVSummaryPtrSet &DecSummaries, const lto::InputFile &File);
 
   /**
    * Perform internalization. Index is updated to reflect linkage changes.
@@ -374,6 +381,9 @@ private:
 
   /// Path to a directory to save the temporary bitcode files.
   std::string SaveTempsDir;
+
+  /// Path to a directory to save the temporary remote service files.
+  std::string RemoteServiceTempsDir;
 
   /// Path to a directory to save the generated object files.
   std::string SavedObjectsDirectoryPath;

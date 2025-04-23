@@ -17,7 +17,6 @@ import lldb
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 
 class TestSwiftModuleSearchPaths(TestBase):
     def setUp(self):
@@ -47,9 +46,9 @@ class TestSwiftModuleSearchPaths(TestBase):
                     self.getBuildDir())
         
         # import the module
-        self.runCmd("e import Module")
+        self.runCmd("expr import Module")
         
         # Check that we know about the function declared in the module
         self.match(
-            "e plusTen(10)", "error: Couldn't lookup symbols:", error=True)
+            "expr plusTen(10)", "error: Couldn't lookup symbols:", error=True)
 

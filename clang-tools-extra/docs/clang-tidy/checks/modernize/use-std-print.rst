@@ -81,7 +81,7 @@ If the call is deemed suitable for conversion then:
   is of ``signed char`` or ``unsigned char`` type are wrapped in a
   ``reinterpret_cast<const char *>``.
 - any arguments where the format string and the parameter differ in
-  signedness will be wrapped in an approprate ``static_cast`` if `StrictMode`
+  signedness will be wrapped in an appropriate ``static_cast`` if `StrictMode`
   is enabled.
 - any arguments that end in a call to ``std::string::c_str()`` or
   ``std::string::data()`` will have that call removed.
@@ -118,7 +118,7 @@ Options
 
 .. option:: PrintfLikeFunctions
 
-   A semicolon-separated list of (fully qualified) extra function names to
+   A semicolon-separated list of (fully qualified) function names to
    replace, with the requirement that the first parameter contains the
    printf-style format string and the arguments to be formatted follow
    immediately afterwards. If neither this option nor
@@ -128,7 +128,7 @@ Options
 
 .. option:: FprintfLikeFunctions
 
-   A semicolon-separated list of (fully qualified) extra function names to
+   A semicolon-separated list of (fully qualified) function names to
    replace, with the requirement that the first parameter is retained, the
    second parameter contains the printf-style format string and the
    arguments to be formatted follow immediately afterwards. If neither this

@@ -15,10 +15,10 @@
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
-#include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/ValueObject/ValueObjectConstResult.h"
 
 // FIXME: we should not need this
 #include "Plugins/Language/ObjC/Cocoa.h"
@@ -297,8 +297,8 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &static_valobj) {
 
   // For now we have to keep the old mangled name since the Objc->Swift bindings
   // that are in Foundation don't get the new mangling.
-  if (valobj_typename.startswith("_TtCs23_ContiguousArrayStorage") ||
-      valobj_typename.startswith("Swift._ContiguousArrayStorage")) {
+  if (valobj_typename.starts_with("_TtCs23_ContiguousArrayStorage") ||
+      valobj_typename.starts_with("Swift._ContiguousArrayStorage")) {
     CompilerType anyobject_type = clang_ts_sp->GetBasicType(
             lldb::eBasicTypeObjCID);
     auto handler = std::unique_ptr<SwiftArrayBufferHandler>(
@@ -310,8 +310,8 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &static_valobj) {
     return nullptr;
   }
 
-  if (valobj_typename.startswith("_TtCs22__SwiftDeferredNSArray") ||
-      valobj_typename.startswith("Swift.__SwiftDeferredNSArray")) {
+  if (valobj_typename.starts_with("_TtCs22__SwiftDeferredNSArray") ||
+      valobj_typename.starts_with("Swift.__SwiftDeferredNSArray")) {
     ProcessSP process_sp(valobj.GetProcessSP());
     if (!process_sp)
       return nullptr;
@@ -330,10 +330,8 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &static_valobj) {
 
     // Get the type of the array elements.
     CompilerType argument_type;
-    auto scratch_ctx_reader = valobj.GetSwiftScratchContext();
-    if (!scratch_ctx_reader)
-      return nullptr;
-    auto *ts = scratch_ctx_reader->get();
+    auto ts = TypeSystemSwiftTypeRefForExpressions::GetForTarget(
+        *valobj.GetTargetSP());
     if (!ts)
       return nullptr;
     auto *swift_runtime = SwiftLanguageRuntime::Get(process_sp);
@@ -357,7 +355,7 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &static_valobj) {
 
   ExecutionContext exe_ctx(valobj.GetExecutionContextRef());
   ExecutionContextScope *exe_scope = exe_ctx.GetBestExecutionContextScope();
-  if (valobj_typename.startswith("Swift.ContiguousArray<")) {
+  if (valobj_typename.starts_with("Swift.ContiguousArray<")) {
     // Swift.NativeArray
     static ConstString g__buffer("_buffer");
     static ConstString g__storage("_storage");
@@ -378,9 +376,9 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &static_valobj) {
     if (handler && handler->IsValid())
       return handler;
     return nullptr;
-  } else if (valobj_typename.startswith("Swift.ArraySlice<") ||
-             (valobj_typename.startswith("Swift.Array<") &&
-              valobj_typename.endswith(">.SubSequence"))) {
+  } else if (valobj_typename.starts_with("Swift.ArraySlice<") ||
+             (valobj_typename.starts_with("Swift.Array<") &&
+              valobj_typename.ends_with(">.SubSequence"))) {
     // ArraySlice or Array<T>.SubSequence, which is a typealias to ArraySlice.
     static ConstString g_buffer("_buffer");
 

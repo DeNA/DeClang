@@ -15,14 +15,15 @@
 
 def NeoverseV2Model : SchedMachineModel {
   let IssueWidth            =  16; // Micro-ops dispatched at a time.
-  let MicroOpBufferSize     = 160; // Entries in micro-op re-order buffer. NOTE: Copied from N2.
+  let MicroOpBufferSize     = 320; // Entries in micro-op re-order buffer.
   let LoadLatency           =   4; // Optimistic load latency.
   let MispredictPenalty     =  10; // Extra cycles for mispredicted branch.  NOTE: Copied from N2.
   let LoopMicroOpBufferSize =  16; // NOTE: Copied from Cortex-A57.
   let CompleteModel         =   1;
 
   list<Predicate> UnsupportedFeatures = !listconcat(SMEUnsupported.F,
-                                                    [HasSVE2p1]);
+                                                    [HasSVE2p1, HasCPA,
+                                                    HasCSSC]);
 }
 
 //===----------------------------------------------------------------------===//
@@ -88,6 +89,10 @@ def : WriteRes<WriteLDHi,    []> { let Latency = 4; }
 // Define customized scheduler read/write types specific to the Neoverse V2.
 
 //===----------------------------------------------------------------------===//
+
+// Define generic 0 micro-op types
+def V2Write_0cyc : SchedWriteRes<[]> { let Latency = 0; }
+
 // Define generic 1 micro-op types
 
 def V2Write_1cyc_1B    : SchedWriteRes<[V2UnitB]>   { let Latency = 1; }
@@ -102,9 +107,9 @@ def V2Write_2cyc_1M0   : SchedWriteRes<[V2UnitM0]>  { let Latency = 2; }
 def V2Write_3cyc_1M0   : SchedWriteRes<[V2UnitM0]>  { let Latency = 3; }
 def V2Write_5cyc_1M0   : SchedWriteRes<[V2UnitM0]>  { let Latency = 5; }
 def V2Write_12cyc_1M0  : SchedWriteRes<[V2UnitM0]>  { let Latency = 12;
-                                                      let ResourceCycles = [12]; }
+                                                      let ReleaseAtCycles = [12]; }
 def V2Write_20cyc_1M0  : SchedWriteRes<[V2UnitM0]>  { let Latency = 20;
-                                                      let ResourceCycles = [20]; }
+                                                      let ReleaseAtCycles = [20]; }
 def V2Write_4cyc_1L    : SchedWriteRes<[V2UnitL]>   { let Latency = 4; }
 def V2Write_6cyc_1L    : SchedWriteRes<[V2UnitL]>   { let Latency = 6; }
 def V2Write_2cyc_1V    : SchedWriteRes<[V2UnitV]>   { let Latency = 2; }
@@ -113,7 +118,7 @@ def V2Write_2cyc_1V01  : SchedWriteRes<[V2UnitV01]> { let Latency = 2; }
 def V2Write_2cyc_1V23  : SchedWriteRes<[V2UnitV23]> { let Latency = 2; }
 def V2Write_3cyc_1V    : SchedWriteRes<[V2UnitV]>   { let Latency = 3; }
 def V2Write_3cyc_1V01  : SchedWriteRes<[V2UnitV01]> { let Latency = 3;
-                                                      let ResourceCycles = [2]; }
+                                                      let ReleaseAtCycles = [2]; }
 def V2Write_3cyc_1V23  : SchedWriteRes<[V2UnitV23]> { let Latency = 3; }
 def V2Write_4cyc_1V    : SchedWriteRes<[V2UnitV]>   { let Latency = 4; }
 def V2Write_5cyc_1V    : SchedWriteRes<[V2UnitV]>   { let Latency = 5; }
@@ -124,26 +129,26 @@ def V2Write_3cyc_1V02  : SchedWriteRes<[V2UnitV02]> { let Latency = 3; }
 def V2Write_4cyc_1V0   : SchedWriteRes<[V2UnitV0]>  { let Latency = 4; }
 def V2Write_4cyc_1V02  : SchedWriteRes<[V2UnitV02]> { let Latency = 4; }
 def V2Write_7cyc_1V0   : SchedWriteRes<[V2UnitV0]>  { let Latency = 7;
-                                                      let ResourceCycles = [7]; }
+                                                      let ReleaseAtCycles = [7]; }
 def V2Write_7cyc_1V02  : SchedWriteRes<[V2UnitV02]> { let Latency = 7;
-                                                      let ResourceCycles = [2]; }
+                                                      let ReleaseAtCycles = [2]; }
 def V2Write_9cyc_1V0   : SchedWriteRes<[V2UnitV0]>  { let Latency = 9; }
 def V2Write_9cyc_1V02  : SchedWriteRes<[V2UnitV02]> { let Latency = 9;
-                                                      let ResourceCycles = [2]; }
+                                                      let ReleaseAtCycles = [2]; }
 def V2Write_10cyc_1V0  : SchedWriteRes<[V2UnitV0]>  { let Latency = 10; }
 def V2Write_10cyc_1V02 : SchedWriteRes<[V2UnitV02]> { let Latency = 10;
-                                                      let ResourceCycles = [2]; }
+                                                      let ReleaseAtCycles = [2]; }
 def V2Write_12cyc_1V0  : SchedWriteRes<[V2UnitV0]>  { let Latency = 12;
-                                                      let ResourceCycles = [11]; }
+                                                      let ReleaseAtCycles = [11]; }
 def V2Write_13cyc_1V0  : SchedWriteRes<[V2UnitV0]>  { let Latency = 13; }
 def V2Write_15cyc_1V0  : SchedWriteRes<[V2UnitV0]>  { let Latency = 15; }
 def V2Write_15cyc_1V02 : SchedWriteRes<[V2UnitV02]> { let Latency = 15;
-                                                      let ResourceCycles = [8]; }
+                                                      let ReleaseAtCycles = [8]; }
 def V2Write_16cyc_1V0  : SchedWriteRes<[V2UnitV0]>  { let Latency = 16; }
 def V2Write_16cyc_1V02 : SchedWriteRes<[V2UnitV02]> { let Latency = 16;
-                                                      let ResourceCycles = [8]; }
+                                                      let ReleaseAtCycles = [8]; }
 def V2Write_20cyc_1V0  : SchedWriteRes<[V2UnitV0]>  { let Latency = 20;
-                                                      let ResourceCycles = [20]; }
+                                                      let ReleaseAtCycles = [20]; }
 def V2Write_2cyc_1V1   : SchedWriteRes<[V2UnitV1]>  { let Latency = 2; }
 def V2Write_2cyc_1V13  : SchedWriteRes<[V2UnitV13]> { let Latency = 2; }
 def V2Write_3cyc_1V1   : SchedWriteRes<[V2UnitV1]>  { let Latency = 3; }
@@ -900,6 +905,18 @@ def V2Write_StrHQ : SchedWriteVariant<[
                       SchedVar<NeoverseHQForm,  [V2Write_2cyc_1L01_1V01_1I]>,
                       SchedVar<NoSchedPred,     [V2Write_2cyc_1L01_1V01]>]>;
 
+def V2Write_0or1cyc_1I : SchedWriteVariant<[
+                      SchedVar<NeoverseZeroMove, [V2Write_0cyc]>,
+                      SchedVar<NoSchedPred,      [V2Write_1cyc_1I]>]>;
+
+def V2Write_0or2cyc_1V : SchedWriteVariant<[
+                      SchedVar<NeoverseZeroMove, [V2Write_0cyc]>,
+                      SchedVar<NoSchedPred,      [V2Write_2cyc_1V]>]>;
+
+def V2Write_0or3cyc_1M0 : SchedWriteVariant<[
+                      SchedVar<NeoverseZeroMove, [V2Write_0cyc]>,
+                      SchedVar<NoSchedPred,      [V2Write_3cyc_1M0]>]>;
+
 def V2Write_2or3cyc_1M : SchedWriteVariant<[
                       SchedVar<NeoversePdIsPg,  [V2Write_3cyc_1M]>,
                       SchedVar<NoSchedPred,     [V2Write_2cyc_1M]>]>;
@@ -1054,19 +1071,17 @@ def V2Rd_ZBFMAL : SchedReadAdvance<3, [V2Wr_ZBFMAL]>;
 //===----------------------------------------------------------------------===//
 // Define types with long resource cycles (rc)
 
-def V2Write_6cyc_1V1_5rc    : SchedWriteRes<[V2UnitV1]>  { let Latency =  6; let ResourceCycles = [ 5]; }
-def V2Write_7cyc_1V02_7rc   : SchedWriteRes<[V2UnitV02]> { let Latency =  7; let ResourceCycles = [ 7]; }
-def V2Write_10cyc_1V02_5rc  : SchedWriteRes<[V2UnitV02]> { let Latency = 10; let ResourceCycles = [ 5]; }
-def V2Write_10cyc_1V02_9rc  : SchedWriteRes<[V2UnitV02]> { let Latency = 10; let ResourceCycles = [ 9]; }
-def V2Write_10cyc_1V02_10rc : SchedWriteRes<[V2UnitV02]> { let Latency = 10; let ResourceCycles = [10]; }
-def V2Write_10cyc_1V0_9rc   : SchedWriteRes<[V2UnitV0]>  { let Latency = 10; let ResourceCycles = [ 9]; }
-def V2Write_10cyc_1V1_9rc   : SchedWriteRes<[V2UnitV1]>  { let Latency = 10; let ResourceCycles = [ 9]; }
-def V2Write_13cyc_1V0_12rc  : SchedWriteRes<[V2UnitV0]>  { let Latency = 13; let ResourceCycles = [12]; }
-def V2Write_13cyc_1V02_12rc : SchedWriteRes<[V2UnitV02]> { let Latency = 13; let ResourceCycles = [12]; }
-def V2Write_13cyc_1V02_13rc : SchedWriteRes<[V2UnitV02]> { let Latency = 13; let ResourceCycles = [13]; }
-def V2Write_15cyc_1V02_14rc : SchedWriteRes<[V2UnitV02]> { let Latency = 15; let ResourceCycles = [14]; }
-def V2Write_16cyc_1V02_15rc : SchedWriteRes<[V2UnitV02]> { let Latency = 16; let ResourceCycles = [15]; }
-def V2Write_16cyc_1V0_14rc  : SchedWriteRes<[V2UnitV0]>  { let Latency = 16; let ResourceCycles = [14]; }
+def V2Write_6cyc_1V1_5rc    : SchedWriteRes<[V2UnitV1]>  { let Latency =  6; let ReleaseAtCycles = [ 5]; }
+def V2Write_7cyc_1V02_7rc   : SchedWriteRes<[V2UnitV02]> { let Latency =  7; let ReleaseAtCycles = [ 7]; }
+def V2Write_10cyc_1V02_5rc  : SchedWriteRes<[V2UnitV02]> { let Latency = 10; let ReleaseAtCycles = [ 5]; }
+def V2Write_10cyc_1V02_9rc  : SchedWriteRes<[V2UnitV02]> { let Latency = 10; let ReleaseAtCycles = [ 9]; }
+def V2Write_10cyc_1V02_10rc : SchedWriteRes<[V2UnitV02]> { let Latency = 10; let ReleaseAtCycles = [10]; }
+def V2Write_10cyc_1V1_9rc   : SchedWriteRes<[V2UnitV1]>  { let Latency = 10; let ReleaseAtCycles = [ 9]; }
+def V2Write_13cyc_1V02_12rc : SchedWriteRes<[V2UnitV02]> { let Latency = 13; let ReleaseAtCycles = [12]; }
+def V2Write_13cyc_1V02_13rc : SchedWriteRes<[V2UnitV02]> { let Latency = 13; let ReleaseAtCycles = [13]; }
+def V2Write_15cyc_1V02_14rc : SchedWriteRes<[V2UnitV02]> { let Latency = 15; let ReleaseAtCycles = [14]; }
+def V2Write_16cyc_1V02_14rc : SchedWriteRes<[V2UnitV02]> { let Latency = 16; let ReleaseAtCycles = [14]; }
+def V2Write_16cyc_1V02_15rc : SchedWriteRes<[V2UnitV02]> { let Latency = 16; let ReleaseAtCycles = [15]; }
 
 // Miscellaneous
 // -----------------------------------------------------------------------------
@@ -1092,12 +1107,17 @@ def : InstRW<[V2Write_1cyc_1B_1R], (instrs BL, BLR)>;
 
 // ALU, basic
 // ALU, basic, flagset
-def : SchedAlias<WriteI,     V2Write_1cyc_1I>;
-def : InstRW<[V2Write_1cyc_1F],
-             (instregex "^(ADC|SBC)S[WX]r$")>;
+def : SchedAlias<WriteI, V2Write_1cyc_1I>;
+def : InstRW<[V2Write_1cyc_1F], (instregex "^(ADD|SUB)S[WX]r[ir]$",
+                        "^(ADC|SBC)S[WX]r$",
+                        "^ANDS[WX]ri$")>;
+def : InstRW<[V2Write_0or1cyc_1I], (instregex "^MOVZ[WX]i$")>;
 
 // ALU, extend and shift
 def : SchedAlias<WriteIEReg, V2Write_2cyc_1M>;
+
+// Conditional compare
+def : InstRW<[V2Write_1cyc_1F], (instregex "^CCM[NP][WX][ir]")>;
 
 // Arithmetic, LSL shift, shift <= 4
 // Arithmetic, flagset, LSL shift, shift <= 4
@@ -1122,8 +1142,8 @@ def : InstRW<[V2Write_2cyc_1M], (instrs IRG, IRGstack)>;
 def : InstRW<[V2Write_1cyc_1I], (instrs GMI, SUBP, SUBPS)>;
 
 // Logical, shift, no flagset
-def : InstRW<[V2Write_1cyc_1I],
-             (instregex "^(AND|BIC|EON|EOR|ORN|ORR)[WX]rs$")>;
+def : InstRW<[V2Write_1cyc_1I],    (instregex "^(AND|BIC|EON|EOR|ORN)[WX]rs$")>;
+def : InstRW<[V2Write_0or1cyc_1I], (instregex "^ORR[WX]rs$")>;
 
 // Logical, shift, flagset
 def : InstRW<[V2Write_Logical], (instregex "^(AND|BIC)S[WX]rs$")>;
@@ -1213,7 +1233,7 @@ def : InstRW<[V2Write_5cyc_1L_1F], (instrs LDRWl, LDRXl, LDRSWl, PRFMl)>;
 def : InstRW<[V2Write_5cyc_1I_3L, WriteLDHi], (instrs LDPSWi)>;
 
 // Load pair, immed post-index or immed pre-index, signed words
-def : InstRW<[V2Write_5cyc_1I_3L, WriteLDHi, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_5cyc_1I_3L, WriteLDHi],
              (instregex "^LDPSW(post|pre)$")>;
 
 // Store instructions
@@ -1224,7 +1244,7 @@ def : InstRW<[V2Write_5cyc_1I_3L, WriteLDHi, WriteAdr],
 def : SchedAlias<WriteST,    V2Write_1cyc_1L01_1D>;
 def : SchedAlias<WriteSTIdx, V2Write_1cyc_1L01_1D>;
 def : SchedAlias<WriteSTP,   V2Write_1cyc_1L01_1D>;
-def : SchedAlias<WriteAdr,   V2Write_1cyc_1I>; // copied from A57.
+def : SchedAlias<WriteAdr,   V2Write_1cyc_1I>;
 
 // Tag load instructions
 // -----------------------------------------------------------------------------
@@ -1318,7 +1338,8 @@ def : InstRW<[V2Write_3cyc_1V02], (instrs FCVTSHr, FCVTDHr, FCVTHSr, FCVTDSr,
 def : SchedAlias<WriteFImm, V2Write_2cyc_1V>;
 
 // FP transfer, from gen to low half of vec reg
-def : InstRW<[V2Write_3cyc_1M0], (instrs FMOVWHr, FMOVXHr, FMOVWSr, FMOVXDr)>;
+def : InstRW<[V2Write_0or3cyc_1M0],
+             (instrs FMOVWHr, FMOVXHr, FMOVWSr, FMOVXDr)>;
 
 // FP transfer, from gen to high half of vec reg
 def : InstRW<[V2Write_5cyc_1M0_1V], (instrs FMOVXDHighr)>;
@@ -1337,7 +1358,7 @@ def : InstRW<[V2Write_6cyc_1L], (instregex "^LDUR[BHSDQ]i$")>;
 
 // Load vector reg, immed post-index
 // Load vector reg, immed pre-index
-def : InstRW<[V2Write_6cyc_1I_1L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_1I_1L],
              (instregex "^LDR[BHSDQ](pre|post)$")>;
 
 // Load vector reg, unsigned immed
@@ -1359,12 +1380,12 @@ def : InstRW<[V2Write_6cyc_2L, WriteLDHi], (instrs LDPQi, LDNPQi)>;
 
 // Load vector pair, immed post-index, S/D-form
 // Load vector pair, immed pre-index, S/D-form
-def : InstRW<[V2Write_6cyc_1I_1L, WriteLDHi, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_1I_1L, WriteLDHi],
              (instregex "^LDP[SD](pre|post)$")>;
 
 // Load vector pair, immed post-index, Q-form
 // Load vector pair, immed pre-index, Q-form
-def : InstRW<[V2Write_6cyc_2I_2L, WriteLDHi, WriteAdr], (instrs LDPQpost,
+def : InstRW<[WriteAdr, V2Write_6cyc_2I_2L, WriteLDHi], (instrs LDPQpost,
                                                                 LDPQpre)>;
 
 // FP store instructions
@@ -1662,6 +1683,7 @@ def : InstRW<[V2Write_3cyc_1V02], (instrs BFCVT)>;
 // ASIMD transpose
 // ASIMD unzip/zip
 // Handled by SchedAlias<WriteV[dq], ...>
+def : InstRW<[V2Write_0or2cyc_1V], (instrs MOVID, MOVIv2d_ns)>;
 
 // ASIMD duplicate, gen reg
 def : InstRW<[V2Write_3cyc_1M0], (instregex "^DUPv.+gpr")>;
@@ -1725,220 +1747,220 @@ def : InstRW<[V2Write_5cyc_1M0_1V], (instregex "^INSvi(8|16|32|64)gpr$")>;
 
 // ASIMD load, 1 element, multiple, 1 reg, D-form
 def : InstRW<[V2Write_6cyc_1L], (instregex "^LD1Onev(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_6cyc_1L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_1L],
              (instregex "^LD1Onev(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 1 element, multiple, 1 reg, Q-form
 def : InstRW<[V2Write_6cyc_1L], (instregex "^LD1Onev(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_6cyc_1L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_1L],
              (instregex "^LD1Onev(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 1 element, multiple, 2 reg, D-form
 def : InstRW<[V2Write_6cyc_2L], (instregex "^LD1Twov(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_6cyc_2L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_2L],
              (instregex "^LD1Twov(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 1 element, multiple, 2 reg, Q-form
 def : InstRW<[V2Write_6cyc_2L], (instregex "^LD1Twov(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_6cyc_2L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_2L],
              (instregex "^LD1Twov(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 1 element, multiple, 3 reg, D-form
 def : InstRW<[V2Write_6cyc_3L], (instregex "^LD1Threev(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_6cyc_3L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_3L],
              (instregex "^LD1Threev(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 1 element, multiple, 3 reg, Q-form
 def : InstRW<[V2Write_6cyc_3L], (instregex "^LD1Threev(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_6cyc_3L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_6cyc_3L],
              (instregex "^LD1Threev(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 1 element, multiple, 4 reg, D-form
 def : InstRW<[V2Write_7cyc_4L], (instregex "^LD1Fourv(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_7cyc_4L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_7cyc_4L],
              (instregex "^LD1Fourv(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 1 element, multiple, 4 reg, Q-form
 def : InstRW<[V2Write_7cyc_4L], (instregex "^LD1Fourv(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_7cyc_4L, WriteAdr],
+def : InstRW<[WriteAdr, V2Write_7cyc_4L],
              (instregex "^LD1Fourv(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 1 element, one lane, B/H/S
 // ASIMD load, 1 element, one lane, D
 def : InstRW<[V2Write_8cyc_1L_1V],           (instregex "LD1i(8|16|32|64)$")>;
-def : InstRW<[V2Write_8cyc_1L_1V, WriteAdr], (instregex "LD1i(8|16|32|64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_1L_1V], (instregex "LD1i(8|16|32|64)_POST$")>;
 
 // ASIMD load, 1 element, all lanes, D-form, B/H/S
 // ASIMD load, 1 element, all lanes, D-form, D
 def : InstRW<[V2Write_8cyc_1L_1V],           (instregex "LD1Rv(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_8cyc_1L_1V, WriteAdr], (instregex "LD1Rv(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_1L_1V], (instregex "LD1Rv(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 1 element, all lanes, Q-form
 def : InstRW<[V2Write_8cyc_1L_1V],           (instregex "LD1Rv(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_8cyc_1L_1V, WriteAdr], (instregex "LD1Rv(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_1L_1V], (instregex "LD1Rv(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 2 element, multiple, D-form, B/H/S
 def : InstRW<[V2Write_8cyc_1L_2V],           (instregex "LD2Twov(8b|4h|2s)$")>;
-def : InstRW<[V2Write_8cyc_1L_2V, WriteAdr], (instregex "LD2Twov(8b|4h|2s)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_1L_2V], (instregex "LD2Twov(8b|4h|2s)_POST$")>;
 
 // ASIMD load, 2 element, multiple, Q-form, B/H/S
 // ASIMD load, 2 element, multiple, Q-form, D
 def : InstRW<[V2Write_8cyc_2L_2V],           (instregex "LD2Twov(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_8cyc_2L_2V, WriteAdr], (instregex "LD2Twov(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_2L_2V], (instregex "LD2Twov(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 2 element, one lane, B/H
 // ASIMD load, 2 element, one lane, S
 // ASIMD load, 2 element, one lane, D
 def : InstRW<[V2Write_8cyc_1L_2V],           (instregex "LD2i(8|16|32|64)$")>;
-def : InstRW<[V2Write_8cyc_1L_2V, WriteAdr], (instregex "LD2i(8|16|32|64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_1L_2V], (instregex "LD2i(8|16|32|64)_POST$")>;
 
 // ASIMD load, 2 element, all lanes, D-form, B/H/S
 // ASIMD load, 2 element, all lanes, D-form, D
 def : InstRW<[V2Write_8cyc_1L_2V],            (instregex "LD2Rv(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_8cyc_1L_2V, WriteAdr],  (instregex "LD2Rv(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_1L_2V],  (instregex "LD2Rv(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 2 element, all lanes, Q-form
 def : InstRW<[V2Write_8cyc_1L_2V],           (instregex "LD2Rv(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_8cyc_1L_2V, WriteAdr], (instregex "LD2Rv(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_1L_2V], (instregex "LD2Rv(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 3 element, multiple, D-form, B/H/S
 def : InstRW<[V2Write_8cyc_2L_3V],           (instregex "LD3Threev(8b|4h|2s)$")>;
-def : InstRW<[V2Write_8cyc_2L_3V, WriteAdr], (instregex "LD3Threev(8b|4h|2s)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_2L_3V], (instregex "LD3Threev(8b|4h|2s)_POST$")>;
 
 // ASIMD load, 3 element, multiple, Q-form, B/H/S
 // ASIMD load, 3 element, multiple, Q-form, D
 def : InstRW<[V2Write_8cyc_3L_3V],           (instregex "LD3Threev(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_8cyc_3L_3V, WriteAdr], (instregex "LD3Threev(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_3L_3V], (instregex "LD3Threev(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 3 element, one lane, B/H
 // ASIMD load, 3 element, one lane, S
 // ASIMD load, 3 element, one lane, D
 def : InstRW<[V2Write_8cyc_2L_3V],           (instregex "LD3i(8|16|32|64)$")>;
-def : InstRW<[V2Write_8cyc_2L_3V, WriteAdr], (instregex "LD3i(8|16|32|64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_2L_3V], (instregex "LD3i(8|16|32|64)_POST$")>;
 
 // ASIMD load, 3 element, all lanes, D-form, B/H/S
 // ASIMD load, 3 element, all lanes, D-form, D
 def : InstRW<[V2Write_8cyc_2L_3V],           (instregex "LD3Rv(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_8cyc_2L_3V, WriteAdr], (instregex "LD3Rv(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_2L_3V], (instregex "LD3Rv(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 3 element, all lanes, Q-form, B/H/S
 // ASIMD load, 3 element, all lanes, Q-form, D
 def : InstRW<[V2Write_8cyc_3L_3V],           (instregex "LD3Rv(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_8cyc_3L_3V, WriteAdr], (instregex "LD3Rv(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_3L_3V], (instregex "LD3Rv(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 4 element, multiple, D-form, B/H/S
 def : InstRW<[V2Write_8cyc_3L_4V],           (instregex "LD4Fourv(8b|4h|2s)$")>;
-def : InstRW<[V2Write_8cyc_3L_4V, WriteAdr], (instregex "LD4Fourv(8b|4h|2s)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_3L_4V], (instregex "LD4Fourv(8b|4h|2s)_POST$")>;
 
 // ASIMD load, 4 element, multiple, Q-form, B/H/S
 // ASIMD load, 4 element, multiple, Q-form, D
 def : InstRW<[V2Write_9cyc_6L_4V],           (instregex "LD4Fourv(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_9cyc_6L_4V, WriteAdr], (instregex "LD4Fourv(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_9cyc_6L_4V], (instregex "LD4Fourv(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD load, 4 element, one lane, B/H
 // ASIMD load, 4 element, one lane, S
 // ASIMD load, 4 element, one lane, D
 def : InstRW<[V2Write_8cyc_3L_4V],           (instregex "LD4i(8|16|32|64)$")>;
-def : InstRW<[V2Write_8cyc_3L_4V, WriteAdr], (instregex "LD4i(8|16|32|64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_3L_4V], (instregex "LD4i(8|16|32|64)_POST$")>;
 
 // ASIMD load, 4 element, all lanes, D-form, B/H/S
 // ASIMD load, 4 element, all lanes, D-form, D
-def : InstRW<[V2Write_8cyc_3L_4V],              (instregex "LD4Rv(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_8cyc_3L_4V, WriteAdr],    (instregex "LD4Rv(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[V2Write_8cyc_3L_4V],           (instregex "LD4Rv(8b|4h|2s|1d)$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_3L_4V], (instregex "LD4Rv(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD load, 4 element, all lanes, Q-form, B/H/S
 // ASIMD load, 4 element, all lanes, Q-form, D
-def : InstRW<[V2Write_8cyc_4L_4V],            (instregex "LD4Rv(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_8cyc_4L_4V, WriteAdr],  (instregex "LD4Rv(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[V2Write_8cyc_4L_4V],           (instregex "LD4Rv(16b|8h|4s|2d)$")>;
+def : InstRW<[WriteAdr, V2Write_8cyc_4L_4V], (instregex "LD4Rv(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD store instructions
 // -----------------------------------------------------------------------------
 
 // ASIMD store, 1 element, multiple, 1 reg, D-form
 def : InstRW<[V2Write_2cyc_1L01_1V01],           (instregex "ST1Onev(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_2cyc_1L01_1V01, WriteAdr], (instregex "ST1Onev(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_1L01_1V01], (instregex "ST1Onev(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD store, 1 element, multiple, 1 reg, Q-form
 def : InstRW<[V2Write_2cyc_1L01_1V01],           (instregex "ST1Onev(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_2cyc_1L01_1V01, WriteAdr], (instregex "ST1Onev(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_1L01_1V01], (instregex "ST1Onev(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD store, 1 element, multiple, 2 reg, D-form
 def : InstRW<[V2Write_2cyc_1L01_1V01],           (instregex "ST1Twov(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_2cyc_1L01_1V01, WriteAdr], (instregex "ST1Twov(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_1L01_1V01], (instregex "ST1Twov(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD store, 1 element, multiple, 2 reg, Q-form
 def : InstRW<[V2Write_2cyc_2L01_2V01],           (instregex "ST1Twov(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_2cyc_2L01_2V01, WriteAdr], (instregex "ST1Twov(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_2L01_2V01], (instregex "ST1Twov(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD store, 1 element, multiple, 3 reg, D-form
 def : InstRW<[V2Write_2cyc_2L01_2V01],           (instregex "ST1Threev(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_2cyc_2L01_2V01, WriteAdr], (instregex "ST1Threev(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_2L01_2V01], (instregex "ST1Threev(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD store, 1 element, multiple, 3 reg, Q-form
 def : InstRW<[V2Write_2cyc_3L01_3V01],           (instregex "ST1Threev(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_2cyc_3L01_3V01, WriteAdr], (instregex "ST1Threev(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_3L01_3V01], (instregex "ST1Threev(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD store, 1 element, multiple, 4 reg, D-form
 def : InstRW<[V2Write_2cyc_2L01_2V01],           (instregex "ST1Fourv(8b|4h|2s|1d)$")>;
-def : InstRW<[V2Write_2cyc_2L01_2V01, WriteAdr], (instregex "ST1Fourv(8b|4h|2s|1d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_2L01_2V01], (instregex "ST1Fourv(8b|4h|2s|1d)_POST$")>;
 
 // ASIMD store, 1 element, multiple, 4 reg, Q-form
 def : InstRW<[V2Write_2cyc_4L01_4V01],           (instregex "ST1Fourv(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_2cyc_4L01_4V01, WriteAdr], (instregex "ST1Fourv(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_2cyc_4L01_4V01], (instregex "ST1Fourv(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD store, 1 element, one lane, B/H/S
 // ASIMD store, 1 element, one lane, D
 def : InstRW<[V2Write_4cyc_1L01_2V01],           (instregex "ST1i(8|16|32|64)$")>;
-def : InstRW<[V2Write_4cyc_1L01_2V01, WriteAdr], (instregex "ST1i(8|16|32|64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_4cyc_1L01_2V01], (instregex "ST1i(8|16|32|64)_POST$")>;
 
 // ASIMD store, 2 element, multiple, D-form, B/H/S
 def : InstRW<[V2Write_4cyc_1L01_2V01],           (instregex "ST2Twov(8b|4h|2s)$")>;
-def : InstRW<[V2Write_4cyc_1L01_2V01, WriteAdr], (instregex "ST2Twov(8b|4h|2s)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_4cyc_1L01_2V01], (instregex "ST2Twov(8b|4h|2s)_POST$")>;
 
 // ASIMD store, 2 element, multiple, Q-form, B/H/S
 // ASIMD store, 2 element, multiple, Q-form, D
 def : InstRW<[V2Write_4cyc_2L01_4V01],           (instregex "ST2Twov(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_4cyc_2L01_4V01, WriteAdr], (instregex "ST2Twov(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_4cyc_2L01_4V01], (instregex "ST2Twov(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD store, 2 element, one lane, B/H/S
 // ASIMD store, 2 element, one lane, D
 def : InstRW<[V2Write_4cyc_1L01_2V01],           (instregex "ST2i(8|16|32|64)$")>;
-def : InstRW<[V2Write_4cyc_1L01_2V01, WriteAdr], (instregex "ST2i(8|16|32|64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_4cyc_1L01_2V01], (instregex "ST2i(8|16|32|64)_POST$")>;
 
 // ASIMD store, 3 element, multiple, D-form, B/H/S
 def : InstRW<[V2Write_5cyc_2L01_4V01],           (instregex "ST3Threev(8b|4h|2s)$")>;
-def : InstRW<[V2Write_5cyc_2L01_4V01, WriteAdr], (instregex "ST3Threev(8b|4h|2s)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_5cyc_2L01_4V01], (instregex "ST3Threev(8b|4h|2s)_POST$")>;
 
 // ASIMD store, 3 element, multiple, Q-form, B/H/S
 // ASIMD store, 3 element, multiple, Q-form, D
 def : InstRW<[V2Write_6cyc_3L01_6V01],           (instregex "ST3Threev(16b|8h|4s|2d)$")>;
-def : InstRW<[V2Write_6cyc_3L01_6V01, WriteAdr], (instregex "ST3Threev(16b|8h|4s|2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_6cyc_3L01_6V01], (instregex "ST3Threev(16b|8h|4s|2d)_POST$")>;
 
 // ASIMD store, 3 element, one lane, B/H
 // ASIMD store, 3 element, one lane, S
 // ASIMD store, 3 element, one lane, D
 def : InstRW<[V2Write_5cyc_2L01_4V01],           (instregex "ST3i(8|16|32|64)$")>;
-def : InstRW<[V2Write_5cyc_2L01_4V01, WriteAdr], (instregex "ST3i(8|16|32|64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_5cyc_2L01_4V01], (instregex "ST3i(8|16|32|64)_POST$")>;
 
 // ASIMD store, 4 element, multiple, D-form, B/H/S
 def : InstRW<[V2Write_6cyc_2L01_6V01],           (instregex "ST4Fourv(8b|4h|2s)$")>;
-def : InstRW<[V2Write_6cyc_2L01_6V01, WriteAdr], (instregex "ST4Fourv(8b|4h|2s)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_6cyc_2L01_6V01], (instregex "ST4Fourv(8b|4h|2s)_POST$")>;
 
 // ASIMD store, 4 element, multiple, Q-form, B/H/S
 def : InstRW<[V2Write_7cyc_4L01_12V01],           (instregex "ST4Fourv(16b|8h|4s)$")>;
-def : InstRW<[V2Write_7cyc_4L01_12V01, WriteAdr], (instregex "ST4Fourv(16b|8h|4s)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_7cyc_4L01_12V01], (instregex "ST4Fourv(16b|8h|4s)_POST$")>;
 
 // ASIMD store, 4 element, multiple, Q-form, D
 def : InstRW<[V2Write_5cyc_4L01_8V01],           (instregex "ST4Fourv(2d)$")>;
-def : InstRW<[V2Write_5cyc_4L01_8V01, WriteAdr], (instregex "ST4Fourv(2d)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_5cyc_4L01_8V01], (instregex "ST4Fourv(2d)_POST$")>;
 
 // ASIMD store, 4 element, one lane, B/H/S
 def : InstRW<[V2Write_6cyc_1L01_3V01],           (instregex "ST4i(8|16|32)$")>;
-def : InstRW<[V2Write_6cyc_1L01_3V01, WriteAdr], (instregex "ST4i(8|16|32)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_6cyc_1L01_3V01], (instregex "ST4i(8|16|32)_POST$")>;
 
 // ASIMD store, 4 element, one lane, D
 def : InstRW<[V2Write_4cyc_2L01_4V01],            (instregex "ST4i(64)$")>;
-def : InstRW<[V2Write_4cyc_2L01_4V01, WriteAdr],  (instregex "ST4i(64)_POST$")>;
+def : InstRW<[WriteAdr, V2Write_4cyc_2L01_4V01],  (instregex "ST4i(64)_POST$")>;
 
 // Cryptography extensions
 // -----------------------------------------------------------------------------
@@ -2548,13 +2570,13 @@ def : InstRW<[V2Write_4cyc_2V02], (instregex "^FRINT[AIMNPXZ]_ZPmZ_S")>;
 def : InstRW<[V2Write_3cyc_1V02], (instregex "^FRINT[AIMNPXZ]_ZPmZ_D")>;
 
 // Floating point square root, F16
-def : InstRW<[V2Write_13cyc_1V0_12rc], (instregex "^FSQRT_ZPmZ_H", "^FSQRT_ZPmZ_H")>;
+def : InstRW<[V2Write_13cyc_1V02_12rc], (instregex "^FSQRT_ZPmZ_H")>;
 
 // Floating point square root, F32
-def : InstRW<[V2Write_10cyc_1V0_9rc], (instregex "^FSQRT_ZPmZ_S", "^FSQRT_ZPmZ_S")>;
+def : InstRW<[V2Write_10cyc_1V02_9rc], (instregex "^FSQRT_ZPmZ_S")>;
 
 // Floating point square root, F64
-def : InstRW<[V2Write_16cyc_1V0_14rc], (instregex "^FSQRT_ZPmZ_D", "^FSQRT_ZPmZ_D")>;
+def : InstRW<[V2Write_16cyc_1V02_14rc], (instregex "^FSQRT_ZPmZ_D")>;
 
 // Floating point trigonometric exponentiation
 def : InstRW<[V2Write_3cyc_1V1], (instregex "^FEXPA_ZZ_[HSD]")>;
@@ -2590,10 +2612,10 @@ def : InstRW<[V2Write_6cyc_1L], (instrs LDR_ZXI)>;
 def : InstRW<[V2Write_6cyc_1L_1M], (instrs LDR_PXI)>;
 
 // Contiguous load, scalar + imm
-def : InstRW<[V2Write_6cyc_1L], (instregex "^LD1[BHWD]_IMM_REAL$",
-                                           "^LD1S?B_[HSD]_IMM_REAL$",
-                                           "^LD1S?H_[SD]_IMM_REAL$",
-                                           "^LD1S?W_D_IMM_REAL$" )>;
+def : InstRW<[V2Write_6cyc_1L], (instregex "^LD1[BHWD]_IMM$",
+                                           "^LD1S?B_[HSD]_IMM$",
+                                           "^LD1S?H_[SD]_IMM$",
+                                           "^LD1S?W_D_IMM$" )>;
 // Contiguous load, scalar + scalar
 def : InstRW<[V2Write_6cyc_1L], (instregex "^LD1[BHWD]$",
                                            "^LD1S?B_[HSD]$",
@@ -2616,24 +2638,24 @@ def : InstRW<[V2Write_6cyc_1L], (instregex "^LD1RQ_[BHWD]$")>;
 def : InstRW<[V2Write_6cyc_1L], (instregex "^LDNT1[BHWD]_ZR[IR]$")>;
 
 // Non temporal gather load, vector + scalar 32-bit element size
-def : InstRW<[V2Write_9cyc_2L_4V], (instregex "^LDNT1[BHW]_ZZR_S_REAL$",
-                                              "^LDNT1S[BH]_ZZR_S_REAL$")>;
+def : InstRW<[V2Write_9cyc_2L_4V], (instregex "^LDNT1[BHW]_ZZR_S$",
+                                              "^LDNT1S[BH]_ZZR_S$")>;
 
 // Non temporal gather load, vector + scalar 64-bit element size
-def : InstRW<[V2Write_9cyc_2L_2V1], (instregex "^LDNT1S?[BHW]_ZZR_D_REAL$")>;
-def : InstRW<[V2Write_9cyc_2L_2V1], (instrs LDNT1D_ZZR_D_REAL)>;
+def : InstRW<[V2Write_9cyc_2L_2V1], (instregex "^LDNT1S?[BHW]_ZZR_D$")>;
+def : InstRW<[V2Write_9cyc_2L_2V1], (instrs LDNT1D_ZZR_D)>;
 
 // Contiguous first faulting load, scalar + scalar
-def : InstRW<[V2Write_6cyc_1L_1S], (instregex "^LDFF1[BHWD]_REAL$",
-                                              "^LDFF1S?B_[HSD]_REAL$",
-                                              "^LDFF1S?H_[SD]_REAL$",
-                                              "^LDFF1S?W_D_REAL$")>;
+def : InstRW<[V2Write_6cyc_1L_1S], (instregex "^LDFF1[BHWD]$",
+                                              "^LDFF1S?B_[HSD]$",
+                                              "^LDFF1S?H_[SD]$",
+                                              "^LDFF1S?W_D$")>;
 
 // Contiguous non faulting load, scalar + imm
-def : InstRW<[V2Write_6cyc_1L], (instregex "^LDNF1[BHWD]_IMM_REAL$",
-                                           "^LDNF1S?B_[HSD]_IMM_REAL$",
-                                           "^LDNF1S?H_[SD]_IMM_REAL$",
-                                           "^LDNF1S?W_D_IMM_REAL$")>;
+def : InstRW<[V2Write_6cyc_1L], (instregex "^LDNF1[BHWD]_IMM$",
+                                           "^LDNF1S?B_[HSD]_IMM$",
+                                           "^LDNF1S?H_[SD]_IMM$",
+                                           "^LDNF1S?W_D_IMM$")>;
 
 // Contiguous Load two structures to two vectors, scalar + imm
 def : InstRW<[V2Write_8cyc_2L_2V], (instregex "^LD2[BHWD]_IMM$")>;
@@ -2654,33 +2676,33 @@ def : InstRW<[V2Write_9cyc_4L_8V], (instregex "^LD4[BHWD]_IMM$")>;
 def : InstRW<[V2Write_10cyc_4L_8V_4S], (instregex "^LD4[BHWD]$")>;
 
 // Gather load, vector + imm, 32-bit element size
-def : InstRW<[V2Write_9cyc_1L_4V], (instregex "^GLD(FF)?1S?[BH]_S_IMM_REAL$",
-                                              "^GLD(FF)?1W_IMM_REAL$")>;
+def : InstRW<[V2Write_9cyc_1L_4V], (instregex "^GLD(FF)?1S?[BH]_S_IMM$",
+                                              "^GLD(FF)?1W_IMM$")>;
 
 // Gather load, vector + imm, 64-bit element size
-def : InstRW<[V2Write_9cyc_1L_4V], (instregex "^GLD(FF)?1S?[BHW]_D_IMM_REAL$",
-                                              "^GLD(FF)?1D_IMM_REAL$")>;
+def : InstRW<[V2Write_9cyc_1L_4V], (instregex "^GLD(FF)?1S?[BHW]_D_IMM$",
+                                              "^GLD(FF)?1D_IMM$")>;
 
 // Gather load, 32-bit scaled offset
 def : InstRW<[V2Write_10cyc_1L_8V],
-             (instregex "^GLD(FF)?1S?H_S_[SU]XTW_SCALED_REAL$",
-                        "^GLD(FF)?1W_[SU]XTW_SCALED_REAL")>;
+             (instregex "^GLD(FF)?1S?H_S_[SU]XTW_SCALED$",
+                        "^GLD(FF)?1W_[SU]XTW_SCALED")>;
 
 // Gather load, 64-bit scaled offset
 // NOTE: These instructions are not specified in the SOG.
 def : InstRW<[V2Write_10cyc_1L_4V],
-             (instregex "^GLD(FF)?1S?[HW]_D_([SU]XTW_)?SCALED_REAL$",
-                        "^GLD(FF)?1D_([SU]XTW_)?SCALED_REAL$")>;
+             (instregex "^GLD(FF)?1S?[HW]_D_([SU]XTW_)?SCALED$",
+                        "^GLD(FF)?1D_([SU]XTW_)?SCALED$")>;
 
 // Gather load, 32-bit unpacked unscaled offset
-def : InstRW<[V2Write_9cyc_1L_4V], (instregex "^GLD(FF)?1S?[BH]_S_[SU]XTW_REAL$",
-                                              "^GLD(FF)?1W_[SU]XTW_REAL$")>;
+def : InstRW<[V2Write_9cyc_1L_4V], (instregex "^GLD(FF)?1S?[BH]_S_[SU]XTW$",
+                                              "^GLD(FF)?1W_[SU]XTW$")>;
 
 // Gather load, 64-bit unpacked unscaled offset
 // NOTE: These instructions are not specified in the SOG.
 def : InstRW<[V2Write_9cyc_1L_2V],
-             (instregex "^GLD(FF)?1S?[BHW]_D_([SU]XTW_)?REAL$",
-                        "^GLD(FF)?1D_([SU]XTW_)?REAL$")>;
+             (instregex "^GLD(FF)?1S?[BHW]_D(_[SU]XTW)?$",
+                        "^GLD(FF)?1D(_[SU]XTW)?$")>;
 
 // SVE Store instructions
 // -----------------------------------------------------------------------------
@@ -2771,10 +2793,10 @@ def : InstRW<[V2Write_2cyc_2L01_2V01], (instregex "^SST1[BHW]_D$",
 // -----------------------------------------------------------------------------
 
 // Read first fault register, unpredicated
-def : InstRW<[V2Write_2cyc_1M0], (instrs RDFFR_P_REAL)>;
+def : InstRW<[V2Write_2cyc_1M0], (instrs RDFFR_P)>;
 
 // Read first fault register, predicated
-def : InstRW<[V2Write_3or4cyc_1M0_1M], (instrs RDFFR_PPz_REAL)>;
+def : InstRW<[V2Write_3or4cyc_1M0_1M], (instrs RDFFR_PPz)>;
 
 // Read first fault register and set flags
 def : InstRW<[V2Write_4or5cyc_2M0_2M], (instrs RDFFRS_PPz)>;

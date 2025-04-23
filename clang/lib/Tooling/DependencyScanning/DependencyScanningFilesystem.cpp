@@ -217,7 +217,7 @@ static bool shouldCacheStatFailures(StringRef Filename) {
   // negative 'stat' caching of `.framework` directories enabled,
   // because they do not always explicitly specify their target
   // dependencies and may be either getting lucky wih build timing, or
-  // compiling against wrong dependenceis a lot of the time: e.g. an
+  // compiling against wrong dependencies a lot of the time: e.g. an
   // SDK variant of a dependency module, instead of one in the
   // project's own build directory. Temporarily disable negative
   // 'stat' caching here until all such projects are fixed.
@@ -310,7 +310,7 @@ DependencyScanningWorkerFilesystem::status(const Twine &Path) {
   SmallString<256> OwnedFilename;
   StringRef Filename = Path.toStringRef(OwnedFilename);
 
-  if (Filename.endswith(".pcm"))
+  if (Filename.ends_with(".pcm"))
     return getUnderlyingFS().status(Path);
 
   llvm::ErrorOr<EntryRef> Result = getOrCreateFileSystemEntry(Filename);
@@ -388,7 +388,7 @@ DependencyScanningWorkerFilesystem::openFileForRead(const Twine &Path) {
   SmallString<256> OwnedFilename;
   StringRef Filename = Path.toStringRef(OwnedFilename);
 
-  if (Filename.endswith(".pcm"))
+  if (Filename.ends_with(".pcm"))
     return getUnderlyingFS().openFileForRead(Path);
 
   llvm::ErrorOr<EntryRef> Result = getOrCreateFileSystemEntry(Filename);

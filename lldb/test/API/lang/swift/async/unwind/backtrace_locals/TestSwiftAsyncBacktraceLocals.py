@@ -2,7 +2,6 @@ import lldb
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 
 
 class TestSwiftAsyncBacktraceLocals(lldbtest.TestBase):
@@ -129,7 +128,7 @@ class TestSwiftAsyncBacktraceLocals(lldbtest.TestBase):
         last_result = None
         while True:
             thread = lldbutil.continue_to_breakpoint(process, self.compute_bkpt)
-            if len(thread) == 0:
+            if thread is None:
                 self.assertEqual(last_result, 55, "Computed the right final value")
                 break
 

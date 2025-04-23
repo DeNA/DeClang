@@ -78,22 +78,6 @@ public:
   ///     from \a cstr.
   explicit ConstString(const char *cstr, size_t max_cstr_len);
 
-  /// C string equality binary predicate function object for ConstString
-  /// objects.
-  struct StringIsEqual {
-    /// C equality test.
-    ///
-    /// Two C strings are equal when they are contained in ConstString objects
-    /// when their pointer values are equal to each other.
-    ///
-    /// \return
-    ///     Returns \b true if the C string in \a lhs is equal to
-    ///     the C string value in \a rhs, \b false otherwise.
-    bool operator()(const char *lhs, const char *rhs) const {
-      return lhs == rhs;
-    }
-  };
-
   /// Convert to bool operator.
   ///
   /// This allows code to check a ConstString object to see if it contains a
@@ -184,8 +168,8 @@ public:
   // Implicitly convert \class ConstString instances to \class StringRef.
   operator llvm::StringRef() const { return GetStringRef(); }
 
-  // Implicitly convert \class ConstString instances to \class std::string_view.
-  operator std::string_view() const {
+  // Explicitly convert \class ConstString instances to \class std::string_view.
+  explicit operator std::string_view() const {
     return std::string_view(m_string, GetLength());
   }
 
@@ -215,7 +199,9 @@ public:
   }
 
   /// Get the string value as a std::string
-  std::string GetString() const { return std::string(m_string, GetLength()); }
+  std::string GetString() const {
+    return std::string(AsCString(""), GetLength());
+  }
 
   /// Get the string value as a C string.
   ///

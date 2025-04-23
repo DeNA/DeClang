@@ -26,6 +26,7 @@
 #include "lldb/Utility/UnimplementedError.h"
 #include "lldb/Utility/UserID.h"
 #include "lldb/lldb-private.h"
+#include "llvm/Support/MemoryBuffer.h"
 
 #define LLDB_THREAD_MAX_STOP_EXC_DATA 8
 
@@ -74,9 +75,9 @@ public:
     eBroadcastBitThreadSelected = (1 << 4)
   };
 
-  static ConstString &GetStaticBroadcasterClass();
+  static llvm::StringRef GetStaticBroadcasterClass();
 
-  ConstString &GetBroadcasterClass() const override {
+  llvm::StringRef GetBroadcasterClass() const override {
     return GetStaticBroadcasterClass();
   }
 
@@ -1157,11 +1158,11 @@ public:
 
   size_t GetStatus(Stream &strm, uint32_t start_frame, uint32_t num_frames,
                    uint32_t num_frames_with_source, bool stop_format,
-                   bool only_stacks = false);
+                   bool show_hidden, bool only_stacks = false);
 
   size_t GetStackFrameStatus(Stream &strm, uint32_t first_frame,
                              uint32_t num_frames, bool show_frame_info,
-                             uint32_t num_frames_with_source);
+                             uint32_t num_frames_with_source, bool show_hidden);
 
   // We need a way to verify that even though we have a thread in a shared
   // pointer that the object itself is still valid. Currently this won't be the

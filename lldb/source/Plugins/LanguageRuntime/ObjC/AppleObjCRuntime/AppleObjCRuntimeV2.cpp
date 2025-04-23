@@ -14,8 +14,6 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
-#include "lldb/Core/ValueObjectConstResult.h"
-#include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/FunctionCaller.h"
 #include "lldb/Expression/UtilityFunction.h"
@@ -48,6 +46,8 @@
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/Timer.h"
+#include "lldb/ValueObject/ValueObjectConstResult.h"
+#include "lldb/ValueObject/ValueObjectVariable.h"
 #include "lldb/lldb-enumerations.h"
 
 #include "AppleObjCClassDescriptorV2.h"
@@ -463,7 +463,14 @@ __lldb_apple_objc_v2_get_shared_cache_class_info (void *objc_opt_ro_ptr,
 
         if (objc_opt->version == 16)
         {
-            const objc_clsopt_v16_t* clsopt = (const objc_clsopt_v16_t*)((uint8_t *)objc_opt + objc_opt_v16->largeSharedCachesClassOffset);
+            int32_t large_offset = objc_opt_v16->largeSharedCachesClassOffset;
+            const objc_clsopt_v16_t* clsopt = (const objc_clsopt_v16_t*)((uint8_t *)objc_opt + large_offset);
+            // Work around a bug in some version shared cache builder where the offset overflows 2GiB (rdar://146432183).
+            uint32_t unsigned_offset = (uint32_t)large_offset;
+            if (unsigned_offset > 0x7fffffff && unsigned_offset < 0x82000000) {
+               clsopt = (const objc_clsopt_v16_t*)((uint8_t *)objc_opt + unsigned_offset);
+               DEBUG_PRINTF("warning: applying largeSharedCachesClassOffset overflow workaround!\n");
+            }
             const size_t max_class_infos = class_infos_byte_size/sizeof(ClassInfo);
 
             DEBUG_PRINTF("max_class_infos = %llu\n", (uint64_t)max_class_infos);
@@ -697,12 +704,12 @@ ExtractRuntimeGlobalSymbol(Process *process, ConstString name,
                            uint64_t default_value = LLDB_INVALID_ADDRESS,
                            SymbolType sym_type = lldb::eSymbolTypeData) {
   if (!process) {
-    error.SetErrorString("no process");
+    error = Status::FromErrorString("no process");
     return default_value;
   }
 
   if (!module_sp) {
-    error.SetErrorString("no module");
+    error = Status::FromErrorString("no module");
     return default_value;
   }
 
@@ -712,14 +719,14 @@ ExtractRuntimeGlobalSymbol(Process *process, ConstString name,
       module_sp->FindFirstSymbolWithNameAndType(name, lldb::eSymbolTypeData);
 
   if (!symbol || !symbol->ValueIsAddress()) {
-    error.SetErrorString("no symbol");
+    error = Status::FromErrorString("no symbol");
     return default_value;
   }
 
   lldb::addr_t symbol_load_addr =
       symbol->GetAddressRef().GetLoadAddress(&process->GetTarget());
   if (symbol_load_addr == LLDB_INVALID_ADDRESS) {
-    error.SetErrorString("symbol address invalid");
+    error = Status::FromErrorString("symbol address invalid");
     return default_value;
   }
 
@@ -882,8 +889,8 @@ public:
         break;
 
       default:
-        error.SetErrorStringWithFormat("unrecognized short option '%c'",
-                                       short_option);
+        error = Status::FromErrorStringWithFormat(
+            "unrecognized short option '%c'", short_option);
         break;
       }
 
@@ -910,19 +917,7 @@ public:
                                 eCommandProcessMustBeLaunched |
                                 eCommandProcessMustBePaused),
         m_options() {
-    CommandArgumentEntry arg;
-    CommandArgumentData index_arg;
-
-    // Define the first (and only) variant of this arg.
-    index_arg.arg_type = eArgTypeRegularExpression;
-    index_arg.arg_repetition = eArgRepeatOptional;
-
-    // There is only one variant this argument could be; put it into the
-    // argument entry.
-    arg.push_back(index_arg);
-
-    // Push the data for the first argument into the m_arguments vector.
-    m_arguments.push_back(arg);
+    AddSimpleArgumentList(eArgTypeRegularExpression, eArgRepeatOptional);
   }
 
   ~CommandObjectObjC_ClassTable_Dump() override = default;
@@ -1028,19 +1023,7 @@ public:
             "language objc tagged-pointer info",
             eCommandRequiresProcess | eCommandProcessMustBeLaunched |
                 eCommandProcessMustBePaused) {
-    CommandArgumentEntry arg;
-    CommandArgumentData index_arg;
-
-    // Define the first (and only) variant of this arg.
-    index_arg.arg_type = eArgTypeAddress;
-    index_arg.arg_repetition = eArgRepeatPlus;
-
-    // There is only one variant this argument could be; put it into the
-    // argument entry.
-    arg.push_back(index_arg);
-
-    // Push the data for the first argument into the m_arguments vector.
-    m_arguments.push_back(arg);
+    AddSimpleArgumentList(eArgTypeAddress, eArgRepeatPlus);
   }
 
   ~CommandObjectMultiwordObjC_TaggedPointer_Info() override = default;
@@ -1410,7 +1393,7 @@ public:
       return *this;
     }
 
-    const element operator*() const {
+    element operator*() const {
       if (m_index == -1) {
         // TODO find a way to make this an error, but not an assert
         return element();
@@ -1906,15 +1889,15 @@ AppleObjCRuntimeV2::DynamicClassInfoExtractor::ComputeHelper(
       if (loader->IsFullyInitialized()) {
         switch (exe_ctx.GetTargetRef().GetDynamicClassInfoHelper()) {
         case eDynamicClassInfoHelperAuto:
-          [[clang::fallthrough]];
+          [[fallthrough]];
         case eDynamicClassInfoHelperGetRealizedClassList:
           if (m_runtime.m_has_objc_getRealizedClassList_trylock)
             return DynamicClassInfoExtractor::objc_getRealizedClassList_trylock;
-          [[clang::fallthrough]];
+          [[fallthrough]];
         case eDynamicClassInfoHelperCopyRealizedClassList:
           if (m_runtime.m_has_objc_copyRealizedClassList)
             return DynamicClassInfoExtractor::objc_copyRealizedClassList;
-          [[clang::fallthrough]];
+          [[fallthrough]];
         case eDynamicClassInfoHelperRealizedClassesStruct:
           return DynamicClassInfoExtractor::gdb_objc_realized_classes;
         }
@@ -2654,7 +2637,7 @@ static bool DoesProcessHaveSharedCache(Process &process) {
     return true; // this should not happen
 
   llvm::StringRef platform_plugin_name_sr = platform_sp->GetPluginName();
-  if (platform_plugin_name_sr.endswith("-simulator"))
+  if (platform_plugin_name_sr.ends_with("-simulator"))
     return false;
 
   return true;
@@ -2744,13 +2727,13 @@ lldb::addr_t AppleObjCRuntimeV2::LookupRuntimeSymbol(ConstString name) {
     llvm::StringRef ivar_prefix("OBJC_IVAR_$_");
     llvm::StringRef class_prefix("OBJC_CLASS_$_");
 
-    if (name_strref.startswith(ivar_prefix)) {
+    if (name_strref.starts_with(ivar_prefix)) {
       llvm::StringRef ivar_skipped_prefix =
           name_strref.substr(ivar_prefix.size());
       std::pair<llvm::StringRef, llvm::StringRef> class_and_ivar =
           ivar_skipped_prefix.split('.');
 
-      if (class_and_ivar.first.size() && class_and_ivar.second.size()) {
+      if (!class_and_ivar.first.empty() && !class_and_ivar.second.empty()) {
         const ConstString class_name_cs(class_and_ivar.first);
         ClassDescriptorSP descriptor =
             ObjCLanguageRuntime::GetClassDescriptorFromClassName(class_name_cs);
@@ -2777,7 +2760,7 @@ lldb::addr_t AppleObjCRuntimeV2::LookupRuntimeSymbol(ConstString name) {
               ivar_func);
         }
       }
-    } else if (name_strref.startswith(class_prefix)) {
+    } else if (name_strref.starts_with(class_prefix)) {
       llvm::StringRef class_skipped_prefix =
           name_strref.substr(class_prefix.size());
       const ConstString class_name_cs(class_skipped_prefix);
@@ -3191,7 +3174,7 @@ AppleObjCRuntimeV2::TaggedPointerVendorExtended::GetClassDescriptor(
                             << m_objc_debug_taggedpointer_ext_payload_lshift) >>
                            m_objc_debug_taggedpointer_ext_payload_rshift);
   int64_t data_payload_signed =
-      ((int64_t)((int64_t)unobfuscated
+      ((int64_t)((uint64_t)unobfuscated
                  << m_objc_debug_taggedpointer_ext_payload_lshift) >>
        m_objc_debug_taggedpointer_ext_payload_rshift);
 
@@ -3315,7 +3298,7 @@ bool AppleObjCRuntimeV2::NonPointerISACache::EvaluateNonPointerISA(
       }
 
       // If the index is still out of range then this isn't a pointer.
-      if (index > m_indexed_isa_cache.size())
+      if (index >= m_indexed_isa_cache.size())
         return false;
 
       LLDB_LOGF(log, "AOCRT::NPI Evaluate(ret_isa = 0x%" PRIx64 ")",
@@ -3435,6 +3418,14 @@ std::optional<uint64_t> AppleObjCRuntimeV2::GetSharedCacheImageHeaderVersion() {
   return std::nullopt;
 }
 
+StructuredData::ObjectSP
+AppleObjCRuntimeV2::GetLanguageSpecificData(SymbolContext sc) {
+  auto dict_up = std::make_unique<StructuredData::Dictionary>();
+  dict_up->AddItem("Objective-C runtime version",
+                   std::make_unique<StructuredData::UnsignedInteger>(2));
+  return dict_up;
+}
+
 #pragma mark Frame recognizers
 
 class ObjCExceptionRecognizedStackFrame : public RecognizedStackFrame {
@@ -3502,6 +3493,6 @@ static void RegisterObjCExceptionRecognizer(Process *process) {
 
   process->GetTarget().GetFrameRecognizerManager().AddRecognizer(
       StackFrameRecognizerSP(new ObjCExceptionThrowFrameRecognizer()),
-      module.GetFilename(), symbols,
+      module.GetFilename(), symbols, Mangled::NamePreference::ePreferDemangled,
       /*first_instruction_only*/ true);
 }

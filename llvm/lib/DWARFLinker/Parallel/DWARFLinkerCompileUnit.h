@@ -87,12 +87,12 @@ public:
   CompileUnit(LinkingGlobalData &GlobalData, unsigned ID,
               StringRef ClangModuleName, DWARFFile &File,
               OffsetToUnitTy UnitFromOffset, dwarf::FormParams Format,
-              support::endianness Endianess);
+              llvm::endianness Endianess);
 
   CompileUnit(LinkingGlobalData &GlobalData, DWARFUnit &OrigUnit, unsigned ID,
               StringRef ClangModuleName, DWARFFile &File,
               OffsetToUnitTy UnitFromOffset, dwarf::FormParams Format,
-              support::endianness Endianess);
+              llvm::endianness Endianess);
 
   /// Returns stage of overall processing.
   Stage getStage() const { return Stage; }

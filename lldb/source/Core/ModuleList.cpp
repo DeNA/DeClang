@@ -114,8 +114,7 @@ enum {
 } // namespace
 
 ModuleListProperties::ModuleListProperties() {
-  m_collection_sp =
-      std::make_shared<OptionValueProperties>(ConstString("symbols"));
+  m_collection_sp = std::make_shared<OptionValueProperties>("symbols");
   m_collection_sp->Initialize(g_modulelist_properties);
   m_collection_sp->SetValueChangedCallback(ePropertySymLinkPaths,
                                            [this] { UpdateSymlinkMappings(); });
@@ -195,27 +194,16 @@ bool ModuleListProperties::SetUseSwiftDWARFImporter(bool new_value) {
   return SetPropertyAtIndex(idx, new_value);
 }
 
-bool ModuleListProperties::GetUseSwiftTypeRefTypeSystem() const {
-  const uint32_t idx = ePropertyUseSwiftTypeRefTypeSystem;
-  return GetPropertyAtIndexAs<bool>(
-      idx, g_modulelist_properties[idx].default_uint_value != 0);
-}
-
 bool ModuleListProperties::GetSwiftValidateTypeSystem() const {
   const uint32_t idx = ePropertySwiftValidateTypeSystem;
   return GetPropertyAtIndexAs<bool>(
       idx, g_modulelist_properties[idx].default_uint_value != 0);
 }
 
-bool ModuleListProperties::GetUseSwiftPreciseCompilerInvocation() const {
-  const uint32_t idx = ePropertyUseSwiftPreciseCompilerInvocation;
+bool ModuleListProperties::GetSwiftLoadConformances() const {
+  const uint32_t idx = ePropertySwiftLoadConformances;
   return GetPropertyAtIndexAs<bool>(
       idx, g_modulelist_properties[idx].default_uint_value != 0);
-}
-
-bool ModuleListProperties::SetUseSwiftTypeRefTypeSystem(bool new_value) {
-  const uint32_t idx = ePropertyUseSwiftTypeRefTypeSystem;
-  return SetPropertyAtIndex(idx, new_value);
 }
 
 SwiftModuleLoadingMode ModuleListProperties::GetSwiftModuleLoadingMode() const {
@@ -509,7 +497,7 @@ bool ModuleList::RemoveIfOrphaned(const Module *module_ptr) {
     collection::iterator pos, end = m_modules.end();
     for (pos = m_modules.begin(); pos != end; ++pos) {
       if (pos->get() == module_ptr) {
-        if (pos->unique()) {
+        if (pos->use_count() == 1) {
           pos = RemoveImpl(pos);
           return true;
         } else
@@ -532,7 +520,7 @@ size_t ModuleList::RemoveOrphans(bool mandatory) {
   }
   size_t remove_count = 0;
   // Modules might hold shared pointers to other modules, so removing one
-  // module might make other other modules orphans. Keep removing modules until
+  // module might make other modules orphans. Keep removing modules until
   // there are no further modules that can be removed.
   bool made_progress = true;
   while (made_progress) {
@@ -540,7 +528,7 @@ size_t ModuleList::RemoveOrphans(bool mandatory) {
     made_progress = false;
     collection::iterator pos = m_modules.begin();
     while (pos != m_modules.end()) {
-      if (pos->unique()) {
+      if (pos->use_count() == 1) {
         pos = RemoveImpl(pos);
         ++remove_count;
         // We did make progress.
@@ -846,6 +834,24 @@ void ModuleList::FindTypes(Module *search_first, const TypeQuery &query,
       if (results.Done(query))
         return;
     }
+  }
+}
+
+void ModuleList::FindImportedDeclarations(
+    Module *search_first, ConstString name,
+    std::vector<ImportedDeclaration> &results, bool find_one) const {
+  std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
+  if (search_first) {
+    search_first->FindImportedDeclarations(name, results, find_one);
+    if (find_one && !results.empty())
+      return;
+  }
+  for (const auto &module_sp : m_modules) {
+    if (search_first != module_sp.get()) {
+      module_sp->FindImportedDeclarations(name, results, find_one);
+    }
+    if (find_one && !results.empty())
+      return;
   }
 }
 
@@ -1186,16 +1192,16 @@ ModuleList::GetSharedModule(const ModuleSpec &module_spec, ModuleSP &module_sp,
 
         if (arch.IsValid()) {
           if (!uuid_str.empty())
-            error.SetErrorStringWithFormat(
+            error = Status::FromErrorStringWithFormat(
                 "'%s' does not contain the %s architecture and UUID %s", path,
                 arch.GetArchitectureName(), uuid_str.c_str());
           else
-            error.SetErrorStringWithFormat(
+            error = Status::FromErrorStringWithFormat(
                 "'%s' does not contain the %s architecture.", path,
                 arch.GetArchitectureName());
         }
       } else {
-        error.SetErrorStringWithFormat("'%s' does not exist", path);
+        error = Status::FromErrorStringWithFormat("'%s' does not exist", path);
       }
       if (error.Fail())
         module_sp.reset();
@@ -1254,21 +1260,22 @@ ModuleList::GetSharedModule(const ModuleSpec &module_spec, ModuleSP &module_sp,
 
         if (located_binary_modulespec.GetFileSpec()) {
           if (arch.IsValid())
-            error.SetErrorStringWithFormat(
+            error = Status::FromErrorStringWithFormat(
                 "unable to open %s architecture in '%s'",
                 arch.GetArchitectureName(), path);
           else
-            error.SetErrorStringWithFormat("unable to open '%s'", path);
+            error =
+                Status::FromErrorStringWithFormat("unable to open '%s'", path);
         } else {
           std::string uuid_str;
           if (uuid_ptr && uuid_ptr->IsValid())
             uuid_str = uuid_ptr->GetAsString();
 
           if (!uuid_str.empty())
-            error.SetErrorStringWithFormat(
+            error = Status::FromErrorStringWithFormat(
                 "cannot locate a module for UUID '%s'", uuid_str.c_str());
           else
-            error.SetErrorString("cannot locate a module");
+            error = Status::FromErrorString("cannot locate a module");
         }
       }
     }
@@ -1293,19 +1300,19 @@ bool ModuleList::LoadScriptingResourcesInTarget(Target *target,
     return false;
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   for (auto module : m_modules) {
-    Status error;
     if (module) {
+      Status error;
       if (!module->LoadScriptingResourceInTarget(target, error,
                                                  feedback_stream)) {
         if (error.Fail() && error.AsCString()) {
-          error.SetErrorStringWithFormat("unable to load scripting data for "
-                                         "module %s - error reported was %s",
-                                         module->GetFileSpec()
-                                             .GetFileNameStrippingExtension()
-                                             .GetCString(),
-                                         error.AsCString());
-          errors.push_back(error);
-
+          error = Status::FromErrorStringWithFormat(
+              "unable to load scripting data for "
+              "module %s - error reported was %s",
+              module->GetFileSpec()
+                  .GetFileNameStrippingExtension()
+                  .GetCString(),
+              error.AsCString());
+          errors.push_back(std::move(error));
           if (!continue_on_error)
             return false;
         }
@@ -1350,6 +1357,7 @@ bool ModuleList::AnyOf(
 
 void ModuleList::Swap(ModuleList &other) {
   // scoped_lock locks both mutexes at once.
-  std::scoped_lock lock(m_modules_mutex, other.m_modules_mutex);
+  std::scoped_lock<std::recursive_mutex, std::recursive_mutex> lock(
+      m_modules_mutex, other.m_modules_mutex);
   m_modules.swap(other.m_modules);
 }

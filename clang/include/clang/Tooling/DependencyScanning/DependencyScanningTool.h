@@ -116,7 +116,7 @@ public:
   /// dependency information by `-MD -MF <dep_file>`.
   ///
   /// \param MakeformatOutputPath The output parameter for the path to
-  /// \p MakeformatOutput.
+  /// \param MakeformatOutput.
   ///
   /// \returns A \c StringError with the diagnostic output if clang errors
   /// occurred, P1689 dependency format rules otherwise.
@@ -124,6 +124,15 @@ public:
   getP1689ModuleDependencyFile(const clang::tooling::CompileCommand &Command,
                                StringRef CWD, std::string &MakeformatOutput,
                                std::string &MakeformatOutputPath);
+  llvm::Expected<P1689Rule>
+  getP1689ModuleDependencyFile(const clang::tooling::CompileCommand &Command,
+                               StringRef CWD) {
+    std::string MakeformatOutput;
+    std::string MakeformatOutputPath;
+
+    return getP1689ModuleDependencyFile(Command, CWD, MakeformatOutput,
+                                        MakeformatOutputPath);
+  }
 
   /// Collect dependency tree.
   llvm::Expected<llvm::cas::ObjectProxy>
@@ -181,6 +190,8 @@ public:
       StringRef ModuleName, const std::vector<std::string> &CommandLine,
       StringRef CWD, const llvm::DenseSet<ModuleID> &AlreadySeen,
       LookupModuleOutputCallback LookupModuleOutput);
+
+  llvm::vfs::FileSystem &getWorkerVFS() const { return Worker.getVFS(); }
 
   ScanningOutputFormat getScanningFormat() const {
     return Worker.getScanningFormat();

@@ -144,9 +144,8 @@ entry:
   ret <6 x double> %mul
 }
 
-declare <6 x double> @llvm.matrix.transpose.v6f64(<6 x double>, i32, i32)
-declare <4 x double> @llvm.matrix.transpose.v4f64(<4 x double>, i32, i32)
+declare <6 x double> @llvm.matrix.transpose.v6f64.v6f64(<6 x double>, i32, i32)
+declare <4 x double> @llvm.matrix.transpose.v4f64.v4f64(<4 x double>, i32, i32)
 declare <9 x double> @llvm.matrix.multiply.v9f64.v6f64(<6 x double>, <6 x double>, i32, i32, i32)
 declare <6 x double> @llvm.matrix.multiply.v6f64.v6f64.v4f64(<6 x double>, <4 x double>, i32, i32, i32)
 declare <6 x double> @llvm.matrix.multiply.v6f64.v6f64.v6f64(<6 x double>, <4 x double>, i32, i32, i32)
-declare <6 x double> @llvm.matrix.multiply.v6f64.v4f64.v6f64(<4 x double>, <6 x double>, i32, i32, i32)

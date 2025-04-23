@@ -39,6 +39,11 @@ static cl::opt<bool>
     EnableTrapUnreachable("trap-unreachable", cl::Hidden,
                           cl::desc("Enable generating trap for unreachable"));
 
+static cl::opt<bool> EnableNoTrapAfterNoreturn(
+    "no-trap-after-noreturn", cl::Hidden,
+    cl::desc("Do not emit a trap instruction for 'unreachable' IR instructions "
+             "after noreturn calls, even if --trap-unreachable is set."));
+
 void LLVMTargetMachine::initAsmInfo() {
   MRI.reset(TheTarget.createMCRegInfo(getTargetTriple().str()));
   assert(MRI && "Unable to create reg info");
@@ -74,9 +79,7 @@ void LLVMTargetMachine::initAsmInfo() {
 
   TmpAsmInfo->setPreserveAsmComments(Options.MCOptions.PreserveAsmComments);
 
-  TmpAsmInfo->setCompressDebugSections(Options.CompressDebugSections);
-
-  TmpAsmInfo->setRelaxELFRelocations(Options.RelaxELFRelocations);
+  TmpAsmInfo->setFullRegisterNames(Options.MCOptions.PPCUseFullRegisterNames);
 
   if (Options.ExceptionModel != ExceptionHandling::None)
     TmpAsmInfo->setExceptionsType(Options.ExceptionModel);
@@ -89,7 +92,7 @@ LLVMTargetMachine::LLVMTargetMachine(const Target &T,
                                      const Triple &TT, StringRef CPU,
                                      StringRef FS, const TargetOptions &Options,
                                      Reloc::Model RM, CodeModel::Model CM,
-                                     CodeGenOpt::Level OL)
+                                     CodeGenOptLevel OL)
     : TargetMachine(T, DataLayoutString, TT, CPU, FS, Options) {
   this->RM = RM;
   this->CMModel = CM;
@@ -97,6 +100,8 @@ LLVMTargetMachine::LLVMTargetMachine(const Target &T,
 
   if (EnableTrapUnreachable)
     this->Options.TrapUnreachable = true;
+  if (EnableNoTrapAfterNoreturn)
+    this->Options.NoTrapAfterNoreturn = true;
 }
 
 TargetTransformInfo
@@ -145,9 +150,6 @@ bool LLVMTargetMachine::addAsmPrinter(
 Expected<std::unique_ptr<MCStreamer>> LLVMTargetMachine::createMCStreamer(
     raw_pwrite_stream &Out, raw_pwrite_stream *DwoOut, CodeGenFileType FileType,
     MCContext &Context, raw_pwrite_stream *CasIDOS) {
-  if (Options.MCOptions.MCSaveTempLabels)
-    Context.setAllowTemporaryLabels(false);
-
   const MCSubtargetInfo &STI = *getMCSubtargetInfo();
   const MCAsmInfo &MAI = *getMCAsmInfo();
   const MCRegisterInfo &MRI = *getMCRegisterInfo();
@@ -156,7 +158,7 @@ Expected<std::unique_ptr<MCStreamer>> LLVMTargetMachine::createMCStreamer(
   std::unique_ptr<MCStreamer> AsmStreamer;
 
   switch (FileType) {
-  case CGFT_AssemblyFile: {
+  case CodeGenFileType::AssemblyFile: {
     MCInstPrinter *InstPrinter = getTarget().createMCInstPrinter(
         getTargetTriple(), MAI.getAssemblerDialect(), MAI, MII, MRI);
 
@@ -165,30 +167,15 @@ Expected<std::unique_ptr<MCStreamer>> LLVMTargetMachine::createMCStreamer(
     if (Options.MCOptions.ShowMCEncoding)
       MCE.reset(getTarget().createMCCodeEmitter(MII, Context));
 
-    bool UseDwarfDirectory = false;
-    switch (Options.MCOptions.MCUseDwarfDirectory) {
-    case MCTargetOptions::DisableDwarfDirectory:
-      UseDwarfDirectory = false;
-      break;
-    case MCTargetOptions::EnableDwarfDirectory:
-      UseDwarfDirectory = true;
-      break;
-    case MCTargetOptions::DefaultDwarfDirectory:
-      UseDwarfDirectory = MAI.enableDwarfFileDirectoryDefault();
-      break;
-    }
-
     std::unique_ptr<MCAsmBackend> MAB(
         getTarget().createMCAsmBackend(STI, MRI, Options.MCOptions));
     auto FOut = std::make_unique<formatted_raw_ostream>(Out);
     MCStreamer *S = getTarget().createAsmStreamer(
-        Context, std::move(FOut), Options.MCOptions.AsmVerbose,
-        UseDwarfDirectory, InstPrinter, std::move(MCE), std::move(MAB),
-        Options.MCOptions.ShowMCInst);
+        Context, std::move(FOut), InstPrinter, std::move(MCE), std::move(MAB));
     AsmStreamer.reset(S);
     break;
   }
-  case CGFT_ObjectFile: {
+  case CodeGenFileType::ObjectFile: {
     // Create the code emitter for the target if it exists.  If not, .o file
     // emission fails.
     MCCodeEmitter *MCE = getTarget().createMCCodeEmitter(MII, Context);
@@ -205,16 +192,15 @@ Expected<std::unique_ptr<MCStreamer>> LLVMTargetMachine::createMCStreamer(
     // BEGIN MCCAS
     std::unique_ptr<MCObjectWriter> CASBackendWriter;
     if (Options.UseCASBackend) {
-      std::function<const cas::ObjectProxy(
-          llvm::MachOCASWriter &, llvm::MCAssembler &,
-          const llvm::MCAsmLayout &, cas::ObjectStore &, raw_ostream *)>
+      std::function<const cas::ObjectProxy(llvm::MachOCASWriter &,
+                                           llvm::MCAssembler &,
+                                           cas::ObjectStore &, raw_ostream *)>
           CreateFromMcAssembler =
               [](llvm::MachOCASWriter &Writer, llvm::MCAssembler &Asm,
-                 const llvm::MCAsmLayout &Layout, cas::ObjectStore &CAS,
+                 cas::ObjectStore &CAS,
                  raw_ostream *DebugOS = nullptr) -> const cas::ObjectProxy {
         auto Schema = std::make_unique<mccasformats::v1::MCSchema>(CAS);
-        return cantFail(
-            Schema->createFromMCAssembler(Writer, Asm, Layout, DebugOS));
+        return cantFail(Schema->createFromMCAssembler(Writer, Asm, DebugOS));
       };
       std::function<Error(cas::ObjectProxy, cas::ObjectStore &, raw_ostream &)>
           SerializeObjectFile = [](cas::ObjectProxy RootNode,
@@ -234,12 +220,10 @@ Expected<std::unique_ptr<MCStreamer>> LLVMTargetMachine::createMCStreamer(
         Options.UseCASBackend ? std::move(CASBackendWriter) // MCCAS
         : DwoOut ? MAB->createDwoObjectWriter(Out, *DwoOut)
                : MAB->createObjectWriter(Out),
-        std::unique_ptr<MCCodeEmitter>(MCE), STI, Options.MCOptions.MCRelaxAll,
-        Options.MCOptions.MCIncrementalLinkerCompatible,
-        /*DWARFMustBeAtTheEnd*/ true));
+        std::unique_ptr<MCCodeEmitter>(MCE), STI));
     break;
   }
-  case CGFT_Null:
+  case CodeGenFileType::Null:
     // The Null output is intended for use for performance analysis and testing,
     // not real users.
     AsmStreamer.reset(getTarget().createNullStreamer(Context));
@@ -267,7 +251,7 @@ bool LLVMTargetMachine::addPassesToEmitFile(
       return true;
   } else {
     // MIR printing is redundant with -filetype=null.
-    if (FileType != CGFT_Null)
+    if (FileType != CodeGenFileType::Null)
       PM.add(createPrintMIRPass(Out));
   }
 
@@ -296,8 +280,6 @@ bool LLVMTargetMachine::addPassesToEmitMC(PassManagerBase &PM, MCContext *&Ctx,
   // libunwind is unable to load compact unwind dynamically, so we must generate
   // DWARF unwind info for the JIT.
   Options.MCOptions.EmitDwarfUnwind = EmitDwarfUnwindType::Always;
-  if (Options.MCOptions.MCSaveTempLabels)
-    Ctx->setAllowTemporaryLabels(false);
 
   // Create the code emitter for the target if it exists.  If not, .o file
   // emission fails.
@@ -305,17 +287,15 @@ bool LLVMTargetMachine::addPassesToEmitMC(PassManagerBase &PM, MCContext *&Ctx,
   const MCRegisterInfo &MRI = *getMCRegisterInfo();
   std::unique_ptr<MCCodeEmitter> MCE(
       getTarget().createMCCodeEmitter(*getMCInstrInfo(), *Ctx));
-  std::unique_ptr<MCAsmBackend> MAB(
-      getTarget().createMCAsmBackend(STI, MRI, Options.MCOptions));
+  MCAsmBackend *MAB =
+      getTarget().createMCAsmBackend(STI, MRI, Options.MCOptions);
   if (!MCE || !MAB)
     return true;
 
   const Triple &T = getTargetTriple();
   std::unique_ptr<MCStreamer> AsmStreamer(getTarget().createMCObjectStreamer(
-      T, *Ctx, std::move(MAB), MAB->createObjectWriter(Out), std::move(MCE),
-      STI, Options.MCOptions.MCRelaxAll,
-      Options.MCOptions.MCIncrementalLinkerCompatible,
-      /*DWARFMustBeAtTheEnd*/ true));
+      T, *Ctx, std::unique_ptr<MCAsmBackend>(MAB), MAB->createObjectWriter(Out),
+      std::move(MCE), STI));
 
   // Create the AsmPrinter, which takes ownership of AsmStreamer if successful.
   FunctionPass *Printer =

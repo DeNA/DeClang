@@ -14,8 +14,6 @@
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
-#include "lldb/Core/StreamBuffer.h"
-#include "lldb/Core/StreamFile.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/LineTable.h"
 #include "lldb/Symbol/ObjectFile.h"
@@ -536,9 +534,9 @@ SymbolFileNativePDB::CreateCompileUnit(const CompilandIndexItem &cci) {
   FileSpec fs(llvm::sys::path::convert_to_slash(
       source_file_name, llvm::sys::path::Style::windows_backslash));
 
-  CompUnitSP cu_sp =
-      std::make_shared<CompileUnit>(m_objfile_sp->GetModule(), nullptr, fs,
-                                    toOpaqueUid(cci.m_id), lang, optimized);
+  CompUnitSP cu_sp = std::make_shared<CompileUnit>(
+      m_objfile_sp->GetModule(), nullptr, std::make_shared<SupportFile>(fs),
+      toOpaqueUid(cci.m_id), lang, optimized);
 
   SetCompileUnitAtIndex(cci.m_id.modi, cu_sp);
   return cu_sp;
@@ -1384,7 +1382,7 @@ bool SymbolFileNativePDB::ParseSupportFiles(CompileUnit &comp_unit,
 
   for (llvm::StringRef f : cci->m_file_list) {
     FileSpec::Style style =
-        f.startswith("/") ? FileSpec::Style::posix : FileSpec::Style::windows;
+        f.starts_with("/") ? FileSpec::Style::posix : FileSpec::Style::windows;
     FileSpec spec(f, style);
     support_files.Append(spec);
   }
@@ -2161,7 +2159,7 @@ SymbolFileNativePDB::GetTypeSystemForLanguage(lldb::LanguageType language) {
   return type_system_or_err;
 }
 
-uint64_t SymbolFileNativePDB::GetDebugInfoSize() {
+uint64_t SymbolFileNativePDB::GetDebugInfoSize(bool load_all_debug_info) {
   // PDB files are a separate file that contains all debug info.
   return m_index->pdb().getFileSize();
 }
@@ -2270,7 +2268,8 @@ void SymbolFileNativePDB::BuildParentMap() {
   }
   for (TypeIndex fwd : fwd_keys) {
     TypeIndex full = forward_to_full[fwd];
-    m_parent_types[full] = m_parent_types[fwd];
+    TypeIndex parent_idx = m_parent_types[fwd];
+    m_parent_types[full] = parent_idx;
   }
   for (TypeIndex full : full_keys) {
     TypeIndex fwd = full_to_forward[full];

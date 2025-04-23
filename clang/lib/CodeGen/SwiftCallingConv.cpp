@@ -78,7 +78,7 @@ void SwiftAggLowering::addTypedData(QualType type, CharUnits begin) {
 
     QualType eltType = arrayType->getElementType();
     auto eltSize = CGM.getContext().getTypeSizeInChars(eltType);
-    for (uint64_t i = 0, e = arrayType->getSize().getZExtValue(); i != e; ++i) {
+    for (uint64_t i = 0, e = arrayType->getZExtSize(); i != e; ++i) {
       addTypedData(eltType, begin + i * eltSize);
     }
 
@@ -642,6 +642,27 @@ bool SwiftAggLowering::shouldPassIndirectly(bool asReturnValue) const {
     componentTys.push_back(entry.Type);
   }
   return getSwiftABIInfo(CGM).shouldPassIndirectly(componentTys, asReturnValue);
+}
+
+bool SwiftAggLowering::shouldReturnTypedErrorIndirectly() const {
+  assert(Finished && "haven't yet finished lowering");
+
+  // Empty types don't need to be passed indirectly.
+  if (Entries.empty())
+    return false;
+
+  // Avoid copying the array of types when there's just a single element.
+  if (Entries.size() == 1) {
+    return getSwiftABIInfo(CGM).shouldReturnTypedErrorIndirectly(
+        Entries.back().Type);
+  }
+
+  SmallVector<llvm::Type *, 8> componentTys;
+  componentTys.reserve(Entries.size());
+  for (auto &entry : Entries) {
+    componentTys.push_back(entry.Type);
+  }
+  return getSwiftABIInfo(CGM).shouldReturnTypedErrorIndirectly(componentTys);
 }
 
 bool swiftcall::shouldPassIndirectly(CodeGenModule &CGM,

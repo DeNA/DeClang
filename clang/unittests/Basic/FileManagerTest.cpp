@@ -288,7 +288,6 @@ TEST_F(FileManagerTest, getFileRefReturnsCorrectNameForDifferentStatPath) {
   ASSERT_FALSE(!F1Alias);
   ASSERT_FALSE(!F1Alias2);
   EXPECT_EQ("dir/f1.cpp", F1->getName());
-  EXPECT_EQ("dir/f1.cpp", F1->getFileEntry().getName());
   EXPECT_EQ("dir/f1.cpp", F1Alias->getName());
   EXPECT_EQ("dir/f1.cpp", F1Alias2->getName());
   EXPECT_EQ(&F1->getFileEntry(), &F1Alias->getFileEntry());
@@ -307,7 +306,6 @@ TEST_F(FileManagerTest, getFileRefReturnsCorrectNameForDifferentStatPath) {
   ASSERT_FALSE(!F2Alias);
   ASSERT_FALSE(!F2Alias2);
   EXPECT_EQ("dir/f2.cpp", F2->getName());
-  EXPECT_EQ("dir/f2.cpp", F2->getFileEntry().getName());
   EXPECT_EQ("dir/f2.cpp", F2Alias->getName());
   EXPECT_EQ("dir/f2.cpp", F2Alias2->getName());
   EXPECT_EQ(&F2->getFileEntry(), &F2Alias->getFileEntry());
@@ -551,7 +549,7 @@ TEST_F(FileManagerTest, getBypassFile) {
   Manager.setStatCache(std::move(Cache));
 
   // Set up a virtual file with a different size than FakeStatCache uses.
-  const FileEntry *File = Manager.getVirtualFile("/tmp/test", /*Size=*/10, 0);
+  FileEntryRef File = Manager.getVirtualFileRef("/tmp/test", /*Size=*/10, 0);
   ASSERT_TRUE(File);
   const FileEntry &FE = *File;
   EXPECT_EQ(FE.getSize(), 10);
@@ -566,7 +564,7 @@ TEST_F(FileManagerTest, getBypassFile) {
   EXPECT_EQ(FE.getSize(), 10);
 
   // Bypass the file.
-  OptionalFileEntryRef BypassRef = Manager.getBypassFile(File->getLastRef());
+  OptionalFileEntryRef BypassRef = Manager.getBypassFile(File);
   ASSERT_TRUE(BypassRef);
   EXPECT_EQ("/tmp/test", BypassRef->getName());
 
@@ -597,7 +595,7 @@ TEST_F(FileManagerTest, CASProvider) {
     std::optional<ObjectRef> CASContents;
     auto Buf = Manager.getBufferForFile(Path, /*IsVolatile*/ false,
                                         /*RequiresNullTerminator*/ false,
-                                        &CASContents);
+                                        std::nullopt, &CASContents);
     ASSERT_TRUE(Buf);
     EXPECT_EQ(Contents, (*Buf)->getBuffer());
     ASSERT_TRUE(CASContents);
@@ -615,7 +613,7 @@ TEST_F(FileManagerTest, CASProvider) {
     std::optional<ObjectRef> CASContents;
     auto Buf = Manager.getBufferForFile(*FERef, /*IsVolatile*/ false,
                                         /*RequiresNullTerminator*/ false,
-                                        &CASContents);
+                                        std::nullopt, &CASContents);
     ASSERT_TRUE(Buf);
     EXPECT_EQ(Contents, (*Buf)->getBuffer());
     ASSERT_TRUE(CASContents);

@@ -38,6 +38,9 @@ namespace llvm {
   class Module;
   class Value;
   class DbgAssignIntrinsic;
+  class DbgRecord;
+
+  using DbgInstPtr = PointerUnion<Instruction *, DbgRecord *>;
 
   class DIBuilder {
     Module &M;
@@ -90,13 +93,18 @@ namespace llvm {
     void trackIfUnresolved(MDNode *N);
 
     /// Internal helper for insertDeclare.
-    Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
-                               DIExpression *Expr, const DILocation *DL,
-                               BasicBlock *InsertBB, Instruction *InsertBefore);
+    DbgInstPtr insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
+                             DIExpression *Expr, const DILocation *DL,
+                             BasicBlock *InsertBB, Instruction *InsertBefore);
 
     /// Internal helper for insertLabel.
-    Instruction *insertLabel(DILabel *LabelInfo, const DILocation *DL,
-                             BasicBlock *InsertBB, Instruction *InsertBefore);
+    DbgInstPtr insertLabel(DILabel *LabelInfo, const DILocation *DL,
+                           BasicBlock *InsertBB, Instruction *InsertBefore);
+
+    /// Internal helper. Track metadata if untracked and insert \p DVR.
+    void insertDbgVariableRecord(DbgVariableRecord *DVR, BasicBlock *InsertBB,
+                                 Instruction *InsertBefore,
+                                 bool InsertAtHead = false);
 
     /// Internal helper with common code used by insertDbg{Value,Addr}Intrinsic.
     Instruction *insertDbgIntrinsic(llvm::Function *Intrinsic, llvm::Value *Val,
@@ -106,10 +114,11 @@ namespace llvm {
                                     Instruction *InsertBefore);
 
     /// Internal helper for insertDbgValueIntrinsic.
-    Instruction *
-    insertDbgValueIntrinsic(llvm::Value *Val, DILocalVariable *VarInfo,
-                            DIExpression *Expr, const DILocation *DL,
-                            BasicBlock *InsertBB, Instruction *InsertBefore);
+    DbgInstPtr insertDbgValueIntrinsic(llvm::Value *Val,
+                                       DILocalVariable *VarInfo,
+                                       DIExpression *Expr, const DILocation *DL,
+                                       BasicBlock *InsertBB,
+                                       Instruction *InsertBefore);
 
   public:
     /// Construct a builder for a module.
@@ -218,7 +227,7 @@ namespace llvm {
     /// \param Flags       Optional DWARF attributes, e.g., DW_AT_endianity.
     /// \param NumExtraInhabitants The number of extra inhabitants of the type.
     /// An extra inhabitant is a bit pattern that does not represent a valid
-    /// value for objects of a given type.
+    /// value for instances of a given type. This is used by the Swift language.
     DIBasicType *createBasicType(StringRef Name, uint64_t SizeInBits,
                                  unsigned Encoding,
                                  DINode::DIFlags Flags = DINode::FlagZero,
@@ -269,7 +278,9 @@ namespace llvm {
     /// Create a __ptrauth qualifier.
     DIDerivedType *createPtrAuthQualifiedType(DIType *FromTy, unsigned Key,
                                               bool IsAddressDiscriminated,
-                                              unsigned ExtraDiscriminator);
+                                              unsigned ExtraDiscriminator,
+                                              bool IsaPointer,
+                                              bool authenticatesNullValues);
 
     /// Create debugging information entry for a pointer to member.
     /// \param PointeeTy Type pointed to by this pointer.
@@ -302,6 +313,24 @@ namespace llvm {
                                  uint32_t AlignInBits = 0,
                                  DINode::DIFlags Flags = DINode::FlagZero,
                                  DINodeArray Annotations = nullptr);
+
+    /// Create debugging information entry for a template alias.
+    /// \param Ty          Original type.
+    /// \param Name        Alias name.
+    /// \param File        File where this type is defined.
+    /// \param LineNo      Line number.
+    /// \param Context     The surrounding context for the alias.
+    /// \param TParams     The template arguments.
+    /// \param AlignInBits Alignment. (optional)
+    /// \param Flags       Flags to describe inheritance attribute (optional),
+    ///                    e.g. private.
+    /// \param Annotations Annotations. (optional)
+    DIDerivedType *createTemplateAlias(DIType *Ty, StringRef Name, DIFile *File,
+                                       unsigned LineNo, DIScope *Context,
+                                       DINodeArray TParams,
+                                       uint32_t AlignInBits = 0,
+                                       DINode::DIFlags Flags = DINode::FlagZero,
+                                       DINodeArray Annotations = nullptr);
 
     /// Create debugging information entry for a 'friend'.
     DIDerivedType *createFriend(DIType *Ty, DIType *FriendTy);
@@ -385,11 +414,12 @@ namespace llvm {
     /// \param Ty         Type of the static member.
     /// \param Flags      Flags to encode member attribute, e.g. private.
     /// \param Val        Const initializer of the member.
+    /// \param Tag        DWARF tag of the static member.
     /// \param AlignInBits  Member alignment.
     DIDerivedType *createStaticMemberType(DIScope *Scope, StringRef Name,
                                           DIFile *File, unsigned LineNo,
                                           DIType *Ty, DINode::DIFlags Flags,
-                                          Constant *Val,
+                                          Constant *Val, unsigned Tag,
                                           uint32_t AlignInBits = 0);
 
     /// Create debugging information entry for Objective-C
@@ -458,18 +488,17 @@ namespace llvm {
     /// \param Elements     Struct elements.
     /// \param RunTimeLang  Optional parameter, Objective-C runtime version.
     /// \param UniqueIdentifier A unique identifier for the struct.
-    /// \param SpecificationOf The type that this type completes (is a
-    /// specification of). For example, this could be a templated type whose
-    /// template parameters have been substituted in.
+    /// \param Specification The type that this type completes. This is used by
+    /// Swift to represent generic types.
     /// \param NumExtraInhabitants The number of extra inhabitants of the type.
     /// An extra inhabitant is a bit pattern that does not represent a valid
-    /// value for objects of a given type.
+    /// value for instances of a given type.
     DICompositeType *createStructType(
         DIScope *Scope, StringRef Name, DIFile *File, unsigned LineNumber,
         uint64_t SizeInBits, uint32_t AlignInBits, DINode::DIFlags Flags,
         DIType *DerivedFrom, DINodeArray Elements, unsigned RunTimeLang = 0,
         DIType *VTableHolder = nullptr, StringRef UniqueIdentifier = "",
-        DIType *SpecificationOf = nullptr, uint32_t NumExtraInhabitants = 0);
+        DIType *Specification = nullptr, uint32_t NumExtraInhabitants = 0);
 
     /// Create debugging information entry for an union.
     /// \param Scope        Scope in which this union is defined.
@@ -503,17 +532,12 @@ namespace llvm {
     /// \param Discriminator Discriminant member
     /// \param Elements     Variant elements.
     /// \param UniqueIdentifier A unique identifier for the union.
-    /// \param OffsetInBits The offset of the variant payload in the variant
-    /// type.
-    /// \param SpareBitsMask A mask of spare bits of the payload, spare bits are
-    /// bits that aren't used in any of the variant's cases.
     DICompositeType *
     createVariantPart(DIScope *Scope, StringRef Name, DIFile *File,
                       unsigned LineNumber, uint64_t SizeInBits,
                       uint32_t AlignInBits, DINode::DIFlags Flags,
                       DIDerivedType *Discriminator, DINodeArray Elements,
-                      StringRef UniqueIdentifier = "",
-                      uint64_t OffsetInBits = 0, APInt SpareBitsMask = APInt());
+                      StringRef UniqueIdentifier = "");
 
     /// Create debugging information for template
     /// type parameter.
@@ -940,9 +964,9 @@ namespace llvm {
     /// \param Expr        A complex location expression.
     /// \param DL          Debug info location.
     /// \param InsertAtEnd Location for the new intrinsic.
-    Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
-                               DIExpression *Expr, const DILocation *DL,
-                               BasicBlock *InsertAtEnd);
+    DbgInstPtr insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
+                             DIExpression *Expr, const DILocation *DL,
+                             BasicBlock *InsertAtEnd);
 
     /// Insert a new llvm.dbg.assign intrinsic call.
     /// \param LinkedInstr   Instruction with a DIAssignID to link with the new
@@ -958,11 +982,10 @@ namespace llvm {
     /// \param DL            Debug info location, usually: (line: 0,
     ///                      column: 0, scope: var-decl-scope). See
     ///                      getDebugValueLoc.
-    DbgAssignIntrinsic *insertDbgAssign(Instruction *LinkedInstr, Value *Val,
-                                        DILocalVariable *SrcVar,
-                                        DIExpression *ValExpr, Value *Addr,
-                                        DIExpression *AddrExpr,
-                                        const DILocation *DL);
+    DbgInstPtr insertDbgAssign(Instruction *LinkedInstr, Value *Val,
+                               DILocalVariable *SrcVar, DIExpression *ValExpr,
+                               Value *Addr, DIExpression *AddrExpr,
+                               const DILocation *DL);
 
     /// Insert a new llvm.dbg.declare intrinsic call.
     /// \param Storage      llvm::Value of the variable
@@ -970,23 +993,23 @@ namespace llvm {
     /// \param Expr         A complex location expression.
     /// \param DL           Debug info location.
     /// \param InsertBefore Location for the new intrinsic.
-    Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
-                               DIExpression *Expr, const DILocation *DL,
-                               Instruction *InsertBefore);
-
-    /// Insert a new llvm.dbg.label intrinsic call.
-    /// \param LabelInfo    Label's debug info descriptor.
-    /// \param DL           Debug info location.
-    /// \param InsertBefore Location for the new intrinsic.
-    Instruction *insertLabel(DILabel *LabelInfo, const DILocation *DL,
+    DbgInstPtr insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
+                             DIExpression *Expr, const DILocation *DL,
                              Instruction *InsertBefore);
 
     /// Insert a new llvm.dbg.label intrinsic call.
     /// \param LabelInfo    Label's debug info descriptor.
     /// \param DL           Debug info location.
+    /// \param InsertBefore Location for the new intrinsic.
+    DbgInstPtr insertLabel(DILabel *LabelInfo, const DILocation *DL,
+                           Instruction *InsertBefore);
+
+    /// Insert a new llvm.dbg.label intrinsic call.
+    /// \param LabelInfo    Label's debug info descriptor.
+    /// \param DL           Debug info location.
     /// \param InsertAtEnd Location for the new intrinsic.
-    Instruction *insertLabel(DILabel *LabelInfo, const DILocation *DL,
-                             BasicBlock *InsertAtEnd);
+    DbgInstPtr insertLabel(DILabel *LabelInfo, const DILocation *DL,
+                           BasicBlock *InsertAtEnd);
 
     /// Insert a new llvm.dbg.value intrinsic call.
     /// \param Val          llvm::Value of the variable
@@ -994,11 +1017,10 @@ namespace llvm {
     /// \param Expr         A complex location expression.
     /// \param DL           Debug info location.
     /// \param InsertAtEnd Location for the new intrinsic.
-    Instruction *insertDbgValueIntrinsic(llvm::Value *Val,
-                                         DILocalVariable *VarInfo,
-                                         DIExpression *Expr,
-                                         const DILocation *DL,
-                                         BasicBlock *InsertAtEnd);
+    DbgInstPtr insertDbgValueIntrinsic(llvm::Value *Val,
+                                       DILocalVariable *VarInfo,
+                                       DIExpression *Expr, const DILocation *DL,
+                                       BasicBlock *InsertAtEnd);
 
     /// Insert a new llvm.dbg.value intrinsic call.
     /// \param Val          llvm::Value of the variable
@@ -1006,11 +1028,10 @@ namespace llvm {
     /// \param Expr         A complex location expression.
     /// \param DL           Debug info location.
     /// \param InsertBefore Location for the new intrinsic.
-    Instruction *insertDbgValueIntrinsic(llvm::Value *Val,
-                                         DILocalVariable *VarInfo,
-                                         DIExpression *Expr,
-                                         const DILocation *DL,
-                                         Instruction *InsertBefore);
+    DbgInstPtr insertDbgValueIntrinsic(llvm::Value *Val,
+                                       DILocalVariable *VarInfo,
+                                       DIExpression *Expr, const DILocation *DL,
+                                       Instruction *InsertBefore);
 
     /// Replace the vtable holder in the given type.
     ///

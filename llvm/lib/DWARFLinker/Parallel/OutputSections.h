@@ -153,7 +153,7 @@ struct SectionDescriptor : SectionDescriptorBase {
   friend OutputSections;
 
   SectionDescriptor(DebugSectionKind SectionKind, LinkingGlobalData &GlobalData,
-                    dwarf::FormParams Format, support::endianness Endianess)
+                    dwarf::FormParams Format, llvm::endianness Endianess)
       : SectionDescriptorBase(SectionKind, Format, Endianess), OS(Contents),
         ListDebugStrPatch(&GlobalData.getAllocator()),
         ListDebugLineStrPatch(&GlobalData.getAllocator()),
@@ -220,7 +220,7 @@ struct SectionDescriptor : SectionDescriptorBase {
   /// Returns section content.
   StringRef getContents() override {
     if (SectionOffsetInsideAsmPrinterOutputStart == 0)
-      return StringRef(Contents.data(), Contents.size());
+      return Contents;
 
     return Contents.slice(SectionOffsetInsideAsmPrinterOutputStart,
                           SectionOffsetInsideAsmPrinterOutputEnd);
@@ -253,7 +253,7 @@ struct SectionDescriptor : SectionDescriptorBase {
 
   /// Emit specified inplace string value into the current section contents.
   void emitInplaceString(StringRef String) {
-    OS << GlobalData.translateString(String);
+    OS << String;
     emitIntVal(0, 1);
   }
 
@@ -280,8 +280,7 @@ protected:
   void applySLEB128(uint64_t PatchOffset, uint64_t Val);
 
   /// Sets output format.
-  void setOutputFormat(dwarf::FormParams Format,
-                       support::endianness Endianess) {
+  void setOutputFormat(dwarf::FormParams Format, llvm::endianness Endianess) {
     this->Format = Format;
     this->Endianess = Endianess;
   }
@@ -306,8 +305,7 @@ public:
   OutputSections(LinkingGlobalData &GlobalData) : GlobalData(GlobalData) {}
 
   /// Sets output format for all keeping sections.
-  void setOutputFormat(dwarf::FormParams Format,
-                       support::endianness Endianness) {
+  void setOutputFormat(dwarf::FormParams Format, llvm::endianness Endianness) {
     this->Format = Format;
     this->Endianness = Endianness;
   }
@@ -429,7 +427,7 @@ public:
                     TypeUnit *TypeUnitPtr);
 
   /// Endiannes for the sections.
-  support::endianness getEndianness() const { return Endianness; }
+  llvm::endianness getEndianness() const { return Endianness; }
 
   /// Return DWARF version.
   uint16_t getVersion() const { return Format.Version; }
@@ -461,7 +459,7 @@ protected:
   dwarf::FormParams Format = {4, 4, dwarf::DWARF32};
 
   /// Endiannes for sections.
-  support::endianness Endianness = support::endian::system_endianness();
+  llvm::endianness Endianness = llvm::endianness::native;
 
   /// All keeping sections.
   using SectionsSetTy =

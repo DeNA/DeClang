@@ -62,8 +62,8 @@ ModuleFile *ModuleManager::lookupByFileName(StringRef Name) const {
 
 ModuleFile *ModuleManager::lookupByModuleName(StringRef Name) const {
   if (const Module *Mod = HeaderSearchInfo.getModuleMap().findModule(Name))
-    if (const FileEntry *File = Mod->getASTFile())
-      return lookup(File);
+    if (OptionalFileEntryRef File = Mod->getASTFile())
+      return lookup(*File);
 
   return nullptr;
 }
@@ -118,7 +118,7 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
 
   // Look for the file entry. This only fails if the expected size or
   // modification time differ.
-  OptionalFileEntryRefDegradesToFileEntryPtr Entry;
+  OptionalFileEntryRef Entry;
   if (Type == MK_ExplicitModule || Type == MK_PrebuiltModule) {
     // If we're not expecting to pull this file out of the module cache, it
     // might have a different mtime due to being moved across filesystems in
@@ -133,7 +133,7 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
     return OutOfDate;
   }
 
-  if (!Entry && FileName != "-") {
+  if (!Entry) {
     ErrorStr = "module file not found";
     return Missing;
   }
@@ -153,15 +153,15 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
   // being consistent across operating systems and across subsequent accesses
   // to the Modules map.
   auto implicitModuleNamesMatch = [](ModuleKind Kind, const ModuleFile *MF,
-                                     const FileEntry *Entry) -> bool {
+                                     FileEntryRef Entry) -> bool {
     if (Kind != MK_ImplicitModule)
       return true;
-    return Entry->getName() == MF->FileName;
+    return Entry.getName() == MF->FileName;
   };
 
   // Check whether we already loaded this module, before
-  if (ModuleFile *ModuleEntry = Modules.lookup(Entry)) {
-    if (implicitModuleNamesMatch(Type, ModuleEntry, Entry)) {
+  if (ModuleFile *ModuleEntry = Modules.lookup(*Entry)) {
+    if (implicitModuleNamesMatch(Type, ModuleEntry, *Entry)) {
       // Check the stored signature.
       if (checkSignature(ModuleEntry->Signature, ExpectedSignature, ErrorStr))
         return OutOfDate;
@@ -173,15 +173,15 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
   }
 
   // Allocate a new module.
-  auto NewModule = std::make_unique<ModuleFile>(Type, Generation);
+  auto NewModule = std::make_unique<ModuleFile>(Type, *Entry, Generation);
   NewModule->Index = Chain.size();
   NewModule->FileName = FileName.str();
-  NewModule->File = Entry;
   NewModule->ImportLoc = ImportLoc;
   NewModule->InputFilesValidationTimestamp = 0;
 
   if (NewModule->Kind == MK_ImplicitModule) {
-    std::string TimestampFilename = NewModule->getTimestampFilename();
+    std::string TimestampFilename =
+        ModuleFile::getTimestampFilename(NewModule->FileName);
     llvm::vfs::Status Status;
     // A cached stat value would be fine as well.
     if (!FileMgr.getNoncachedStatValue(TimestampFilename, Status))
@@ -208,21 +208,15 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
     Entry->closeFile();
     return OutOfDate;
   } else {
-    // Open the AST file.
-    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> Buf((std::error_code()));
-    if (FileName == "-") {
-      Buf = llvm::MemoryBuffer::getSTDIN();
-    } else {
-      // Get a buffer of the file and close the file descriptor when done.
-      // The file is volatile because in a parallel build we expect multiple
-      // compiler processes to use the same module file rebuilding it if needed.
-      //
-      // RequiresNullTerminator is false because module files don't need it, and
-      // this allows the file to still be mmapped.
-      Buf = FileMgr.getBufferForFile(NewModule->File,
-                                     /*IsVolatile=*/true,
-                                     /*RequiresNullTerminator=*/false);
-    }
+    // Get a buffer of the file and close the file descriptor when done.
+    // The file is volatile because in a parallel build we expect multiple
+    // compiler processes to use the same module file rebuilding it if needed.
+    //
+    // RequiresNullTerminator is false because module files don't need it, and
+    // this allows the file to still be mmapped.
+    auto Buf = FileMgr.getBufferForFile(NewModule->File,
+                                        /*IsVolatile=*/true,
+                                        /*RequiresNullTerminator=*/false);
 
     if (!Buf) {
       ErrorStr = Buf.getError().message();
@@ -242,7 +236,7 @@ ModuleManager::addModule(StringRef FileName, ModuleKind Type,
     return OutOfDate;
 
   // We're keeping this module.  Store it everywhere.
-  Module = Modules[Entry] = NewModule.get();
+  Module = Modules[*Entry] = NewModule.get();
 
   updateModuleImports(*NewModule, ImportedBy, ImportLoc);
 
@@ -451,43 +445,40 @@ void ModuleManager::visit(llvm::function_ref<bool(ModuleFile &M)> Visitor,
 bool ModuleManager::lookupModuleFile(StringRef FileName, off_t ExpectedSize,
                                      time_t ExpectedModTime,
                                      OptionalFileEntryRef &File) {
-  File = std::nullopt;
-  if (FileName == "-")
+  if (FileName == "-") {
+    File = expectedToOptional(FileMgr.getSTDIN());
     return false;
+  }
 
   // Open the file immediately to ensure there is no race between stat'ing and
   // opening the file.
-  OptionalFileEntryRef FileOrErr =
-      FileMgr.getOptionalFileRef(FileName, /*OpenFile=*/true,
-                                 /*CacheFailure=*/false);
+  File = FileMgr.getOptionalFileRef(FileName, /*OpenFile=*/true,
+                                    /*CacheFailure=*/false);
+
 #if !defined(__APPLE__)
-  if (FileOrErr) {
+  if (File) {
     // On Linux ext4 FileManager's inode caching system does not
     // provide us correct behaviour for ModuleCache directories.
     // inode can be reused after PCM delete resulting in cache misleading.
     // Only use the bypass file if bypass succeed in case the underlying file
     // system doesn't support bypass (thus there is no need for the workaround).
-    if (auto Bypass = FileMgr.getBypassFile(*FileOrErr))
-      FileOrErr = *Bypass;
+    if (auto Bypass = FileMgr.getBypassFile(*File))
+      File = *Bypass;
   }
 #endif
 
   // If the file is known to the module cache but not in the filesystem, it is
   // a memory buffer. Create a virtual file for it.
-  if (!FileOrErr) {
+  if (!File) {
     if (auto *KnownBuffer = getModuleCache().lookupPCM(FileName)) {
-      FileOrErr =
+      File =
           FileMgr.getVirtualFileRef(FileName, KnownBuffer->getBufferSize(), 0);
     }
   }
 
-  if (!FileOrErr)
-    return false;
-
-  File = *FileOrErr;
-
-  if ((ExpectedSize && ExpectedSize != File->getSize()) ||
-      (ExpectedModTime && ExpectedModTime != File->getModificationTime()))
+  if (File &&
+      ((ExpectedSize && ExpectedSize != File->getSize()) ||
+       (ExpectedModTime && ExpectedModTime != File->getModificationTime())))
     // Do not destroy File, as it may be referenced. If we need to rebuild it,
     // it will be destroyed by removeModules.
     return true;

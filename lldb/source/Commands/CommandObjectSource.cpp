@@ -50,20 +50,20 @@ class CommandObjectSourceInfo : public CommandObjectParsed {
       switch (short_option) {
       case 'l':
         if (option_arg.getAsInteger(0, start_line))
-          error.SetErrorStringWithFormat("invalid line number: '%s'",
-                                         option_arg.str().c_str());
+          error = Status::FromErrorStringWithFormat("invalid line number: '%s'",
+                                                    option_arg.str().c_str());
         break;
 
       case 'e':
         if (option_arg.getAsInteger(0, end_line))
-          error.SetErrorStringWithFormat("invalid line number: '%s'",
-                                         option_arg.str().c_str());
+          error = Status::FromErrorStringWithFormat("invalid line number: '%s'",
+                                                    option_arg.str().c_str());
         break;
 
       case 'c':
         if (option_arg.getAsInteger(0, num_lines))
-          error.SetErrorStringWithFormat("invalid line count: '%s'",
-                                         option_arg.str().c_str());
+          error = Status::FromErrorStringWithFormat("invalid line count: '%s'",
+                                                    option_arg.str().c_str());
         break;
 
       case 'f':
@@ -158,7 +158,7 @@ protected:
         if (module_list.GetSize() &&
             module_list.GetIndexForModule(module) == LLDB_INVALID_INDEX32)
           continue;
-        if (!FileSpec::Match(file_spec, line_entry.file))
+        if (!FileSpec::Match(file_spec, line_entry.GetFile()))
           continue;
         if (start_line > 0 && line_entry.line < start_line)
           continue;
@@ -239,7 +239,7 @@ protected:
             num_matches++;
             if (num_lines > 0 && num_matches > num_lines)
               break;
-            assert(cu_file_spec == line_entry.file);
+            assert(cu_file_spec == line_entry.GetFile());
             if (!cu_header_printed) {
               if (num_matches > 0)
                 strm << "\n\n";
@@ -620,14 +620,14 @@ class CommandObjectSourceList : public CommandObjectParsed {
       switch (short_option) {
       case 'l':
         if (option_arg.getAsInteger(0, start_line))
-          error.SetErrorStringWithFormat("invalid line number: '%s'",
-                                         option_arg.str().c_str());
+          error = Status::FromErrorStringWithFormat("invalid line number: '%s'",
+                                                    option_arg.str().c_str());
         break;
 
       case 'c':
         if (option_arg.getAsInteger(0, num_lines))
-          error.SetErrorStringWithFormat("invalid line count: '%s'",
-                                         option_arg.str().c_str());
+          error = Status::FromErrorStringWithFormat("invalid line count: '%s'",
+                                                    option_arg.str().c_str());
         break;
 
       case 'f':
@@ -657,9 +657,8 @@ class CommandObjectSourceList : public CommandObjectParsed {
         OptionValueFileColonLine value;
         Status fcl_err = value.SetValueFromString(option_arg);
         if (!fcl_err.Success()) {
-          error.SetErrorStringWithFormat(
-              "Invalid value for file:line specifier: %s",
-              fcl_err.AsCString());
+          error = Status::FromErrorStringWithFormat(
+              "Invalid value for file:line specifier: %s", fcl_err.AsCString());
         } else {
           file_name = value.GetFileSpec().GetPath();
           start_line = value.GetLineNumber();
@@ -747,24 +746,28 @@ protected:
 
     bool operator==(const SourceInfo &rhs) const {
       return function == rhs.function &&
-             line_entry.original_file == rhs.line_entry.original_file &&
+             line_entry.original_file_sp->Equal(
+                 *rhs.line_entry.original_file_sp,
+                 SupportFile::eEqualFileSpecAndChecksumIfSet) &&
              line_entry.line == rhs.line_entry.line;
     }
 
     bool operator!=(const SourceInfo &rhs) const {
       return function != rhs.function ||
-             line_entry.original_file != rhs.line_entry.original_file ||
+             !line_entry.original_file_sp->Equal(
+                 *rhs.line_entry.original_file_sp,
+                 SupportFile::eEqualFileSpecAndChecksumIfSet) ||
              line_entry.line != rhs.line_entry.line;
     }
 
     bool operator<(const SourceInfo &rhs) const {
       if (function.GetCString() < rhs.function.GetCString())
         return true;
-      if (line_entry.file.GetDirectory().GetCString() <
-          rhs.line_entry.file.GetDirectory().GetCString())
+      if (line_entry.GetFile().GetDirectory().GetCString() <
+          rhs.line_entry.GetFile().GetDirectory().GetCString())
         return true;
-      if (line_entry.file.GetFilename().GetCString() <
-          rhs.line_entry.file.GetFilename().GetCString())
+      if (line_entry.GetFile().GetFilename().GetCString() <
+          rhs.line_entry.GetFile().GetFilename().GetCString())
         return true;
       if (line_entry.line < rhs.line_entry.line)
         return true;
@@ -799,7 +802,7 @@ protected:
         sc.function->GetEndLineSourceInfo(end_file, end_line);
       } else {
         // We have an inlined function
-        start_file = source_info.line_entry.file;
+        start_file = source_info.line_entry.GetFile();
         start_line = source_info.line_entry.line;
         end_line = start_line + m_options.num_lines;
       }

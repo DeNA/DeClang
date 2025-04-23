@@ -16,8 +16,6 @@
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
-#include "lldb/Core/ValueObject.h"
-#include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/StackFrame.h"
@@ -26,6 +24,8 @@
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
+#include "lldb/ValueObject/ValueObject.h"
+#include "lldb/ValueObject/ValueObjectConstResult.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -37,7 +37,7 @@ NSDictionary_Additionals::AdditionalFormatterMatching::Prefix::Prefix(
 
 bool NSDictionary_Additionals::AdditionalFormatterMatching::Prefix::Match(
     ConstString class_name) {
-  return class_name.GetStringRef().startswith(m_prefix.GetStringRef());
+  return class_name.GetStringRef().starts_with(m_prefix.GetStringRef());
 }
 
 NSDictionary_Additionals::AdditionalFormatterMatching::Full::Full(ConstString n)
@@ -78,7 +78,8 @@ static CompilerType GetLLDBNSPairType(TargetSP target_sp) {
   if (!compiler_type) {
     compiler_type = scratch_ts_sp->CreateRecordType(
         nullptr, OptionalClangModuleID(), lldb::eAccessPublic,
-        g_lldb_autogen_nspair, clang::TTK_Struct, lldb::eLanguageTypeC);
+        g_lldb_autogen_nspair, llvm::to_underlying(clang::TagTypeKind::Struct),
+        lldb::eLanguageTypeC);
 
     if (compiler_type) {
       TypeSystemClang::StartTagDeclarationDefinition(compiler_type);
@@ -1066,8 +1067,9 @@ lldb_private::formatters::GenericNSDictionaryMSyntheticFrontEnd<D32, D64>::
       m_data_32(nullptr), m_data_64(nullptr), m_pair_type() {}
 
 template <typename D32, typename D64>
-lldb_private::formatters::GenericNSDictionaryMSyntheticFrontEnd<D32,D64>::
-    ~GenericNSDictionaryMSyntheticFrontEnd<D32,D64>() {
+lldb_private::formatters::GenericNSDictionaryMSyntheticFrontEnd<
+    D32, D64>::GenericNSDictionaryMSyntheticFrontEnd::
+    ~GenericNSDictionaryMSyntheticFrontEnd() {
   delete m_data_32;
   m_data_32 = nullptr;
   delete m_data_64;

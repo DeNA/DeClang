@@ -268,7 +268,9 @@ static CXErrorCode getFullDependencies(DependencyScanningWorker *Worker,
       M.Name = cxstring::createDup(MD.ID.ModuleName);
       M.ContextHash = cxstring::createDup(MD.ID.ContextHash);
       M.ModuleMapPath = cxstring::createDup(MD.ClangModuleMapFile);
-      M.FileDeps = cxstring::createSet(MD.FileDeps);
+      std::vector<std::string> FileDeps;
+      MD.forEachFileDep([&](StringRef File) { FileDeps.emplace_back(File); });
+      M.FileDeps = cxstring::createSet(FileDeps);
       std::vector<std::string> Modules;
       for (ModuleID &MID : MD.ClangModuleDeps)
         Modules.push_back(MID.ModuleName + ":" + MID.ContextHash);
@@ -545,6 +547,12 @@ size_t clang_experimental_DepGraph_getNumModules(CXDepGraph Graph) {
 
 CXDepGraphModule clang_experimental_DepGraph_getModule(CXDepGraph Graph,
                                                        size_t Index) {
+  return clang_experimental_DepGraph_getModuleTopological(Graph, Index);
+}
+
+CXDepGraphModule
+clang_experimental_DepGraph_getModuleTopological(CXDepGraph Graph,
+                                                 size_t Index) {
   TranslationUnitDeps &TUDeps = unwrap(Graph)->TUDeps;
   return wrap(new DependencyGraphModule{&TUDeps.ModuleGraph[Index]});
 }
@@ -576,7 +584,9 @@ clang_experimental_DepGraphModule_getModuleMapPath(CXDepGraphModule CXDepMod) {
 CXCStringArray
 clang_experimental_DepGraphModule_getFileDeps(CXDepGraphModule CXDepMod) {
   ModuleDeps &ModDeps = *unwrap(CXDepMod)->ModDeps;
-  return unwrap(CXDepMod)->StrMgr.createCStringsRef(ModDeps.FileDeps);
+  std::vector<std::string> FileDeps;
+  ModDeps.forEachFileDep([&](StringRef File) { FileDeps.emplace_back(File); });
+  return unwrap(CXDepMod)->StrMgr.createCStringsOwned(std::move(FileDeps));
 }
 
 CXCStringArray

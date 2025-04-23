@@ -14,13 +14,6 @@ config.name = "lldb-unit"
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = []
 
-# Begin Swift mod.
-# Swift's libReflection builds without ASAN, which causes a known
-# false positive in std::vector. We also want to support testing a sanitized
-# lldb using unsanitized llvm, clang, and swift libraries.
-config.environment['ASAN_OPTIONS'] = 'detect_container_overflow=0'
-# End Swift mod.
-
 # test_source_root: The root path where unit test binaries are located.
 # test_exec_root: The root path where tests should be run.
 config.test_source_root = os.path.join(config.lldb_obj_root, "unittests")
@@ -40,6 +33,24 @@ llvm_config.with_system_environment(
     ]
 )
 llvm_config.with_environment("PATH", os.path.dirname(sys.executable), append_path=True)
+
+# Enable sanitizer runtime flags.
+config.environment["ASAN_OPTIONS"] = "detect_stack_use_after_return=1"
+config.environment["TSAN_OPTIONS"] = "halt_on_error=1"
+
+# Begin Swift mod.
+# Swift's libReflection builds without ASAN, which causes a known
+# false positive in std::vector. We also want to support testing a sanitized
+# lldb using unsanitized llvm, clang, and swift libraries.
+config.environment['ASAN_OPTIONS'] += ':' + 'detect_container_overflow=0'
+
+# FIXME: This is the wrong place to disable this. This is working
+# around the fact that the ci.swift.org scripts build only LLDB with
+# asan and this creates an ODR violation in Allocator.h that breaks
+# poisoning.
+config.environment['ASAN_OPTIONS'] += ':' + 'allow_user_poisoning=0'
+# End Swift mod.
+
 
 # testFormat: The test format to use to interpret tests.
 config.test_format = lit.formats.GoogleTest(config.llvm_build_mode, "Tests")

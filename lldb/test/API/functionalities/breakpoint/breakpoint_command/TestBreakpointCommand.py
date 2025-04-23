@@ -6,7 +6,7 @@ Test lldb breakpoint command add/list/delete.
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
-from lldbsuite.test import lldbutil
+from lldbsuite.test import lldbutil, lldbplatformutil
 import json
 import os
 import side_effect
@@ -86,8 +86,9 @@ class BreakpointCommandTestCase(TestBase):
         ]
         for path in valid_paths:
             bkpt = target.BreakpointCreateByLocation(path, 2)
-            self.assertTrue(
-                bkpt.GetNumLocations() > 0,
+            self.assertGreater(
+                bkpt.GetNumLocations(),
+                0,
                 'Couldn\'t resolve breakpoint using full path "%s" in executate "%s" with '
                 "debug info that has relative path with matching suffix"
                 % (path, self.getBuildArtifact("a.out")),
@@ -142,8 +143,9 @@ class BreakpointCommandTestCase(TestBase):
         target = self.dbg.CreateTarget(obj_path)
         src_path = "/tmp/ab/main.cpp"
         bkpt = target.BreakpointCreateByLocation(src_path, 2)
-        self.assertTrue(
-            bkpt.GetNumLocations() > 0,
+        self.assertGreater(
+            bkpt.GetNumLocations(),
+            0,
             'Couldn\'t resolve breakpoint using "%s" in executate "%s" with '
             "debug info that has a bad .debug_aranges section"
             % (src_path, self.getBuildArtifact("a.out")),
@@ -570,16 +572,15 @@ class BreakpointCommandTestCase(TestBase):
         res = target.GetStatistics().GetAsJSON(stream)
         self.assertTrue(res.Success())
         debug_stats = json.loads(stream.GetData())
-        self.assertEqual(
-            "targets" in debug_stats,
-            True,
+        self.assertIn(
+            "targets",
+            debug_stats,
             'Make sure the "targets" key in in target.GetStatistics()',
         )
         target_stats = debug_stats["targets"][0]
         self.assertNotEqual(target_stats, None)
         self.assertEqual(target_stats["sourceMapDeduceCount"], expected_count)
 
-    @skipIf(oslist=["windows"])
     @no_debug_info_test
     def test_breakpoints_auto_source_map_relative(self):
         """
@@ -610,11 +611,17 @@ class BreakpointCommandTestCase(TestBase):
         self.verify_source_map_deduce_statistics(target, 0)
 
         # Verify auto deduced source map when file path in debug info
-        # is a suffix of request breakpoint file path
-        path = "/x/y/a/b/c/main.cpp"
+        # is a suffix of request breakpoint file path.
+        # Note the path must be absolute.
+        path = (
+            "/x/y/a/b/c/main.cpp"
+            if lldbplatformutil.getHostPlatform() != "windows"
+            else r"C:\x\y\a\b\c\main.cpp"
+        )
         bp = target.BreakpointCreateByLocation(path, 2)
-        self.assertTrue(
-            bp.GetNumLocations() > 0,
+        self.assertGreater(
+            bp.GetNumLocations(),
+            0,
             'Couldn\'t resolve breakpoint using full path "%s" in executate "%s" with '
             "debug info that has relative path with matching suffix"
             % (path, self.getBuildArtifact("a.out")),
@@ -622,7 +629,11 @@ class BreakpointCommandTestCase(TestBase):
 
         source_map_json = self.get_source_map_json()
         self.assertEqual(len(source_map_json), 1, "source map should not be empty")
-        self.verify_source_map_entry_pair(source_map_json[0], ".", "/x/y")
+        self.verify_source_map_entry_pair(
+            source_map_json[0],
+            ".",
+            "/x/y" if lldbplatformutil.getHostPlatform() != "windows" else r"C:\x\y",
+        )
         self.verify_source_map_deduce_statistics(target, 1)
 
         # Reset source map.
@@ -632,8 +643,9 @@ class BreakpointCommandTestCase(TestBase):
         # equals the file path in debug info.
         path = "a/b/c/main.cpp"
         bp = target.BreakpointCreateByLocation(path, 2)
-        self.assertTrue(
-            bp.GetNumLocations() > 0,
+        self.assertGreater(
+            bp.GetNumLocations(),
+            0,
             'Couldn\'t resolve breakpoint using full path "%s" in executate "%s" with '
             "debug info that has relative path with matching suffix"
             % (path, self.getBuildArtifact("a.out")),
@@ -655,9 +667,9 @@ class BreakpointCommandTestCase(TestBase):
         res = target.GetStatistics().GetAsJSON(stream)
         self.assertTrue(res.Success())
         debug_stats = json.loads(stream.GetData())
-        self.assertEqual(
-            "targets" in debug_stats,
-            True,
+        self.assertIn(
+            "targets",
+            debug_stats,
             'Make sure the "targets" key in in target.GetStatistics()',
         )
         target_stats = debug_stats["targets"][0]
@@ -667,3 +679,20 @@ class BreakpointCommandTestCase(TestBase):
         self.assertNotEqual(breakpoints_stats, None)
         for breakpoint_stats in breakpoints_stats:
             self.assertIn("hitCount", breakpoint_stats)
+
+    @skipIf(oslist=no_match(["linux"]))
+    def test_break_at__dl_debug_state(self):
+        """
+        Test lldb is able to stop at _dl_debug_state if it is set before the
+        process is launched.
+        """
+        self.build()
+        exe = self.getBuildArtifact("a.out")
+        self.runCmd("target create %s" % exe)
+        bpid = lldbutil.run_break_set_by_symbol(
+            self, "_dl_debug_state", num_expected_locations=-2
+        )
+        self.runCmd("run")
+        self.assertIsNotNone(
+            lldbutil.get_one_thread_stopped_at_breakpoint_id(self.process(), bpid)
+        )

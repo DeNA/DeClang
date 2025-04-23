@@ -12,6 +12,7 @@ from lldbsuite.test import lldbutil
 class FoundationDisassembleTestCase(TestBase):
     NO_DEBUG_INFO_TESTCASE = True
 
+    @skipIf(bugnumber = "rdar://135575668")
     @skipIfAsan
     @expectedFailureDarwin('rdar://problem/54977700')
     def test_foundation_disasm(self):
@@ -35,9 +36,7 @@ class FoundationDisassembleTestCase(TestBase):
                 foundation_framework = module.file.fullpath
                 break
 
-        self.assertTrue(
-            foundation_framework is not None, "Foundation.framework path located"
-        )
+        self.assertIsNotNone(foundation_framework, "Foundation.framework path located")
         self.runCmd("image dump symtab '%s'" % foundation_framework)
         raw_output = self.res.GetOutput()
         # Now, grab every 'Code' symbol and feed it into the command:

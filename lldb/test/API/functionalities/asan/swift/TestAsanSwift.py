@@ -13,11 +13,11 @@
 Test Swift support of ASan.
 """
 import lldb
-import lldbsuite.test.decorators as decorators
+from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
+from lldbsuite.test_event.build_exception import BuildError
 import os
-import unittest2
 import json
 
 
@@ -25,21 +25,31 @@ class AsanSwiftTestCase(lldbtest.TestBase):
 
     mydir = lldbtest.TestBase.compute_mydir(__file__)
 
-    @decorators.swiftTest
-    @decorators.skipIfLinux
-    @decorators.skipUnlessSwiftAddressSanitizer
+    @swiftTest
+    @skipIfLinux
+    @skipUnlessSwiftAddressSanitizer
+    @skipIf(macos_version=["<", "15.3"])
     def test_asan_swift(self):
-        self.build()
-        self.do_test()
+        self.build(make_targets=["asan"])
+        self.do_test_asan()
+
+    @skipIf(oslist=no_match(["macosx"]))
+    @skipIf(macos_version=["<", "15.0"])
+    @skipIfDarwin #  rdar://142836595
+    def test_libsanitizers_swift(self):
+        try:
+            self.build(make_targets=["libsanitizers"])
+        except BuildError as e:
+            self.skipTest("failed to build with libsanitizers")
+        self.do_test_libsanitizers()
 
     def setUp(self):
         lldbtest.TestBase.setUp(self)
         self.main_source = "main.swift"
-        self.main_source_spec = lldb.SBFileSpec(self.main_source)
         self.line_breakpoint = lldbtest.line_number(
             self.main_source, '// breakpoint')
 
-    def do_test(self):
+    def do_test_asan(self):
         exe_name = "a.out"
         exe = self.getBuildArtifact(exe_name)
 
@@ -66,12 +76,14 @@ class AsanSwiftTestCase(lldbtest.TestBase):
             # interceptors.
             self.runCmd("continue")
 
+        self.runCmd("expr let $targetptr = ptr")
+
         # the stop reason of the thread should be breakpoint.
         self.expect("thread list", lldbtest.STOPPED_DUE_TO_BREAKPOINT,
                     substrs=['stopped', 'stop reason = breakpoint'])
 
         self.expect(
-            "memory history `ptr`",
+            "memory history $targetptr",
             substrs=[
                 'Memory allocated by Thread 1',
                 'main.swift'])
@@ -97,7 +109,39 @@ class AsanSwiftTestCase(lldbtest.TestBase):
                 break
 
         self.expect(
-            "memory history `ptr`",
+            "memory history $targetptr",
+            substrs=[
+                'Memory allocated by Thread 1',
+                'main.swift'])
+
+    # Test line numbers: rdar://126237493
+    def do_test_libsanitizers(self):
+        exe_name = "a.out"
+        exe = self.getBuildArtifact(exe_name)
+
+        # Create the target
+        target = self.dbg.CreateTarget(exe)
+        self.assertTrue(target, lldbtest.VALID_TARGET)
+
+        self.runCmd("env SanitizersAddress=1 MallocSanitizerZone=1 MallocSecureAllocator=0")
+
+        self.runCmd("run")
+
+        # the stop reason of the thread should be a ASan report.
+        self.expect("thread list", "Heap buffer overflow", substrs=[
+                    'stopped', 'stop reason = Heap buffer overflow'])
+
+        process = self.dbg.GetSelectedTarget().process
+        thread = process.GetSelectedThread()
+
+        self.assertEqual(
+            thread.GetStopReason(),
+            lldb.eStopReasonInstrumentation)
+
+        self.runCmd("expr long $ar = (long)__asan_get_report_address()")
+
+        self.expect(
+            "memory history $ar",
             substrs=[
                 'Memory allocated by Thread 1',
                 'main.swift'])

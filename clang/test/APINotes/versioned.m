@@ -1,39 +1,39 @@
 // RUN: rm -rf %t && mkdir -p %t
 
 // Build and check the unversioned module file.
-// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Unversioned -fdisable-module-hash -fapinotes-modules  -fsyntax-only -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s
+// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Unversioned -fdisable-module-hash -fapinotes-modules -fsyntax-only -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s
 // RUN: %clang_cc1 -ast-print %t/ModulesCache/Unversioned/VersionedKit.pcm | FileCheck -check-prefix=CHECK-UNVERSIONED %s
-// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Unversioned -fdisable-module-hash -fapinotes-modules  -fsyntax-only -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s -ast-dump -ast-dump-filter 'DUMP' | FileCheck -check-prefix=CHECK-DUMP -check-prefix=CHECK-UNVERSIONED-DUMP %s
+// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Unversioned -fdisable-module-hash -fapinotes-modules -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s -ast-dump -ast-dump-filter 'DUMP' | FileCheck -check-prefix=CHECK-DUMP -check-prefix=CHECK-UNVERSIONED-DUMP %s
 
 // Build and check the versioned module file.
-// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Versioned -fdisable-module-hash -fapinotes-modules  -fapinotes-swift-version=3 -fsyntax-only -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s
+// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Versioned -fdisable-module-hash -fapinotes-modules -fapinotes-swift-version=3 -fsyntax-only -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s
 // RUN: %clang_cc1 -ast-print %t/ModulesCache/Versioned/VersionedKit.pcm | FileCheck -check-prefix=CHECK-VERSIONED %s
-// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Versioned -fdisable-module-hash -fapinotes-modules  -fapinotes-swift-version=3 -fsyntax-only -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s -ast-dump -ast-dump-filter 'DUMP' | FileCheck -check-prefix=CHECK-DUMP -check-prefix=CHECK-VERSIONED-DUMP %s
+// RUN: %clang_cc1 -fmodules -fblocks -fimplicit-module-maps -fmodules-cache-path=%t/ModulesCache/Versioned -fdisable-module-hash -fapinotes-modules -fapinotes-swift-version=3 -I %S/Inputs/Headers -F %S/Inputs/Frameworks %s -ast-dump -ast-dump-filter 'DUMP' | FileCheck -check-prefix=CHECK-DUMP -check-prefix=CHECK-VERSIONED-DUMP %s
 
 #import <VersionedKit/VersionedKit.h>
 
 // CHECK-UNVERSIONED: void moveToPointDUMP(double x, double y) __attribute__((swift_name("moveTo(x:y:)")));
-// CHECK-VERSIONED: void moveToPointDUMP(double x, double y) __attribute__((swift_name("moveTo(a:b:)")));
+// CHECK-VERSIONED:__attribute__((swift_name("moveTo(a:b:)"))) void moveToPointDUMP(double x, double y);
 
 // CHECK-DUMP-LABEL: Dumping moveToPointDUMP
-// CHECK-VERSIONED-DUMP: SwiftVersionedAttr {{.+}} Implicit 3.0 IsReplacedByActive{{$}}
+// CHECK-VERSIONED-DUMP: SwiftVersionedAdditionAttr {{.+}} Implicit 3.0 IsReplacedByActive{{$}}
 // CHECK-VERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} "moveTo(x:y:)"
 // CHECK-VERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} <<invalid sloc>> "moveTo(a:b:)"
 // CHECK-UNVERSIONED-DUMP: SwiftNameAttr {{.+}} "moveTo(x:y:)"
-// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAttr {{.+}} Implicit 3.0{{$}}
+// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAdditionAttr {{.+}} Implicit 3.0{{$}}
 // CHECK-UNVERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} <<invalid sloc>> "moveTo(a:b:)"
 // CHECK-DUMP-NOT: Attr
 
 // CHECK-DUMP-LABEL: Dumping unversionedRenameDUMP
 // CHECK-DUMP: in VersionedKit unversionedRenameDUMP
-// CHECK-DUMP-NEXT: SwiftVersionedAttr {{.+}} Implicit 0 IsReplacedByActive{{$}}
+// CHECK-DUMP-NEXT: SwiftVersionedAdditionAttr {{.+}} Implicit 0 IsReplacedByActive{{$}}
 // CHECK-DUMP-NEXT: SwiftNameAttr {{.+}} "unversionedRename_HEADER()"
 // CHECK-DUMP-NEXT: SwiftNameAttr {{.+}} "unversionedRename_NOTES()"
 // CHECK-DUMP-NOT: Attr
 
 // CHECK-DUMP-LABEL: Dumping TestGenericDUMP
 // CHECK-VERSIONED-DUMP: SwiftImportAsNonGenericAttr {{.+}} <<invalid sloc>>
-// CHECK-UNVERSIONED-DUMP: SwiftVersionedAttr {{.+}} Implicit 3.0{{$}}
+// CHECK-UNVERSIONED-DUMP: SwiftVersionedAdditionAttr {{.+}} Implicit 3.0{{$}}
 // CHECK-UNVERSIONED-DUMP-NEXT: SwiftImportAsNonGenericAttr {{.+}} <<invalid sloc>>
 // CHECK-DUMP-NOT: Attr
 
@@ -41,17 +41,17 @@
 // CHECK-DUMP: in VersionedKit Swift3RenamedOnlyDUMP
 // CHECK-VERSIONED-DUMP-NEXT: SwiftVersionedRemovalAttr {{.+}} Implicit 3.0 {{[0-9]+}} IsReplacedByActive{{$}}
 // CHECK-VERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} "SpecialSwift3Name"
-// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAttr {{.+}} Implicit 3.0{{$}}
+// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAdditionAttr {{.+}} Implicit 3.0{{$}}
 // CHECK-UNVERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} <<invalid sloc>> "SpecialSwift3Name"
 // CHECK-DUMP-NOT: Attr
 
 // CHECK-DUMP-LABEL: Dumping Swift3RenamedAlsoDUMP
 // CHECK-DUMP: in VersionedKit Swift3RenamedAlsoDUMP
-// CHECK-VERSIONED-DUMP-NEXT: SwiftVersionedAttr {{.+}} Implicit 3.0 IsReplacedByActive{{$}}
+// CHECK-VERSIONED-DUMP-NEXT: SwiftVersionedAdditionAttr {{.+}} Implicit 3.0 IsReplacedByActive{{$}}
 // CHECK-VERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} <line:{{.+}}, col:{{.+}}> "Swift4Name"
 // CHECK-VERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} "SpecialSwift3Also"
 // CHECK-UNVERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} <line:{{.+}}, col:{{.+}}> "Swift4Name"
-// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAttr {{.+}} Implicit 3.0{{$}}
+// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAdditionAttr {{.+}} Implicit 3.0{{$}}
 // CHECK-UNVERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} <<invalid sloc>> "SpecialSwift3Also"
 // CHECK-DUMP-NOT: Attr
 
@@ -59,13 +59,13 @@
 // CHECK-DUMP: in VersionedKit Swift4RenamedDUMP
 // CHECK-VERSIONED-DUMP-NEXT: SwiftVersionedRemovalAttr {{.+}} Implicit 4 {{[0-9]+}} IsReplacedByActive{{$}}
 // CHECK-VERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} "SpecialSwift4Name"
-// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAttr {{.+}} Implicit 4{{$}}
+// CHECK-UNVERSIONED-DUMP-NEXT: SwiftVersionedAdditionAttr {{.+}} Implicit 4{{$}}
 // CHECK-UNVERSIONED-DUMP-NEXT: SwiftNameAttr {{.+}} <<invalid sloc>> "SpecialSwift4Name"
 // CHECK-DUMP-NOT: Attr
 
 // CHECK-DUMP-NOT: Dumping
 
-// CHECK-UNVERSIONED: void acceptClosure(void (^block)(void) __attribute__((noescape)));
+// CHECK-UNVERSIONED: void acceptClosure(__attribute__((noescape)) void (^block)(void));
 // CHECK-VERSIONED: void acceptClosure(void (^block)(void));
 
 // CHECK-UNVERSIONED: void privateFunc(void) __attribute__((swift_private));

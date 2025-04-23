@@ -533,8 +533,6 @@ namespace llvm {
   MutableArrayRef(T (&Arr)[N]) -> MutableArrayRef<T>;
 
   /// @}
-
-  /// @}
   /// @name ArrayRef Comparison Operators
   /// @{
 

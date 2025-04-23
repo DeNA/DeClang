@@ -10,6 +10,7 @@
 #define LLVM_LIBC_SRC_STDIO_PRINTF_CORE_WRITER_H
 
 #include "src/__support/CPP/string_view.h"
+#include "src/__support/macros/config.h"
 #include "src/__support/macros/optimization.h"
 #include "src/stdio/printf_core/core_structs.h"
 #include "src/string/memory_utils/inline_memcpy.h"
@@ -17,7 +18,7 @@
 
 #include <stddef.h>
 
-namespace __llvm_libc {
+namespace LIBC_NAMESPACE_DECL {
 namespace printf_core {
 
 struct WriteBuffer {
@@ -45,7 +46,7 @@ struct WriteBuffer {
   // write as much of new_str to the buffer as it can. The current position in
   // the buffer will be reset iff stream_writer is called. Calling this with an
   // empty string will flush the buffer if relevant.
-  int overflow_write(cpp::string_view new_str) {
+  LIBC_INLINE int overflow_write(cpp::string_view new_str) {
     // If there is a stream_writer, write the contents of the buffer, then
     // new_str, then clear the buffer.
     if (stream_writer != nullptr) {
@@ -93,7 +94,7 @@ public:
   // Takes a string, copies it into the buffer if there is space, else passes it
   // to the overflow mechanism to be handled separately.
   LIBC_INLINE int write(cpp::string_view new_string) {
-    chars_written += new_string.size();
+    chars_written += static_cast<int>(new_string.size());
     if (LIBC_LIKELY(wb->buff_cur + new_string.size() <= wb->buff_len)) {
       inline_memcpy(wb->buff + wb->buff_cur, new_string.data(),
                     new_string.size());
@@ -107,7 +108,7 @@ public:
   // if there is space, else calls pad which will loop and call the overflow
   // mechanism on a secondary buffer.
   LIBC_INLINE int write(char new_char, size_t length) {
-    chars_written += length;
+    chars_written += static_cast<int>(length);
 
     if (LIBC_LIKELY(wb->buff_cur + length <= wb->buff_len)) {
       inline_memset(wb->buff + wb->buff_cur, new_char, length);
@@ -134,6 +135,6 @@ public:
 };
 
 } // namespace printf_core
-} // namespace __llvm_libc
+} // namespace LIBC_NAMESPACE_DECL
 
 #endif // LLVM_LIBC_SRC_STDIO_PRINTF_CORE_WRITER_H

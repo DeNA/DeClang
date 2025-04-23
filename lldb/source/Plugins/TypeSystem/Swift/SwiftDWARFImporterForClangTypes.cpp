@@ -96,8 +96,8 @@ void SwiftDWARFImporterForClangTypes::lookupValue(
       if (!swift_ts)
         continue;
       // FIXME: LookupClangType won't work for nested C++ types.
-      clang_type_sp =
-          swift_ts->GetTypeSystemSwiftTypeRef().LookupClangType(name);
+      if (auto tr_ts = swift_ts->GetTypeSystemSwiftTypeRef())
+        clang_type_sp = tr_ts->LookupClangType(name);
       if (clang_type_sp)
         break;
     }
@@ -170,7 +170,7 @@ SwiftDWARFImporterDelegate::GetDeclForTypeAndKind(clang::QualType qual_type,
 SwiftDWARFImporterDelegate::SwiftDWARFImporterDelegate(SwiftASTContext &ts)
     : m_swift_ast_ctx(ts),
       m_importer(m_swift_ast_ctx.GetTypeSystemSwiftTypeRef()
-                     .GetSwiftDWARFImporterForClangTypes()),
+                     ->GetSwiftDWARFImporterForClangTypes()),
       m_description(ts.GetDescription() + "::SwiftDWARFImporterDelegate") {}
 
 void SwiftDWARFImporterDelegate::lookupValue(
@@ -178,6 +178,12 @@ void SwiftDWARFImporterDelegate::lookupValue(
     StringRef inModule, llvm::SmallVectorImpl<clang::Decl *> &results) {
   LLDB_LOG(GetLog(LLDBLog::Types), "{0}::lookupValue(\"{1}\")", m_description,
            name.str());
+  if (!name.size() || name[0] < 0) {
+    LLDB_LOG(GetLog(LLDBLog::Types),
+             "SwiftDWARFImporterDelegate was asked to look up a type with a "
+             "non-ASCII or empty type name");
+    return;
+  }
   auto clang_importer = m_swift_ast_ctx.GetClangImporter();
   if (!clang_importer) {
     LLDB_LOG(GetLog(LLDBLog::Types), "no clangimporter");

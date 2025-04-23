@@ -1,4 +1,3 @@
-// XFAIL: *
 // RUN: rm -rf %t
 // RUN: split-file %s %t
 // RUN: sed -e "s@INPUT_DIR@%{/t:regex_replacement}@g" \
@@ -116,18 +115,6 @@ enum {
       "source": "c:@E@Direction@West",
       "target": "c:@E@Direction",
       "targetFallback": "Direction"
-    },
-    {
-      "kind": "memberOf",
-      "source": "c:@Ea@Constant@Constant",
-      "target": "c:@Ea@Constant",
-      "targetFallback": "enum (unnamed)"
-    },
-    {
-      "kind": "memberOf",
-      "source": "c:@Ea@OtherConstant@OtherConstant",
-      "target": "c:@Ea@OtherConstant",
-      "targetFallback": "enum (unnamed)"
     }
   ],
   "symbols": [
@@ -148,7 +135,7 @@ enum {
         },
         {
           "kind": "text",
-          "spelling": ": "
+          "spelling": " : "
         },
         {
           "kind": "typeIdentifier",
@@ -460,7 +447,7 @@ enum {
         },
         {
           "kind": "text",
-          "spelling": ": "
+          "spelling": " : "
         },
         {
           "kind": "typeIdentifier",
@@ -682,55 +669,6 @@ enum {
       "accessLevel": "public",
       "declarationFragments": [
         {
-          "kind": "keyword",
-          "spelling": "enum"
-        },
-        {
-          "kind": "text",
-          "spelling": ": "
-        },
-        {
-          "kind": "typeIdentifier",
-          "preciseIdentifier": "c:i",
-          "spelling": "unsigned int"
-        },
-        {
-          "kind": "text",
-          "spelling": ";"
-        }
-      ],
-      "identifier": {
-        "interfaceLanguage": "c",
-        "precise": "c:@Ea@Constant"
-      },
-      "kind": {
-        "displayName": "Enumeration",
-        "identifier": "c.enum"
-      },
-      "location": {
-        "position": {
-          "character": 0,
-          "line": 16
-        },
-        "uri": "file://INPUT_DIR/input.h"
-      },
-      "names": {
-        "navigator": [
-          {
-            "kind": "identifier",
-            "spelling": "enum (unnamed)"
-          }
-        ],
-        "title": "enum (unnamed)"
-      },
-      "pathComponents": [
-        "enum (unnamed)"
-      ]
-    },
-    {
-      "accessLevel": "public",
-      "declarationFragments": [
-        {
           "kind": "identifier",
           "spelling": "Constant"
         }
@@ -766,57 +704,7 @@ enum {
         "title": "Constant"
       },
       "pathComponents": [
-        "enum (unnamed)",
         "Constant"
-      ]
-    },
-    {
-      "accessLevel": "public",
-      "declarationFragments": [
-        {
-          "kind": "keyword",
-          "spelling": "enum"
-        },
-        {
-          "kind": "text",
-          "spelling": ": "
-        },
-        {
-          "kind": "typeIdentifier",
-          "preciseIdentifier": "c:i",
-          "spelling": "unsigned int"
-        },
-        {
-          "kind": "text",
-          "spelling": ";"
-        }
-      ],
-      "identifier": {
-        "interfaceLanguage": "c",
-        "precise": "c:@Ea@OtherConstant"
-      },
-      "kind": {
-        "displayName": "Enumeration",
-        "identifier": "c.enum"
-      },
-      "location": {
-        "position": {
-          "character": 0,
-          "line": 20
-        },
-        "uri": "file://INPUT_DIR/input.h"
-      },
-      "names": {
-        "navigator": [
-          {
-            "kind": "identifier",
-            "spelling": "enum (unnamed)"
-          }
-        ],
-        "title": "enum (unnamed)"
-      },
-      "pathComponents": [
-        "enum (unnamed)"
       ]
     },
     {
@@ -858,7 +746,6 @@ enum {
         "title": "OtherConstant"
       },
       "pathComponents": [
-        "enum (unnamed)",
         "OtherConstant"
       ]
     }

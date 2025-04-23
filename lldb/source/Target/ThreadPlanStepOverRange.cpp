@@ -11,6 +11,7 @@
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/LineTable.h"
+#include "lldb/Target/Language.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Target.h"
@@ -101,6 +102,10 @@ void ThreadPlanStepOverRange::SetupAvoidNoDebug(
 
 bool ThreadPlanStepOverRange::IsEquivalentContext(
     const SymbolContext &context) {
+  if (Language *language = Language::FindPlugin(context.GetLanguage()))
+    if (std::optional<bool> maybe_equivalent =
+            language->AreEqualForFrameComparison(context, m_addr_context))
+      return *maybe_equivalent;
   // Match as much as is specified in the m_addr_context: This is a fairly
   // loose sanity check.  Note, sometimes the target doesn't get filled in so I
   // left out the target check.  And sometimes the module comes in as the .o
@@ -220,8 +225,9 @@ bool ThreadPlanStepOverRange::ShouldStop(Event *event_ptr) {
         StackFrameSP frame_sp = thread.GetStackFrameAtIndex(0);
         sc = frame_sp->GetSymbolContext(eSymbolContextEverything);
         if (sc.line_entry.IsValid()) {
-          if (sc.line_entry.original_file !=
-                  m_addr_context.line_entry.original_file &&
+          if (!sc.line_entry.original_file_sp->Equal(
+                  *m_addr_context.line_entry.original_file_sp,
+                  SupportFile::eEqualFileSpecAndChecksumIfSet) &&
               sc.comp_unit == m_addr_context.comp_unit &&
               sc.function == m_addr_context.function) {
             // Okay, find the next occurrence of this file in the line table:
@@ -244,8 +250,9 @@ bool ThreadPlanStepOverRange::ShouldStop(Event *event_ptr) {
                   LineEntry prev_line_entry;
                   if (line_table->GetLineEntryAtIndex(entry_idx - 1,
                                                       prev_line_entry) &&
-                      prev_line_entry.original_file ==
-                          line_entry.original_file) {
+                      prev_line_entry.original_file_sp->Equal(
+                          *line_entry.original_file_sp,
+                          SupportFile::eEqualFileSpecAndChecksumIfSet)) {
                     SymbolContext prev_sc;
                     Address prev_address =
                         prev_line_entry.range.GetBaseAddress();
@@ -279,8 +286,9 @@ bool ThreadPlanStepOverRange::ShouldStop(Event *event_ptr) {
                     if (next_line_function != m_addr_context.function)
                       break;
 
-                    if (next_line_entry.original_file ==
-                        m_addr_context.line_entry.original_file) {
+                    if (next_line_entry.original_file_sp->Equal(
+                            *m_addr_context.line_entry.original_file_sp,
+                            SupportFile::eEqualFileSpecAndChecksumIfSet)) {
                       const bool abort_other_plans = false;
                       const RunMode stop_other_threads = RunMode::eAllThreads;
                       lldb::addr_t cur_pc = thread.GetStackFrameAtIndex(0)
@@ -347,7 +355,7 @@ bool ThreadPlanStepOverRange::DoWillResume(lldb::StateType resume_state,
       if (in_inlined_stack) {
         Log *log = GetLog(LLDBLog::Step);
         LLDB_LOGF(log,
-                  "ThreadPlanStepInRange::DoWillResume: adjusting range to "
+                  "ThreadPlanStepOverRange::DoWillResume: adjusting range to "
                   "the frame at inlined depth %d.",
                   thread.GetCurrentInlinedDepth());
         StackFrameSP stack_sp = thread.GetStackFrameAtIndex(0);

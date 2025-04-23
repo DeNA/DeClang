@@ -18,6 +18,7 @@
 #include "lldb/API/SBStream.h"
 #include "lldb/API/SBStringList.h"
 #include "lldb/API/SBStructuredData.h"
+#include "lldb/Host/Config.h"
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Format.h"
@@ -51,6 +52,8 @@ using namespace lldb;
 using namespace llvm;
 
 namespace {
+using namespace llvm::opt;
+
 enum ID {
   OPT_INVALID = 0, // This is not an option ID.
 #define OPTION(...) LLVM_MAKE_OPT_ID(__VA_ARGS__),
@@ -186,7 +189,6 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   if (args.hasArg(OPT_no_use_colors)) {
     m_debugger.SetUseColor(false);
     WithColor::setAutoDetectFunction(disable_color);
-    m_option_data.m_debug_mode = true;
   }
 
   if (args.hasArg(OPT_version)) {
@@ -205,7 +207,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   }
 
   if (auto *arg = args.getLastArg(OPT_core)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     SBFileSpec file(arg_value);
     if (!file.Exists()) {
       error.SetErrorStringWithFormat(
@@ -231,7 +233,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   }
 
   if (auto *arg = args.getLastArg(OPT_file)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     SBFileSpec file(arg_value);
     if (file.Exists()) {
       m_option_data.m_args.emplace_back(arg_value);
@@ -248,7 +250,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   }
 
   if (auto *arg = args.getLastArg(OPT_arch)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     if (!lldb::SBDebugger::SetDefaultArchitecture(arg_value)) {
       error.SetErrorStringWithFormat(
           "invalid architecture in the -a or --arch option: '%s'", arg_value);
@@ -257,7 +259,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   }
 
   if (auto *arg = args.getLastArg(OPT_script_language)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     m_debugger.SetScriptLanguage(m_debugger.GetScriptingLanguage(arg_value));
   }
 
@@ -266,7 +268,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   }
 
   if (auto *arg = args.getLastArg(OPT_attach_name)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     m_option_data.m_process_name = arg_value;
   }
 
@@ -275,7 +277,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   }
 
   if (auto *arg = args.getLastArg(OPT_attach_pid)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     char *remainder;
     m_option_data.m_process_pid = strtol(arg_value, &remainder, 0);
     if (remainder == arg_value || *remainder != '\0') {
@@ -286,7 +288,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   }
 
   if (auto *arg = args.getLastArg(OPT_repl_language)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     m_option_data.m_repl_lang =
         SBLanguageRuntime::GetLanguageTypeFromString(arg_value);
     if (m_option_data.m_repl_lang == eLanguageTypeUnknown) {
@@ -303,7 +305,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
 
   if (auto *arg = args.getLastArg(OPT_repl_)) {
     m_option_data.m_repl = true;
-    if (auto arg_value = arg->getValue())
+    if (auto *arg_value = arg->getValue())
       m_option_data.m_repl_options = arg_value;
   }
 
@@ -322,7 +324,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
   for (auto *arg : args.filtered(OPT_source_on_crash, OPT_one_line_on_crash,
                                  OPT_source, OPT_source_before_file,
                                  OPT_one_line, OPT_one_line_before_file)) {
-    auto arg_value = arg->getValue();
+    auto *arg_value = arg->getValue();
     if (arg->getOption().matches(OPT_source_on_crash)) {
       m_option_data.AddInitialCommand(arg_value, eCommandPlacementAfterCrash,
                                       true, error);
@@ -374,7 +376,7 @@ SBError Driver::ProcessArgs(const opt::InputArgList &args, bool &exiting) {
 
     // Any argument following -- is an argument for the inferior.
     if (auto *arg = args.getLastArgNoClaim(OPT_REM)) {
-      for (auto value : arg->getValues())
+      for (auto *value : arg->getValues())
         m_option_data.m_args.emplace_back(value);
     }
   } else if (args.getLastArgNoClaim() != nullptr) {
@@ -450,29 +452,17 @@ int Driver::MainLoop() {
   m_debugger.SetInputFileHandle(stdin, false);
 
   m_debugger.SetUseExternalEditor(m_option_data.m_use_external_editor);
+  m_debugger.SetShowInlineDiagnostics(true);
 
-  struct winsize window_size;
-  if ((isatty(STDIN_FILENO) != 0) &&
-      ::ioctl(STDIN_FILENO, TIOCGWINSZ, &window_size) == 0) {
-    if (window_size.ws_col > 0)
-      m_debugger.SetTerminalWidth(window_size.ws_col);
-  }
+  // Set the terminal dimensions.
+  UpdateWindowSize();
 
   SBCommandInterpreter sb_interpreter = m_debugger.GetCommandInterpreter();
 
   // Process lldbinit files before handling any options from the command line.
   SBCommandReturnObject result;
   sb_interpreter.SourceInitFileInGlobalDirectory(result);
-  if (m_option_data.m_debug_mode) {
-    result.PutError(m_debugger.GetErrorFile());
-    result.PutOutput(m_debugger.GetOutputFile());
-  }
-
   sb_interpreter.SourceInitFileInHomeDirectory(result, m_option_data.m_repl);
-  if (m_option_data.m_debug_mode) {
-    result.PutError(m_debugger.GetErrorFile());
-    result.PutOutput(m_debugger.GetOutputFile());
-  }
 
   // Source the local .lldbinit file if it exists and we're allowed to source.
   // Here we want to always print the return object because it contains the
@@ -542,11 +532,6 @@ int Driver::MainLoop() {
     // We're in repl mode and after-file-load commands were specified.
     WithColor::warning() << "commands specified to run after file load (via -o "
                             "or -s) are ignored in REPL mode.\n";
-  }
-
-  if (m_option_data.m_debug_mode) {
-    result.PutError(m_debugger.GetErrorFile());
-    result.PutOutput(m_debugger.GetOutputFile());
   }
 
   const bool handle_events = true;
@@ -646,18 +631,22 @@ int Driver::MainLoop() {
   return sb_interpreter.GetQuitStatus();
 }
 
-void Driver::ResizeWindow(unsigned short col) {
-  GetDebugger().SetTerminalWidth(col);
-}
-
-void sigwinch_handler(int signo) {
+void Driver::UpdateWindowSize() {
   struct winsize window_size;
   if ((isatty(STDIN_FILENO) != 0) &&
       ::ioctl(STDIN_FILENO, TIOCGWINSZ, &window_size) == 0) {
-    if ((window_size.ws_col > 0) && g_driver != nullptr) {
-      g_driver->ResizeWindow(window_size.ws_col);
-    }
+    if (window_size.ws_col > 0)
+      m_debugger.SetTerminalWidth(window_size.ws_col);
+#ifndef _WIN32
+    if (window_size.ws_row > 0)
+      m_debugger.SetTerminalHeight(window_size.ws_row);
+#endif
   }
+}
+
+void sigwinch_handler(int signo) {
+  if (g_driver != nullptr)
+    g_driver->UpdateWindowSize();
 }
 
 void sigint_handler(int signo) {
@@ -755,6 +744,14 @@ int main(int argc, char const *argv[]) {
   // Setup LLVM signal handlers and make sure we call llvm_shutdown() on
   // destruction.
   llvm::InitLLVM IL(argc, argv, /*InstallPipeSignalExitHandler=*/false);
+#if !defined(__APPLE__)
+  llvm::setBugReportMsg("PLEASE submit a bug report to " LLDB_BUG_REPORT_URL
+                        " and include the crash backtrace.\n");
+#else
+  llvm::setBugReportMsg("PLEASE submit a bug report to " LLDB_BUG_REPORT_URL
+                        " and include the crash report from "
+                        "~/Library/Logs/DiagnosticReports/.\n");
+#endif
 
   // Parse arguments.
   LLDBOptTable T;

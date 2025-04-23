@@ -13,7 +13,6 @@
 #include "llvm/DWARFLinker/Parallel/DWARFLinker.h"
 #include "llvm/DWARFLinker/StringPool.h"
 #include "llvm/Support/PerThreadBumpPtrAllocator.h"
-#include <map>
 
 namespace llvm {
 
@@ -22,7 +21,6 @@ class DWARFDie;
 namespace dwarf_linker {
 namespace parallel {
 
-using TranslatorFuncTy = std::function<StringRef(StringRef)>;
 using MessageHandlerTy = std::function<void(
     const Twine &Warning, StringRef Context, const DWARFDie *DIE)>;
 
@@ -96,19 +94,6 @@ public:
   /// Returns global string pool.
   StringPool &getStringPool() { return Strings; }
 
-  /// Set translation function.
-  void setTranslator(TranslatorFuncTy Translator) {
-    this->Translator = Translator;
-  }
-
-  /// Translate specified string.
-  StringRef translateString(StringRef String) {
-    if (Translator)
-      return Translator(String);
-
-    return String;
-  }
-
   /// Returns linking options.
   const DWARFLinkerOptions &getOptions() const { return Options; }
 
@@ -162,7 +147,6 @@ public:
 protected:
   llvm::parallel::PerThreadBumpPtrAllocator Allocator;
   StringPool Strings;
-  TranslatorFuncTy Translator;
   DWARFLinkerOptions Options;
   MessageHandlerTy WarningHandler;
   MessageHandlerTy ErrorHandler;

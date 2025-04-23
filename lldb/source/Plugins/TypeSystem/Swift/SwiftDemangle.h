@@ -25,8 +25,8 @@ namespace swift_demangle {
 /// Note: The Node::Kind path is relative to the given root node. The root
 /// node's Node::Kind must not be included in the path.
 inline swift::Demangle::NodePointer
-nodeAtPath(swift::Demangle::NodePointer root,
-           llvm::ArrayRef<swift::Demangle::Node::Kind> kind_path) {
+ChildAtPath(swift::Demangle::NodePointer root,
+            llvm::ArrayRef<swift::Demangle::Node::Kind> kind_path) {
   if (!root)
     return nullptr;
 
@@ -50,8 +50,18 @@ nodeAtPath(swift::Demangle::NodePointer root,
   return node;
 }
 
-/// \return the child of the \p Type node.
-static swift::Demangle::NodePointer GetType(swift::Demangle::NodePointer n) {
+/// Like \ref childAtPath, but starts the comparison at \c root.
+inline swift::Demangle::NodePointer
+NodeAtPath(swift::Demangle::NodePointer root,
+           llvm::ArrayRef<swift::Demangle::Node::Kind> kind_path) {
+  if (!root || !kind_path.size() || root->getKind() != kind_path.front())
+    return nullptr;
+  return ChildAtPath(root, kind_path.drop_front());
+}
+
+/// \return the child of the TypeMangling node.
+static swift::Demangle::NodePointer
+GetTypeMangling(swift::Demangle::NodePointer n) {
   using namespace swift::Demangle;
   if (!n || n->getKind() != Node::Kind::Global)
     return nullptr;
@@ -59,6 +69,13 @@ static swift::Demangle::NodePointer GetType(swift::Demangle::NodePointer n) {
   if (!n || n->getKind() != Node::Kind::TypeMangling || !n->hasChildren())
     return nullptr;
   n = n->getFirstChild();
+  return n;
+}
+
+/// \return the child of the \p Type node.
+static swift::Demangle::NodePointer GetType(swift::Demangle::NodePointer n) {
+  using namespace swift::Demangle;
+  n = GetTypeMangling(n);
   if (!n || n->getKind() != Node::Kind::Type || !n->hasChildren())
     return nullptr;
   n = n->getFirstChild();
@@ -66,11 +83,64 @@ static swift::Demangle::NodePointer GetType(swift::Demangle::NodePointer n) {
 }
 
 /// Demangle a mangled type name and return the child of the \p Type node.
-static swift::Demangle::NodePointer
+inline swift::Demangle::NodePointer
 GetDemangledType(swift::Demangle::Demangler &dem, llvm::StringRef name) {
   return GetType(dem.demangleSymbol(name));
 }
-  
+
+/// Demangle a mangled type name and return the child of the \p TypeMangling
+/// node.
+inline swift::Demangle::NodePointer
+GetDemangledTypeMangling(swift::Demangle::Demangler &dem,
+                         llvm::StringRef name) {
+  return GetTypeMangling(dem.demangleSymbol(name));
+}
+
+/// Wrap node in Global/TypeMangling/Type.
+inline swift::Demangle::NodePointer
+MangleType(swift::Demangle::Demangler &dem,
+           swift::Demangle::NodePointer type_node) {
+  auto *global = dem.createNode(Node::Kind::Global);
+  auto *type_mangling = dem.createNode(Node::Kind::TypeMangling);
+  global->addChild(type_mangling, dem);
+  auto *type = dem.createNode(Node::Kind::Type);
+  type_mangling->addChild(type, dem);
+  type->addChild(type_node, dem);
+  return global;
+}
+
+/// Produce a type mangle tree for a nominal type.
+inline swift::Demangle::NodePointer
+CreateNominal(swift::Demangle::Demangler &dem, swift::Demangle::Node::Kind kind,
+              llvm::StringRef module_name, llvm::StringRef type_name) {
+  auto *nominal = dem.createNode(kind);
+  auto *m = dem.createNodeWithAllocatedText(Node::Kind::Module, module_name);
+  auto *id = dem.createNodeWithAllocatedText(Node::Kind::Identifier, type_name);
+  nominal->addChild(m, dem);
+  nominal->addChild(id, dem);
+  return nominal;
+}
+
+/// Produce a type mangling for a class.
+inline ManglingErrorOr<std::string> MangleClass(swift::Demangle::Demangler &dem,
+                                                llvm::StringRef module_name,
+                                                llvm::StringRef class_name) {
+  auto *node = CreateNominal(dem, Node::Kind::Class, module_name, class_name);
+  return mangleNode(MangleType(dem, node));
+}
+
+/// Create a mangled name for a type node.
+inline swift::Demangle::ManglingErrorOr<std::string>
+GetMangledName(swift::Demangle::Demangler &dem,
+               swift::Demangle::NodePointer node) {
+  using namespace swift::Demangle;
+  auto global = dem.createNode(Node::Kind::Global);
+  auto type_mangling = dem.createNode(Node::Kind::TypeMangling);
+  global->addChild(type_mangling, dem);
+  type_mangling->addChild(node, dem);
+  return mangleNode(global);
+}
+
 } // namespace swift_demangle
 } // namespace lldb_private
 

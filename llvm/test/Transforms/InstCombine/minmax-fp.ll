@@ -257,7 +257,7 @@ define double @t16(i32 %x) {
 define double @t17(i32 %x) {
 ; CHECK-LABEL: @t17(
 ; CHECK-NEXT:    [[SEL1:%.*]] = call i32 @llvm.smax.i32(i32 [[X:%.*]], i32 2)
-; CHECK-NEXT:    [[SEL:%.*]] = sitofp i32 [[SEL1]] to double
+; CHECK-NEXT:    [[SEL:%.*]] = uitofp nneg i32 [[SEL1]] to double
 ; CHECK-NEXT:    ret double [[SEL]]
 ;
   %cmp = icmp sgt i32 %x, 2
@@ -448,4 +448,17 @@ define float @minnum_no_nnan(float %a, float %b) {
   %cond = fcmp ole float %a, %b
   %f = select nsz i1 %cond, float %a, float %b
   ret float %f
+}
+
+define float @pr64937_preserve_min_idiom(float %a) {
+; CHECK-LABEL: @pr64937_preserve_min_idiom(
+; CHECK-NEXT:    [[CMP:%.*]] = fcmp nnan olt float [[A:%.*]], 3.276700e+04
+; CHECK-NEXT:    [[SEL:%.*]] = select nnan i1 [[CMP]], float [[A]], float 3.276700e+04
+; CHECK-NEXT:    [[RES:%.*]] = fmul nnan float [[SEL]], 6.553600e+04
+; CHECK-NEXT:    ret float [[RES]]
+;
+  %cmp = fcmp nnan olt float %a, 3.276700e+04
+  %sel = select nnan i1 %cmp, float %a, float 3.276700e+04
+  %res = fmul nnan float %sel, 6.553600e+04
+  ret float %res
 }

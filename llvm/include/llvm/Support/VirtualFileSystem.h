@@ -18,6 +18,9 @@
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+// FIXME: Bringing in "CASReference.h" because Swift/C++ interop complains about
+// `ObjectRef` being undefined.
+#include "llvm/CAS/CASReference.h"
 #include "llvm/Support/Chrono.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/Error.h"
@@ -32,7 +35,6 @@
 #include <ctime>
 #include <memory>
 #include <optional>
-#include <stack>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -62,9 +64,6 @@ class Status {
   llvm::sys::fs::perms Perms;
 
 public:
-  // FIXME: remove when files support multiple names
-  bool IsVFSMapped = false;
-
   /// Whether this entity has an external path different from the virtual path,
   /// and the external path is exposed by leaking it through the abstraction.
   /// For example, a RedirectingFileSystem will set this for paths where
@@ -73,7 +72,7 @@ public:
   /// FIXME: Currently the external path is exposed by replacing the virtual
   /// path in this Status object. Instead, we should leave the path in the
   /// Status intact (matching the requested virtual path) - see
-  /// FileManager::getFileRef for how how we plan to fix this.
+  /// FileManager::getFileRef for how we plan to fix this.
   bool ExposesExternalVFSPath = false;
 
   Status() = default;
@@ -232,7 +231,7 @@ namespace detail {
 
 /// Keeps state for the recursive_directory_iterator.
 struct RecDirIterState {
-  std::stack<directory_iterator, std::vector<directory_iterator>> Stack;
+  std::vector<directory_iterator> Stack;
   bool HasNoPushRequest = false;
 };
 
@@ -255,8 +254,8 @@ public:
   /// Equivalent to operator++, with an error code.
   recursive_directory_iterator &increment(std::error_code &EC);
 
-  const directory_entry &operator*() const { return *State->Stack.top(); }
-  const directory_entry *operator->() const { return &*State->Stack.top(); }
+  const directory_entry &operator*() const { return *State->Stack.back(); }
+  const directory_entry *operator->() const { return &*State->Stack.back(); }
 
   bool operator==(const recursive_directory_iterator &Other) const {
     return State == Other.State; // identity
@@ -380,6 +379,10 @@ public:
   /// \returns success if \a path has been made absolute, otherwise a
   ///          platform-specific error_code.
   virtual std::error_code makeAbsolute(SmallVectorImpl<char> &Path) const;
+
+  /// \returns true if \p A and \p B represent the same file, or an error or
+  /// false if they do not.
+  llvm::ErrorOr<bool> equivalent(const Twine &A, const Twine &B);
 
   /// Check if files are loaded from a CAS.
   virtual bool isCASFS() const { return false; }
@@ -739,7 +742,6 @@ class RedirectingFileSystemParser;
 ///            ]
 /// }
 /// \endverbatim
-///
 /// The roots may be absolute or relative. If relative they will be made
 /// absolute against either current working directory or the directory where
 /// the Overlay YAML file is located, depending on the 'root-relative'
@@ -771,7 +773,6 @@ class RedirectingFileSystemParser;
 ///   'contents': [ <file or directory entries> ]
 /// }
 /// \endverbatim
-///
 /// The default attributes for such virtual directories are:
 /// \verbatim
 /// MTime = now() when created
@@ -780,7 +781,6 @@ class RedirectingFileSystemParser;
 /// Size = 0
 /// UniqueID = unspecified unique value
 /// \endverbatim
-///
 /// When a path prefix matches such a directory, the next component in the path
 /// is matched against the entries in the 'contents' array.
 ///
@@ -793,7 +793,6 @@ class RedirectingFileSystemParser;
 ///   'external-contents': <path to external directory>
 /// }
 /// \endverbatim
-///
 /// and inherit their attributes from the external directory. When a path
 /// prefix matches such an entry, the unmatched components are appended to the
 /// 'external-contents' path, and the resulting path is looked up in the
@@ -808,7 +807,6 @@ class RedirectingFileSystemParser;
 ///   'external-contents': <path to external file>
 /// }
 /// \endverbatim
-///
 /// Their attributes and file contents are determined by looking up the file at
 /// their 'external-contents' path in the external file system.
 ///
@@ -978,7 +976,7 @@ public:
     LookupResult(Entry *E, sys::path::const_iterator Start,
                  sys::path::const_iterator End);
 
-    /// If the found Entry maps the the input path to a path in the external
+    /// If the found Entry maps the input path to a path in the external
     /// file system (i.e. it is a FileEntry or DirectoryRemapEntry), returns
     /// that path.
     std::optional<StringRef> getExternalRedirect() const {
@@ -1001,12 +999,12 @@ private:
   /// Canonicalize path by removing ".", "..", "./", components. This is
   /// a VFS request, do not bother about symlinks in the path components
   /// but canonicalize in order to perform the correct entry search.
-  std::error_code makeCanonical(SmallVectorImpl<char> &Path) const;
+  std::error_code makeCanonicalForLookup(SmallVectorImpl<char> &Path) const;
 
   /// Get the File status, or error, from the underlying external file system.
   /// This returns the status with the originally requested name, while looking
-  /// up the entry using the canonical path.
-  ErrorOr<Status> getExternalStatus(const Twine &CanonicalPath,
+  /// up the entry using a potentially different path.
+  ErrorOr<Status> getExternalStatus(const Twine &LookupPath,
                                     const Twine &OriginalPath) const;
 
   /// Make \a Path an absolute path.
@@ -1030,7 +1028,7 @@ private:
   // that, other than the root, path components should not contain slashes or
   // backslashes.
   bool pathComponentMatches(llvm::StringRef lhs, llvm::StringRef rhs) const {
-    if ((CaseSensitive ? lhs.equals(rhs) : lhs.equals_insensitive(rhs)))
+    if ((CaseSensitive ? lhs == rhs : lhs.equals_insensitive(rhs)))
       return true;
     return (lhs == "/" && rhs == "\\") || (lhs == "\\" && rhs == "/");
   }
@@ -1094,7 +1092,7 @@ private:
                  llvm::SmallVectorImpl<Entry *> &Entries) const;
 
   /// Get the status for a path with the provided \c LookupResult.
-  ErrorOr<Status> status(const Twine &CanonicalPath, const Twine &OriginalPath,
+  ErrorOr<Status> status(const Twine &LookupPath, const Twine &OriginalPath,
                          const LookupResult &Result);
 
 public:
@@ -1196,6 +1194,60 @@ public:
   const std::vector<YAMLVFSEntry> &getMappings() const { return Mappings; }
 
   void write(llvm::raw_ostream &OS);
+};
+
+/// File system that tracks the number of calls to the underlying file system.
+/// This is particularly useful when wrapped around \c RealFileSystem to add
+/// lightweight tracking of expensive syscalls.
+class TracingFileSystem
+    : public llvm::RTTIExtends<TracingFileSystem, ProxyFileSystem> {
+public:
+  static const char ID;
+
+  std::size_t NumStatusCalls = 0;
+  std::size_t NumOpenFileForReadCalls = 0;
+  std::size_t NumDirBeginCalls = 0;
+  std::size_t NumGetRealPathCalls = 0;
+  std::size_t NumExistsCalls = 0;
+  std::size_t NumIsLocalCalls = 0;
+
+  TracingFileSystem(llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS)
+      : RTTIExtends(std::move(FS)) {}
+
+  ErrorOr<Status> status(const Twine &Path) override {
+    ++NumStatusCalls;
+    return ProxyFileSystem::status(Path);
+  }
+
+  ErrorOr<std::unique_ptr<File>> openFileForRead(const Twine &Path) override {
+    ++NumOpenFileForReadCalls;
+    return ProxyFileSystem::openFileForRead(Path);
+  }
+
+  directory_iterator dir_begin(const Twine &Dir, std::error_code &EC) override {
+    ++NumDirBeginCalls;
+    return ProxyFileSystem::dir_begin(Dir, EC);
+  }
+
+  std::error_code getRealPath(const Twine &Path,
+                              SmallVectorImpl<char> &Output) override {
+    ++NumGetRealPathCalls;
+    return ProxyFileSystem::getRealPath(Path, Output);
+  }
+
+  bool exists(const Twine &Path) override {
+    ++NumExistsCalls;
+    return ProxyFileSystem::exists(Path);
+  }
+
+  std::error_code isLocal(const Twine &Path, bool &Result) override {
+    ++NumIsLocalCalls;
+    return ProxyFileSystem::isLocal(Path, Result);
+  }
+
+protected:
+  void printImpl(raw_ostream &OS, PrintType Type,
+                 unsigned IndentLevel) const override;
 };
 
 } // namespace vfs

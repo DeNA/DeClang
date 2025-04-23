@@ -2,7 +2,6 @@ import lldb
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 
 class TestSwiftTaggedPointer(lldbtest.TestBase):
 
@@ -17,7 +16,8 @@ class TestSwiftTaggedPointer(lldbtest.TestBase):
     @skipIf(setting=('symbols.swift-precise-compiler-invocation', 'true'))
     def test(self):
         self.build()
-        self.expect('log enable lldb types')
+        # On the bots only, Swift typesystem validation fails.
+        self.runCmd("settings set symbols.swift-validate-typesystem false")
         target, process, thread, bkpt = lldbutil.run_to_source_breakpoint(
             self, 'break here', lldb.SBFileSpec('main.swift'))
 

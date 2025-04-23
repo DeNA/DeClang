@@ -13,7 +13,6 @@
 #include "clang/AST/Mangle.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/PathRemapper.h"
-#include "clang/CodeGen/ObjectFilePCHContainerOperations.h"
 #include "clang/Frontend/ASTUnit.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/CompilerInvocation.h"
@@ -27,6 +26,7 @@
 #include "clang/Index/USRGeneration.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Serialization/ASTReader.h"
+#include "clang/Serialization/ObjectFilePCHContainerReader.h"
 #include "llvm/ADT/FunctionExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/CommandLine.h"
@@ -363,7 +363,7 @@ static bool printSourceSymbolsFromModule(StringRef modulePath,
       CompilerInstance::createDiagnostics(new DiagnosticOptions());
   std::unique_ptr<ASTUnit> AU = ASTUnit::LoadFromASTFile(
       std::string(modulePath), *pchRdr, ASTUnit::LoadASTOnly, Diags,
-      FileSystemOpts, HSOpts,
+      FileSystemOpts, HSOpts, /*LangOpts=*/nullptr,
       /*OnlyLocalDecls=*/true, CaptureDiagsKind::None,
       /*AllowASTWithCompilerErrors=*/true,
       /*UserFilesAreVolatile=*/false);
@@ -801,7 +801,8 @@ static int scanDeps(ArrayRef<const char *> Args, std::string WorkingDirectory,
     llvm::outs() << "modules:\n";
     for (size_t I = 0, E = clang_experimental_DepGraph_getNumModules(Graph);
          I < E; ++I) {
-      CXDepGraphModule Mod = clang_experimental_DepGraph_getModule(Graph, I);
+      CXDepGraphModule Mod =
+          clang_experimental_DepGraph_getModuleTopological(Graph, I);
       const char *Name = clang_experimental_DepGraphModule_getName(Mod);
       const char *ContextHash =
           clang_experimental_DepGraphModule_getContextHash(Mod);

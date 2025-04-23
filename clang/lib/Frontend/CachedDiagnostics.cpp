@@ -347,7 +347,7 @@ unsigned CachedDiagnosticSerializer::convertFileID(FileID FID,
   if (Entry.isFile()) {
     const SrcMgr::FileInfo &FI = Entry.getFile();
     cached_diagnostics::SLocEntry::FileInfo CachedFI;
-    if (const FileEntry *FE = FI.getContentCache().ContentsEntry) {
+    if (OptionalFileEntryRef FE = FI.getContentCache().ContentsEntry) {
       CachedFI.Filename = FE->getName();
     } else {
       CachedFI.Filename = FI.getName();
@@ -571,7 +571,7 @@ CachedDiagnosticSerializer::serializeEmittedDiagnostics() {
   }
   if (!CompressedBuffer.empty()) {
     raw_svector_ostream BufOS((SmallVectorImpl<char> &)CompressedBuffer);
-    support::endian::Writer Writer(BufOS, support::little);
+    support::endian::Writer Writer(BufOS, endianness::little);
     Writer.write(uint32_t(YamlContents.size()));
     return toStringRef(CompressedBuffer).str();
   }
@@ -586,7 +586,7 @@ Error CachedDiagnosticSerializer::deserializeCachedDiagnostics(
   SmallVector<uint8_t, 512> UncompressedBuffer;
   if (compression::zstd::isAvailable() || compression::zlib::isAvailable()) {
     uint32_t UncompressedSize =
-        support::endian::read<uint32_t, llvm::support::little>(
+        support::endian::read<uint32_t, llvm::endianness::little>(
             Buffer.data() + Buffer.size() - sizeof(uint32_t));
     StringRef CompressedData = Buffer.drop_back(sizeof(uint32_t));
     if (compression::zstd::isAvailable()) {
@@ -669,6 +669,8 @@ struct CachingDiagnosticsProcessor::DiagnosticsConsumer
       // de-canonicalized filenames during compilation (the original diagnostic
       // uses canonical paths).
       assert(Serializer.DiagEngine.getClient() == OrigConsumer);
+      // FIXME: This is not sound: giving the original consumer diagnostics with
+      // different SourceManager may break them.
       Serializer.DiagEngine.Report(NewDiag);
     } else {
       OrigConsumer->HandleDiagnostic(Level, Info);

@@ -24,8 +24,8 @@
 #include "clang/AST/Mangle.h"
 #include "clang/Basic/ABI.h"
 #include "clang/Basic/LangOptions.h"
-#include "clang/Basic/Module.h"
 #include "clang/Basic/NoSanitizeList.h"
+#include "clang/Basic/ProfileList.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/XRayLists.h"
 #include "clang/Lex/PreprocessorOptions.h"
@@ -215,16 +215,14 @@ struct ObjCEntrypoints {
 
 /// This class records statistics on instrumentation based profiling.
 class InstrProfStats {
-  uint32_t VisitedInMainFile;
-  uint32_t MissingInMainFile;
-  uint32_t Visited;
-  uint32_t Missing;
-  uint32_t Mismatched;
+  uint32_t VisitedInMainFile = 0;
+  uint32_t MissingInMainFile = 0;
+  uint32_t Visited = 0;
+  uint32_t Missing = 0;
+  uint32_t Mismatched = 0;
 
 public:
-  InstrProfStats()
-      : VisitedInMainFile(0), MissingInMainFile(0), Visited(0), Missing(0),
-        Mismatched(0) {}
+  InstrProfStats() = default;
   /// Record that we've visited a function and whether or not that function was
   /// in the main source file.
   void addVisited(bool MainFile) {
@@ -322,7 +320,7 @@ private:
   // This should not be moved earlier, since its initialization depends on some
   // of the previous reference members being already initialized and also checks
   // if TheTargetCodeGenInfo is NULL
-  CodeGenTypes Types;
+  std::unique_ptr<CodeGenTypes> Types;
 
   /// Holds information about C++ vtables.
   CodeGenVTables VTables;
@@ -349,6 +347,8 @@ private:
   /// used. If a decl is in this, then it is known to have not been referenced
   /// yet.
   llvm::DenseMap<StringRef, GlobalDecl> DeferredDecls;
+
+  llvm::StringSet<llvm::BumpPtrAllocator> DeferredResolversToEmit;
 
   /// This is a list of deferred decls which we have seen that *are* actually
   /// referenced. These get code generated when the module is done.
@@ -433,6 +433,10 @@ private:
   /// Global annotations.
   std::vector<llvm::Constant*> Annotations;
 
+  // Store deferred function annotations so they can be emitted at the end with
+  // most up to date ValueDecl that will have all the inherited annotations.
+  llvm::MapVector<StringRef, const ValueDecl *> DeferredAnnotations;
+
   /// Signed constant pointers.
   void *ConstantSignedPointersByDecl = nullptr;
   void *SignedThunkPointers = nullptr;
@@ -485,6 +489,14 @@ private:
 
   typedef std::pair<OrderGlobalInitsOrStermFinalizers, llvm::Function *>
       GlobalInitData;
+
+  // When a tail call is performed on an "undefined" symbol, on PPC without pc
+  // relative feature, the tail call is not allowed. In "EmitCall" for such
+  // tail calls, the "undefined" symbols may be forward declarations, their
+  // definitions are provided in the module after the callsites. For such tail
+  // calls, diagnose message should not be emitted.
+  llvm::SmallSetVector<std::pair<const FunctionDecl *, SourceLocation>, 4>
+      MustTailCallUndefinedGlobals;
 
   struct GlobalInitPriorityCmp {
     bool operator()(const GlobalInitData &LHS,
@@ -556,6 +568,9 @@ private:
 
   bool isTriviallyRecursive(const FunctionDecl *F);
   bool shouldEmitFunction(GlobalDecl GD);
+  // Whether a global variable should be emitted by CUDA/HIP host/device
+  // related attributes.
+  bool shouldEmitCUDAGlobalVar(const VarDecl *VD) const;
   bool shouldOpportunisticallyEmitVTables();
   /// Map used to be sure we don't emit the same CompoundLiteral twice.
   llvm::DenseMap<const CompoundLiteralExpr *, llvm::GlobalVariable *>
@@ -605,18 +620,25 @@ private:
   MetadataTypeMap VirtualMetadataIdMap;
   MetadataTypeMap GeneralizedMetadataIdMap;
 
-  llvm::DenseMap<GlobalDecl, uint16_t> PtrAuthDiscriminatorHashes;
-
   // Helps squashing blocks of TopLevelStmtDecl into a single llvm::Function
   // when used with -fincremental-extensions.
   std::pair<std::unique_ptr<CodeGenFunction>, const TopLevelStmtDecl *>
       GlobalTopLevelStmtBlockInFlight;
 
+  llvm::DenseMap<GlobalDecl, uint16_t> PtrAuthDiscriminatorHashes;
+
+  llvm::DenseMap<const CXXRecordDecl *, std::optional<PointerAuthQualifier>>
+      VTablePtrAuthInfos;
+  std::optional<PointerAuthQualifier>
+  computeVTPointerAuthentication(const CXXRecordDecl *ThisClass);
+
 public:
   CodeGenModule(ASTContext &C, IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS,
                 const HeaderSearchOptions &headersearchopts,
                 const PreprocessorOptions &ppopts,
-                const CodeGenOptions &CodeGenOpts, llvm::Module &M,
+                const CodeGenOptions &CodeGenOpts,
+                const TargetInfo &CodeGenTargetInfo,
+                llvm::Module &M,
                 DiagnosticsEngine &Diags,
                 CoverageSourceInfo *CoverageInfo = nullptr);
 
@@ -761,6 +783,7 @@ public:
   bool supportsCOMDAT() const;
   void maybeSetTrivialComdat(const Decl &D, llvm::GlobalObject &GO);
 
+  const ABIInfo &getABIInfo();
   CGCXXABI &getCXXABI() const { return *ABI; }
   llvm::LLVMContext &getLLVMContext() { return VMContext; }
 
@@ -768,7 +791,7 @@ public:
 
   const TargetCodeGenInfo &getTargetCodeGenInfo();
 
-  CodeGenTypes &getTypes() { return Types; }
+  CodeGenTypes &getTypes() { return *Types; }
 
   CodeGenVTables &getVTables() { return VTables; }
 
@@ -830,8 +853,6 @@ public:
       return TBAAAccessInfo::getMayAliasInfo();
     return getTBAAAccessInfo(AccessType);
   }
-
-  bool isTypeConstant(QualType QTy, bool ExcludeCtor, bool ExcludeDtor);
 
   bool isPaddedAtomicType(QualType type);
   bool isPaddedAtomicType(const AtomicType *type);
@@ -940,6 +961,9 @@ public:
                                     ForDefinition_t IsForDefinition
                                       = NotForDefinition);
 
+  // Return the function body address of the given function.
+  llvm::Constant *GetFunctionStart(const ValueDecl *Decl);
+
   /// Return a function pointer for a reference to the given function.
   /// This correctly handles weak references, but does not apply a
   /// pointer signature.
@@ -949,50 +973,62 @@ public:
   /// Return the ABI-correct function pointer value for a reference
   /// to the given function.  This will apply a pointer signature if
   /// necessary, caching the result for the given function.
-  llvm::Constant *getFunctionPointer(GlobalDecl GD,
-                                     llvm::Type *Ty = nullptr);
+  llvm::Constant *getFunctionPointer(GlobalDecl GD, llvm::Type *Ty = nullptr);
 
   /// Return the ABI-correct function pointer value for a reference
   /// to the given function.  This will apply a pointer signature if
-  /// necessary, but will only cache the result if \p FD is passed.
-  llvm::Constant *getFunctionPointer(llvm::Constant *pointer,
-                                     QualType functionType,
+  /// necessary, but will only cache the result if \p GD is passed.
+  llvm::Constant *getFunctionPointer(llvm::Constant *Pointer,
+                                     QualType FunctionType,
                                      GlobalDecl GD = GlobalDecl());
 
   llvm::Constant *getMemberFunctionPointer(const FunctionDecl *FD,
                                            llvm::Type *Ty = nullptr);
 
-  llvm::Constant *getMemberFunctionPointer(llvm::Constant *pointer,
-                                           QualType functionType,
-                                           const FunctionDecl *FD = nullptr);
+  llvm::Constant *getMemberFunctionPointer(llvm::Constant *Pointer,
+                                           QualType FT,
+                                           const FunctionDecl *FD);
 
-  CGPointerAuthInfo getFunctionPointerAuthInfo(QualType functionType);
+  CGPointerAuthInfo getFunctionPointerAuthInfo(QualType T);
 
-  CGPointerAuthInfo getMemberFunctionPointerAuthInfo(QualType functionType);
+  CGPointerAuthInfo getMemberFunctionPointerAuthInfo(QualType FT);
 
-  llvm::Constant *getConstantSignedPointer(llvm::Constant *pointer,
-                                           const PointerAuthSchema &schema,
-                                           llvm::Constant *storageAddress,
-                                           GlobalDecl schemaDecl,
-                                           QualType schemaType);
-  llvm::Constant *getConstantSignedPointer(llvm::Constant *pointer,
-                                           unsigned key,
-                                           llvm::Constant *storageAddress,
-                                           llvm::Constant *extraDiscrim);
+  CGPointerAuthInfo getPointerAuthInfoForPointeeType(QualType type);
+
+  CGPointerAuthInfo getPointerAuthInfoForType(QualType type);
+
+  bool shouldSignPointer(const PointerAuthSchema &Schema);
+  llvm::Constant *getConstantSignedPointer(llvm::Constant *Pointer,
+                                           const PointerAuthSchema &Schema,
+                                           llvm::Constant *StorageAddress,
+                                           GlobalDecl SchemaDecl,
+                                           QualType SchemaType);
 
   llvm::Constant *
-  getPointerAuthOtherDiscriminator(const PointerAuthSchema &schema,
-                                   GlobalDecl schemaDecl, QualType schemaType);
-  uint16_t getPointerAuthDeclDiscriminator(GlobalDecl GD);
+  getConstantSignedPointer(llvm::Constant *Pointer, unsigned Key,
+                           llvm::Constant *StorageAddress,
+                           llvm::ConstantInt *OtherDiscriminator);
 
-  // Return the function body address of the given function.
-  llvm::Constant *GetFunctionStart(const ValueDecl *Decl);
+  llvm::ConstantInt *
+  getPointerAuthOtherDiscriminator(const PointerAuthSchema &Schema,
+                                   GlobalDecl SchemaDecl, QualType SchemaType);
+
+  uint16_t getPointerAuthDeclDiscriminator(GlobalDecl GD);
+  std::optional<CGPointerAuthInfo>
+  getVTablePointerAuthInfo(CodeGenFunction *Context,
+                           const CXXRecordDecl *Record,
+                           llvm::Value *StorageAddress);
+
+  std::optional<PointerAuthQualifier>
+  getVTablePointerAuthentication(const CXXRecordDecl *thisClass);
+
+  CGPointerAuthInfo EmitPointerAuthInfo(const RecordDecl *RD);
 
   // Return whether RTTI information should be emitted for this target.
   bool shouldEmitRTTI(bool ForEH = false) {
     return (ForEH || getLangOpts().RTTI) && !getLangOpts().CUDAIsDevice &&
            !(getLangOpts().OpenMP && getLangOpts().OpenMPIsTargetDevice &&
-             getTriple().isNVPTX());
+             (getTriple().isNVPTX() || getTriple().isAMDGPU()));
   }
 
   /// Get the address of the RTTI descriptor for the given type.
@@ -1080,11 +1116,6 @@ public:
 
   /// Return a pointer to a constant CFString object for the given string.
   ConstantAddress GetAddrOfConstantCFString(const StringLiteral *Literal);
-
-  /// Return a pointer to a constant NSString object for the given string. Or a
-  /// user defined String object as defined via
-  /// -fconstant-string-class=class_name option.
-  ConstantAddress GetAddrOfConstantString(const StringLiteral *Literal);
 
   /// Return a constant array for the given string.
   llvm::Constant *GetConstantArrayFromStringLiteral(const StringLiteral *E);
@@ -1296,6 +1327,9 @@ public:
   /// Return true iff the given type uses 'sret' when used as a return type.
   bool ReturnTypeUsesSRet(const CGFunctionInfo &FI);
 
+  /// Return true iff the given type has `inreg` set.
+  bool ReturnTypeHasInReg(const CGFunctionInfo &FI);
+
   /// Return true iff the given type uses an argument slot when 'sret' is used
   /// as a return type.
   bool ReturnSlotInterferesWithArgs(const CGFunctionInfo &FI);
@@ -1321,26 +1355,11 @@ public:
                               llvm::AttributeList &Attrs, unsigned &CallingConv,
                               bool AttrOnCallSite, bool IsThunk);
 
-  /// Adds attributes to F according to our CodeGenOptions and LangOptions, as
-  /// though we had emitted it ourselves.  We remove any attributes on F that
-  /// conflict with the attributes we add here.
-  ///
-  /// This is useful for adding attrs to bitcode modules that you want to link
-  /// with but don't control, such as CUDA's libdevice.  When linking with such
-  /// a bitcode library, you might want to set e.g. its functions'
-  /// "unsafe-fp-math" attribute to match the attr of the functions you're
-  /// codegen'ing.  Otherwise, LLVM will interpret the bitcode module's lack of
-  /// unsafe-fp-math attrs as tantamount to unsafe-fp-math=false, and then LLVM
-  /// will propagate unsafe-fp-math=false up to every transitive caller of a
-  /// function in the bitcode library!
-  ///
-  /// With the exception of fast-math attrs, this will only make the attributes
-  /// on the function more conservative.  But it's unsafe to call this on a
-  /// function which relies on particular fast-math attributes for correctness.
-  /// It's up to you to ensure that this is safe.
-  void addDefaultFunctionDefinitionAttributes(llvm::Function &F);
-  void mergeDefaultFunctionDefinitionAttributes(llvm::Function &F,
-                                                bool WillInternalize);
+  /// Adjust Memory attribute to ensure that the BE gets the right attribute
+  // in order to generate the library call or the intrinsic for the function
+  // name 'Name'.
+  void AdjustMemoryAttribute(StringRef Name, CGCalleeInfo CalleeInfo,
+                             llvm::AttributeList &Attrs);
 
   /// Like the overload taking a `Function &`, but intended specifically
   /// for frontends that want to build on Clang's target-configuration logic.
@@ -1352,7 +1371,7 @@ public:
 
   void EmitTentativeDefinition(const VarDecl *D);
 
-  void EmitExternalDeclaration(const VarDecl *D);
+  void EmitExternalDeclaration(const DeclaratorDecl *D);
 
   void EmitVTable(CXXRecordDecl *Class);
 
@@ -1566,7 +1585,7 @@ public:
   ///
   /// A most-base class of a class C is defined as a recursive base class of C,
   /// including C itself, that does not have any bases.
-  std::vector<const CXXRecordDecl *>
+  SmallVector<const CXXRecordDecl *, 0>
   getMostBaseClasses(const CXXRecordDecl *RD);
 
   /// Get the declaration of std::terminate for the platform.
@@ -1618,12 +1637,65 @@ public:
   /// because we'll lose all important information after each repl.
   void moveLazyEmissionStates(CodeGenModule *NewBuilder);
 
+  /// Emit the IR encoding to attach the CUDA launch bounds attribute to \p F.
+  /// If \p MaxThreadsVal is not nullptr, the max threads value is stored in it,
+  /// if a valid one was found.
+  void handleCUDALaunchBoundsAttr(llvm::Function *F,
+                                  const CUDALaunchBoundsAttr *A,
+                                  int32_t *MaxThreadsVal = nullptr,
+                                  int32_t *MinBlocksVal = nullptr,
+                                  int32_t *MaxClusterRankVal = nullptr);
+
+  /// Emit the IR encoding to attach the AMD GPU flat-work-group-size attribute
+  /// to \p F. Alternatively, the work group size can be taken from a \p
+  /// ReqdWGS. If \p MinThreadsVal is not nullptr, the min threads value is
+  /// stored in it, if a valid one was found. If \p MaxThreadsVal is not
+  /// nullptr, the max threads value is stored in it, if a valid one was found.
+  void handleAMDGPUFlatWorkGroupSizeAttr(
+      llvm::Function *F, const AMDGPUFlatWorkGroupSizeAttr *A,
+      const ReqdWorkGroupSizeAttr *ReqdWGS = nullptr,
+      int32_t *MinThreadsVal = nullptr, int32_t *MaxThreadsVal = nullptr);
+
+  /// Emit the IR encoding to attach the AMD GPU waves-per-eu attribute to \p F.
+  void handleAMDGPUWavesPerEUAttr(llvm::Function *F,
+                                  const AMDGPUWavesPerEUAttr *A);
+
+  llvm::Constant *
+  GetOrCreateLLVMGlobal(StringRef MangledName, llvm::Type *Ty, LangAS AddrSpace,
+                        const VarDecl *D,
+                        ForDefinition_t IsForDefinition = NotForDefinition);
+
+  // FIXME: Hardcoding priority here is gross.
+  void AddGlobalCtor(llvm::Function *Ctor, int Priority = 65535,
+                     unsigned LexOrder = ~0U,
+                     llvm::Constant *AssociatedData = nullptr);
+  void AddGlobalDtor(llvm::Function *Dtor, int Priority = 65535,
+                     bool IsDtorAttrFunc = false);
+
+  // Return whether structured convergence intrinsics should be generated for
+  // this target.
+  bool shouldEmitConvergenceTokens() const {
+    // TODO: this should probably become unconditional once the controlled
+    // convergence becomes the norm.
+    return getTriple().isSPIRVLogical();
+  }
+
+  void addUndefinedGlobalForTailCall(
+      std::pair<const FunctionDecl *, SourceLocation> Global) {
+    MustTailCallUndefinedGlobals.insert(Global);
+  }
+
 private:
+  bool shouldDropDLLAttribute(const Decl *D, const llvm::GlobalValue *GV) const;
+
   llvm::Constant *GetOrCreateLLVMFunction(
       StringRef MangledName, llvm::Type *Ty, GlobalDecl D, bool ForVTable,
       bool DontDefer = false, bool IsThunk = false,
       llvm::AttributeList ExtraAttrs = llvm::AttributeList(),
       ForDefinition_t IsForDefinition = NotForDefinition);
+
+  // Adds a declaration to the list of multi version functions if not present.
+  void AddDeferredMultiVersionResolverToEmit(GlobalDecl GD);
 
   // References to multiversion functions are resolved through an implicitly
   // defined resolver function. This function is responsible for creating
@@ -1639,11 +1711,6 @@ private:
   // is responsible for performing such mangled name updates.
   void UpdateMultiVersionNames(GlobalDecl GD, const FunctionDecl *FD,
                                StringRef &CurName);
-
-  llvm::Constant *
-  GetOrCreateLLVMGlobal(StringRef MangledName, llvm::Type *Ty, LangAS AddrSpace,
-                        const VarDecl *D,
-                        ForDefinition_t IsForDefinition = NotForDefinition);
 
   bool GetCPUAndFeaturesAttributes(GlobalDecl GD,
                                    llvm::AttrBuilder &AttrBuilder,
@@ -1661,6 +1728,7 @@ private:
 
   void EmitGlobalVarDefinition(const VarDecl *D, bool IsTentative = false);
   void EmitExternalVarDeclaration(const VarDecl *D);
+  void EmitExternalFunctionDeclaration(const FunctionDecl *D);
   void EmitAliasDefinition(GlobalDecl GD);
   void emitIFuncDefinition(GlobalDecl GD);
   void emitCPUDispatchDefinition(GlobalDecl GD);
@@ -1693,13 +1761,6 @@ private:
 
   void EmitPointerToInitFunc(const VarDecl *VD, llvm::GlobalVariable *Addr,
                              llvm::Function *InitFunc, InitSegAttr *ISA);
-
-  // FIXME: Hardcoding priority here is gross.
-  void AddGlobalCtor(llvm::Function *Ctor, int Priority = 65535,
-                     unsigned LexOrder = ~0U,
-                     llvm::Constant *AssociatedData = nullptr);
-  void AddGlobalDtor(llvm::Function *Dtor, int Priority = 65535,
-                     bool IsDtorAttrFunc = false);
 
   /// EmitCtorList - Generates a global array of functions and priorities using
   /// the given list and name. This array will have appending linkage and is

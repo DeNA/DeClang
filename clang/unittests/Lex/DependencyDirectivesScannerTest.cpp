@@ -583,10 +583,12 @@ TEST(MinimizeSourceToDependencyDirectivesTest, UnderscorePragma) {
       R"(_Pragma(u"clang module import"))", Out));
   EXPECT_STREQ("<TokBeforeEOF>\n", Out.data());
 
-  // FIXME: R"()" strings depend on using C++ 11 language mode
+  // R"()" strings are enabled by default.
   ASSERT_FALSE(minimizeSourceToDependencyDirectives(
       R"(_Pragma(R"abc(clang module import)abc"))", Out));
-  EXPECT_STREQ("<TokBeforeEOF>\n", Out.data());
+  EXPECT_STREQ(R"(_Pragma(R"abc(clang module import)abc"))"
+               "\n",
+               Out.data());
 }
 
 TEST(MinimizeSourceToDependencyDirectivesTest, Include) {
@@ -646,6 +648,17 @@ TEST(MinimizeSourceToDependencyDirectivesTest, AtImport) {
   ASSERT_FALSE(minimizeSourceToDependencyDirectives(
       "@import /*x*/ A /*x*/ . /*x*/ B /*x*/ \n /*x*/ ; /*x*/", Out));
   EXPECT_STREQ("@import A.B;\n", Out.data());
+}
+
+TEST(MinimizeSourceToDependencyDirectivesTest, EmptyIncludesAndImports) {
+  SmallVector<char, 128> Out;
+
+  ASSERT_TRUE(minimizeSourceToDependencyDirectives("#import\n", Out));
+  ASSERT_TRUE(minimizeSourceToDependencyDirectives("#include\n", Out));
+  ASSERT_TRUE(minimizeSourceToDependencyDirectives("#ifdef A\n"
+                                                   "#import \n"
+                                                   "#endif\n",
+                                                   Out));
 }
 
 TEST(MinimizeSourceToDependencyDirectivesTest, AtImportFailures) {

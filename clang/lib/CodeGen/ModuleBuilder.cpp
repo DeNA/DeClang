@@ -149,21 +149,26 @@ namespace {
     }
 
     void Initialize(ASTContext &Context) override {
+      Initialize(Context, Context.getTargetInfo());
+    }
+
+    void Initialize(ASTContext &Context, const TargetInfo &CodeGenTargetInfo) override {
       Ctx = &Context;
 
-      M->setTargetTriple(Ctx->getTargetInfo().getTriple().getTriple());
-      M->setDataLayout(Ctx->getTargetInfo().getDataLayoutString());
-      const auto &SDKVersion = Ctx->getTargetInfo().getSDKVersion();
+      M->setTargetTriple(CodeGenTargetInfo.getTriple().getTriple());
+      M->setDataLayout(CodeGenTargetInfo.getDataLayoutString());
+      const auto &SDKVersion = CodeGenTargetInfo.getSDKVersion();
       if (!SDKVersion.empty())
         M->setSDKVersion(SDKVersion);
-      if (const auto *TVT = Ctx->getTargetInfo().getDarwinTargetVariantTriple())
+      if (const auto *TVT = CodeGenTargetInfo.getDarwinTargetVariantTriple())
         M->setDarwinTargetVariantTriple(TVT->getTriple());
       if (auto TVSDKVersion =
-              Ctx->getTargetInfo().getDarwinTargetVariantSDKVersion())
+          CodeGenTargetInfo.getDarwinTargetVariantSDKVersion())
         M->setDarwinTargetVariantSDKVersion(*TVSDKVersion);
       Builder.reset(new CodeGen::CodeGenModule(Context, FS, HeaderSearchOpts,
                                                PreprocessorOpts, CodeGenOpts,
-                                               *M, Diags, CoverageInfo));
+                                               CodeGenTargetInfo, *M,
+                                               Diags, CoverageInfo));
 
       for (auto &&Lib : CodeGenOpts.DependentLibraries)
         Builder->AddDependentLib(Lib);
@@ -180,7 +185,7 @@ namespace {
 
     bool HandleTopLevelDecl(DeclGroupRef DG) override {
       // FIXME: Why not return false and abort parsing?
-      if (Diags.hasErrorOccurred())
+      if (Diags.hasUnrecoverableErrorOccurred())
         return true;
 
       HandlingTopLevelDeclRAII HandlingDecl(*this);
@@ -206,7 +211,7 @@ namespace {
     }
 
     void HandleInlineFunctionDefinition(FunctionDecl *D) override {
-      if (Diags.hasErrorOccurred())
+      if (Diags.hasUnrecoverableErrorOccurred())
         return;
 
       assert(D->doesThisDeclarationHaveABody());
@@ -233,7 +238,7 @@ namespace {
     /// client hack on the type, which can occur at any point in the file
     /// (because these can be defined in declspecs).
     void HandleTagDeclDefinition(TagDecl *D) override {
-      if (Diags.hasErrorOccurred())
+      if (Diags.hasUnrecoverableErrorOccurred())
         return;
 
       // Don't allow re-entrant calls to CodeGen triggered by PCH
@@ -269,7 +274,7 @@ namespace {
     }
 
     void HandleTagDeclRequiredDefinition(const TagDecl *D) override {
-      if (Diags.hasErrorOccurred())
+      if (Diags.hasUnrecoverableErrorOccurred())
         return;
 
       // Don't allow re-entrant calls to CodeGen triggered by PCH
@@ -283,7 +288,7 @@ namespace {
 
     void HandleTranslationUnit(ASTContext &Ctx) override {
       // Release the Builder when there is no error.
-      if (!Diags.hasErrorOccurred() && Builder)
+      if (!Diags.hasUnrecoverableErrorOccurred() && Builder)
         Builder->Release();
 
       // If there are errors before or when releasing the Builder, reset
@@ -297,25 +302,25 @@ namespace {
     }
 
     void AssignInheritanceModel(CXXRecordDecl *RD) override {
-      if (Diags.hasErrorOccurred())
+      if (Diags.hasUnrecoverableErrorOccurred())
         return;
 
       Builder->RefreshTypeCacheForClass(RD);
     }
 
     void CompleteTentativeDefinition(VarDecl *D) override {
-      if (Diags.hasErrorOccurred())
+      if (Diags.hasUnrecoverableErrorOccurred())
         return;
 
       Builder->EmitTentativeDefinition(D);
     }
 
-    void CompleteExternalDeclaration(VarDecl *D) override {
+    void CompleteExternalDeclaration(DeclaratorDecl *D) override {
       Builder->EmitExternalDeclaration(D);
     }
 
     void HandleVTable(CXXRecordDecl *RD) override {
-      if (Diags.hasErrorOccurred())
+      if (Diags.hasUnrecoverableErrorOccurred())
         return;
 
       Builder->EmitVTable(RD);

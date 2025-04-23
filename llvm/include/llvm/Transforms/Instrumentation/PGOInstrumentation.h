@@ -18,11 +18,13 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Support/VirtualFileSystem.h"
+#include "llvm/Support/CommandLine.h"
 #include <cstdint>
 #include <string>
 
 namespace llvm {
+
+extern cl::opt<bool> DebugInfoCorrelate;
 
 class Function;
 class Instruction;
@@ -41,12 +43,14 @@ class FileSystem;
 class PGOInstrumentationGenCreateVar
     : public PassInfoMixin<PGOInstrumentationGenCreateVar> {
 public:
-  PGOInstrumentationGenCreateVar(std::string CSInstrName = "")
-      : CSInstrName(CSInstrName) {}
+  PGOInstrumentationGenCreateVar(std::string CSInstrName = "",
+                                 bool Sampling = false)
+      : CSInstrName(CSInstrName), ProfileSampling(Sampling) {}
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 
 private:
   std::string CSInstrName;
+  bool ProfileSampling;
 };
 
 /// The instrumentation (profile-instr-gen) pass for IR based PGO.

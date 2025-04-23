@@ -23,7 +23,7 @@
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/LLVMDriver.h"
 #include "llvm/Support/LineIterator.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/VirtualFileSystem.h"
@@ -31,6 +31,7 @@
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/TextAPI/Architecture.h"
+#include <cstdlib>
 #include <map>
 #include <type_traits>
 
@@ -130,7 +131,7 @@ static Expected<std::string> searchForFile(const Twine &FileName) {
 static Error processCommandLineLibraries() {
   for (StringRef BaseName : Libraries) {
     Expected<std::string> FullPath = searchForFile(
-        BaseName.endswith(".o") ? BaseName.str() : "lib" + BaseName + ".a");
+        BaseName.ends_with(".o") ? BaseName.str() : "lib" + BaseName + ".a");
     if (!FullPath)
       return FullPath.takeError();
     InputFiles.push_back(FullPath.get());
@@ -592,18 +593,17 @@ static Error createStaticLibrary(LLVMContext &LLVMCtx, const Config &C) {
 
   if (NewMembers.size() == 1)
     return writeArchive(OutputFile, NewMembers.begin()->second.getMembers(),
-                        /*WriteSymtab=*/true,
+                        SymtabWritingMode::NormalSymtab,
                         /*Kind=*/object::Archive::K_DARWIN, C.Deterministic,
                         /*Thin=*/false);
 
   SmallVector<OwningBinary<Archive>, 2> OutputBinaries;
   for (const std::pair<const uint64_t, NewArchiveMemberList> &M : NewMembers) {
     Expected<std::unique_ptr<MemoryBuffer>> OutputBufferOrErr =
-        writeArchiveToBuffer(M.second.getMembers(),
-                             /*WriteSymtab=*/true,
-                             /*Kind=*/object::Archive::K_DARWIN,
-                             C.Deterministic,
-                             /*Thin=*/false);
+        writeArchiveToBuffer(
+            M.second.getMembers(), SymtabWritingMode::NormalSymtab,
+            /*Kind=*/object::Archive::K_DARWIN, C.Deterministic,
+            /*Thin=*/false);
     if (!OutputBufferOrErr)
       return OutputBufferOrErr.takeError();
     std::unique_ptr<MemoryBuffer> &OutputBuffer = OutputBufferOrErr.get();
@@ -725,8 +725,7 @@ static Expected<Config> parseCommandLine(int Argc, char **Argv) {
   return C;
 }
 
-int main(int Argc, char **Argv) {
-  InitLLVM X(Argc, Argv);
+int llvm_libtool_darwin_main(int Argc, char **Argv, const llvm::ToolContext &) {
   Expected<Config> ConfigOrErr = parseCommandLine(Argc, Argv);
   if (!ConfigOrErr) {
     WithColor::defaultErrorHandler(ConfigOrErr.takeError());
@@ -752,4 +751,5 @@ int main(int Argc, char **Argv) {
     }
     break;
   }
+  return EXIT_SUCCESS;
 }

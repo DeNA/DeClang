@@ -22,7 +22,7 @@
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/LLVMDriver.h"
 #include "llvm/Support/ThreadPool.h"
 
 using namespace llvm;
@@ -43,6 +43,7 @@ enum ID {
 #include "Opts.inc"
 #undef PREFIX
 
+using namespace llvm::opt;
 static constexpr opt::OptTable::Info InfoTable[] = {
 #define OPTION(...) LLVM_CONSTRUCT_OPT_INFO(__VA_ARGS__),
 #include "Opts.inc"
@@ -118,8 +119,7 @@ static void parseArgs(int argc, char **argv) {
   HostInterface = Args.getLastArgValue(OPT_host_interface, "0.0.0.0");
 }
 
-int main(int argc, char **argv) {
-  InitLLVM X(argc, argv);
+int llvm_debuginfod_main(int argc, char **argv, const llvm::ToolContext &) {
   HTTPClient::initialize();
   parseArgs(argc, argv);
 
@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
   for (const std::string &Path : ScanPaths)
     Paths.push_back(Path);
 
-  ThreadPool Pool(hardware_concurrency(MaxConcurrency));
+  DefaultThreadPool Pool(hardware_concurrency(MaxConcurrency));
   DebuginfodLog Log;
   DebuginfodCollection Collection(Paths, Log, Pool, MinInterval);
   DebuginfodServer Server(Log, Collection);

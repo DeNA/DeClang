@@ -16,6 +16,7 @@ define void @widget(ptr %a) {
 ; CHECK-NEXT:    [[GETELEMENTPTR4:%.*]] = getelementptr i8, ptr [[GETELEMENTPTR]], i64 8
 ; CHECK-NEXT:    store i16 0, ptr [[GETELEMENTPTR4]], align 4
 ; CHECK-NEXT:    [[GETELEMENTPTR5:%.*]] = getelementptr i8, ptr [[GETELEMENTPTR]], i64 12
+; CHECK-NEXT:    store i32 0, ptr [[CALL1]], align 4
 ; CHECK-NEXT:    [[LOAD6:%.*]] = load i32, ptr inttoptr (i64 4 to ptr), align 4
 ; CHECK-NEXT:    br label [[BB48:%.*]]
 ; CHECK:       bb7:

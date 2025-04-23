@@ -77,7 +77,15 @@ DWARFDie DWARFLinker::resolveDIEReference(const DWARFFile &File,
                                           const DWARFDie &DIE,
                                           CompileUnit *&RefCU) {
   assert(RefValue.isFormClass(DWARFFormValue::FC_Reference));
-  uint64_t RefOffset = *RefValue.getAsReference();
+  uint64_t RefOffset;
+  if (std::optional<uint64_t> Off = RefValue.getAsRelativeReference()) {
+    RefOffset = RefValue.getUnit()->getOffset() + *Off;
+  } else if (Off = RefValue.getAsDebugInfoReference(); Off) {
+    RefOffset = *Off;
+  } else {
+    reportWarning("Unsupported reference type", File, &DIE);
+    return DWARFDie();
+  }
   if ((RefCU = getUnitForOffset(Units, RefOffset)))
     if (const auto RefDie = RefCU->getOrigUnit().getDIEForOffset(RefOffset)) {
       // In a file with broken references, an attribute might point to a NULL
@@ -116,6 +124,7 @@ static bool isTypeTag(uint16_t Tag) {
   case dwarf::DW_TAG_string_type:
   case dwarf::DW_TAG_structure_type:
   case dwarf::DW_TAG_subroutine_type:
+  case dwarf::DW_TAG_template_alias:
   case dwarf::DW_TAG_typedef:
   case dwarf::DW_TAG_union_type:
   case dwarf::DW_TAG_ptr_to_member_type:
@@ -190,13 +199,13 @@ static void analyzeImportedModule(
     return;
 
   StringRef Path = dwarf::toStringRef(DIE.find(dwarf::DW_AT_LLVM_include_path));
-  if (!Path.endswith(".swiftinterface"))
+  if (!Path.ends_with(".swiftinterface"))
     return;
   // Don't track interfaces that are part of the SDK.
   StringRef SysRoot = dwarf::toStringRef(DIE.find(dwarf::DW_AT_LLVM_sysroot));
   if (SysRoot.empty())
     SysRoot = CU.getSysRoot();
-  if (!SysRoot.empty() && Path.startswith(SysRoot))
+  if (!SysRoot.empty() && Path.starts_with(SysRoot))
     return;
   // Don't track interfaces that are part of the toolchain.
   // For example: Swift, _Concurrency, ...
@@ -220,7 +229,7 @@ static void analyzeImportedModule(
     ReportWarning(Twine("Conflicting parseable interfaces for Swift Module ") +
                       *Name + ": " + Entry + " and " + Path,
                   DIE);
-  Entry = std::string(ResolvedPath.str());
+  Entry = std::string(ResolvedPath);
 }
 
 /// The distinct types of work performed by the work loop in
@@ -1072,7 +1081,13 @@ unsigned DWARFLinker::DIECloner::cloneDieReferenceAttribute(
     unsigned AttrSize, const DWARFFormValue &Val, const DWARFFile &File,
     CompileUnit &Unit) {
   const DWARFUnit &U = Unit.getOrigUnit();
-  uint64_t Ref = *Val.getAsReference();
+  uint64_t Ref;
+  if (std::optional<uint64_t> Off = Val.getAsRelativeReference())
+    Ref = Val.getUnit()->getOffset() + *Off;
+  else if (Off = Val.getAsDebugInfoReference(); Off)
+    Ref = *Off;
+  else
+    return 0;
 
   DIE *NewRefDie = nullptr;
   CompileUnit *RefUnit = nullptr;
@@ -1816,10 +1831,8 @@ DIE *DWARFLinker::DIECloner::cloneDIE(const DWARFDie &InputDIE,
     Unit.addNamespaceAccelerator(Die, AttrInfo.Name);
   } else if (Tag == dwarf::DW_TAG_imported_declaration && AttrInfo.Name) {
     Unit.addNamespaceAccelerator(Die, AttrInfo.Name);
-  } else if (isTypeTag(Tag) && !AttrInfo.IsDeclaration &&
-             getDIENames(InputDIE, AttrInfo, DebugStrPool) && AttrInfo.Name &&
-             AttrInfo.Name.getString()[0]) {
-    uint32_t Hash = hashFullyQualifiedName(InputDIE, Unit, File);
+  } else if (isTypeTag(Tag) && !AttrInfo.IsDeclaration) {
+    bool Success = getDIENames(InputDIE, AttrInfo, DebugStrPool);
     uint64_t RuntimeLang =
         dwarf::toUnsigned(InputDIE.find(dwarf::DW_AT_APPLE_runtime_class))
             .value_or(0);
@@ -1828,8 +1841,21 @@ DIE *DWARFLinker::DIECloner::cloneDIE(const DWARFDie &InputDIE,
          RuntimeLang == dwarf::DW_LANG_ObjC_plus_plus) &&
         dwarf::toUnsigned(InputDIE.find(dwarf::DW_AT_APPLE_objc_complete_type))
             .value_or(0);
-    Unit.addTypeAccelerator(Die, AttrInfo.Name, ObjCClassIsImplementation,
-                            Hash);
+    if (Success && AttrInfo.Name && !AttrInfo.Name.getString().empty()) {
+      uint32_t Hash = hashFullyQualifiedName(InputDIE, Unit, File);
+      Unit.addTypeAccelerator(Die, AttrInfo.Name, ObjCClassIsImplementation,
+                              Hash);
+    }
+
+    // For Swift, mangled names are put into DW_AT_linkage_name.
+    if (Success && AttrInfo.MangledName &&
+        RuntimeLang == dwarf::DW_LANG_Swift &&
+        !AttrInfo.MangledName.getString().empty() &&
+        AttrInfo.MangledName != AttrInfo.Name) {
+      auto Hash = djbHash(AttrInfo.MangledName.getString().data());
+      Unit.addTypeAccelerator(Die, AttrInfo.MangledName,
+                              ObjCClassIsImplementation, Hash);
+    }
   }
 
   // Determine whether there are any children that we want to keep.
@@ -2246,17 +2272,20 @@ void DWARFLinker::emitAcceleratorEntriesForUnit(CompileUnit &Unit) {
         DebugNames.addName(
             Namespace.Name, Namespace.Die->getOffset(),
             DWARF5AccelTableData::getDefiningParentDieOffset(*Namespace.Die),
-            Namespace.Die->getTag(), Unit.getUniqueID());
+            Namespace.Die->getTag(), Unit.getUniqueID(),
+            Unit.getTag() == dwarf::DW_TAG_type_unit);
       for (const auto &Pubname : Unit.getPubnames())
         DebugNames.addName(
             Pubname.Name, Pubname.Die->getOffset(),
             DWARF5AccelTableData::getDefiningParentDieOffset(*Pubname.Die),
-            Pubname.Die->getTag(), Unit.getUniqueID());
+            Pubname.Die->getTag(), Unit.getUniqueID(),
+            Unit.getTag() == dwarf::DW_TAG_type_unit);
       for (const auto &Pubtype : Unit.getPubtypes())
         DebugNames.addName(
             Pubtype.Name, Pubtype.Die->getOffset(),
             DWARF5AccelTableData::getDefiningParentDieOffset(*Pubtype.Die),
-            Pubtype.Die->getTag(), Unit.getUniqueID());
+            Pubtype.Die->getTag(), Unit.getUniqueID(),
+            Unit.getTag() == dwarf::DW_TAG_type_unit);
     } break;
     }
   }
@@ -2703,8 +2732,8 @@ Error DWARFLinker::link() {
   // This Dwarf string pool which is used for emission. It must be used
   // serially as the order of calling getStringOffset matters for
   // reproducibility.
-  OffsetsStringPool DebugStrPool(StringsTranslator, true);
-  OffsetsStringPool DebugLineStrPool(StringsTranslator, false);
+  OffsetsStringPool DebugStrPool(true);
+  OffsetsStringPool DebugLineStrPool(false);
   DebugDieValuePool StringOffsetPool;
 
   // ODR Contexts for the optimize.
@@ -2937,7 +2966,7 @@ Error DWARFLinker::link() {
     }
     EmitLambda();
   } else {
-    ThreadPool Pool(hardware_concurrency(2));
+    DefaultThreadPool Pool(hardware_concurrency(2));
     Pool.async(AnalyzeAll);
     Pool.async(CloneAll);
     Pool.wait();

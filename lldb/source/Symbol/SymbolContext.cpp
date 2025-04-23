@@ -8,6 +8,7 @@
 
 #include "lldb/Symbol/SymbolContext.h"
 
+#include "lldb/Core/Address.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
@@ -23,6 +24,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/lldb-enumerations.h"
 
@@ -67,12 +69,12 @@ void SymbolContext::Clear(bool clear_target) {
   variable = nullptr;
 }
 
-bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
-                                    const Address &addr, bool show_fullpaths,
-                                    bool show_module, bool show_inlined_frames,
-                                    bool show_function_arguments,
-                                    bool show_function_name,
-                                    bool show_function_display_name) const {
+bool SymbolContext::DumpStopContext(
+    Stream *s, ExecutionContextScope *exe_scope, const Address &addr,
+    bool show_fullpaths, bool show_module, bool show_inlined_frames,
+    bool show_function_arguments, bool show_function_name,
+    bool show_function_display_name,
+    std::optional<Stream::HighlightSettings> settings) const {
   bool dumped_something = false;
   if (show_module && module_sp) {
     if (show_fullpaths)
@@ -82,7 +84,6 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
     s->PutChar('`');
     dumped_something = true;
   }
-
   if (function != nullptr) {
     SymbolContext inline_parent_sc;
     Address inline_parent_addr;
@@ -98,7 +99,7 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
       if (!name)
         name = function->GetName(this);
       if (name)
-        name.Dump(s);
+        s->PutCStringColorHighlighted(name.GetStringRef(), settings);
     }
 
     if (addr.IsValid()) {
@@ -172,7 +173,7 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
         name = symbol->GetDisplayName(this);
       if (!name)
         name = symbol->GetName();
-      name.Dump(s);
+      s->PutCStringColorHighlighted(name.GetStringRef(), settings);
     }
 
     if (addr.IsValid() && symbol->ValueIsAddress()) {
@@ -194,8 +195,9 @@ bool SymbolContext::DumpStopContext(Stream *s, ExecutionContextScope *exe_scope,
   return dumped_something;
 }
 
-void SymbolContext::GetDescription(Stream *s, lldb::DescriptionLevel level,
-                                   Target *target) const {
+void SymbolContext::GetDescription(
+    Stream *s, lldb::DescriptionLevel level, Target *target,
+    std::optional<Stream::HighlightSettings> settings) const {
   if (module_sp) {
     s->Indent("     Module: file = \"");
     module_sp->GetFileSpec().Dump(s->AsRawOstream());
@@ -255,7 +257,7 @@ void SymbolContext::GetDescription(Stream *s, lldb::DescriptionLevel level,
 
   if (symbol != nullptr) {
     s->Indent("     Symbol: ");
-    symbol->GetDescription(s, level, target);
+    symbol->GetDescription(s, level, target, settings);
     s->EOL();
   }
 
@@ -479,10 +481,11 @@ bool SymbolContext::GetParentOfInlinedScope(const Address &curr_frame_pc,
             curr_inlined_block->GetInlinedFunctionInfo();
         next_frame_pc = range.GetBaseAddress();
         next_frame_sc.line_entry.range.GetBaseAddress() = next_frame_pc;
-        next_frame_sc.line_entry.file =
-            curr_inlined_block_inlined_info->GetCallSite().GetFile();
-        next_frame_sc.line_entry.original_file =
-            curr_inlined_block_inlined_info->GetCallSite().GetFile();
+        next_frame_sc.line_entry.file_sp = std::make_shared<SupportFile>(
+            curr_inlined_block_inlined_info->GetCallSite().GetFile());
+        next_frame_sc.line_entry.original_file_sp =
+            std::make_shared<SupportFile>(
+                curr_inlined_block_inlined_info->GetCallSite().GetFile());
         next_frame_sc.line_entry.line =
             curr_inlined_block_inlined_info->GetCallSite().GetLine();
         next_frame_sc.line_entry.column =
@@ -707,13 +710,13 @@ bool SymbolContext::GetAddressRangeFromHereToEndLine(uint32_t end_line,
                                                      AddressRange &range,
                                                      Status &error) {
   if (!line_entry.IsValid()) {
-    error.SetErrorString("Symbol context has no line table.");
+    error = Status::FromErrorString("Symbol context has no line table.");
     return false;
   }
 
   range = line_entry.range;
   if (line_entry.line > end_line) {
-    error.SetErrorStringWithFormat(
+    error = Status::FromErrorStringWithFormat(
         "end line option %d must be after the current line: %d", end_line,
         line_entry.line);
     return false;
@@ -737,7 +740,7 @@ bool SymbolContext::GetAddressRangeFromHereToEndLine(uint32_t end_line,
   if (!found) {
     // Can't find the index of the SymbolContext's line entry in the
     // SymbolContext's CompUnit.
-    error.SetErrorString(
+    error = Status::FromErrorString(
         "Can't find the current line entry in the CompUnit - can't process "
         "the end-line option");
     return false;
@@ -746,7 +749,7 @@ bool SymbolContext::GetAddressRangeFromHereToEndLine(uint32_t end_line,
   line_index = comp_unit->FindLineEntry(line_index, end_line, nullptr, false,
                                         &end_entry);
   if (line_index == UINT32_MAX) {
-    error.SetErrorStringWithFormat(
+    error = Status::FromErrorStringWithFormat(
         "could not find a line table entry corresponding "
         "to end line number %d",
         end_line);
@@ -756,7 +759,7 @@ bool SymbolContext::GetAddressRangeFromHereToEndLine(uint32_t end_line,
   Block *func_block = GetFunctionBlock();
   if (func_block && func_block->GetRangeIndexContainingAddress(
                         end_entry.range.GetBaseAddress()) == UINT32_MAX) {
-    error.SetErrorStringWithFormat(
+    error = Status::FromErrorStringWithFormat(
         "end line number %d is not contained within the current function.",
         end_line);
     return false;
@@ -874,7 +877,7 @@ const Symbol *SymbolContext::FindBestGlobalDataSymbol(ConstString name,
         symbol->GetDescription(&ss, eDescriptionLevelFull, &target);
       }
       ss.PutChar('\n');
-      error.SetErrorString(ss.GetData());
+      error = Status::FromErrorString(ss.GetData());
       return nullptr;
     } else if (external_symbols.size()) {
       return external_symbols[0];
@@ -885,7 +888,7 @@ const Symbol *SymbolContext::FindBestGlobalDataSymbol(ConstString name,
         symbol->GetDescription(&ss, eDescriptionLevelVerbose, &target);
         ss.PutChar('\n');
       }
-      error.SetErrorString(ss.GetData());
+      error = Status::FromErrorString(ss.GetData());
       return nullptr;
     } else if (internal_symbols.size()) {
       return internal_symbols[0];

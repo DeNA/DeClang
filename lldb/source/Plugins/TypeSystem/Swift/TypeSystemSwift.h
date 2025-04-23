@@ -29,7 +29,18 @@ class Decl;
 namespace lldb_private {
 class TypeSystemClang;
 class SwiftASTContext;
+class SwiftASTContextForExpressions;
+class TypeSystemSwift;
 class TypeSystemSwiftTypeRef;
+class TypeSystemSwiftTypeRefForExpressions;
+typedef std::shared_ptr<TypeSystemSwift> TypeSystemSwiftSP;
+typedef std::shared_ptr<TypeSystemSwiftTypeRef> TypeSystemSwiftTypeRefSP;
+typedef std::shared_ptr<TypeSystemSwiftTypeRefForExpressions>
+    TypeSystemSwiftTypeRefForExpressionsSP;
+typedef std::shared_ptr<SwiftASTContext> SwiftASTContextSP;
+typedef std::shared_ptr<SwiftASTContextForExpressions>
+    SwiftASTContextForExpressionsSP;
+
 /// The implementation of lldb::Type's m_payload field for TypeSystemSwift.
 class TypePayloadSwift {
   /// Layout: bit 1 ... IsFixedValueBuffer.
@@ -115,10 +126,13 @@ public:
 
   const std::string &GetDescription() const { return m_description; }
   static LanguageSet GetSupportedLanguagesForTypes();
-  virtual SwiftASTContext *GetSwiftASTContext(const SymbolContext *sc) const = 0;
-  virtual TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() = 0;
-  virtual const TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() const = 0;
-  virtual void SetTriple(const llvm::Triple triple) = 0;
+  virtual SwiftASTContextSP
+  GetSwiftASTContext(const SymbolContext &sc) const = 0;
+  virtual TypeSystemSwiftTypeRefSP GetTypeSystemSwiftTypeRef() = 0;
+  virtual std::shared_ptr<const TypeSystemSwiftTypeRef>
+  GetTypeSystemSwiftTypeRef() const = 0;
+  virtual void SetTriple(const SymbolContext &sc,
+                         const llvm::Triple triple) = 0;
   virtual void ClearModuleDependentCaches() = 0;
   virtual lldb::TargetWP GetTargetWP() const = 0;
 
@@ -187,13 +201,6 @@ public:
   /// For example, int is converted to Int32.
   virtual CompilerType ConvertClangTypeToSwiftType(CompilerType clang_type) = 0;
 
-  void DumpValue(lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx,
-                 Stream &s, lldb::Format format, const DataExtractor &data,
-                 lldb::offset_t data_offset, size_t data_byte_size,
-                 uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
-                 bool show_types, bool show_summary, bool verbose,
-                 uint32_t depth) override;
-
   /// \see lldb_private::TypeSystem::Dump
   void Dump(llvm::raw_ostream &output) override;
 
@@ -231,10 +238,6 @@ public:
     return {};
   }
   bool IsScalarType(lldb::opaque_compiler_type_t type) override;
-  bool IsCStringType(lldb::opaque_compiler_type_t type,
-                     uint32_t &length) override {
-    return false;
-  }
   bool IsVectorType(lldb::opaque_compiler_type_t type,
                     CompilerType *element_type, uint64_t *size) override {
     return false;
@@ -324,18 +327,17 @@ public:
     return {};
   }
 
-  // TODO: This method appear unused. Should they be removed?
-  void DumpSummary(lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx,
-                   Stream &s, const DataExtractor &data,
-                   lldb::offset_t data_offset, size_t data_byte_size) override {
-  }
+  unsigned GetPtrAuthKey(lldb::opaque_compiler_type_t type) override;
+  unsigned GetPtrAuthDiscriminator(lldb::opaque_compiler_type_t type) override;
+  bool GetPtrAuthAddressDiversity(lldb::opaque_compiler_type_t type) override;
+
   /// \}
 protected:
   /// Used in the logs.
   std::string m_description;
   /// The module this typesystem belongs to if any.
   Module *m_module = nullptr;
-  };
+};
 
 } // namespace lldb_private
 

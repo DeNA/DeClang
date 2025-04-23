@@ -12,9 +12,17 @@
 
 #include "Parser.h"
 #include "mlir/IR/AffineMap.h"
+#include "mlir/IR/BuiltinAttributeInterfaces.h"
+#include "mlir/IR/BuiltinTypeInterfaces.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/TensorEncoding.h"
+#include "mlir/IR/Types.h"
+#include "mlir/Support/LLVM.h"
+#include "llvm/ADT/STLExtras.h"
+#include <cassert>
+#include <cstdint>
+#include <limits>
 #include <optional>
 
 using namespace mlir;
@@ -32,6 +40,7 @@ OptionalParseResult Parser::parseOptionalType(Type &type) {
   case Token::kw_vector:
   case Token::inttype:
   case Token::kw_f8E5M2:
+  case Token::kw_f8E4M3:
   case Token::kw_f8E4M3FN:
   case Token::kw_f8E5M2FNUZ:
   case Token::kw_f8E4M3FNUZ:
@@ -296,6 +305,9 @@ Type Parser::parseNonFunctionType() {
   case Token::kw_f8E5M2:
     consumeToken(Token::kw_f8E5M2);
     return builder.getFloat8E5M2Type();
+  case Token::kw_f8E4M3:
+    consumeToken(Token::kw_f8E4M3);
+    return builder.getFloat8E4M3Type();
   case Token::kw_f8E4M3FN:
     consumeToken(Token::kw_f8E4M3FN);
     return builder.getFloat8E4M3FNType();
@@ -386,11 +398,15 @@ Type Parser::parseTensorType() {
   // Parse an optional encoding attribute.
   Attribute encoding;
   if (consumeIf(Token::comma)) {
-    encoding = parseAttribute();
-    if (auto v = dyn_cast_or_null<VerifiableTensorEncoding>(encoding)) {
-      if (failed(v.verifyEncoding(dimensions, elementType,
-                                  [&] { return emitError(); })))
+    auto parseResult = parseOptionalAttribute(encoding);
+    if (parseResult.has_value()) {
+      if (failed(parseResult.value()))
         return nullptr;
+      if (auto v = dyn_cast_or_null<VerifiableTensorEncoding>(encoding)) {
+        if (failed(v.verifyEncoding(dimensions, elementType,
+                                    [&] { return emitError(); })))
+          return nullptr;
+      }
     }
   }
 

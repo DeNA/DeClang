@@ -49,15 +49,15 @@ public:
   static const int MaxTables = 4;
 
   /// The lookup result is a list of global declaration IDs.
-  using data_type = SmallVector<DeclID, 4>;
+  using data_type = SmallVector<GlobalDeclID, 4>;
 
   struct data_type_builder {
     data_type &Data;
-    llvm::DenseSet<DeclID> Found;
+    llvm::DenseSet<GlobalDeclID> Found;
 
     data_type_builder(data_type &D) : Data(D) {}
 
-    void insert(DeclID ID) {
+    void insert(GlobalDeclID ID) {
       // Just use a linear scan unless we have more than a few IDs.
       if (Found.empty() && !Data.empty()) {
         if (Data.size() <= 4) {
@@ -108,7 +108,7 @@ public:
 
   static void MergeDataInto(const data_type &From, data_type_builder &To) {
     To.Data.reserve(To.Data.size() + From.size());
-    for (DeclID ID : From)
+    for (GlobalDeclID ID : From)
       To.insert(ID);
   }
 
@@ -175,7 +175,7 @@ public:
                      const unsigned char* d,
                      unsigned DataLen);
 
-  IdentID ReadIdentifierID(const unsigned char *d);
+  IdentifierID ReadIdentifierID(const unsigned char *d);
 
   ASTReader &getReader() const { return Reader; }
 };
@@ -243,11 +243,9 @@ using ASTSelectorLookupTable =
 class HeaderFileInfoTrait {
   ASTReader &Reader;
   ModuleFile &M;
-  HeaderSearch *HS;
-  const char *FrameworkStrings;
 
 public:
-  using external_key_type = const FileEntry *;
+  using external_key_type = FileEntryRef;
 
   struct internal_key_type {
     off_t Size;
@@ -262,12 +260,11 @@ public:
   using hash_value_type = unsigned;
   using offset_type = unsigned;
 
-  HeaderFileInfoTrait(ASTReader &Reader, ModuleFile &M, HeaderSearch *HS,
-                      const char *FrameworkStrings)
-      : Reader(Reader), M(M), HS(HS), FrameworkStrings(FrameworkStrings) {}
+  HeaderFileInfoTrait(ASTReader &Reader, ModuleFile &M)
+      : Reader(Reader), M(M) {}
 
   static hash_value_type ComputeHash(internal_key_ref ikey);
-  internal_key_type GetInternalKey(const FileEntry *FE);
+  internal_key_type GetInternalKey(external_key_type ekey);
   bool EqualKey(internal_key_ref a, internal_key_ref b);
 
   static std::pair<unsigned, unsigned>
@@ -278,7 +275,7 @@ public:
   data_type ReadData(internal_key_ref,const unsigned char *d, unsigned DataLen);
 
 private:
-  const FileEntry *getFile(const internal_key_type &Key);
+  OptionalFileEntryRef getFile(const internal_key_type &Key);
 };
 
 /// The on-disk hash table used for known header files.

@@ -148,7 +148,8 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
 
   if (!Name.empty())
     WithColor(OS, Color) << Name;
-  else if (Attr == DW_AT_decl_line || Attr == DW_AT_call_line) {
+  else if (Attr == DW_AT_decl_line || Attr == DW_AT_decl_column ||
+           Attr == DW_AT_call_line || Attr == DW_AT_call_column) {
     if (std::optional<uint64_t> Val = FormValue.getAsUnsignedConstant())
       OS << *Val;
     else
@@ -190,7 +191,8 @@ static void dumpAttribute(raw_ostream &OS, const DWARFDie &Die,
   // We have dumped the attribute raw value. For some attributes
   // having both the raw value and the pretty-printed value is
   // interesting. These attributes are handled below.
-  if (Attr == DW_AT_specification || Attr == DW_AT_abstract_origin) {
+  if (Attr == DW_AT_specification || Attr == DW_AT_abstract_origin ||
+      Attr == DW_AT_call_origin) {
     if (const char *Name =
             Die.getAttributeValueAsReferencedDie(FormValue).getName(
                 DINameKind::LinkageName))
@@ -311,13 +313,12 @@ DWARFDie::getAttributeValueAsReferencedDie(dwarf::Attribute Attr) const {
 DWARFDie
 DWARFDie::getAttributeValueAsReferencedDie(const DWARFFormValue &V) const {
   DWARFDie Result;
-  if (auto SpecRef = V.getAsRelativeReference()) {
-    if (SpecRef->Unit)
-      Result = SpecRef->Unit->getDIEForOffset(SpecRef->Unit->getOffset() +
-                                              SpecRef->Offset);
-    else if (auto SpecUnit =
-                 U->getUnitVector().getUnitForOffset(SpecRef->Offset))
-      Result = SpecUnit->getDIEForOffset(SpecRef->Offset);
+  if (std::optional<uint64_t> Offset = V.getAsRelativeReference()) {
+    Result = const_cast<DWARFUnit *>(V.getUnit())
+                 ->getDIEForOffset(V.getUnit()->getOffset() + *Offset);
+  } else if (Offset = V.getAsDebugInfoReference(); Offset) {
+    if (DWARFUnit *SpecUnit = U->getUnitVector().getUnitForOffset(*Offset))
+      Result = SpecUnit->getDIEForOffset(*Offset);
   }
   return Result;
 }
@@ -513,6 +514,7 @@ getTypeSizeImpl(DWARFDie Die, uint64_t PointerSize,
   case DW_TAG_immutable_type:
   case DW_TAG_volatile_type:
   case DW_TAG_restrict_type:
+  case DW_TAG_template_alias:
   case DW_TAG_typedef: {
     if (DWARFDie BaseType = Die.getAttributeValueAsReferencedDie(DW_AT_type))
       return getTypeSizeImpl(BaseType, PointerSize, Visited);

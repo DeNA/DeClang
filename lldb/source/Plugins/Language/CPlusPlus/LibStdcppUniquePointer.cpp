@@ -8,10 +8,10 @@
 
 #include "LibStdcpp.h"
 
-#include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/ValueObject/ValueObject.h"
 
 #include <memory>
 #include <vector>
@@ -108,14 +108,7 @@ lldb::ChildCacheState LibStdcppUniquePtrSyntheticFrontEnd::Update() {
     if (del_obj)
       m_del_obj = del_obj->Clone(ConstString("deleter")).get();
   }
-
-  if (m_ptr_obj) {
-    Status error;
-    ValueObjectSP obj_obj = m_ptr_obj->Dereference(error);
-    if (error.Success()) {
-      m_obj_obj = obj_obj->Clone(ConstString("object")).get();
-    }
-  }
+  m_obj_obj = nullptr;
 
   return lldb::ChildCacheState::eRefetch;
 }
@@ -128,8 +121,17 @@ LibStdcppUniquePtrSyntheticFrontEnd::GetChildAtIndex(uint32_t idx) {
     return m_ptr_obj->GetSP();
   if (idx == 1 && m_del_obj)
     return m_del_obj->GetSP();
-  if (idx == 2 && m_obj_obj)
-    return m_obj_obj->GetSP();
+  if (idx == 2) {
+    if (m_ptr_obj && !m_obj_obj) {
+      Status error;
+      ValueObjectSP obj_obj = m_ptr_obj->Dereference(error);
+      if (error.Success()) {
+        m_obj_obj = obj_obj->Clone(ConstString("object")).get();
+      }
+    }
+    if (m_obj_obj)
+      return m_obj_obj->GetSP();
+  }
   return lldb::ValueObjectSP();
 }
 

@@ -24,7 +24,6 @@
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/StructuredDataImpl.h"
 #include "lldb/Core/UserSettingsController.h"
-#include "lldb/Core/SwiftScratchContextReader.h"
 #include "lldb/Expression/Expression.h"
 #include "lldb/Host/ProcessLaunchInfo.h"
 #include "lldb/Interpreter/OptionValueBoolean.h"
@@ -52,7 +51,10 @@ namespace lldb_private {
 class ClangModulesDeclVendor;
 class SwiftPersistentExpressionState;
 class SharedMutex;
-class SwiftASTContextForExpressions;
+class TypeSystemSwiftTypeRefForExpressions;
+typedef std::shared_ptr<TypeSystemSwiftTypeRefForExpressions>
+    TypeSystemSwiftTypeRefForExpressionsSP;
+
 
 OptionEnumValues GetDynamicValueTypes();
 
@@ -129,6 +131,10 @@ public:
   void SetDisableSTDIO(bool b);
 
   const char *GetDisassemblyFlavor() const;
+
+  const char *GetDisassemblyCPU() const;
+
+  const char *GetDisassemblyFeatures() const;
 
   InlineStrategy GetInlineStrategy() const;
 
@@ -214,6 +220,8 @@ public:
 
   bool GetEnableSyntheticValue() const;
 
+  bool ShowHexVariableValuesWithLeadingZeroes() const;
+
   uint32_t GetMaxZeroPaddingInFloatFormat() const;
 
   uint32_t GetMaximumNumberOfChildrenToDisplay() const;
@@ -289,8 +297,6 @@ public:
 
   bool GetInjectLocalVariables(ExecutionContext *exe_ctx) const;
 
-  void SetInjectLocalVariables(ExecutionContext *exe_ctx, bool b);
-
   void SetRequireHardwareBreakpoints(bool b);
 
   bool GetRequireHardwareBreakpoints() const;
@@ -310,6 +316,10 @@ public:
   bool GetEnableTrampolineSupport() const;
 
 private:
+  std::optional<bool>
+  GetExperimentalPropertyValue(size_t prop_idx,
+                               ExecutionContext *exe_ctx = nullptr) const;
+
   // Callbacks for m_launch_info.
   void Arg0ValueChangedCallback();
   void RunArgsValueChangedCallback();
@@ -593,9 +603,9 @@ public:
 
   // These two functions fill out the Broadcaster interface:
 
-  static ConstString &GetStaticBroadcasterClass();
+  static llvm::StringRef GetStaticBroadcasterClass();
 
-  ConstString &GetBroadcasterClass() const override {
+  llvm::StringRef GetBroadcasterClass() const override {
     return GetStaticBroadcasterClass();
   }
 
@@ -750,6 +760,8 @@ public:
 
   lldb::BreakpointSP GetBreakpointByID(lldb::break_id_t break_id);
 
+  lldb::BreakpointSP CreateBreakpointAtUserEntry(Status &error);
+
   // Use this to create a file and line breakpoint to a given module or all
   // module it is nullptr
   lldb::BreakpointSP CreateBreakpoint(const FileSpecList *containingModules,
@@ -857,9 +869,10 @@ public:
   WatchpointList &GetWatchpointList() { return m_watchpoint_list; }
 
   // Manages breakpoint names:
-  void AddNameToBreakpoint(BreakpointID &id, const char *name, Status &error);
+  void AddNameToBreakpoint(BreakpointID &id, llvm::StringRef name,
+                           Status &error);
 
-  void AddNameToBreakpoint(lldb::BreakpointSP &bp_sp, const char *name,
+  void AddNameToBreakpoint(lldb::BreakpointSP &bp_sp, llvm::StringRef name,
                            Status &error);
 
   void RemoveNameFromBreakpoint(lldb::BreakpointSP &bp_sp, ConstString name);
@@ -1159,9 +1172,11 @@ public:
   // section, then read from the file cache
   // 2 - if there is a process, then read from memory
   // 3 - if there is no process, then read from the file cache
-  size_t ReadMemory(const Address &addr, void *dst, size_t dst_len,
-                    Status &error, bool force_live_memory = false,
-                    lldb::addr_t *load_addr_ptr = nullptr);
+  //
+  // The method is virtual for mocking in the unit tests.
+  virtual size_t ReadMemory(const Address &addr, void *dst, size_t dst_len,
+                            Status &error, bool force_live_memory = false,
+                            lldb::addr_t *load_addr_ptr = nullptr);
 
   size_t ReadCStringFromMemory(const Address &addr, std::string &out_str,
                                Status &error, bool force_live_memory = false);
@@ -1237,19 +1252,13 @@ public:
 
   llvm::Expected<lldb::TypeSystemSP>
   GetScratchTypeSystemForLanguage(lldb::LanguageType language,
-                                  bool create_on_demand = true,
-                                  const char *compiler_options = nullptr);
+                                  bool create_on_demand = true);
 
   std::vector<lldb::TypeSystemSP>
   GetScratchTypeSystems(bool create_on_demand = true);
 
   PersistentExpressionState *
   GetPersistentExpressionStateForLanguage(lldb::LanguageType language);
-
-#ifdef LLDB_ENABLE_SWIFT
-  SwiftPersistentExpressionState *
-  GetSwiftPersistentExpressionState(ExecutionContextScope &exe_scope);
-#endif // LLDB_ENABLE_SWIFT
 
   const TypeSystemMap &GetTypeSystemMap();
 
@@ -1283,26 +1292,13 @@ public:
   CreateUtilityFunction(std::string expression, std::string name,
                         lldb::LanguageType language, ExecutionContext &exe_ctx);
 
-
 #ifdef LLDB_ENABLE_SWIFT
-  /// Get the lock guarding the scratch typesystem from being re-initialized.
-  std::shared_mutex &GetSwiftScratchContextLock() {
-    return m_scratch_typesystem_lock;
-  }
-
-  std::optional<SwiftScratchContextReader>
-  GetSwiftScratchContext(Status &error, ExecutionContextScope &exe_scope,
-                         bool create_on_demand = true);
-
   /// Return whether this is the Swift REPL.
   bool IsSwiftREPL();
 
   bool IsSwiftCxxInteropEnabled();
 
   bool IsEmbeddedSwift();
-private:
-  void DisplayFallbackSwiftContextErrors(
-      SwiftASTContextForExpressions *swift_ast_ctx);
 #endif // LLDB_ENABLE_SWIFT
 
 public:
@@ -1577,14 +1573,6 @@ public:
 
   void SetREPL(lldb::LanguageType language, lldb::REPLSP repl_sp);
 
-  /// Enable the use of a separate sscratch type system per lldb::Module.
-  void SetUseScratchTypesystemPerModule(bool value) {
-    m_use_scratch_typesystem_per_module = value;
-  }
-  bool UseScratchTypesystemPerModule() const {
-    return m_use_scratch_typesystem_per_module;
-  }
-
 public:
   StackFrameRecognizerManager &GetFrameRecognizerManager() {
     return *m_frame_recognizer_manager_up;
@@ -1716,14 +1704,7 @@ protected:
   /// signals you will have.
   llvm::StringMap<DummySignalValues> m_dummy_signals;
 
-  bool m_use_scratch_typesystem_per_module = false;
   bool m_did_display_scratch_fallback_warning = false;
-  typedef std::pair<lldb_private::Module *, char> ModuleLanguage;
-  llvm::DenseMap<ModuleLanguage, lldb::TypeSystemSP>
-      m_scratch_typesystem_for_module;
-
-  /// Guards the scratch typesystem from being re-initialized.
-  std::shared_mutex m_scratch_typesystem_lock;
 
   static void ImageSearchPathsChanged(const PathMappingList &path_list,
                                       void *baton);
@@ -1743,11 +1724,12 @@ public:
   ///
   /// \return
   ///     Returns a JSON value that contains all target metrics.
-  llvm::json::Value ReportStatistics();
+  llvm::json::Value
+  ReportStatistics(const lldb_private::StatisticsOptions &options);
 
   TargetStats &GetStatistics() { return m_stats; }
 
-private:
+protected:
   /// Construct with optional file and arch.
   ///
   /// This member is private. Clients must use
@@ -1778,12 +1760,6 @@ private:
 #ifdef LLDB_ENABLE_SWIFT
   LazyBool m_is_swift_cxx_interop_enabled = eLazyBoolCalculate;
 #endif // LLDB_ENABLE_SWIFT
-
-private:
-  void CallLocateModuleCallbackIfSet(const ModuleSpec &module_spec,
-                                     lldb::ModuleSP &module_sp,
-                                     FileSpec &symbol_file_spec,
-                                     bool &did_create_module);
 };
 
 } // namespace lldb_private

@@ -118,7 +118,13 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
     FileSpec dsym_fspec(module_sp->GetSymbolFileFileSpec());
 
     ObjectFileSP dsym_objfile_sp;
-    if (!dsym_fspec) {
+    // On Darwin, we store the debug information either in object files,
+    // using the debug map to tie them to the executable, or in a dSYM.  We
+    // pass through this routine both for binaries and for .o files, but in the
+    // latter case there will never be an external debug file.  So we shouldn't
+    // do all the stats needed to find it.
+    if (!dsym_fspec && module_sp->GetObjectFile()->CalculateType() !=
+        ObjectFile::eTypeObjectFile) {
       // No symbol file was specified in the module, lets try and find one
       // ourselves.
       FileSpec file_spec = obj_file->GetFileSpec();
@@ -223,7 +229,7 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
                           [&module_sp, new_style_source_remapping_dictionary,
                            original_DBGSourcePath_value,
                            do_truncate_remapping_names](
-                              ConstString key,
+                              llvm::StringRef key,
                               StructuredData::Object *object) -> bool {
                             if (object && object->GetAsString()) {
 
@@ -236,7 +242,7 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
                                 DBGSourcePath = original_DBGSourcePath_value;
                               }
                               module_sp->GetSourceMappingList().Append(
-                                  key.GetStringRef(), DBGSourcePath, true);
+                                  key, DBGSourcePath, true);
                               // With version 2 of DBGSourcePathRemapping, we
                               // can chop off the last two filename parts
                               // from the source remapping and get a more
@@ -244,7 +250,7 @@ SymbolVendorMacOSX::CreateInstance(const lldb::ModuleSP &module_sp,
                               // Add this as another option in addition to
                               // the full source path remap.
                               if (do_truncate_remapping_names) {
-                                FileSpec build_path(key.AsCString());
+                                FileSpec build_path(key);
                                 FileSpec source_path(DBGSourcePath.c_str());
                                 build_path.RemoveLastPathComponent();
                                 build_path.RemoveLastPathComponent();

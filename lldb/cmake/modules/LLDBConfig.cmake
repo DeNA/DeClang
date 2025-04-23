@@ -18,12 +18,6 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
     "`CMakeFiles'. Please delete them.")
 endif()
 
-set(LLDB_LINKER_SUPPORTS_GROUPS OFF)
-if (LLVM_COMPILER_IS_GCC_COMPATIBLE AND NOT "${CMAKE_SYSTEM_NAME}" MATCHES "Darwin")
-  # The Darwin linker doesn't understand --start-group/--end-group.
-  set(LLDB_LINKER_SUPPORTS_GROUPS ON)
-endif()
-
 macro(add_optional_dependency variable description package found)
   cmake_parse_arguments(ARG
     "QUIET"
@@ -162,13 +156,15 @@ if(APPLE AND CMAKE_GENERATOR STREQUAL Xcode)
   endif()
 endif()
 
-if (NOT CMAKE_SYSTEM_NAME MATCHES "Windows")
-  set(LLDB_EXPORT_ALL_SYMBOLS 0 CACHE BOOL
-    "Causes lldb to export all symbols when building liblldb.")
-else()
-  # Windows doesn't support toggling this, so don't bother making it a
-  # cache variable.
-  set(LLDB_EXPORT_ALL_SYMBOLS 0)
+set(LLDB_EXPORT_ALL_SYMBOLS 0 CACHE BOOL
+  "Causes lldb to export some private symbols when building liblldb. See lldb/source/API/liblldb-private.exports for the full list of symbols that get exported.")
+
+set(LLDB_EXPORT_ALL_SYMBOLS_EXPORTS_FILE "" CACHE PATH
+  "When `LLDB_EXPORT_ALL_SYMBOLS` is enabled, this specifies the exports file to use when building liblldb.")
+
+if (CMAKE_SYSTEM_NAME MATCHES "Windows")
+  set(LLDB_EXPORT_ALL_SYMBOLS_PLUGINS "" CACHE STRING
+    "When `LLDB_EXPORT_ALL_SYMBOLS` is enabled, this specifies the plugins whose symbols should be exported.")
 endif()
 
 if ((NOT MSVC) OR MSVC12)
@@ -238,25 +234,21 @@ endif()
 # printed. Therefore, check for whether the compiler supports options in the
 # form -W<foo>, and if supported, add the corresponding -Wno-<foo> option.
 
-# Disable GCC warnings
-check_cxx_compiler_flag("-Wdeprecated-declarations" CXX_SUPPORTS_DEPRECATED_DECLARATIONS)
-append_if(CXX_SUPPORTS_DEPRECATED_DECLARATIONS "-Wno-deprecated-declarations" CMAKE_CXX_FLAGS)
+if (LLVM_COMPILER_IS_GCC_COMPATIBLE)
+  # Disable GCC warnings
+  append("-Wno-deprecated-declarations" CMAKE_CXX_FLAGS)
+  append("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
+  append("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
 
-check_cxx_compiler_flag("-Wunknown-pragmas" CXX_SUPPORTS_UNKNOWN_PRAGMAS)
-append_if(CXX_SUPPORTS_UNKNOWN_PRAGMAS "-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
-
-check_cxx_compiler_flag("-Wstrict-aliasing" CXX_SUPPORTS_STRICT_ALIASING)
-append_if(CXX_SUPPORTS_STRICT_ALIASING "-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
-
-check_cxx_compiler_flag("-Wstringop-truncation" CXX_SUPPORTS_STRINGOP_TRUNCATION)
-append_if(CXX_SUPPORTS_STRINGOP_TRUNCATION "-Wno-stringop-truncation" CMAKE_CXX_FLAGS)
+  check_cxx_compiler_flag("-Wstringop-truncation" CXX_SUPPORTS_STRINGOP_TRUNCATION)
+  append_if(CXX_SUPPORTS_STRINGOP_TRUNCATION "-Wno-stringop-truncation" CMAKE_CXX_FLAGS)
+endif()
 
 # Disable Clang warnings
-check_cxx_compiler_flag("-Wdeprecated-register" CXX_SUPPORTS_DEPRECATED_REGISTER)
-append_if(CXX_SUPPORTS_DEPRECATED_REGISTER "-Wno-deprecated-register" CMAKE_CXX_FLAGS)
-
-check_cxx_compiler_flag("-Wvla-extension" CXX_SUPPORTS_VLA_EXTENSION)
-append_if(CXX_SUPPORTS_VLA_EXTENSION "-Wno-vla-extension" CMAKE_CXX_FLAGS)
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  append("-Wno-deprecated-register" CMAKE_CXX_FLAGS)
+  append("-Wno-vla-extension" CMAKE_CXX_FLAGS)
+endif()
 
 # Disable MSVC warnings
 if( MSVC )
@@ -268,6 +260,7 @@ if( MSVC )
     -wd4251 # Suppress 'warning C4251: T must have dll-interface to be used by clients of class U.'
     -wd4521 # Suppress 'warning C4521: 'type' : multiple copy constructors specified'
     -wd4530 # Suppress 'warning C4530: C++ exception handler used, but unwind semantics are not enabled.'
+    -wd4589 # Suppress 'warning C4589: Constructor of abstract class 'lldb_private::NativeRegisterContextDBReg_x86' ignores initializer for virtual base class 'lldb_private::NativeRegisterContextRegisterInfo''
   )
 endif()
 
@@ -332,7 +325,7 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     )
 
   add_custom_target(lldb-headers)
-  set_target_properties(lldb-headers PROPERTIES FOLDER "lldb misc")
+  set_target_properties(lldb-headers PROPERTIES FOLDER "LLDB/Resources")
 
   if (NOT CMAKE_CONFIGURATION_TYPES)
     add_llvm_install_targets(install-lldb-headers
@@ -380,21 +373,6 @@ endif()
 if ((CMAKE_SYSTEM_NAME MATCHES "Android") AND LLVM_BUILD_STATIC AND
     ((ANDROID_ABI MATCHES "armeabi") OR (ANDROID_ABI MATCHES "mips")))
   add_definitions(-DANDROID_USE_ACCEPT_WORKAROUND)
-endif()
-
-if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-  check_cxx_source_compiles(
-    "#include <asm/ptrace.h>
-     struct user_sve_header hdr;
-     int main(void){return 0;}
-    "
-    user_sve_header_available)
-  if(user_sve_header_available)
-    set(LLDB_HAVE_USER_SVE_HEADER ON)
-    message(STATUS "AArch64 SVE support enabled.")
-  else()
-    message(STATUS "AArch64 SVE support disabled.")
-  endif()
 endif()
 
 include(LLDBGenerateConfig)

@@ -29,7 +29,8 @@ SelfExecutorProcessControl::SelfExecutorProcessControl(
     std::shared_ptr<SymbolStringPool> SSP, std::unique_ptr<TaskDispatcher> D,
     Triple TargetTriple, unsigned PageSize,
     std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr)
-    : ExecutorProcessControl(std::move(SSP), std::move(D)) {
+    : ExecutorProcessControl(std::move(SSP), std::move(D)),
+      InProcessMemoryAccess(TargetTriple.isArch64Bit()) {
 
   OwnedMemMgr = std::move(MemMgr);
   if (!OwnedMemMgr)
@@ -60,13 +61,8 @@ SelfExecutorProcessControl::Create(
   if (!SSP)
     SSP = std::make_shared<SymbolStringPool>();
 
-  if (!D) {
-#if LLVM_ENABLE_THREADS
-    D = std::make_unique<DynamicThreadPoolTaskDispatcher>();
-#else
+  if (!D)
     D = std::make_unique<InPlaceTaskDispatcher>();
-#endif
-  }
 
   auto PageSize = sys::Process::getPageSize();
   if (!PageSize)
@@ -88,13 +84,14 @@ SelfExecutorProcessControl::loadDylib(const char *DylibPath) {
   return ExecutorAddr::fromPtr(Dylib.getOSSpecificHandle());
 }
 
-Expected<std::vector<tpctypes::LookupResult>>
-SelfExecutorProcessControl::lookupSymbols(ArrayRef<LookupRequest> Request) {
+void SelfExecutorProcessControl::lookupSymbolsAsync(
+    ArrayRef<LookupRequest> Request,
+    ExecutorProcessControl::SymbolLookupCompleteFn Complete) {
   std::vector<tpctypes::LookupResult> R;
 
   for (auto &Elem : Request) {
     sys::DynamicLibrary Dylib(Elem.Handle.toPtr<void *>());
-    R.push_back(std::vector<ExecutorAddr>());
+    R.push_back(std::vector<ExecutorSymbolDef>());
     for (auto &KV : Elem.Symbols) {
       auto &Sym = KV.first;
       std::string Tmp((*Sym).data() + !!GlobalManglingPrefix,
@@ -104,13 +101,16 @@ SelfExecutorProcessControl::lookupSymbols(ArrayRef<LookupRequest> Request) {
         // FIXME: Collect all failing symbols before erroring out.
         SymbolNameVector MissingSymbols;
         MissingSymbols.push_back(Sym);
-        return make_error<SymbolsNotFound>(SSP, std::move(MissingSymbols));
+        return Complete(
+            make_error<SymbolsNotFound>(SSP, std::move(MissingSymbols)));
       }
-      R.back().push_back(ExecutorAddr::fromPtr(Addr));
+      // FIXME: determine accurate JITSymbolFlags.
+      R.back().push_back(
+          {ExecutorAddr::fromPtr(Addr), JITSymbolFlags::Exported});
     }
   }
 
-  return R;
+  Complete(std::move(R));
 }
 
 Expected<int32_t>
@@ -146,38 +146,51 @@ Error SelfExecutorProcessControl::disconnect() {
   return Error::success();
 }
 
-void SelfExecutorProcessControl::writeUInt8sAsync(
-    ArrayRef<tpctypes::UInt8Write> Ws, WriteResultFn OnWriteComplete) {
+void InProcessMemoryAccess::writeUInt8sAsync(ArrayRef<tpctypes::UInt8Write> Ws,
+                                             WriteResultFn OnWriteComplete) {
   for (auto &W : Ws)
     *W.Addr.toPtr<uint8_t *>() = W.Value;
   OnWriteComplete(Error::success());
 }
 
-void SelfExecutorProcessControl::writeUInt16sAsync(
+void InProcessMemoryAccess::writeUInt16sAsync(
     ArrayRef<tpctypes::UInt16Write> Ws, WriteResultFn OnWriteComplete) {
   for (auto &W : Ws)
     *W.Addr.toPtr<uint16_t *>() = W.Value;
   OnWriteComplete(Error::success());
 }
 
-void SelfExecutorProcessControl::writeUInt32sAsync(
+void InProcessMemoryAccess::writeUInt32sAsync(
     ArrayRef<tpctypes::UInt32Write> Ws, WriteResultFn OnWriteComplete) {
   for (auto &W : Ws)
     *W.Addr.toPtr<uint32_t *>() = W.Value;
   OnWriteComplete(Error::success());
 }
 
-void SelfExecutorProcessControl::writeUInt64sAsync(
+void InProcessMemoryAccess::writeUInt64sAsync(
     ArrayRef<tpctypes::UInt64Write> Ws, WriteResultFn OnWriteComplete) {
   for (auto &W : Ws)
     *W.Addr.toPtr<uint64_t *>() = W.Value;
   OnWriteComplete(Error::success());
 }
 
-void SelfExecutorProcessControl::writeBuffersAsync(
+void InProcessMemoryAccess::writeBuffersAsync(
     ArrayRef<tpctypes::BufferWrite> Ws, WriteResultFn OnWriteComplete) {
   for (auto &W : Ws)
     memcpy(W.Addr.toPtr<char *>(), W.Buffer.data(), W.Buffer.size());
+  OnWriteComplete(Error::success());
+}
+
+void InProcessMemoryAccess::writePointersAsync(
+    ArrayRef<tpctypes::PointerWrite> Ws, WriteResultFn OnWriteComplete) {
+  if (IsArch64Bit) {
+    for (auto &W : Ws)
+      *W.Addr.toPtr<uint64_t *>() = W.Value.getValue();
+  } else {
+    for (auto &W : Ws)
+      *W.Addr.toPtr<uint32_t *>() = static_cast<uint32_t>(W.Value.getValue());
+  }
+
   OnWriteComplete(Error::success());
 }
 

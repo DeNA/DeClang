@@ -29,6 +29,7 @@ add_lldb_library(lldbUtility NO_INTERNAL_DEPENDENCIES
   Args.cpp
   Baton.cpp
   Broadcaster.cpp
+  Checksum.cpp
   CompletionRequest.cpp
   Connection.cpp
   ConstString.cpp
@@ -37,6 +38,7 @@ add_lldb_library(lldbUtility NO_INTERNAL_DEPENDENCIES
   DataEncoder.cpp
   DataExtractor.cpp
   Diagnostics.cpp
+  DiagnosticsRendering.cpp
   Environment.cpp
   ErrorMessages.cpp
   Event.cpp

@@ -110,7 +110,7 @@ AND call SWIG_fail at the same time, because it will result in a double free.
         SWIG_fail;
       }
 
-      if (llvm::StringRef(type_name.get()).startswith("SB")) {
+      if (llvm::StringRef(type_name.get()).starts_with("SB")) {
         std::string error_msg = "Input type is invalid: " + type_name.get();
         PyErr_SetString(PyExc_TypeError, error_msg.c_str());
         SWIG_fail;
@@ -257,7 +257,8 @@ AND call SWIG_fail at the same time, because it will result in a double free.
 }
 // For SBProcess::WriteMemory, SBTarget::GetInstructions and SBDebugger::DispatchInput.
 %typemap(in) (const void *buf, size_t size),
-             (const void *data, size_t data_len) {
+             (const void *data, size_t data_len),
+             (const void *buf, uint64_t size) {
   if (PythonString::Check($input)) {
     PythonString str(PyRefType::Borrowed, $input);
     $1 = (void *)str.GetString().data();

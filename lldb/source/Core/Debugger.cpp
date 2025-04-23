@@ -17,12 +17,12 @@
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Progress.h"
 #include "lldb/Core/StreamAsynchronousIO.h"
-#include "lldb/Core/StreamFile.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/Expression/REPL.h"
 #include "lldb/Host/File.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
+#include "lldb/Host/StreamFile.h"
 #include "lldb/Host/Terminal.h"
 #include "lldb/Host/ThreadLauncher.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
@@ -104,7 +104,7 @@ static std::recursive_mutex *g_debugger_list_mutex_ptr =
     nullptr; // NOTE: intentional leak to avoid issues with C++ destructor chain
 static Debugger::DebuggerList *g_debugger_list_ptr =
     nullptr; // NOTE: intentional leak to avoid issues with C++ destructor chain
-static llvm::ThreadPool *g_thread_pool = nullptr;
+static llvm::DefaultThreadPool *g_thread_pool = nullptr;
 
 static constexpr OptionEnumValueElement g_show_disassembly_enum_values[] = {
     {
@@ -258,7 +258,7 @@ Status Debugger::SetPropertyValue(const ExecutionContext *exe_ctx,
         StreamString feedback_stream;
         if (!target_sp->LoadScriptingResources(errors, feedback_stream)) {
           Stream &s = GetErrorStream();
-          for (auto error : errors) {
+          for (auto &error : errors) {
             s.Printf("%s\n", error.AsCString());
           }
           if (feedback_stream.GetSize())
@@ -371,11 +371,29 @@ uint64_t Debugger::GetTerminalWidth() const {
 }
 
 bool Debugger::SetTerminalWidth(uint64_t term_width) {
+  const uint32_t idx = ePropertyTerminalWidth;
+  const bool success = SetPropertyAtIndex(idx, term_width);
+
   if (auto handler_sp = m_io_handler_stack.Top())
     handler_sp->TerminalSizeChanged();
 
-  const uint32_t idx = ePropertyTerminalWidth;
-  return SetPropertyAtIndex(idx, term_width);
+  return success;
+}
+
+uint64_t Debugger::GetTerminalHeight() const {
+  const uint32_t idx = ePropertyTerminalHeight;
+  return GetPropertyAtIndexAs<uint64_t>(
+      idx, g_debugger_properties[idx].default_uint_value);
+}
+
+bool Debugger::SetTerminalHeight(uint64_t term_height) {
+  const uint32_t idx = ePropertyTerminalHeight;
+  const bool success = SetPropertyAtIndex(idx, term_height);
+
+  if (auto handler_sp = m_io_handler_stack.Top())
+    handler_sp->TerminalSizeChanged();
+
+  return success;
 }
 
 bool Debugger::GetUseExternalEditor() const {
@@ -450,6 +468,18 @@ llvm::StringRef Debugger::GetAutosuggestionAnsiPrefix() const {
 
 llvm::StringRef Debugger::GetAutosuggestionAnsiSuffix() const {
   const uint32_t idx = ePropertyShowAutosuggestionAnsiSuffix;
+  return GetPropertyAtIndexAs<llvm::StringRef>(
+      idx, g_debugger_properties[idx].default_cstr_value);
+}
+
+llvm::StringRef Debugger::GetRegexMatchAnsiPrefix() const {
+  const uint32_t idx = ePropertyShowRegexMatchAnsiPrefix;
+  return GetPropertyAtIndexAs<llvm::StringRef>(
+      idx, g_debugger_properties[idx].default_cstr_value);
+}
+
+llvm::StringRef Debugger::GetRegexMatchAnsiSuffix() const {
+  const uint32_t idx = ePropertyShowRegexMatchAnsiSuffix;
   return GetPropertyAtIndexAs<llvm::StringRef>(
       idx, g_debugger_properties[idx].default_cstr_value);
 }
@@ -580,7 +610,18 @@ lldb::DWIMPrintVerbosity Debugger::GetDWIMPrintVerbosity() const {
   const uint32_t idx = ePropertyDWIMPrintVerbosity;
   return GetPropertyAtIndexAs<lldb::DWIMPrintVerbosity>(
       idx, static_cast<lldb::DWIMPrintVerbosity>(
-               g_debugger_properties[idx].default_uint_value));
+               g_debugger_properties[idx].default_uint_value != 0));
+}
+
+bool Debugger::GetShowInlineDiagnostics() const {
+  const uint32_t idx = ePropertyShowInlineDiagnostics;
+  return GetPropertyAtIndexAs<bool>(
+      idx, g_debugger_properties[idx].default_uint_value);
+}
+
+bool Debugger::SetShowInlineDiagnostics(bool b) {
+  const uint32_t idx = ePropertyShowInlineDiagnostics;
+  return SetPropertyAtIndex(idx, b);
 }
 
 #pragma mark Debugger
@@ -597,7 +638,7 @@ void Debugger::Initialize(LoadPluginCallbackType load_plugin_callback) {
          "Debugger::Initialize called more than once!");
   g_debugger_list_mutex_ptr = new std::recursive_mutex();
   g_debugger_list_ptr = new DebuggerList();
-  g_thread_pool = new llvm::ThreadPool(llvm::optimal_concurrency());
+  g_thread_pool = new llvm::DefaultThreadPool(llvm::optimal_concurrency());
   g_load_plugin_callback = load_plugin_callback;
 }
 
@@ -643,7 +684,7 @@ bool Debugger::LoadPlugin(const FileSpec &spec, Status &error) {
     // The g_load_plugin_callback is registered in SBDebugger::Initialize() and
     // if the public API layer isn't available (code is linking against all of
     // the internal LLDB static libraries), then we can't load plugins
-    error.SetErrorString("Public API layer is not available");
+    error = Status::FromErrorString("Public API layer is not available");
   }
   return false;
 }
@@ -731,9 +772,22 @@ DebuggerSP Debugger::CreateInstance(lldb::LogOutputCallback log_callback,
 }
 
 void Debugger::HandleDestroyCallback() {
-  if (m_destroy_callback) {
-    m_destroy_callback(GetID(), m_destroy_callback_baton);
-    m_destroy_callback = nullptr;
+  const lldb::user_id_t user_id = GetID();
+  // Invoke and remove all the callbacks in an FIFO order. Callbacks which are
+  // added during this loop will be appended, invoked and then removed last.
+  // Callbacks which are removed during this loop will not be invoked.
+  while (true) {
+    DestroyCallbackInfo callback_info;
+    {
+      std::lock_guard<std::mutex> guard(m_destroy_callback_mutex);
+      if (m_destroy_callbacks.empty())
+        break;
+      // Pop the first item in the list
+      callback_info = m_destroy_callbacks.front();
+      m_destroy_callbacks.erase(m_destroy_callbacks.begin());
+    }
+    // Call the destroy callback with user id and baton
+    callback_info.callback(user_id, callback_info.baton);
   }
 }
 
@@ -748,9 +802,10 @@ void Debugger::Destroy(DebuggerSP &debugger_sp) {
     CommandReturnObject result(debugger_sp->GetUseColor());
     cmd_interpreter.SaveTranscript(result);
     if (result.Succeeded())
-      (*debugger_sp->GetAsyncOutputStream()) << result.GetOutputData() << '\n';
+      (*debugger_sp->GetAsyncOutputStream())
+          << result.GetOutputString() << '\n';
     else
-      (*debugger_sp->GetAsyncErrorStream()) << result.GetErrorData() << '\n';
+      (*debugger_sp->GetAsyncErrorStream()) << result.GetErrorString() << '\n';
   }
 
   debugger_sp->Clear();
@@ -811,8 +866,8 @@ TargetSP Debugger::FindTargetWithProcess(Process *process) {
   return target_sp;
 }
 
-ConstString Debugger::GetStaticBroadcasterClass() {
-  static ConstString class_name("lldb.debugger");
+llvm::StringRef Debugger::GetStaticBroadcasterClass() {
+  static constexpr llvm::StringLiteral class_name("lldb.debugger");
   return class_name;
 }
 
@@ -834,7 +889,7 @@ Debugger::Debugger(lldb::LogOutputCallback log_callback, void *baton)
       m_loaded_plugins(), m_event_handler_thread(), m_io_handler_thread(),
       m_sync_broadcaster(nullptr, "lldb.debugger.sync"),
       m_broadcaster(m_broadcaster_manager_sp,
-                    GetStaticBroadcasterClass().AsCString()),
+                    GetStaticBroadcasterClass().str()),
       m_forward_listener_sp(), m_clear_once() {
   // Initialize the debugger properties as early as possible as other parts of
   // LLDB will start querying them during construction.
@@ -848,6 +903,9 @@ Debugger::Debugger(lldb::LogOutputCallback log_callback, void *baton)
   m_collection_sp->AppendProperty(
       "symbols", "Symbol lookup and cache settings.", true,
       ModuleList::GetGlobalModuleListProperties().GetValueProperties());
+  m_collection_sp->AppendProperty(
+      LanguageProperties::GetSettingName(), "Language settings.", true,
+      Language::GetGlobalLanguageProperties().GetValueProperties());
   if (m_command_interpreter_up) {
     m_collection_sp->AppendProperty(
         "interpreter",
@@ -879,7 +937,11 @@ Debugger::Debugger(lldb::LogOutputCallback log_callback, void *baton)
       m_collection_sp->GetPropertyAtIndexAsOptionValueUInt64(
           ePropertyTerminalWidth);
   term_width->SetMinimumValue(10);
-  term_width->SetMaximumValue(1024);
+
+  OptionValueUInt64 *term_height =
+      m_collection_sp->GetPropertyAtIndexAsOptionValueUInt64(
+          ePropertyTerminalHeight);
+  term_height->SetMinimumValue(10);
 
   // Turn off use-color if this is a dumb terminal.
   const char *term = getenv("TERM");
@@ -931,7 +993,7 @@ void Debugger::Clear() {
     for (TargetSP target_sp : m_target_list.Targets()) {
       if (target_sp) {
         if (ProcessSP process_sp = target_sp->GetProcessSP())
-          process_sp->Finalize();
+          process_sp->Finalize(false /* not destructing */);
         target_sp->Destroy();
       }
     }
@@ -947,15 +1009,6 @@ void Debugger::Clear() {
     if (Diagnostics::Enabled())
       Diagnostics::Instance().RemoveCallback(m_diagnostics_callback_id);
   });
-}
-
-bool Debugger::GetCloseInputOnEOF() const {
-  //    return m_input_comm.GetCloseOnEOF();
-  return false;
-}
-
-void Debugger::SetCloseInputOnEOF(bool b) {
-  //    m_input_comm.SetCloseOnEOF(b);
 }
 
 bool Debugger::GetAsyncExecution() {
@@ -983,18 +1036,18 @@ Status Debugger::SetInputString(const char *data) {
   int fds[2] = {-1, -1};
 
   if (data == nullptr) {
-    result.SetErrorString("String data is null");
+    result = Status::FromErrorString("String data is null");
     return result;
   }
 
   size_t size = strlen(data);
   if (size == 0) {
-    result.SetErrorString("String data is empty");
+    result = Status::FromErrorString("String data is empty");
     return result;
   }
 
   if (OpenPipe(fds, size) != 0) {
-    result.SetErrorString(
+    result = Status::FromErrorString(
         "can't create pipe file descriptors for LLDB commands");
     return result;
   }
@@ -1009,9 +1062,10 @@ Status Debugger::SetInputString(const char *data) {
   // handle.
   FILE *commands_file = fdopen(fds[READ], "rb");
   if (commands_file == nullptr) {
-    result.SetErrorStringWithFormat("fdopen(%i, \"rb\") failed (errno = %i) "
-                                    "when trying to open LLDB commands pipe",
-                                    fds[READ], errno);
+    result = Status::FromErrorStringWithFormat(
+        "fdopen(%i, \"rb\") failed (errno = %i) "
+        "when trying to open LLDB commands pipe",
+        fds[READ], errno);
     llvm::sys::Process::SafelyCloseFileDescriptor(fds[READ]);
     return result;
   }
@@ -1109,9 +1163,6 @@ void Debugger::RunIOHandlerSync(const IOHandlerSP &reader_sp) {
   IOHandlerSP top_reader_sp = reader_sp;
 
   while (top_reader_sp) {
-    if (!top_reader_sp)
-      break;
-
     top_reader_sp->Run();
 
     // Don't unwind past the starting point.
@@ -1340,17 +1391,17 @@ bool Debugger::InterruptRequested() {
   return GetCommandInterpreter().WasInterrupted();
 }
 
-Debugger::InterruptionReport::InterruptionReport(std::string function_name, 
-    const llvm::formatv_object_base &payload) :  
-        m_function_name(std::move(function_name)), 
-        m_interrupt_time(std::chrono::system_clock::now()),
-        m_thread_id(llvm::get_threadid()) {
+Debugger::InterruptionReport::InterruptionReport(
+    std::string function_name, const llvm::formatv_object_base &payload)
+    : m_function_name(std::move(function_name)),
+      m_interrupt_time(std::chrono::system_clock::now()),
+      m_thread_id(llvm::get_threadid()) {
   llvm::raw_string_ostream desc(m_description);
   desc << payload << "\n";
 }
 
 void Debugger::ReportInterruption(const InterruptionReport &report) {
-    // For now, just log the description:
+  // For now, just log the description:
   Log *log = GetLog(LLDBLog::Host);
   LLDB_LOG(log, "Interruption: {0}", report.m_description);
 }
@@ -1463,8 +1514,30 @@ void Debugger::SetLoggingCallback(lldb::LogOutputCallback log_callback,
 
 void Debugger::SetDestroyCallback(
     lldb_private::DebuggerDestroyCallback destroy_callback, void *baton) {
-  m_destroy_callback = destroy_callback;
-  m_destroy_callback_baton = baton;
+  std::lock_guard<std::mutex> guard(m_destroy_callback_mutex);
+  m_destroy_callbacks.clear();
+  const lldb::callback_token_t token = m_destroy_callback_next_token++;
+  m_destroy_callbacks.emplace_back(token, destroy_callback, baton);
+}
+
+lldb::callback_token_t Debugger::AddDestroyCallback(
+    lldb_private::DebuggerDestroyCallback destroy_callback, void *baton) {
+  std::lock_guard<std::mutex> guard(m_destroy_callback_mutex);
+  const lldb::callback_token_t token = m_destroy_callback_next_token++;
+  m_destroy_callbacks.emplace_back(token, destroy_callback, baton);
+  return token;
+}
+
+bool Debugger::RemoveDestroyCallback(lldb::callback_token_t token) {
+  std::lock_guard<std::mutex> guard(m_destroy_callback_mutex);
+  for (auto it = m_destroy_callbacks.begin(); it != m_destroy_callbacks.end();
+       ++it) {
+    if (it->token == token) {
+      m_destroy_callbacks.erase(it);
+      return true;
+    }
+  }
+  return false;
 }
 
 static void PrivateReportProgress(Debugger &debugger, uint64_t progress_id,
@@ -1883,7 +1956,8 @@ void Debugger::HandleThreadEvent(const EventSP &event_sp) {
     ThreadSP thread_sp(
         Thread::ThreadEventData::GetThreadFromEvent(event_sp.get()));
     if (thread_sp) {
-      thread_sp->GetStatus(*GetAsyncOutputStream(), 0, 1, 1, stop_format);
+      thread_sp->GetStatus(*GetAsyncOutputStream(), 0, 1, 1, stop_format,
+                           /*show_hidden*/ true);
     }
   }
 }
@@ -1930,7 +2004,8 @@ lldb::thread_result_t Debugger::DefaultEventHandler() {
   listener_sp->StartListeningForEvents(
       &m_broadcaster, lldb::eBroadcastBitProgress | lldb::eBroadcastBitWarning |
                           lldb::eBroadcastBitError |
-                          lldb::eBroadcastSymbolChange);
+                          lldb::eBroadcastSymbolChange |
+                          lldb::eBroadcastBitExternalProgress);
 
   // Let the thread that spawned us know that we have started up and that we
   // are now listening to all required events so no events get missed
@@ -2214,11 +2289,11 @@ Status Debugger::RunREPL(LanguageType language, const char *repl_options) {
     if (auto single_lang = repl_languages.GetSingularLanguage()) {
       language = *single_lang;
     } else if (repl_languages.Empty()) {
-      err.SetErrorString(
+      err = Status::FromErrorString(
           "LLDB isn't configured with REPL support for any languages.");
       return err;
     } else {
-      err.SetErrorString(
+      err = Status::FromErrorString(
           "Multiple possible REPL languages.  Please specify a language.");
       return err;
     }
@@ -2234,8 +2309,9 @@ Status Debugger::RunREPL(LanguageType language, const char *repl_options) {
   }
 
   if (!repl_sp) {
-    err.SetErrorStringWithFormat("couldn't find a REPL for %s",
-                                 Language::GetNameForLanguageType(language));
+    err = Status::FromErrorStringWithFormat(
+        "couldn't find a REPL for %s",
+        Language::GetNameForLanguageType(language));
     return err;
   }
 
@@ -2245,7 +2321,7 @@ Status Debugger::RunREPL(LanguageType language, const char *repl_options) {
   return err;
 }
 
-llvm::ThreadPool &Debugger::GetThreadPool() {
+llvm::ThreadPoolInterface &Debugger::GetThreadPool() {
   assert(g_thread_pool &&
          "Debugger::GetThreadPool called before Debugger::Initialize");
   return *g_thread_pool;

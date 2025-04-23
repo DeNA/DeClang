@@ -15,7 +15,6 @@ import os
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 
 
 class TestSwiftInterfaceDSYM(TestBase):
@@ -45,6 +44,9 @@ class TestSwiftInterfaceDSYM(TestBase):
         # Update the settings to use the custom module cache location
         self.runCmd('settings set symbols.clang-modules-cache-path "%s"'
                     % swift_mod_cache)
+
+        # This interfers with the counting because it initializes an extra compiler.
+        self.runCmd('settings set symbols.swift-validate-typesystem false')
 
         # Set a breakpoint in and launch the main executable
         lldbutil.run_to_source_breakpoint(

@@ -31,6 +31,7 @@
 
 using namespace llvm;
 
+extern cl::opt<bool> UseNewDbgInfoFormat;
 // See PassManagers.h for Pass Manager infrastructure overview.
 
 //===----------------------------------------------------------------------===//
@@ -527,6 +528,11 @@ bool PassManagerImpl::run(Module &M) {
   dumpArguments();
   dumpPasses();
 
+  // RemoveDIs: if a command line flag is given, convert to the
+  // DbgVariableRecord representation of debug-info for the duration of these
+  // passes.
+  ScopedDbgInfoFormatSetter FormatSetter(M, UseNewDbgInfoFormat);
+
   for (ImmutablePass *ImPass : getImmutablePasses())
     Changed |= ImPass->doInitialization(M);
 
@@ -817,9 +823,8 @@ void PMTopLevelManager::dumpPasses() const {
     return;
 
   // Print out the immutable passes
-  for (unsigned i = 0, e = ImmutablePasses.size(); i != e; ++i) {
-    ImmutablePasses[i]->dumpPassStructure(0);
-  }
+  for (ImmutablePass *Pass : ImmutablePasses)
+    Pass->dumpPassStructure(0);
 
   // Every class that derives from PMDataManager also derives from Pass
   // (sometimes indirectly), but there's no inheritance relationship

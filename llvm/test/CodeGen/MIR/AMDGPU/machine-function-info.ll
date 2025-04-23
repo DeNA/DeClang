@@ -14,6 +14,7 @@
 ; CHECK-NEXT: gdsSize: 0
 ; CHECK-NEXT: dynLDSAlign: 1
 ; CHECK-NEXT: isEntryFunction: true
+; CHECK-NEXT: isChainFunction: false
 ; CHECK-NEXT: noSignedZerosFPMath: false
 ; CHECK-NEXT: memoryBound: false
 ; CHECK-NEXT: waveLimiter: false
@@ -26,10 +27,16 @@
 ; CHECK-NEXT: returnsVoid: true
 ; CHECK-NEXT: argumentInfo:
 ; CHECK-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
-; CHECK-NEXT: kernargSegmentPtr: { reg: '$sgpr4_sgpr5' }
-; CHECK-NEXT: workGroupIDX: { reg: '$sgpr6' }
-; CHECK-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr7' }
+; CHECK-NEXT: dispatchPtr: { reg: '$sgpr4_sgpr5' }
+; CHECK-NEXT: kernargSegmentPtr: { reg: '$sgpr6_sgpr7' }
+; CHECK-NEXT: dispatchID: { reg: '$sgpr8_sgpr9' }
+; CHECK-NEXT: workGroupIDX: { reg: '$sgpr10' }
+; CHECK-NEXT: workGroupIDY: { reg: '$sgpr11' }
+; CHECK-NEXT: workGroupIDZ: { reg: '$sgpr12' }
+; CHECK-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr13' }
 ; CHECK-NEXT: workItemIDX: { reg: '$vgpr0' }
+; CHECK-NEXT: workItemIDY: { reg: '$vgpr1' }
+; CHECK-NEXT: workItemIDZ: { reg: '$vgpr2' }
 ; CHECK-NEXT: psInputAddr: 0
 ; CHECK-NEXT: psInputEnable: 0
 ; CHECK-NEXT: mode:
@@ -61,6 +68,7 @@ define amdgpu_kernel void @kernel(i32 %arg0, i64 %arg1, <16 x i32> %arg2) {
 ; CHECK-NEXT: gdsSize: 512
 ; CHECK-NEXT: dynLDSAlign: 1
 ; CHECK-NEXT: isEntryFunction: true
+; CHECK-NEXT: isChainFunction: false
 ; CHECK-NEXT: noSignedZerosFPMath: false
 ; CHECK-NEXT: memoryBound: false
 ; CHECK-NEXT: waveLimiter: false
@@ -119,6 +127,7 @@ define amdgpu_ps void @gds_size_shader(i32 %arg0, i32 inreg %arg1) #5 {
 ; CHECK-NEXT: gdsSize: 0
 ; CHECK-NEXT: dynLDSAlign: 1
 ; CHECK-NEXT: isEntryFunction: false
+; CHECK-NEXT: isChainFunction: false
 ; CHECK-NEXT: noSignedZerosFPMath: false
 ; CHECK-NEXT: memoryBound: false
 ; CHECK-NEXT: waveLimiter: false
@@ -169,6 +178,7 @@ define void @function() {
 ; CHECK-NEXT: gdsSize: 0
 ; CHECK-NEXT: dynLDSAlign: 1
 ; CHECK-NEXT: isEntryFunction: false
+; CHECK-NEXT: isChainFunction: false
 ; CHECK-NEXT: noSignedZerosFPMath: true
 ; CHECK-NEXT: memoryBound: false
 ; CHECK-NEXT: waveLimiter: false

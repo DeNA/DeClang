@@ -1,5 +1,5 @@
 ; RUN: not llvm-mc -triple arm64-apple-darwin -show-encoding < %s 2> %t | FileCheck %s
-; RUN: not llvm-mc -triple arm64-apple-darwin -mattr=+v8.3a -show-encoding < %s 2> %t | FileCheck %s --check-prefix=CHECK-V83
+; RUN: not llvm-mc -triple arm64-apple-darwin -mattr=+ccidx -show-encoding < %s 2> %t | FileCheck %s --check-prefix=CHECK-V83
 ; RUN: FileCheck --check-prefix=CHECK-ERRORS < %t %s
 
 foo:
@@ -332,6 +332,7 @@ foo:
   mrs x3, ID_AA64ISAR0_EL1
   mrs x3, ID_AA64ISAR1_EL1
   mrs x3, ID_AA64ISAR2_EL1
+  mrs x3, ID_AA64ISAR3_EL1
   mrs x3, ID_AA64MMFR0_EL1
   mrs x3, ID_AA64MMFR1_EL1
   mrs x3, ID_AA64MMFR2_EL1
@@ -550,6 +551,7 @@ foo:
 ; CHECK: mrs x3, ID_AA64ISAR0_EL1       ; encoding: [0x03,0x06,0x38,0xd5]
 ; CHECK: mrs x3, ID_AA64ISAR1_EL1       ; encoding: [0x23,0x06,0x38,0xd5]
 ; CHECK: mrs x3, ID_AA64ISAR2_EL1       ; encoding: [0x43,0x06,0x38,0xd5]
+; CHECK: mrs x3, ID_AA64ISAR3_EL1       ; encoding: [0x63,0x06,0x38,0xd5]
 ; CHECK: mrs x3, ID_AA64MMFR0_EL1       ; encoding: [0x03,0x07,0x38,0xd5]
 ; CHECK: mrs x3, ID_AA64MMFR1_EL1       ; encoding: [0x23,0x07,0x38,0xd5]
 ; CHECK: mrs x3, ID_AA64MMFR2_EL1       ; encoding: [0x43,0x07,0x38,0xd5]
