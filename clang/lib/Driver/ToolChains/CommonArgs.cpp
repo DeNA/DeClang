@@ -455,6 +455,12 @@ void tools::AddLinkerInputs(const ToolChain &TC, const InputInfoList &Inputs,
   // (constructed via -Xarch_).
   Args.AddAllArgValues(CmdArgs, options::OPT_Zlinker_input);
 
+  //DECLANG CODES BEGIN
+  if (TC.getTriple().isAndroid() && Args.hasArg(options::OPT_shared)) {
+    CmdArgs.push_back("-Bsymbolic");
+  }
+  //DECLANG CODES END
+
   // LIBRARY_PATH are included before user inputs and only supported on native
   // toolchains.
   if (!TC.isCrossCompiling())
@@ -2156,13 +2162,26 @@ static void AddUnwindLibrary(const ToolChain &TC, const Driver &D,
     return;
   }
 
+  //DECLANG CODES BEGIN
+  LibGccType LGT = getLibGccType(TC, D, Args);
+  if (TC.getTriple().isAndroid() && getNdkVersion(D.Dir.c_str()) >= 23) {
+      if (LGT == LibGccType::StaticLibGcc) {
+        CmdArgs.push_back("-l:libunwind.a");
+      } else {
+        CmdArgs.push_back("-l:libunwind.so");
+      }
+      return;
+  }
+  //DECLANG CODES END
+
   // Targets that don't use unwind libraries.
   if ((TC.getTriple().isAndroid() && UNW == ToolChain::UNW_Libgcc) ||
       TC.getTriple().isOSIAMCU() || TC.getTriple().isOSBinFormatWasm() ||
       TC.getTriple().isWindowsMSVCEnvironment() || UNW == ToolChain::UNW_None)
     return;
-
-  LibGccType LGT = getLibGccType(TC, D, Args);
+  //DECLANG CODES BEGIN
+  //LibGccType LGT = getLibGccType(TC, D, Args);
+  //DECLANG CODES END
   bool AsNeeded = LGT == LibGccType::UnspecifiedLibGcc &&
                   (UNW == ToolChain::UNW_CompilerRT || !D.CCCIsCXX()) &&
                   !TC.getTriple().isAndroid() &&
@@ -2187,7 +2206,11 @@ static void AddUnwindLibrary(const ToolChain &TC, const Driver &D,
       if (LGT != LibGccType::StaticLibGcc)
         CmdArgs.push_back("-lunwind");
     } else if (LGT == LibGccType::StaticLibGcc) {
-      CmdArgs.push_back("-l:libunwind.a");
+      //DECLANG CODES BEGIN
+      if (!TC.getTriple().isAndroid()) {
+        CmdArgs.push_back("-l:libunwind.a");
+      }
+      //DECLANG CODES END
     } else if (LGT == LibGccType::SharedLibGcc) {
       if (TC.getTriple().isOSCygMing())
         CmdArgs.push_back("-l:libunwind.dll.a");
@@ -2228,6 +2251,13 @@ void tools::AddRunTimeLibs(const ToolChain &TC, const Driver &D,
     AddUnwindLibrary(TC, D, CmdArgs, Args);
     break;
   case ToolChain::RLT_Libgcc:
+    //DECLANG CODES BEGIN
+    if (TC.getTriple().isAndroid() && getNdkVersion(D.Dir.c_str()) >= 23) {
+      CmdArgs.push_back(TC.getCompilerRTArgString(Args, "builtins"));
+      AddUnwindLibrary(TC, D, CmdArgs, Args);
+      break;
+    }
+    //DECLANG CODES END
     // Make sure libgcc is not used under MSVC environment by default
     if (TC.getTriple().isKnownWindowsMSVCEnvironment()) {
       // Issue error diagnostic if libgcc is explicitly specified

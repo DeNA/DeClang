@@ -1220,6 +1220,39 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
 
   // FIXME: What are we going to do with -V and -b?
 
+  //DECLANG CODES BEGIN
+  std::vector<const char*> modArgs = ArgList.vec();
+  modArgs.push_back("-DDECLANG");
+  // remove --gc-sections and --no-undefined flags if libil2cpp.so is linked on unity
+  bool linkIl2cpp = false;
+  for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end(); ++it) {
+    if (std::string("-o") == *it) {
+       ++it;
+       std::string execFilename(llvm::sys::path::filename(*it).data());
+       if (execFilename == "libil2cpp.so") {
+         linkIl2cpp = true;
+         break;
+       }
+    }
+  }
+  if (linkIl2cpp) {
+    for (std::vector<const char*>::iterator it = modArgs.begin() ; it != modArgs.end();) {
+      if (std::string("--gc-sections") == *it) {
+        it = modArgs.erase(it);
+      } else if (std::string("-Wl,--gc-sections") == *it) {
+        it = modArgs.erase(it);
+      } else if (std::string("--no-undefined") == *it) {
+        it = modArgs.erase(it);
+      } else if (std::string("-Wl,--no-undefined") == *it) {
+        it = modArgs.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+  ArgList = ArrayRef<const char*>(modArgs);
+  //DECLANG CODES END
+
   // Arguments specified in command line.
   bool ContainsError;
   CLOptions = std::make_unique<InputArgList>(
@@ -1406,21 +1439,23 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
 
   setLTOMode(Args);
 
+  //DECLANG CODES BEGIN
   // Process -fembed-bitcode= flags.
-  if (Arg *A = Args.getLastArg(options::OPT_fembed_bitcode_EQ)) {
-    StringRef Name = A->getValue();
-    unsigned Model = llvm::StringSwitch<unsigned>(Name)
-        .Case("off", EmbedNone)
-        .Case("all", EmbedBitcode)
-        .Case("bitcode", EmbedBitcode)
-        .Case("marker", EmbedMarker)
-        .Default(~0U);
-    if (Model == ~0U) {
-      Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args)
-                                                << Name;
-    } else
-      BitcodeEmbed = static_cast<BitcodeEmbedMode>(Model);
-  }
+  //if (Arg *A = Args.getLastArg(options::OPT_fembed_bitcode_EQ)) {
+  //  StringRef Name = A->getValue();
+  //  unsigned Model = llvm::StringSwitch<unsigned>(Name)
+  //      .Case("off", EmbedNone)
+  //      .Case("all", EmbedBitcode)
+  //      .Case("bitcode", EmbedBitcode)
+  //      .Case("marker", EmbedMarker)
+  //      .Default(~0U);
+  //  if (Model == ~0U) {
+  //    Diags.Report(diag::err_drv_invalid_value) << A->getAsString(Args)
+  //                                              << Name;
+  //  } else
+  //    BitcodeEmbed = static_cast<BitcodeEmbedMode>(Model);
+  //}
+  //DECLANG CODES END
 
   // Remove existing compilation database so that each job can append to it.
   if (Arg *A = Args.getLastArg(options::OPT_MJ))
@@ -1946,11 +1981,47 @@ int Driver::ExecuteCompilation(
   for (auto &Job : C.getJobs())
     setUpResponseFiles(C, Job);
 
+  //DECLANG CODES BEGIN
+  char* home_dir = getenv("DECLANG_HOME");
+  if (home_dir == nullptr) {
+    home_dir = getenv("HOME");
+  }
+  if (home_dir == nullptr) {
+    home_dir = getenv("USERPROFILE");
+  }
+  if (home_dir == nullptr) {
+    llvm::errs() << "[Linker]: (Warning) Cannot find $DECLANG_HOME, $HOME or %USERPROFILE%\n";
+    llvm::errs().flush();
+    std::exit(EXIT_FAILURE);
+  }
+  std::string homeDir(home_dir);
+  homeDir = llvm::sys::path::convert_to_slash(homeDir);
+
+  //log path
+  std::string logPath = homeDir + "/.DeClang/log.txt";
+  llvm::raw_fd_ostream *logFile;
+  std::error_code EC;
+  logFile = new llvm::raw_fd_ostream(logPath, EC, llvm::sys::fs::OF_Append);
+  if (EC) {
+    llvm::errs() << "[Linker]: Open logFile Failed. Check DECLANG_HOME maybe?: " << EC.message() << " "  << logPath << "\n";
+    llvm::errs().flush();
+  }
+
+  for (Command& cmd : C.getJobs() ) {
+    cmd.Print(*logFile, "\n", /*Quote=*/true);
+    logFile->flush();
+  }
+  //DECLANG CODES END
+
   C.ExecuteJobs(C.getJobs(), FailingCommands);
 
   // If the command succeeded, we are done.
-  if (FailingCommands.empty())
+  if (FailingCommands.empty()){
+    //DECLANG CODES BEGIN
+    DeClangExtraProcess(C, homeDir, logFile);
+    //DECLANG CODES END
     return 0;
+  }
 
   // Otherwise, remove result files and print extra information about abnormal
   // failures.
@@ -5110,6 +5181,16 @@ void Driver::BuildJobs(Compilation &C) const {
         if (DuplicateClaimed)
           continue;
       }
+
+      //DECLANG CODES BEGIN
+      //ignore -DDECLANG to be warned
+      if (A->getNumValues() != 0) {
+        std::string valStr = A->getValue();
+        if (valStr == "DECLANG") {
+          continue;
+        }
+      }
+      //DECLANG CODES END
 
       // In clang-cl, don't mention unknown arguments here since they have
       // already been warned about.

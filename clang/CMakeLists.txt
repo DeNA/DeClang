@@ -16,8 +16,9 @@ endif()
 
 #DECLANG CODES BEGIN  
 if(MSVC)
+ add_compile_options("/utf-8")
 endif()
-#DECLANG CODES END  
+#DECLANG CODES END 
 
 # Make sure that our source directory is on the current cmake module path so that
 # we can include cmake files from this directory.

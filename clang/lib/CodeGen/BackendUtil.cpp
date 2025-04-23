@@ -1143,8 +1143,13 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   }
 
   if (LangOpts.HIPStdPar && !LangOpts.CUDAIsDevice &&
-      LangOpts.HIPStdParInterposeAlloc)
+      LangOpts.HIPStdParInterposeAlloc){
     MPM.addPass(HipStdParAllocationInterpositionPass());
+  }
+  
+  //DECLANG CODES BEGIN
+  MPM.addPass(AntiHack(AntiHackOpt));
+  //DECLANG CODES END
 
   // Now that we have all of the passes ready, run them.
   {
