@@ -43,15 +43,22 @@ if uname -r | grep -i microsoft > /dev/null; then # WSL2
 else # MSYS2 and others
   # backup bin
   if [[ ! -f "${darwin_path}"/bin/clang.orig ]]; then
-      cp "${darwin_path}"/bin/clang "${darwin_path}"/bin/clang.orig
+      cp -R "${darwin_path}"/bin/clang "${darwin_path}"/bin/clang.orig
+      unlink "${darwin_path}"/bin/clang
   fi
   if [[ ! -f "${darwin_path}"/bin/clang++.orig ]]; then
-      cp "${darwin_path}"/bin/clang++ "${darwin_path}"/bin/clang++.orig
+      cp -R "${darwin_path}"/bin/clang++ "${darwin_path}"/bin/clang++.orig
+      unlink "${darwin_path}"/bin/clang++
   fi
   # copy bin
   cp -v "${compiler_path}"/bin/clang "${darwin_path}"/bin/clang
   cp -v "${compiler_path}"/bin/clang++ "${darwin_path}"/bin/clang++
   
+fi
+
+# backup header file
+if [[ ! -f "${darwin_path}"/sysroot/usr/include/android/hardware_buffer.h.orig ]]; then
+  sed -i.orig -e 's/AHARDWAREBUFFER_USAGE_FRONT_BUFFER = 1UL << 32/AHARDWAREBUFFER_USAGE_FRONT_BUFFER = 1ULL << 32/' "${darwin_path}"/sysroot/usr/include/android/hardware_buffer.h
 fi
 
 # backup and copy lib
@@ -61,11 +68,6 @@ if [[ ! -d "${darwin_path}"/lib.orig ]]; then
 fi
 cp -r "${compiler_path}"/lib/clang "${darwin_path}"/lib/
 
-src=`ls -d ${darwin_path}/lib64/clang/*/lib/linux/`
-echo $src
-for f in `ls ${darwin_path}/lib/clang/`; do
-  mkdir -p ${darwin_path}/lib/clang/$f/lib/
-  ln -s $src ${darwin_path}/lib/clang/$f/lib/ || true
-done
+ln -s ${darwin_path}/lib/clang/18/lib/ ${darwin_path}/lib/clang/19/ || true
 
 popd >/dev/null
