@@ -10,7 +10,6 @@
 #include "llvm/CAS/ActionCache.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/CAS/ObjectStore.h"
-#include "llvm/Support/TargetSelect.h"
 
 using namespace clang;
 using namespace tooling;
@@ -21,16 +20,10 @@ DependencyScanningService::DependencyScanningService(
     std::shared_ptr<llvm::cas::ObjectStore> CAS,
     std::shared_ptr<llvm::cas::ActionCache> Cache,
     IntrusiveRefCntPtr<llvm::cas::CachingOnDiskFileSystem> SharedFS,
-    ScanningOptimizations OptimizeArgs, bool EagerLoadModules)
+    ScanningOptimizations OptimizeArgs, bool EagerLoadModules, bool TraceVFS)
     : Mode(Mode), Format(Format), CASOpts(std::move(CASOpts)), CAS(std::move(CAS)), Cache(std::move(Cache)),
-      OptimizeArgs(OptimizeArgs), EagerLoadModules(EagerLoadModules),
+      OptimizeArgs(OptimizeArgs), EagerLoadModules(EagerLoadModules), TraceVFS(TraceVFS),
       SharedFS(std::move(SharedFS)) {
   if (!this->SharedFS)
     SharedCache.emplace();
-
-  // Initialize targets for object file support.
-  llvm::InitializeAllTargets();
-  llvm::InitializeAllTargetMCs();
-  llvm::InitializeAllAsmPrinters();
-  llvm::InitializeAllAsmParsers();
 }

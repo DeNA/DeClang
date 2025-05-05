@@ -6,6 +6,7 @@ from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 
 
+@skipIf(bugnumber = "rdar://136232178")
 class TestSwiftBackwardInteropFormatActors(TestBase):
 
     @swiftTest
@@ -15,4 +16,4 @@ class TestSwiftBackwardInteropFormatActors(TestBase):
         _, _, _, _= lldbutil.run_to_source_breakpoint(
             self, 'Set breakpoint here', lldb.SBFileSpec('main.cpp'))
 
-        self.expect('v actor', substrs=['Actor', 'str = "Hello"'])
+        self.expect('frame var actor', substrs=['Actor', 'str = "Hello"'])

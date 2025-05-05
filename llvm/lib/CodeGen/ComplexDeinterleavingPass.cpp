@@ -60,6 +60,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/ComplexDeinterleavingPass.h"
+#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -258,7 +259,7 @@ private:
   ///
   /// %OutsideUser can be `llvm.vector.reduce.fadd` or `fadd` preceding
   /// `llvm.vector.reduce.fadd` when unroll factor isn't one.
-  std::map<Instruction *, std::pair<PHINode *, Instruction *>> ReductionInfo;
+  MapVector<Instruction *, std::pair<PHINode *, Instruction *>> ReductionInfo;
 
   /// In the process of detecting a reduction, we consider a pair of
   /// %ReductionOP, which we refer to as real and imag (or vice versa), and
@@ -1638,8 +1639,7 @@ bool ComplexDeinterleavingGraph::checkNodes() {
 ComplexDeinterleavingGraph::NodePtr
 ComplexDeinterleavingGraph::identifyRoot(Instruction *RootI) {
   if (auto *Intrinsic = dyn_cast<IntrinsicInst>(RootI)) {
-    if (Intrinsic->getIntrinsicID() !=
-        Intrinsic::experimental_vector_interleave2)
+    if (Intrinsic->getIntrinsicID() != Intrinsic::vector_interleave2)
       return nullptr;
 
     auto *Real = dyn_cast<Instruction>(Intrinsic->getOperand(0));
@@ -1674,7 +1674,7 @@ ComplexDeinterleavingGraph::identifyDeinterleave(Instruction *Real,
   Value *FinalValue = nullptr;
   if (match(Real, m_ExtractValue<0>(m_Instruction(I))) &&
       match(Imag, m_ExtractValue<1>(m_Specific(I))) &&
-      match(I, m_Intrinsic<Intrinsic::experimental_vector_deinterleave2>(
+      match(I, m_Intrinsic<Intrinsic::vector_deinterleave2>(
                    m_Value(FinalValue)))) {
     NodePtr PlaceholderNode = prepareCompositeNode(
         llvm::ComplexDeinterleavingOperation::Deinterleave, Real, Imag);
@@ -1959,13 +1959,11 @@ Value *ComplexDeinterleavingGraph::replaceNode(IRBuilderBase &Builder,
       // Splats that are not constant are interleaved where they are located
       Instruction *InsertPoint = (I->comesBefore(R) ? R : I)->getNextNode();
       IRBuilder<> IRB(InsertPoint);
-      ReplacementNode =
-          IRB.CreateIntrinsic(Intrinsic::experimental_vector_interleave2, NewTy,
-                              {Node->Real, Node->Imag});
+      ReplacementNode = IRB.CreateIntrinsic(Intrinsic::vector_interleave2,
+                                            NewTy, {Node->Real, Node->Imag});
     } else {
-      ReplacementNode =
-          Builder.CreateIntrinsic(Intrinsic::experimental_vector_interleave2,
-                                  NewTy, {Node->Real, Node->Imag});
+      ReplacementNode = Builder.CreateIntrinsic(
+          Intrinsic::vector_interleave2, NewTy, {Node->Real, Node->Imag});
     }
     break;
   }
@@ -1974,7 +1972,7 @@ Value *ComplexDeinterleavingGraph::replaceNode(IRBuilderBase &Builder,
     // It is filled later when the ReductionOperation is processed.
     auto *VTy = cast<VectorType>(Node->Real->getType());
     auto *NewVTy = VectorType::getDoubleElementsVectorType(VTy);
-    auto *NewPHI = PHINode::Create(NewVTy, 0, "", BackEdge->getFirstNonPHI());
+    auto *NewPHI = PHINode::Create(NewVTy, 0, "", BackEdge->getFirstNonPHIIt());
     OldToNewPHI[dyn_cast<PHINode>(Node->Real)] = NewPHI;
     ReplacementNode = NewPHI;
     break;
@@ -1990,9 +1988,8 @@ Value *ComplexDeinterleavingGraph::replaceNode(IRBuilderBase &Builder,
     auto *B = replaceNode(Builder, Node->Operands[1]);
     auto *NewMaskTy = VectorType::getDoubleElementsVectorType(
         cast<VectorType>(MaskReal->getType()));
-    auto *NewMask =
-        Builder.CreateIntrinsic(Intrinsic::experimental_vector_interleave2,
-                                NewMaskTy, {MaskReal, MaskImag});
+    auto *NewMask = Builder.CreateIntrinsic(Intrinsic::vector_interleave2,
+                                            NewMaskTy, {MaskReal, MaskImag});
     ReplacementNode = Builder.CreateSelect(NewMask, A, B);
     break;
   }
@@ -2020,8 +2017,8 @@ void ComplexDeinterleavingGraph::processReductionOperation(
   Value *InitImag = OldPHIImag->getIncomingValueForBlock(Incoming);
 
   IRBuilder<> Builder(Incoming->getTerminator());
-  auto *NewInit = Builder.CreateIntrinsic(
-      Intrinsic::experimental_vector_interleave2, NewVTy, {InitReal, InitImag});
+  auto *NewInit = Builder.CreateIntrinsic(Intrinsic::vector_interleave2, NewVTy,
+                                          {InitReal, InitImag});
 
   NewPHI->addIncoming(NewInit, Incoming);
   NewPHI->addIncoming(OperationReplacement, BackEdge);
@@ -2033,9 +2030,9 @@ void ComplexDeinterleavingGraph::processReductionOperation(
 
   Builder.SetInsertPoint(
       &*FinalReductionReal->getParent()->getFirstInsertionPt());
-  auto *Deinterleave = Builder.CreateIntrinsic(
-      Intrinsic::experimental_vector_deinterleave2,
-      OperationReplacement->getType(), OperationReplacement);
+  auto *Deinterleave = Builder.CreateIntrinsic(Intrinsic::vector_deinterleave2,
+                                               OperationReplacement->getType(),
+                                               OperationReplacement);
 
   auto *NewReal = Builder.CreateExtractValue(Deinterleave, (uint64_t)0);
   FinalReductionReal->replaceUsesOfWith(Real, NewReal);

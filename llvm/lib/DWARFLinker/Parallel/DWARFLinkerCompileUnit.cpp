@@ -28,7 +28,7 @@ using namespace dwarf_linker::parallel;
 CompileUnit::CompileUnit(LinkingGlobalData &GlobalData, unsigned ID,
                          StringRef ClangModuleName, DWARFFile &File,
                          OffsetToUnitTy UnitFromOffset,
-                         dwarf::FormParams Format, support::endianness Endianess)
+                         dwarf::FormParams Format, llvm::endianness Endianess)
     : DwarfUnit(GlobalData, ID, ClangModuleName), File(File),
       getUnitFromOffset(UnitFromOffset), Stage(Stage::CreatedNotLoaded),
       AcceleratorRecords(&GlobalData.getAllocator()) {
@@ -40,7 +40,7 @@ CompileUnit::CompileUnit(LinkingGlobalData &GlobalData, unsigned ID,
 CompileUnit::CompileUnit(LinkingGlobalData &GlobalData, DWARFUnit &OrigUnit,
                          unsigned ID, StringRef ClangModuleName,
                          DWARFFile &File, OffsetToUnitTy UnitFromOffset,
-                         dwarf::FormParams Format, support::endianness Endianess)
+                         dwarf::FormParams Format, llvm::endianness Endianess)
     : DwarfUnit(GlobalData, ID, ClangModuleName), File(File),
       OrigUnit(&OrigUnit), getUnitFromOffset(UnitFromOffset),
       Stage(Stage::CreatedNotLoaded),
@@ -259,7 +259,7 @@ void CompileUnit::analyzeImportedModule(const DWARFDebugInfoEntry *DieEntry) {
 
   StringRef Path =
       dwarf::toStringRef(find(DieEntry, dwarf::DW_AT_LLVM_include_path));
-  if (!Path.endswith(".swiftinterface"))
+  if (!Path.ends_with(".swiftinterface"))
     return;
   // Don't track interfaces that are part of the SDK.
   StringRef SysRoot =
@@ -296,7 +296,7 @@ void CompileUnit::analyzeImportedModule(const DWARFDebugInfoEntry *DieEntry) {
                ": " + Entry + " and " + Path + ".",
            &Die);
     }
-    Entry = std::string(ResolvedPath.str());
+    Entry = std::string(ResolvedPath);
   }
 }
 
@@ -381,38 +381,36 @@ void CompileUnit::updateDieRefPatchesWithClonedOffsets() {
 std::optional<UnitEntryPairTy> CompileUnit::resolveDIEReference(
     const DWARFFormValue &RefValue,
     ResolveInterCUReferencesMode CanResolveInterCUReferences) {
-  if (std::optional<DWARFFormValue::UnitOffset> Ref =
-          *RefValue.getAsRelativeReference()) {
-    if (Ref->Unit == OrigUnit) {
-      // Referenced DIE is in current compile unit.
-      if (std::optional<uint32_t> RefDieIdx =
-              getDIEIndexForOffset(OrigUnit->getOffset() + Ref->Offset))
-        return UnitEntryPairTy{this, OrigUnit->getDebugInfoEntry(*RefDieIdx)};
-    }
-    uint64_t RefDIEOffset =
-        Ref->Unit ? Ref->Unit->getOffset() + Ref->Offset : Ref->Offset;
-    if (CompileUnit *RefCU = getUnitFromOffset(RefDIEOffset)) {
-      if (RefCU == this) {
-        // Referenced DIE is in current compile unit.
-        if (std::optional<uint32_t> RefDieIdx =
-                getDIEIndexForOffset(RefDIEOffset))
-          return UnitEntryPairTy{this, getDebugInfoEntry(*RefDieIdx)};
-      } else if (CanResolveInterCUReferences) {
-        // Referenced DIE is in other compile unit.
-
-        // Check whether DIEs are loaded for that compile unit.
-        enum Stage ReferredCUStage = RefCU->getStage();
-        if (ReferredCUStage < Stage::Loaded || ReferredCUStage > Stage::Cloned)
-          return UnitEntryPairTy{RefCU, nullptr};
-
-        if (std::optional<uint32_t> RefDieIdx =
-                RefCU->getDIEIndexForOffset(RefDIEOffset))
-          return UnitEntryPairTy{RefCU, RefCU->getDebugInfoEntry(*RefDieIdx)};
-      } else
-        return UnitEntryPairTy{RefCU, nullptr};
-    }
+  CompileUnit *RefCU;
+  uint64_t RefDIEOffset;
+  if (std::optional<uint64_t> Offset = RefValue.getAsRelativeReference()) {
+    RefCU = this;
+    RefDIEOffset = RefValue.getUnit()->getOffset() + *Offset;
+  } else if (Offset = RefValue.getAsDebugInfoReference(); Offset) {
+    RefCU = getUnitFromOffset(*Offset);
+    RefDIEOffset = *Offset;
+  } else {
+    return std::nullopt;
   }
 
+  if (RefCU == this) {
+    // Referenced DIE is in current compile unit.
+    if (std::optional<uint32_t> RefDieIdx = getDIEIndexForOffset(RefDIEOffset))
+      return UnitEntryPairTy{this, getDebugInfoEntry(*RefDieIdx)};
+  } else if (RefCU && CanResolveInterCUReferences) {
+    // Referenced DIE is in other compile unit.
+
+    // Check whether DIEs are loaded for that compile unit.
+    enum Stage ReferredCUStage = RefCU->getStage();
+    if (ReferredCUStage < Stage::Loaded || ReferredCUStage > Stage::Cloned)
+      return UnitEntryPairTy{RefCU, nullptr};
+
+    if (std::optional<uint32_t> RefDieIdx =
+            RefCU->getDIEIndexForOffset(RefDIEOffset))
+      return UnitEntryPairTy{RefCU, RefCU->getDebugInfoEntry(*RefDieIdx)};
+  } else {
+    return UnitEntryPairTy{RefCU, nullptr};
+  }
   return std::nullopt;
 }
 
@@ -1175,8 +1173,7 @@ void CompileUnit::cloneDieAttrExpression(
         OutputExpression.push_back(dwarf::DW_OP_addr);
         uint64_t LinkedAddress =
             SA->Address + (VarAddressAdjustment ? *VarAddressAdjustment : 0);
-        if ((getEndianness() == support::endianness::little) !=
-            sys::IsLittleEndianHost)
+        if (getEndianness() != llvm::endianness::native)
           sys::swapByteOrder(LinkedAddress);
         ArrayRef<uint8_t> AddressBytes(
             reinterpret_cast<const uint8_t *>(&LinkedAddress),
@@ -1213,8 +1210,7 @@ void CompileUnit::cloneDieAttrExpression(
           OutputExpression.push_back(*OutOperandKind);
           uint64_t LinkedAddress =
               SA->Address + (VarAddressAdjustment ? *VarAddressAdjustment : 0);
-          if ((getEndianness() == support::endianness::little) !=
-              sys::IsLittleEndianHost)
+          if (getEndianness() != llvm::endianness::native)
             sys::swapByteOrder(LinkedAddress);
           ArrayRef<uint8_t> AddressBytes(
               reinterpret_cast<const uint8_t *>(&LinkedAddress),
@@ -1835,7 +1831,7 @@ TypeUnit *CompileUnit::OutputUnitVariantPtr::getAsTypeUnit() {
 
 bool CompileUnit::resolveDependenciesAndMarkLiveness(
     bool InterCUProcessingStarted, std::atomic<bool> &HasNewInterconnectedCUs) {
-  if (!Dependencies.get())
+  if (!Dependencies)
     Dependencies.reset(new DependencyTracker(*this));
 
   return Dependencies->resolveDependenciesAndMarkLiveness(
@@ -1845,13 +1841,13 @@ bool CompileUnit::resolveDependenciesAndMarkLiveness(
 bool CompileUnit::updateDependenciesCompleteness() {
   assert(Dependencies.get());
 
-  return Dependencies.get()->updateDependenciesCompleteness();
+  return Dependencies->updateDependenciesCompleteness();
 }
 
 void CompileUnit::verifyDependencies() {
   assert(Dependencies.get());
 
-  Dependencies.get()->verifyKeepChain();
+  Dependencies->verifyKeepChain();
 }
 
 ArrayRef<dwarf::Attribute> dwarf_linker::parallel::getODRAttributes() {

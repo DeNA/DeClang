@@ -19,6 +19,7 @@
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Basic/DiagnosticFrontend.h"
 #include "clang/Lex/CodeCompletionHandler.h"
@@ -40,6 +41,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/AlignOf.h"
@@ -83,8 +85,7 @@ Preprocessor::AllocateVisibilityMacroDirective(SourceLocation Loc,
 
 /// Read and discard all tokens remaining on the current line until
 /// the tok::eod token is found.
-SourceRange Preprocessor::DiscardUntilEndOfDirective() {
-  Token Tmp;
+SourceRange Preprocessor::DiscardUntilEndOfDirective(Token &Tmp) {
   SourceRange Res;
 
   LexUnexpandedToken(Tmp);
@@ -165,13 +166,13 @@ static bool isLanguageDefinedBuiltin(const SourceManager &SourceMgr,
     return false;
   // C defines macros starting with __STDC, and C++ defines macros starting with
   // __STDCPP
-  if (MacroName.startswith("__STDC"))
+  if (MacroName.starts_with("__STDC"))
     return true;
   // C++ defines the __cplusplus macro
   if (MacroName == "__cplusplus")
     return true;
   // C++ defines various feature-test macros starting with __cpp
-  if (MacroName.startswith("__cpp"))
+  if (MacroName.starts_with("__cpp"))
     return true;
   // Anything else isn't language-defined
   return false;
@@ -184,7 +185,7 @@ static MacroDiag shouldWarnOnMacroDef(Preprocessor &PP, IdentifierInfo *II) {
     return isFeatureTestMacro(Text) ? MD_NoWarn : MD_ReservedMacro;
   if (II->isKeyword(Lang))
     return MD_KeywordDef;
-  if (Lang.CPlusPlus11 && (Text.equals("override") || Text.equals("final")))
+  if (Lang.CPlusPlus11 && (Text == "override" || Text == "final"))
     return MD_KeywordDef;
   return MD_NoWarn;
 }
@@ -234,9 +235,10 @@ static bool warnByDefaultOnWrongCase(StringRef Include) {
     .Cases("assert.h", "complex.h", "ctype.h", "errno.h", "fenv.h", true)
     .Cases("float.h", "inttypes.h", "iso646.h", "limits.h", "locale.h", true)
     .Cases("math.h", "setjmp.h", "signal.h", "stdalign.h", "stdarg.h", true)
-    .Cases("stdatomic.h", "stdbool.h", "stddef.h", "stdint.h", "stdio.h", true)
-    .Cases("stdlib.h", "stdnoreturn.h", "string.h", "tgmath.h", "threads.h", true)
-    .Cases("time.h", "uchar.h", "wchar.h", "wctype.h", true)
+    .Cases("stdatomic.h", "stdbool.h", "stdckdint.h", "stddef.h", true)
+    .Cases("stdint.h", "stdio.h", "stdlib.h", "stdnoreturn.h", true)
+    .Cases("string.h", "tgmath.h", "threads.h", "time.h", "uchar.h", true)
+    .Cases("wchar.h", "wctype.h", true)
 
     // C++ headers for C library facilities
     .Cases("cassert", "ccomplex", "cctype", "cerrno", "cfenv", true)
@@ -452,7 +454,7 @@ void Preprocessor::SuggestTypoedDirective(const Token &Tok,
   std::vector<StringRef> Candidates = {
       "if", "ifdef", "ifndef", "elif", "else", "endif"
   };
-  if (LangOpts.C2x || LangOpts.CPlusPlus23)
+  if (LangOpts.C23 || LangOpts.CPlusPlus23)
     Candidates.insert(Candidates.end(), {"elifdef", "elifndef"});
 
   if (std::optional<StringRef> Sugg = findSimilarStr(Directive, Candidates)) {
@@ -494,7 +496,9 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
   llvm::SaveAndRestore SARSkipping(SkippingExcludedConditionalBlock, true);
 
   ++NumSkipped;
-  assert(!CurTokenLexer && CurPPLexer && "Lexing a macro, not a file?");
+  assert(!CurTokenLexer && "Conditional PP block cannot appear in a macro!");
+  assert(CurPPLexer && "Conditional PP block must be in a file!");
+  assert(CurLexer && "Conditional PP block but no current lexer set!");
 
   if (PreambleConditionalStack.reachedEOFWhileSkipping())
     PreambleConditionalStack.clearSkipInfo();
@@ -543,7 +547,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
       if (!*SkipRangePtr) {
         *SkipRangePtr = Hashptr - BeginPtr;
       }
-      assert(*SkipRangePtr == Hashptr - BeginPtr);
+      assert(*SkipRangePtr == unsigned(Hashptr - BeginPtr));
       BeginPtr = nullptr;
       SkipRangePtr = nullptr;
     }
@@ -644,7 +648,7 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
       Directive = StringRef(DirectiveBuf, IdLen);
     }
 
-    if (Directive.startswith("if")) {
+    if (Directive.starts_with("if")) {
       StringRef Sub = Directive.substr(2);
       if (Sub.empty() ||   // "if"
           Sub == "def" ||   // "ifdef"
@@ -763,15 +767,15 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation HashTokenLoc,
         if (!CondInfo.WasSkipping)
           SkippingRangeState.endLexPass(Hashptr);
 
-        // Warn if using `#elifdef` & `#elifndef` in not C2x & C++23 mode even
+        // Warn if using `#elifdef` & `#elifndef` in not C23 & C++23 mode even
         // if this branch is in a skipping block.
         unsigned DiagID;
         if (LangOpts.CPlusPlus)
           DiagID = LangOpts.CPlusPlus23 ? diag::warn_cxx23_compat_pp_directive
                                         : diag::ext_cxx23_pp_directive;
         else
-          DiagID = LangOpts.C2x ? diag::warn_c2x_compat_pp_directive
-                                : diag::ext_c2x_pp_directive;
+          DiagID = LangOpts.C23 ? diag::warn_c23_compat_pp_directive
+                                : diag::ext_c23_pp_directive;
         Diag(Tok, DiagID) << (IsElifDef ? PED_Elifdef : PED_Elifndef);
 
         // If this is a #elif with a #else before it, report the error.
@@ -873,7 +877,7 @@ Module *Preprocessor::getModuleForLocation(SourceLocation Loc,
              : HeaderInfo.lookupModule(getLangOpts().CurrentModule, Loc);
 }
 
-const FileEntry *
+OptionalFileEntryRef
 Preprocessor::getHeaderToIncludeForDiagnostics(SourceLocation IncLoc,
                                                SourceLocation Loc) {
   Module *IncM = getModuleForLocation(
@@ -919,7 +923,7 @@ Preprocessor::getHeaderToIncludeForDiagnostics(SourceLocation IncLoc,
       // make a particular module visible. Let the caller know they should
       // suggest an import instead.
       if (getLangOpts().ObjC || getLangOpts().CPlusPlusModules)
-        return nullptr;
+        return std::nullopt;
 
       // If this is an accessible, non-textual header of M's top-level module
       // that transitively includes the given location and makes the
@@ -930,7 +934,7 @@ Preprocessor::getHeaderToIncludeForDiagnostics(SourceLocation IncLoc,
     // FIXME: If we're bailing out due to a private header, we shouldn't suggest
     // an import either.
     if (InPrivateHeader)
-      return nullptr;
+      return std::nullopt;
 
     // If the header is includable and has an include guard, assume the
     // intended way to expose its contents is by #include, not by importing a
@@ -941,7 +945,7 @@ Preprocessor::getHeaderToIncludeForDiagnostics(SourceLocation IncLoc,
     Loc = SM.getIncludeLoc(ID);
   }
 
-  return nullptr;
+  return std::nullopt;
 }
 
 OptionalFileEntryRef Preprocessor::LookupFile(
@@ -959,7 +963,7 @@ OptionalFileEntryRef Preprocessor::LookupFile(
 
   // If the header lookup mechanism may be relative to the current inclusion
   // stack, record the parent #includes.
-  SmallVector<std::pair<const FileEntry *, DirectoryEntryRef>, 16> Includers;
+  SmallVector<std::pair<OptionalFileEntryRef, DirectoryEntryRef>, 16> Includers;
   bool BuildSystemModule = false;
   if (!FromDir && !FromFile) {
     FileID FID = getCurrentFileLexer()->getFileID();
@@ -984,7 +988,7 @@ OptionalFileEntryRef Preprocessor::LookupFile(
                 Filename, getCurrentModule())
                 ? HeaderInfo.getModuleMap().getBuiltinDir()
                 : MainFileDir;
-        Includers.push_back(std::make_pair(nullptr, *IncludeDir));
+        Includers.push_back(std::make_pair(std::nullopt, *IncludeDir));
         BuildSystemModule = getCurrentModule()->IsSystem;
       } else if ((FileEnt = SourceMgr.getFileEntryRefForID(
                       SourceMgr.getMainFileID()))) {
@@ -1039,14 +1043,14 @@ OptionalFileEntryRef Preprocessor::LookupFile(
   if (FE)
     return FE;
 
-  const FileEntry *CurFileEnt;
+  OptionalFileEntryRef CurFileEnt;
   // Otherwise, see if this is a subframework header.  If so, this is relative
   // to one of the headers on the #include stack.  Walk the list of the current
   // headers on the #include stack and pass them to HeaderInfo.
   if (IsFileLexer()) {
     if ((CurFileEnt = CurPPLexer->getFileEntry())) {
       if (OptionalFileEntryRef FE = HeaderInfo.LookupSubframeworkHeader(
-              Filename, CurFileEnt, SearchPath, RelativePath, RequestingModule,
+              Filename, *CurFileEnt, SearchPath, RelativePath, RequestingModule,
               SuggestedModule)) {
         return FE;
       }
@@ -1057,7 +1061,7 @@ OptionalFileEntryRef Preprocessor::LookupFile(
     if (IsFileLexer(ISEntry)) {
       if ((CurFileEnt = ISEntry.ThePPLexer->getFileEntry())) {
         if (OptionalFileEntryRef FE = HeaderInfo.LookupSubframeworkHeader(
-                Filename, CurFileEnt, SearchPath, RelativePath,
+                Filename, *CurFileEnt, SearchPath, RelativePath,
                 RequestingModule, SuggestedModule)) {
           return FE;
         }
@@ -1066,6 +1070,76 @@ OptionalFileEntryRef Preprocessor::LookupFile(
   }
 
   // Otherwise, we really couldn't find the file.
+  return std::nullopt;
+}
+
+OptionalFileEntryRef
+Preprocessor::LookupEmbedFile(StringRef Filename, bool isAngled, bool OpenFile,
+                              const FileEntry *LookupFromFile) {
+  FileManager &FM = this->getFileManager();
+  if (llvm::sys::path::is_absolute(Filename)) {
+    // lookup path or immediately fail
+    llvm::Expected<FileEntryRef> ShouldBeEntry =
+        FM.getFileRef(Filename, OpenFile);
+    return llvm::expectedToOptional(std::move(ShouldBeEntry));
+  }
+
+  auto SeparateComponents = [](SmallVectorImpl<char> &LookupPath,
+                               StringRef StartingFrom, StringRef FileName,
+                               bool RemoveInitialFileComponentFromLookupPath) {
+    llvm::sys::path::native(StartingFrom, LookupPath);
+    if (RemoveInitialFileComponentFromLookupPath)
+      llvm::sys::path::remove_filename(LookupPath);
+    if (!LookupPath.empty() &&
+        !llvm::sys::path::is_separator(LookupPath.back())) {
+      LookupPath.push_back(llvm::sys::path::get_separator().front());
+    }
+    LookupPath.append(FileName.begin(), FileName.end());
+  };
+
+  // Otherwise, it's search time!
+  SmallString<512> LookupPath;
+  // Non-angled lookup
+  if (!isAngled) {
+    if (LookupFromFile) {
+      // Use file-based lookup.
+      StringRef FullFileDir = LookupFromFile->tryGetRealPathName();
+      if (!FullFileDir.empty()) {
+        SeparateComponents(LookupPath, FullFileDir, Filename, true);
+        llvm::Expected<FileEntryRef> ShouldBeEntry =
+            FM.getFileRef(LookupPath, OpenFile);
+        if (ShouldBeEntry)
+          return llvm::expectedToOptional(std::move(ShouldBeEntry));
+        llvm::consumeError(ShouldBeEntry.takeError());
+      }
+    }
+
+    // Otherwise, do working directory lookup.
+    LookupPath.clear();
+    auto MaybeWorkingDirEntry = FM.getDirectoryRef(".");
+    if (MaybeWorkingDirEntry) {
+      DirectoryEntryRef WorkingDirEntry = *MaybeWorkingDirEntry;
+      StringRef WorkingDir = WorkingDirEntry.getName();
+      if (!WorkingDir.empty()) {
+        SeparateComponents(LookupPath, WorkingDir, Filename, false);
+        llvm::Expected<FileEntryRef> ShouldBeEntry =
+            FM.getFileRef(LookupPath, OpenFile);
+        if (ShouldBeEntry)
+          return llvm::expectedToOptional(std::move(ShouldBeEntry));
+        llvm::consumeError(ShouldBeEntry.takeError());
+      }
+    }
+  }
+
+  for (const auto &Entry : PPOpts->EmbedEntries) {
+    LookupPath.clear();
+    SeparateComponents(LookupPath, Entry, Filename, false);
+    llvm::Expected<FileEntryRef> ShouldBeEntry =
+        FM.getFileRef(LookupPath, OpenFile);
+    if (ShouldBeEntry)
+      return llvm::expectedToOptional(std::move(ShouldBeEntry));
+    llvm::consumeError(ShouldBeEntry.takeError());
+  }
   return std::nullopt;
 }
 
@@ -1164,6 +1238,7 @@ void Preprocessor::HandleDirective(Token &Result) {
       case tok::pp_include_next:
       case tok::pp___include_macros:
       case tok::pp_pragma:
+      case tok::pp_embed:
         Diag(Result, diag::err_embedded_directive) << II->getName();
         Diag(*ArgMacro, diag::note_macro_expansion_here)
             << ArgMacro->getIdentifierInfo();
@@ -1269,15 +1344,20 @@ void Preprocessor::HandleDirective(Token &Result) {
                          : diag::ext_pp_warning_directive)
             << /*C++23*/ 1;
       else
-        Diag(Result, LangOpts.C2x ? diag::warn_c2x_compat_warning_directive
+        Diag(Result, LangOpts.C23 ? diag::warn_c23_compat_warning_directive
                                   : diag::ext_pp_warning_directive)
-            << /*C2x*/ 0;
+            << /*C23*/ 0;
 
       return HandleUserDiagnosticDirective(Result, true);
     case tok::pp_ident:
       return HandleIdentSCCSDirective(Result);
     case tok::pp_sccs:
       return HandleIdentSCCSDirective(Result);
+    case tok::pp_embed:
+      return HandleEmbedDirective(SavedHash.getLocation(), Result,
+                                  getCurrentFileLexer()
+                                      ? *getCurrentFileLexer()->getFileEntry()
+                                      : static_cast<FileEntry *>(nullptr));
     case tok::pp_assert:
       //isExtension = true;  // FIXME: implement #assert
       break;
@@ -1894,26 +1974,28 @@ static bool trySimplifyPath(SmallVectorImpl<StringRef> &Components,
 
 bool Preprocessor::checkModuleIsAvailable(const LangOptions &LangOpts,
                                           const TargetInfo &TargetInfo,
-                                          DiagnosticsEngine &Diags, Module *M) {
+                                          const Module &M,
+                                          DiagnosticsEngine &Diags) {
   Module::Requirement Requirement;
   Module::UnresolvedHeaderDirective MissingHeader;
   Module *ShadowingModule = nullptr;
-  if (M->isAvailable(LangOpts, TargetInfo, Requirement, MissingHeader,
-                     ShadowingModule))
+  if (M.isAvailable(LangOpts, TargetInfo, Requirement, MissingHeader,
+                    ShadowingModule))
     return false;
 
   if (MissingHeader.FileNameLoc.isValid()) {
     Diags.Report(MissingHeader.FileNameLoc, diag::err_module_header_missing)
         << MissingHeader.IsUmbrella << MissingHeader.FileName;
   } else if (ShadowingModule) {
-    Diags.Report(M->DefinitionLoc, diag::err_module_shadowed) << M->Name;
+    Diags.Report(M.DefinitionLoc, diag::err_module_shadowed) << M.Name;
     Diags.Report(ShadowingModule->DefinitionLoc,
                  diag::note_previous_definition);
   } else {
     // FIXME: Track the location at which the requirement was specified, and
     // use it here.
-    Diags.Report(M->DefinitionLoc, diag::err_module_unavailable)
-        << M->getFullModuleName() << Requirement.second << Requirement.first;
+    Diags.Report(M.DefinitionLoc, diag::err_module_unavailable)
+        << M.getFullModuleName() << Requirement.RequiredState
+        << Requirement.FeatureName;
   }
   return true;
 }
@@ -1942,7 +2024,8 @@ Preprocessor::getIncludeNextStart(const Token &IncludeNextTok) const {
     // Start looking up in the directory *after* the one in which the current
     // file would be found, if any.
     assert(CurPPLexer && "#include_next directive in macro?");
-    LookupFromFile = CurPPLexer->getFileEntry();
+    if (auto FE = CurPPLexer->getFileEntry())
+      LookupFromFile = *FE;
     Lookup = nullptr;
   } else if (!Lookup) {
     // The current file was not found by walking the include path. Either it
@@ -2022,11 +2105,11 @@ void Preprocessor::HandleIncludeDirective(SourceLocation HashLoc,
     };
 
     auto HandleIncludeFile = [&](const PPCachedActions::IncludeFile *File) {
-      const FileEntry *FE = SourceMgr.getFileEntryForID(File->FID);
+      OptionalFileEntryRef FE = SourceMgr.getFileEntryRefForID(File->FID);
       bool IsImport =
           IncludeTok.getIdentifierInfo()->getPPKeywordID() == tok::pp_import;
       if (FE && IsImport) {
-        HeaderInfo.getFileInfo(FE).isImport = true;
+        HeaderInfo.getFileInfo(*FE).isImport = true;
       }
       InclusionCallback(SourceMgr.getFileEntryRefForID(File->FID), nullptr);
       EnterSourceFile(File->FID, nullptr, FilenameTok.getLocation(),
@@ -2423,8 +2506,8 @@ Preprocessor::ImportAction Preprocessor::HandleHeaderIncludeOrImport(
     // unavailable, diagnose the situation and bail out.
     // FIXME: Remove this; loadModule does the same check (but produces
     // slightly worse diagnostics).
-    if (checkModuleIsAvailable(getLangOpts(), getTargetInfo(), getDiagnostics(),
-                               ModuleToImport)) {
+    if (checkModuleIsAvailable(getLangOpts(), getTargetInfo(), *ModuleToImport,
+                               getDiagnostics())) {
       Diag(FilenameTok.getLocation(),
            diag::note_implicit_top_level_module_import_here)
           << ModuleToImport->getTopLevelModuleName();
@@ -2487,8 +2570,7 @@ Preprocessor::ImportAction Preprocessor::HandleHeaderIncludeOrImport(
   SrcMgr::CharacteristicKind FileCharacter =
       SourceMgr.getFileCharacteristic(FilenameTok.getLocation());
   if (File)
-    FileCharacter = std::max(HeaderInfo.getFileDirFlavor(&File->getFileEntry()),
-                             FileCharacter);
+    FileCharacter = std::max(HeaderInfo.getFileDirFlavor(*File), FileCharacter);
 
   // If this is a '#import' or an import-declaration, don't re-enter the file.
   //
@@ -2504,9 +2586,9 @@ Preprocessor::ImportAction Preprocessor::HandleHeaderIncludeOrImport(
   // Ask HeaderInfo if we should enter this #include file.  If not, #including
   // this file will have no effect.
   if (Action == Enter && File &&
-      !HeaderInfo.ShouldEnterIncludeFile(
-          *this, &File->getFileEntry(), EnterOnce, getLangOpts().Modules,
-          ModuleToImport, IsFirstIncludeOfFile)) {
+      !HeaderInfo.ShouldEnterIncludeFile(*this, *File, EnterOnce,
+                                         getLangOpts().Modules, ModuleToImport,
+                                         IsFirstIncludeOfFile)) {
     // C++ standard modules:
     // If we are not in the GMF, then we textually include only
     // clang modules:
@@ -2688,6 +2770,10 @@ Preprocessor::ImportAction Preprocessor::HandleHeaderIncludeOrImport(
     HasReachedMaxIncludeDepth = true;
     return {ImportAction::None};
   }
+
+  if (isAngled && isInNamedModule())
+    Diag(FilenameTok, diag::warn_pp_include_angled_in_module_purview)
+        << getNamedModuleName();
 
   // Look up the file, create a File ID for it.
   SourceLocation IncludePos = FilenameTok.getLocation();
@@ -2933,17 +3019,17 @@ static bool isConfigurationPattern(Token &MacroName, MacroInfo *MI,
         return false;
       StringRef ValueText = II->getName();
       StringRef TrimmedValue = ValueText;
-      if (!ValueText.startswith("__")) {
-        if (ValueText.startswith("_"))
+      if (!ValueText.starts_with("__")) {
+        if (ValueText.starts_with("_"))
           TrimmedValue = TrimmedValue.drop_front(1);
         else
           return false;
       } else {
         TrimmedValue = TrimmedValue.drop_front(2);
-        if (TrimmedValue.endswith("__"))
+        if (TrimmedValue.ends_with("__"))
           TrimmedValue = TrimmedValue.drop_back(2);
       }
-      return TrimmedValue.equals(MacroText);
+      return TrimmedValue == MacroText;
     } else {
       return false;
     }
@@ -3425,7 +3511,7 @@ void Preprocessor::HandleIfdefDirective(Token &Result,
     return;
   }
 
-  emitMacroExpansionWarnings(MacroNameTok);
+  emitMacroExpansionWarnings(MacroNameTok, /*IsIfnDef=*/true);
 
   // Check to see if this is the last token on the #if[n]def line.
   CheckEndOfDirective(isIfndef ? "ifndef" : "ifdef");
@@ -3609,7 +3695,7 @@ void Preprocessor::HandleElifFamilyDirective(Token &ElifToken,
                                                  : PED_Elifndef;
   ++NumElse;
 
-  // Warn if using `#elifdef` & `#elifndef` in not C2x & C++23 mode.
+  // Warn if using `#elifdef` & `#elifndef` in not C23 & C++23 mode.
   switch (DirKind) {
   case PED_Elifdef:
   case PED_Elifndef:
@@ -3618,8 +3704,8 @@ void Preprocessor::HandleElifFamilyDirective(Token &ElifToken,
       DiagID = LangOpts.CPlusPlus23 ? diag::warn_cxx23_compat_pp_directive
                                     : diag::ext_cxx23_pp_directive;
     else
-      DiagID = LangOpts.C2x ? diag::warn_c2x_compat_pp_directive
-                            : diag::ext_c2x_pp_directive;
+      DiagID = LangOpts.C23 ? diag::warn_c23_compat_pp_directive
+                            : diag::ext_c23_pp_directive;
     Diag(ElifToken, DiagID) << DirKind;
     break;
   default:
@@ -3678,4 +3764,396 @@ void Preprocessor::HandleElifFamilyDirective(Token &ElifToken,
   SkipExcludedConditionalBlock(
       HashToken.getLocation(), CI.IfLoc, /*Foundnonskip*/ true,
       /*FoundElse*/ CI.FoundElse, ElifToken.getLocation());
+}
+
+std::optional<LexEmbedParametersResult>
+Preprocessor::LexEmbedParameters(Token &CurTok, bool ForHasEmbed) {
+  LexEmbedParametersResult Result{};
+  SmallVector<Token, 2> ParameterTokens;
+  tok::TokenKind EndTokenKind = ForHasEmbed ? tok::r_paren : tok::eod;
+
+  auto DiagMismatchedBracesAndSkipToEOD =
+      [&](tok::TokenKind Expected,
+          std::pair<tok::TokenKind, SourceLocation> Matches) {
+        Diag(CurTok, diag::err_expected) << Expected;
+        Diag(Matches.second, diag::note_matching) << Matches.first;
+        if (CurTok.isNot(tok::eod))
+          DiscardUntilEndOfDirective(CurTok);
+      };
+
+  auto ExpectOrDiagAndSkipToEOD = [&](tok::TokenKind Kind) {
+    if (CurTok.isNot(Kind)) {
+      Diag(CurTok, diag::err_expected) << Kind;
+      if (CurTok.isNot(tok::eod))
+        DiscardUntilEndOfDirective(CurTok);
+      return false;
+    }
+    return true;
+  };
+
+  // C23 6.10:
+  // pp-parameter-name:
+  //   pp-standard-parameter
+  //   pp-prefixed-parameter
+  //
+  // pp-standard-parameter:
+  //   identifier
+  //
+  // pp-prefixed-parameter:
+  //   identifier :: identifier
+  auto LexPPParameterName = [&]() -> std::optional<std::string> {
+    // We expect the current token to be an identifier; if it's not, things
+    // have gone wrong.
+    if (!ExpectOrDiagAndSkipToEOD(tok::identifier))
+      return std::nullopt;
+
+    const IdentifierInfo *Prefix = CurTok.getIdentifierInfo();
+
+    // Lex another token; it is either a :: or we're done with the parameter
+    // name.
+    LexNonComment(CurTok);
+    if (CurTok.is(tok::coloncolon)) {
+      // We found a ::, so lex another identifier token.
+      LexNonComment(CurTok);
+      if (!ExpectOrDiagAndSkipToEOD(tok::identifier))
+        return std::nullopt;
+
+      const IdentifierInfo *Suffix = CurTok.getIdentifierInfo();
+
+      // Lex another token so we're past the name.
+      LexNonComment(CurTok);
+      return (llvm::Twine(Prefix->getName()) + "::" + Suffix->getName()).str();
+    }
+    return Prefix->getName().str();
+  };
+
+  // C23 6.10p5: In all aspects, a preprocessor standard parameter specified by
+  // this document as an identifier pp_param and an identifier of the form
+  // __pp_param__ shall behave the same when used as a preprocessor parameter,
+  // except for the spelling.
+  auto NormalizeParameterName = [](StringRef Name) {
+    if (Name.size() > 4 && Name.starts_with("__") && Name.ends_with("__"))
+      return Name.substr(2, Name.size() - 4);
+    return Name;
+  };
+
+  auto LexParenthesizedIntegerExpr = [&]() -> std::optional<size_t> {
+    // we have a limit parameter and its internals are processed using
+    // evaluation rules from #if.
+    if (!ExpectOrDiagAndSkipToEOD(tok::l_paren))
+      return std::nullopt;
+
+    // We do not consume the ( because EvaluateDirectiveExpression will lex
+    // the next token for us.
+    IdentifierInfo *ParameterIfNDef = nullptr;
+    bool EvaluatedDefined;
+    DirectiveEvalResult LimitEvalResult = EvaluateDirectiveExpression(
+        ParameterIfNDef, CurTok, EvaluatedDefined, /*CheckForEOD=*/false);
+
+    if (!LimitEvalResult.Value) {
+      // If there was an error evaluating the directive expression, we expect
+      // to be at the end of directive token.
+      assert(CurTok.is(tok::eod) && "expect to be at the end of directive");
+      return std::nullopt;
+    }
+
+    if (!ExpectOrDiagAndSkipToEOD(tok::r_paren))
+      return std::nullopt;
+
+    // Eat the ).
+    LexNonComment(CurTok);
+
+    // C23 6.10.3.2p2: The token defined shall not appear within the constant
+    // expression.
+    if (EvaluatedDefined) {
+      Diag(CurTok, diag::err_defined_in_pp_embed);
+      return std::nullopt;
+    }
+
+    if (LimitEvalResult.Value) {
+      const llvm::APSInt &Result = *LimitEvalResult.Value;
+      if (Result.isNegative()) {
+        Diag(CurTok, diag::err_requires_positive_value)
+            << toString(Result, 10) << /*positive*/ 0;
+        return std::nullopt;
+      }
+      return Result.getLimitedValue();
+    }
+    return std::nullopt;
+  };
+
+  auto GetMatchingCloseBracket = [](tok::TokenKind Kind) {
+    switch (Kind) {
+    case tok::l_paren:
+      return tok::r_paren;
+    case tok::l_brace:
+      return tok::r_brace;
+    case tok::l_square:
+      return tok::r_square;
+    default:
+      llvm_unreachable("should not get here");
+    }
+  };
+
+  auto LexParenthesizedBalancedTokenSoup =
+      [&](llvm::SmallVectorImpl<Token> &Tokens) {
+        std::vector<std::pair<tok::TokenKind, SourceLocation>> BracketStack;
+
+        // We expect the current token to be a left paren.
+        if (!ExpectOrDiagAndSkipToEOD(tok::l_paren))
+          return false;
+        LexNonComment(CurTok); // Eat the (
+
+        bool WaitingForInnerCloseParen = false;
+        while (CurTok.isNot(tok::eod) &&
+               (WaitingForInnerCloseParen || CurTok.isNot(tok::r_paren))) {
+          switch (CurTok.getKind()) {
+          default: // Shutting up diagnostics about not fully-covered switch.
+            break;
+          case tok::l_paren:
+            WaitingForInnerCloseParen = true;
+            [[fallthrough]];
+          case tok::l_brace:
+          case tok::l_square:
+            BracketStack.push_back({CurTok.getKind(), CurTok.getLocation()});
+            break;
+          case tok::r_paren:
+            WaitingForInnerCloseParen = false;
+            [[fallthrough]];
+          case tok::r_brace:
+          case tok::r_square: {
+            tok::TokenKind Matching =
+                GetMatchingCloseBracket(BracketStack.back().first);
+            if (BracketStack.empty() || CurTok.getKind() != Matching) {
+              DiagMismatchedBracesAndSkipToEOD(Matching, BracketStack.back());
+              return false;
+            }
+            BracketStack.pop_back();
+          } break;
+          }
+          Tokens.push_back(CurTok);
+          LexNonComment(CurTok);
+        }
+
+        // When we're done, we want to eat the closing paren.
+        if (!ExpectOrDiagAndSkipToEOD(tok::r_paren))
+          return false;
+
+        LexNonComment(CurTok); // Eat the )
+        return true;
+      };
+
+  LexNonComment(CurTok); // Prime the pump.
+  while (!CurTok.isOneOf(EndTokenKind, tok::eod)) {
+    SourceLocation ParamStartLoc = CurTok.getLocation();
+    std::optional<std::string> ParamName = LexPPParameterName();
+    if (!ParamName)
+      return std::nullopt;
+    StringRef Parameter = NormalizeParameterName(*ParamName);
+
+    // Lex the parameters (dependent on the parameter type we want!).
+    //
+    // C23 6.10.3.Xp1: The X standard embed parameter may appear zero times or
+    // one time in the embed parameter sequence.
+    if (Parameter == "limit") {
+      if (Result.MaybeLimitParam)
+        Diag(CurTok, diag::err_pp_embed_dup_params) << Parameter;
+
+      std::optional<size_t> Limit = LexParenthesizedIntegerExpr();
+      if (!Limit)
+        return std::nullopt;
+      Result.MaybeLimitParam =
+          PPEmbedParameterLimit{*Limit, {ParamStartLoc, CurTok.getLocation()}};
+    } else if (Parameter == "clang::offset") {
+      if (Result.MaybeOffsetParam)
+        Diag(CurTok, diag::err_pp_embed_dup_params) << Parameter;
+
+      std::optional<size_t> Offset = LexParenthesizedIntegerExpr();
+      if (!Offset)
+        return std::nullopt;
+      Result.MaybeOffsetParam = PPEmbedParameterOffset{
+          *Offset, {ParamStartLoc, CurTok.getLocation()}};
+    } else if (Parameter == "prefix") {
+      if (Result.MaybePrefixParam)
+        Diag(CurTok, diag::err_pp_embed_dup_params) << Parameter;
+
+      SmallVector<Token, 4> Soup;
+      if (!LexParenthesizedBalancedTokenSoup(Soup))
+        return std::nullopt;
+      Result.MaybePrefixParam = PPEmbedParameterPrefix{
+          std::move(Soup), {ParamStartLoc, CurTok.getLocation()}};
+    } else if (Parameter == "suffix") {
+      if (Result.MaybeSuffixParam)
+        Diag(CurTok, diag::err_pp_embed_dup_params) << Parameter;
+
+      SmallVector<Token, 4> Soup;
+      if (!LexParenthesizedBalancedTokenSoup(Soup))
+        return std::nullopt;
+      Result.MaybeSuffixParam = PPEmbedParameterSuffix{
+          std::move(Soup), {ParamStartLoc, CurTok.getLocation()}};
+    } else if (Parameter == "if_empty") {
+      if (Result.MaybeIfEmptyParam)
+        Diag(CurTok, diag::err_pp_embed_dup_params) << Parameter;
+
+      SmallVector<Token, 4> Soup;
+      if (!LexParenthesizedBalancedTokenSoup(Soup))
+        return std::nullopt;
+      Result.MaybeIfEmptyParam = PPEmbedParameterIfEmpty{
+          std::move(Soup), {ParamStartLoc, CurTok.getLocation()}};
+    } else {
+      ++Result.UnrecognizedParams;
+
+      // If there's a left paren, we need to parse a balanced token sequence
+      // and just eat those tokens.
+      if (CurTok.is(tok::l_paren)) {
+        SmallVector<Token, 4> Soup;
+        if (!LexParenthesizedBalancedTokenSoup(Soup))
+          return std::nullopt;
+      }
+      if (!ForHasEmbed) {
+        Diag(CurTok, diag::err_pp_unknown_parameter) << 1 << Parameter;
+        return std::nullopt;
+      }
+    }
+  }
+  return Result;
+}
+
+void Preprocessor::HandleEmbedDirectiveImpl(
+    SourceLocation HashLoc, const LexEmbedParametersResult &Params,
+    StringRef BinaryContents) {
+  if (BinaryContents.empty()) {
+    // If we have no binary contents, the only thing we need to emit are the
+    // if_empty tokens, if any.
+    // FIXME: this loses AST fidelity; nothing in the compiler will see that
+    // these tokens came from #embed. We have to hack around this when printing
+    // preprocessed output. The same is true for prefix and suffix tokens.
+    if (Params.MaybeIfEmptyParam) {
+      ArrayRef<Token> Toks = Params.MaybeIfEmptyParam->Tokens;
+      size_t TokCount = Toks.size();
+      auto NewToks = std::make_unique<Token[]>(TokCount);
+      llvm::copy(Toks, NewToks.get());
+      EnterTokenStream(std::move(NewToks), TokCount, true, true);
+    }
+    return;
+  }
+
+  size_t NumPrefixToks = Params.PrefixTokenCount(),
+         NumSuffixToks = Params.SuffixTokenCount();
+  size_t TotalNumToks = 1 + NumPrefixToks + NumSuffixToks;
+  size_t CurIdx = 0;
+  auto Toks = std::make_unique<Token[]>(TotalNumToks);
+
+  // Add the prefix tokens, if any.
+  if (Params.MaybePrefixParam) {
+    llvm::copy(Params.MaybePrefixParam->Tokens, &Toks[CurIdx]);
+    CurIdx += NumPrefixToks;
+  }
+
+  EmbedAnnotationData *Data = new (BP) EmbedAnnotationData;
+  Data->BinaryData = BinaryContents;
+
+  Toks[CurIdx].startToken();
+  Toks[CurIdx].setKind(tok::annot_embed);
+  Toks[CurIdx].setAnnotationRange(HashLoc);
+  Toks[CurIdx++].setAnnotationValue(Data);
+
+  // Now add the suffix tokens, if any.
+  if (Params.MaybeSuffixParam) {
+    llvm::copy(Params.MaybeSuffixParam->Tokens, &Toks[CurIdx]);
+    CurIdx += NumSuffixToks;
+  }
+
+  assert(CurIdx == TotalNumToks && "Calculated the incorrect number of tokens");
+  EnterTokenStream(std::move(Toks), TotalNumToks, true, true);
+}
+
+void Preprocessor::HandleEmbedDirective(SourceLocation HashLoc, Token &EmbedTok,
+                                        const FileEntry *LookupFromFile) {
+  // Give the usual extension/compatibility warnings.
+  if (LangOpts.C23)
+    Diag(EmbedTok, diag::warn_compat_pp_embed_directive);
+  else
+    Diag(EmbedTok, diag::ext_pp_embed_directive)
+        << (LangOpts.CPlusPlus ? /*Clang*/ 1 : /*C23*/ 0);
+
+  // Parse the filename header
+  Token FilenameTok;
+  if (LexHeaderName(FilenameTok))
+    return;
+
+  if (FilenameTok.isNot(tok::header_name)) {
+    Diag(FilenameTok.getLocation(), diag::err_pp_expects_filename);
+    if (FilenameTok.isNot(tok::eod))
+      DiscardUntilEndOfDirective();
+    return;
+  }
+
+  // Parse the optional sequence of
+  // directive-parameters:
+  //     identifier parameter-name-list[opt] directive-argument-list[opt]
+  // directive-argument-list:
+  //    '(' balanced-token-sequence ')'
+  // parameter-name-list:
+  //    '::' identifier parameter-name-list[opt]
+  Token CurTok;
+  std::optional<LexEmbedParametersResult> Params =
+      LexEmbedParameters(CurTok, /*ForHasEmbed=*/false);
+
+  assert((Params || CurTok.is(tok::eod)) &&
+         "expected success or to be at the end of the directive");
+  if (!Params)
+    return;
+
+  // Now, splat the data out!
+  SmallString<128> FilenameBuffer;
+  StringRef Filename = getSpelling(FilenameTok, FilenameBuffer);
+  StringRef OriginalFilename = Filename;
+  bool isAngled =
+      GetIncludeFilenameSpelling(FilenameTok.getLocation(), Filename);
+  // If GetIncludeFilenameSpelling set the start ptr to null, there was an
+  // error.
+  assert(!Filename.empty());
+  OptionalFileEntryRef MaybeFileRef =
+      this->LookupEmbedFile(Filename, isAngled, true, LookupFromFile);
+  if (!MaybeFileRef) {
+    // could not find file
+    if (Callbacks && Callbacks->EmbedFileNotFound(OriginalFilename)) {
+      return;
+    }
+    Diag(FilenameTok, diag::err_pp_file_not_found) << Filename;
+    return;
+  }
+  std::optional<llvm::MemoryBufferRef> MaybeFile =
+      getSourceManager().getMemoryBufferForFileOrNone(*MaybeFileRef);
+  if (!MaybeFile) {
+    // could not find file
+    Diag(FilenameTok, diag::err_cannot_open_file)
+        << Filename << "a buffer to the contents could not be created";
+    return;
+  }
+  StringRef BinaryContents = MaybeFile->getBuffer();
+
+  // The order is important between 'offset' and 'limit'; we want to offset
+  // first and then limit second; otherwise we may reduce the notional resource
+  // size to something too small to offset into.
+  if (Params->MaybeOffsetParam) {
+    // FIXME: just like with the limit() and if_empty() parameters, this loses
+    // source fidelity in the AST; it has no idea that there was an offset
+    // involved.
+    // offsets all the way to the end of the file make for an empty file.
+    BinaryContents = BinaryContents.substr(Params->MaybeOffsetParam->Offset);
+  }
+
+  if (Params->MaybeLimitParam) {
+    // FIXME: just like with the clang::offset() and if_empty() parameters,
+    // this loses source fidelity in the AST; it has no idea there was a limit
+    // involved.
+    BinaryContents = BinaryContents.substr(0, Params->MaybeLimitParam->Limit);
+  }
+
+  if (Callbacks)
+    Callbacks->EmbedDirective(HashLoc, Filename, isAngled, MaybeFileRef,
+                              *Params);
+  HandleEmbedDirectiveImpl(HashLoc, *Params, BinaryContents);
 }

@@ -17,7 +17,9 @@
 #include "mlir/Dialect/SPIRV/IR/SPIRVOps.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVTypes.h"
 #include "mlir/Dialect/SPIRV/IR/TargetAndABI.h"
+#include "mlir/Dialect/Vector/Transforms/VectorRewritePatterns.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/OneToNTypeConversion.h"
 #include "llvm/ADT/SmallSet.h"
 
 namespace mlir {
@@ -55,13 +57,8 @@ struct SPIRVConversionOptions {
   /// values will be packed into one 32-bit value to be memory efficient.
   bool emulateLT32BitScalarTypes{true};
 
-  /// Use 64-bit integers to convert index types.
+  /// Use 64-bit integers when converting index types.
   bool use64bitIndex{false};
-
-  /// Whether to enable fast math mode during conversion. If true, various
-  /// patterns would assume no NaN/infinity numbers as inputs, and thus there
-  /// will be no special guards emitted to check and handle such cases.
-  bool enableFastMathMode{false};
 };
 
 /// Type conversion from builtin types to SPIR-V types for shader interface.
@@ -77,13 +74,18 @@ public:
   /// Gets the SPIR-V correspondence for the standard index type.
   Type getIndexType() const;
 
+  /// Gets the bitwidth of the index type when converted to SPIR-V.
+  unsigned getIndexTypeBitwidth() const {
+    return options.use64bitIndex ? 64 : 32;
+  }
+
   const spirv::TargetEnv &getTargetEnv() const { return targetEnv; }
 
   /// Returns the options controlling the SPIR-V type converter.
   const SPIRVConversionOptions &getOptions() const { return options; }
 
   /// Checks if the SPIR-V capability inquired is supported.
-  bool allows(spirv::Capability capability);
+  bool allows(spirv::Capability capability) const;
 
 private:
   spirv::TargetEnv targetEnv;
@@ -134,6 +136,10 @@ private:
 void populateBuiltinFuncToSPIRVPatterns(SPIRVTypeConverter &typeConverter,
                                         RewritePatternSet &patterns);
 
+void populateFuncOpVectorRewritePatterns(RewritePatternSet &patterns);
+
+void populateReturnOpVectorRewritePatterns(RewritePatternSet &patterns);
+
 namespace spirv {
 class AccessChainOp;
 
@@ -169,17 +175,17 @@ Value linearizeIndex(ValueRange indices, ArrayRef<int64_t> strides,
 
 // TODO: This method assumes that the `baseType` is a MemRefType with AffineMap
 // that has static strides. Extend to handle dynamic strides.
-Value getElementPtr(SPIRVTypeConverter &typeConverter, MemRefType baseType,
-                    Value basePtr, ValueRange indices, Location loc,
-                    OpBuilder &builder);
+Value getElementPtr(const SPIRVTypeConverter &typeConverter,
+                    MemRefType baseType, Value basePtr, ValueRange indices,
+                    Location loc, OpBuilder &builder);
 
 // GetElementPtr implementation for Kernel/OpenCL flavored SPIR-V.
-Value getOpenCLElementPtr(SPIRVTypeConverter &typeConverter,
+Value getOpenCLElementPtr(const SPIRVTypeConverter &typeConverter,
                           MemRefType baseType, Value basePtr,
                           ValueRange indices, Location loc, OpBuilder &builder);
 
 // GetElementPtr implementation for Vulkan/Shader flavored SPIR-V.
-Value getVulkanElementPtr(SPIRVTypeConverter &typeConverter,
+Value getVulkanElementPtr(const SPIRVTypeConverter &typeConverter,
                           MemRefType baseType, Value basePtr,
                           ValueRange indices, Location loc, OpBuilder &builder);
 

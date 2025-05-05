@@ -11,7 +11,6 @@
 #include "clang/Basic/DiagnosticDriver.h"
 #include "clang/Basic/DiagnosticFrontend.h"
 #include "clang/Basic/DiagnosticSerialization.h"
-#include "clang/CodeGen/ObjectFilePCHContainerOperations.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/Job.h"
@@ -24,10 +23,12 @@
 #include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Frontend/Utils.h"
 #include "clang/Lex/PreprocessorOptions.h"
+#include "clang/Serialization/ObjectFilePCHContainerReader.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningService.h"
 #include "clang/Tooling/DependencyScanning/ModuleDepCollector.h"
 #include "clang/Tooling/DependencyScanning/ScanAndUpdateArgs.h"
 #include "clang/Tooling/Tooling.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/CAS/CASProvidingFileSystem.h"
 #include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/CAS/ObjectStore.h"
@@ -77,7 +78,7 @@ static bool checkHeaderSearchPaths(const HeaderSearchOptions &HSOpts,
                                    const HeaderSearchOptions &ExistingHSOpts,
                                    DiagnosticsEngine *Diags,
                                    const LangOptions &LangOpts) {
-  if (LangOpts.Modules && ExistingHSOpts.ModulesIncludeVFSUsage) {
+  if (LangOpts.Modules) {
     if (HSOpts.VFSOverlayFiles != ExistingHSOpts.VFSOverlayFiles) {
       if (Diags) {
         Diags->Report(diag::warn_pch_vfsoverlay_mismatch);
@@ -129,9 +130,8 @@ public:
     std::vector<std::string> VFSOverlayFiles = HSOpts.VFSOverlayFiles;
     PrebuiltModuleVFSMap.insert(
         {CurrentFile, llvm::StringSet<>(VFSOverlayFiles)});
-    return checkHeaderSearchPaths(HSOpts, CI.getHeaderSearchOpts(),
-                                  Complain ? &Diags : nullptr,
-                                  CI.getLangOpts());
+    return checkHeaderSearchPaths(
+        HSOpts, CI.getHeaderSearchOpts(), Complain ? &Diags : nullptr, CI.getLangOpts());
   }
 
   bool readModuleCacheKey(StringRef ModuleName, StringRef Filename,
@@ -188,7 +188,7 @@ static bool visitPrebuiltModule(StringRef PrebuiltModuleFilename,
 static std::string makeObjFileName(StringRef FileName) {
   SmallString<128> ObjFileName(FileName);
   llvm::sys::path::replace_extension(ObjFileName, "o");
-  return std::string(ObjFileName.str());
+  return std::string(ObjFileName);
 }
 
 /// Deduce the dependency target based on the output file and input files.
@@ -277,9 +277,7 @@ static void canonicalizeDefines(PreprocessorOptions &PPOpts) {
     ++Index;
   }
 
-  llvm::stable_sort(SimpleNames, [](const MacroOpt &A, const MacroOpt &B) {
-    return A.first < B.first;
-  });
+  llvm::stable_sort(SimpleNames, llvm::less_first());
   // Keep the last instance of each macro name by going in reverse
   auto NewEnd = std::unique(
       SimpleNames.rbegin(), SimpleNames.rend(),
@@ -399,18 +397,17 @@ public:
       llvm::IntrusiveRefCntPtr<DependencyScanningWorkerFilesystem> DepFS,
       llvm::IntrusiveRefCntPtr<DependencyScanningCASFilesystem> DepCASFS,
       llvm::IntrusiveRefCntPtr<llvm::cas::CachingOnDiskFileSystem> CacheFS,
-      ScanningOutputFormat Format, ScanningOptimizations OptimizeArgs, bool EagerLoadModules,
-      bool DisableFree, bool EmitDependencyFile,
+      ScanningOutputFormat Format, ScanningOptimizations OptimizeArgs,
+      bool EagerLoadModules, bool DisableFree, bool EmitDependencyFile,
       bool DiagGenerationAsCompilation, const CASOptions &CASOpts,
       std::optional<StringRef> ModuleName = std::nullopt,
       raw_ostream *VerboseOS = nullptr)
       : WorkingDirectory(WorkingDirectory), Consumer(Consumer),
-        Controller(Controller),
-        DepFS(std::move(DepFS)), DepCASFS(std::move(DepCASFS)),
-        CacheFS(std::move(CacheFS)), Format(Format), OptimizeArgs(OptimizeArgs),
+        Controller(Controller), DepFS(std::move(DepFS)),
+        DepCASFS(std::move(DepCASFS)), CacheFS(std::move(CacheFS)),
+        Format(Format), OptimizeArgs(OptimizeArgs),
         EagerLoadModules(EagerLoadModules), DisableFree(DisableFree),
-        CASOpts(CASOpts),
-        EmitDependencyFile(EmitDependencyFile),
+        CASOpts(CASOpts), EmitDependencyFile(EmitDependencyFile),
         DiagGenerationAsCompilation(DiagGenerationAsCompilation),
         ModuleName(ModuleName), VerboseOS(VerboseOS) {
     // The FullIncludeTree output format completely subsumes header search and
@@ -472,7 +469,11 @@ public:
 
     ScanInstance.getFrontendOpts().GenerateGlobalModuleIndex = false;
     ScanInstance.getFrontendOpts().UseGlobalModuleIndex = false;
-    ScanInstance.getFrontendOpts().ModulesShareFileManager = false;
+    // This will prevent us compiling individual modules asynchronously since
+    // FileManager is not thread-safe, but it does improve performance for now.
+    ScanInstance.getFrontendOpts().ModulesShareFileManager = true;
+    if (DepCASFS)
+      ScanInstance.getFrontendOpts().ModulesShareFileManager = false;
     ScanInstance.getHeaderSearchOpts().ModuleFormat = "raw";
     ScanInstance.getHeaderSearchOpts().ModulesIncludeVFSUsage =
         any(OptimizeArgs & ScanningOptimizations::VFS);
@@ -499,11 +500,9 @@ public:
         return false;
 
     // Use the dependency scanning optimized file system if requested to do so.
-    if (DepFS) {
-      llvm::IntrusiveRefCntPtr<DependencyScanningWorkerFilesystem> LocalDepFS =
-          DepFS;
+    if (DepFS)
       ScanInstance.getPreprocessorOpts().DependencyDirectivesForFile =
-          [LocalDepFS = std::move(LocalDepFS)](FileEntryRef File)
+          [LocalDepFS = DepFS](FileEntryRef File)
           -> std::optional<ArrayRef<dependency_directives_scan::Directive>> {
         if (llvm::ErrorOr<EntryRef> Entry =
                 LocalDepFS->getOrCreateFileSystemEntry(File.getName()))
@@ -511,17 +510,13 @@ public:
             return Entry->getDirectiveTokens();
         return std::nullopt;
       };
-    }
+
     // CAS Implementation.
-    if (DepCASFS) {
-      llvm::IntrusiveRefCntPtr<DependencyScanningCASFilesystem> LocalDepCASFS =
-          DepCASFS;
+    if (DepCASFS)
       ScanInstance.getPreprocessorOpts().DependencyDirectivesForFile =
-          [LocalDepCASFS = std::move(LocalDepCASFS)](FileEntryRef File)
-          -> std::optional<ArrayRef<dependency_directives_scan::Directive>> {
-        return LocalDepCASFS->getDirectiveTokens(File.getName());
-      };
-    }
+          [LocalDepCASFS = DepCASFS](FileEntryRef File) {
+            return LocalDepCASFS->getDirectiveTokens(File.getName());
+          };
 
     // Create the dependency collector that will collect the produced
     // dependencies.
@@ -598,6 +593,7 @@ public:
     // TODO: Implement diagnostic bucketing to reduce the impact of strict
     // context hashing.
     ScanInstance.getHeaderSearchOpts().ModulesStrictContextHash = true;
+    ScanInstance.getHeaderSearchOpts().ModulesSerializeOnlyPreprocessor = true;
     ScanInstance.getHeaderSearchOpts().ModulesSkipDiagnosticOptions = true;
     ScanInstance.getHeaderSearchOpts().ModulesSkipHeaderSearchPaths = true;
     ScanInstance.getHeaderSearchOpts().ModulesSkipPragmaDiagnosticMappings =
@@ -650,6 +646,9 @@ public:
               CAS, ScanInstance.getDiagnostics(), OriginalInvocation))
         TUCacheKey = Key->toString();
     }
+
+    // Propagate the statistics to the parent FileManager.
+    DriverFileMgr->AddStats(ScanInstance.getFileManager());
 
     return true;
   }
@@ -716,6 +715,9 @@ DependencyScanningWorker::DependencyScanningWorker(
       std::make_unique<ObjectFilePCHContainerReader>());
   // The scanner itself writes only raw ast files.
   PCHContainerOps->registerWriter(std::make_unique<RawPCHContainerWriter>());
+
+  if (Service.shouldTraceVFS())
+    FS = llvm::makeIntrusiveRefCnt<llvm::vfs::TracingFileSystem>(std::move(FS));
 
   if (Service.useCASFS()) {
     CacheFS = Service.getSharedFS().createProxyFS();
@@ -795,10 +797,34 @@ static bool forEachDriverJob(
   if (!Compilation)
     return false;
 
+  if (Compilation->containsError())
+    return false;
+
   for (const driver::Command &Job : Compilation->getJobs()) {
     if (!Callback(Job))
       return false;
   }
+  return true;
+}
+
+static bool createAndRunToolInvocation(
+    std::vector<std::string> CommandLine, DependencyScanningAction &Action,
+    FileManager &FM,
+    std::shared_ptr<clang::PCHContainerOperations> &PCHContainerOps,
+    DiagnosticsEngine &Diags, DependencyConsumer &Consumer) {
+
+  // Save executable path before providing CommandLine to ToolInvocation
+  std::string Executable = CommandLine[0];
+  ToolInvocation Invocation(std::move(CommandLine), &Action, &FM,
+                            PCHContainerOps);
+  Invocation.setDiagnosticConsumer(Diags.getClient());
+  Invocation.setDiagnosticOptions(&Diags.getDiagnosticOptions());
+  if (!Invocation.run())
+    return false;
+
+  std::vector<std::string> Args = Action.takeLastCC1Arguments();
+  Consumer.handleBuildCommand(
+      {std::move(Executable), std::move(Args), Action.getTUCacheKey()});
   return true;
 }
 
@@ -875,39 +901,37 @@ bool DependencyScanningWorker::computeDependencies(
                                   /*EmitDependencyFile=*/false,
                                   /*DiagGenerationAsCompilation=*/false, getCASOpts(),
                                   ModuleName);
-  bool Success = forEachDriverJob(
-      FinalCommandLine, *Diags, *FileMgr, [&](const driver::Command &Cmd) {
-        if (StringRef(Cmd.getCreator().getName()) != "clang") {
-          // Non-clang command. Just pass through to the dependency
-          // consumer.
-          Consumer.handleBuildCommand(
-              {Cmd.getExecutable(),
-               {Cmd.getArguments().begin(), Cmd.getArguments().end()},
-               /*TUCacheKey=*/std::nullopt});
-          return true;
-        }
+  bool Success = false;
+  if (FinalCommandLine[1] == "-cc1") {
+    Success = createAndRunToolInvocation(FinalCommandLine, Action, *FileMgr,
+                                         PCHContainerOps, *Diags, Consumer);
+  } else {
+    Success = forEachDriverJob(
+        FinalCommandLine, *Diags, *FileMgr, [&](const driver::Command &Cmd) {
+          if (StringRef(Cmd.getCreator().getName()) != "clang") {
+            // Non-clang command. Just pass through to the dependency
+            // consumer.
+            Consumer.handleBuildCommand(
+                {Cmd.getExecutable(),
+                 {Cmd.getArguments().begin(), Cmd.getArguments().end()},
+                 Action.getTUCacheKey()});
+            return true;
+          }
 
-        std::vector<std::string> Argv;
-        Argv.push_back(Cmd.getExecutable());
-        Argv.insert(Argv.end(), Cmd.getArguments().begin(),
-                    Cmd.getArguments().end());
+          // Insert -cc1 comand line options into Argv
+          std::vector<std::string> Argv;
+          Argv.push_back(Cmd.getExecutable());
+          Argv.insert(Argv.end(), Cmd.getArguments().begin(),
+                      Cmd.getArguments().end());
 
-        // Create an invocation that uses the underlying file
-        // system to ensure that any file system requests that
-        // are made by the driver do not go through the
-        // dependency scanning filesystem.
-        ToolInvocation Invocation(std::move(Argv), &Action, &*FileMgr,
-                                  PCHContainerOps);
-        Invocation.setDiagnosticConsumer(Diags->getClient());
-        Invocation.setDiagnosticOptions(&Diags->getDiagnosticOptions());
-        if (!Invocation.run())
-          return false;
-
-        std::vector<std::string> Args = Action.takeLastCC1Arguments();
-        Consumer.handleBuildCommand(
-            {Cmd.getExecutable(), std::move(Args), Action.getTUCacheKey()});
-        return true;
-      });
+          // Create an invocation that uses the underlying file
+          // system to ensure that any file system requests that
+          // are made by the driver do not go through the
+          // dependency scanning filesystem.
+          return createAndRunToolInvocation(std::move(Argv), Action, *FileMgr,
+                                            PCHContainerOps, *Diags, Consumer);
+        });
+  }
 
   if (Success && !Action.hasScanned())
     Diags->Report(diag::err_fe_expected_compiler_job)
@@ -949,8 +973,7 @@ void DependencyScanningWorker::computeDependenciesFromCompilerInvocation(
   DependencyScanningAction Action(
       WorkingDirectory, DepsConsumer, Controller, DepFS, DepCASFS, CacheFS,
       Format,
-      /*OptimizeArgs=*/ScanningOptimizations::Default, /*DisableFree=*/false,
-      EagerLoadModules,
+      ScanningOptimizations::Default, /*DisableFree=*/false, EagerLoadModules,
       /*EmitDependencyFile=*/!DepFile.empty(), DiagGenerationAsCompilation,
       getCASOpts(),
       /*ModuleName=*/std::nullopt, VerboseOS);

@@ -34,7 +34,7 @@ class ObjectStore;
 class CASID;
 } // namespace cas
 
-class MachOCASWriter : public MCObjectWriter {
+class MachOCASWriter : public MachObjectWriter {
 public:
   /// ObjectStore
   const Triple Target;
@@ -46,9 +46,9 @@ public:
       std::unique_ptr<MCMachObjectTargetWriter> MOTW, const Triple &TT,
       cas::ObjectStore &CAS, CASBackendMode Mode, raw_pwrite_stream &OS,
       bool IsLittleEndian,
-      std::function<const cas::ObjectProxy(
-          llvm::MachOCASWriter &, llvm::MCAssembler &,
-          const llvm::MCAsmLayout &, cas::ObjectStore &, raw_ostream *)>
+      std::function<const cas::ObjectProxy(llvm::MachOCASWriter &,
+                                           llvm::MCAssembler &,
+                                           cas::ObjectStore &, raw_ostream *)>
           CreateFromMcAssembler,
       std::function<Error(cas::ObjectProxy, cas::ObjectStore &, raw_ostream &)>
           SerializeObjectFile,
@@ -57,71 +57,11 @@ public:
 
   uint8_t getAddressSize() { return Target.isArch32Bit() ? 4 : 8; }
 
-  void recordRelocation(MCAssembler &Asm, const MCAsmLayout &Layout,
-                        const MCFragment *Fragment, const MCFixup &Fixup,
-                        MCValue Target, uint64_t &FixedValue) override {
-    MOW.recordRelocation(Asm, Layout, Fragment, Fixup, Target, FixedValue);
-  }
-
-  void executePostLayoutBinding(MCAssembler &Asm,
-                                const MCAsmLayout &Layout) override {
-    MOW.executePostLayoutBinding(Asm, Layout);
-  }
-
-  bool isSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
-                                              const MCSymbol &A,
-                                              const MCSymbol &B,
-                                              bool InSet) const override {
-    return MOW.isSymbolRefDifferenceFullyResolvedImpl(Asm, A, B, InSet);
-  }
-
-  bool isSymbolRefDifferenceFullyResolvedImpl(const MCAssembler &Asm,
-                                              const MCSymbol &SymA,
-                                              const MCFragment &FB, bool InSet,
-                                              bool IsPCRel) const override {
-    return MOW.isSymbolRefDifferenceFullyResolvedImpl(Asm, SymA, FB, InSet,
-                                                      IsPCRel);
-  }
-
-  uint64_t getPaddingSize(const MCSection *SD,
-                          const MCAsmLayout &Layout) const {
-    return MOW.getPaddingSize(SD, Layout);
-  }
-
-  void prepareObject(MCAssembler &Asm, const MCAsmLayout &Layout) {
-    MOW.prepareObject(Asm, Layout);
-  }
-
-  void writeMachOHeader(MCAssembler &Asm, const MCAsmLayout &Layout) {
-    MOW.writeMachOHeader(Asm, Layout);
-  }
-
-  void writeSectionData(MCAssembler &Asm, const MCAsmLayout &Layout) {
-    MOW.writeSectionData(Asm, Layout);
-  }
-
-  void writeRelocations(MCAssembler &Asm, const MCAsmLayout &Layout) {
-    MOW.writeRelocations(Asm, Layout);
-  }
-
-  void writeDataInCodeRegion(MCAssembler &Asm, const MCAsmLayout &Layout) {
-    MOW.writeDataInCodeRegion(Asm, Layout);
-  }
-
-  void writeSymbolTable(MCAssembler &Asm, const MCAsmLayout &Layout) {
-    MOW.writeSymbolTable(Asm, Layout);
-  }
-
-  uint64_t writeObject(MCAssembler &Asm, const MCAsmLayout &Layout) override;
+  uint64_t writeObject(MCAssembler &Asm) override;
 
   void resetBuffer() { OSOffset = InternalOS.tell(); }
 
   StringRef getContent() const { return InternalBuffer.substr(OSOffset); }
-
-  DenseMap<const MCSection *, std::vector<MachObjectWriter::RelAndSymbol>> &
-  getRelocations() {
-    return MOW.getRelocations();
-  }
 
 private:
   raw_pwrite_stream &OS;
@@ -130,13 +70,11 @@ private:
   SmallString<512> InternalBuffer;
   raw_svector_ostream InternalOS;
 
-  MachObjectWriter MOW;
-
   uint64_t OSOffset = 0;
 
-  std::function<const cas::ObjectProxy(
-      llvm::MachOCASWriter &, llvm::MCAssembler &, const llvm::MCAsmLayout &,
-      cas::ObjectStore &, raw_ostream *)>
+  std::function<const cas::ObjectProxy(llvm::MachOCASWriter &,
+                                       llvm::MCAssembler &, cas::ObjectStore &,
+                                       raw_ostream *)>
       CreateFromMcAssembler;
   std::function<Error(cas::ObjectProxy, cas::ObjectStore &, raw_ostream &)>
       SerializeObjectFile;
@@ -155,9 +93,9 @@ std::unique_ptr<MCObjectWriter> createMachOCASWriter(
     std::unique_ptr<MCMachObjectTargetWriter> MOTW, const Triple &TT,
     cas::ObjectStore &CAS, CASBackendMode Mode, raw_pwrite_stream &OS,
     bool IsLittleEndian,
-    std::function<const cas::ObjectProxy(
-        llvm::MachOCASWriter &, llvm::MCAssembler &, const llvm::MCAsmLayout &,
-        cas::ObjectStore &, raw_ostream *)>
+    std::function<const cas::ObjectProxy(llvm::MachOCASWriter &,
+                                         llvm::MCAssembler &,
+                                         cas::ObjectStore &, raw_ostream *)>
         CreateFromMcAssembler,
     std::function<Error(cas::ObjectProxy, cas::ObjectStore &, raw_ostream &)>
         SerializeObjectFile,

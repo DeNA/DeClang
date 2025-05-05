@@ -1,4 +1,4 @@
-﻿"""
+"""
 Test calling a function that hits a signal set to auto-restart, make sure the call completes.
 """
 
@@ -84,7 +84,7 @@ class ExprCommandThatRestartsTestCase(TestBase):
         handler_bkpt = target.BreakpointCreateBySourceRegex(
             "Got sigchld %d.", self.main_source_spec
         )
-        self.assertTrue(handler_bkpt.GetNumLocations() > 0)
+        self.assertGreater(handler_bkpt.GetNumLocations(), 0)
         options.SetIgnoreBreakpoints(True)
         options.SetUnwindOnError(True)
 

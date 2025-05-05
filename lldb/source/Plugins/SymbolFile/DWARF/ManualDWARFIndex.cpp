@@ -60,8 +60,11 @@ void ManualDWARFIndex::Index() {
   }
   if (dwp_info && dwp_info->ContainsTypeUnits()) {
     for (size_t U = 0; U < dwp_info->GetNumUnits(); ++U) {
-      if (auto *tu = llvm::dyn_cast<DWARFTypeUnit>(dwp_info->GetUnitAtIndex(U)))
-        units_to_index.push_back(tu);
+      if (auto *tu =
+              llvm::dyn_cast<DWARFTypeUnit>(dwp_info->GetUnitAtIndex(U))) {
+        if (!m_type_sigs_to_avoid.contains(tu->GetTypeHash()))
+          units_to_index.push_back(tu);
+      }
     }
   }
 
@@ -76,7 +79,8 @@ void ManualDWARFIndex::Index() {
   // indexing the unit, and then 8 extra entries for finalizing each index set.
   const uint64_t total_progress = units_to_index.size() * 2 + 8;
   Progress progress("Manually indexing DWARF", module_desc.GetData(),
-                    total_progress);
+                    total_progress, /*debugger=*/nullptr,
+                    /*minimum_report_time=*/std::chrono::milliseconds(20));
 
   std::vector<IndexSet> sets(units_to_index.size());
 
@@ -654,7 +658,7 @@ void ManualDWARFIndex::IndexSet::Encode(DataEncoder &encoder) const {
 
   // Now that all strings have been gathered, we will emit the string table.
   strtab.Encode(encoder);
-  // Followed the the symbol table data.
+  // Followed by the symbol table data.
   encoder.AppendData(index_encoder.GetData());
 }
 

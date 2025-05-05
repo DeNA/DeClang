@@ -20,6 +20,7 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Allocator.h"
@@ -45,6 +46,13 @@
 using namespace clang;
 using namespace SrcMgr;
 using llvm::MemoryBuffer;
+
+#define DEBUG_TYPE "source-manager"
+
+// Reaching a limit of 2^31 results in a hard error. This metric allows to track
+// if particular invocation of the compiler is close to it.
+STATISTIC(MaxUsedSLocBytes, "Maximum number of bytes used by source locations "
+                            "(both loaded and local).");
 
 //===----------------------------------------------------------------------===//
 // SourceManager Helper Classes
@@ -114,7 +122,7 @@ ContentCache::getBufferOrNone(DiagnosticsEngine &Diag, FileManager &FM,
   // return paths.
   IsBufferInvalid = true;
 
-  auto BufferOrError = FM.getBufferForFile(ContentsEntry, IsFileVolatile);
+  auto BufferOrError = FM.getBufferForFile(*ContentsEntry, IsFileVolatile);
 
   // If we were unable to open the file, then we are in an inconsistent
   // situation where the content cache referenced a file which no longer
@@ -276,14 +284,14 @@ void SourceManager::AddLineNote(SourceLocation Loc, unsigned LineNo,
   std::pair<FileID, unsigned> LocInfo = getDecomposedExpansionLoc(Loc);
 
   bool Invalid = false;
-  const SLocEntry &Entry = getSLocEntry(LocInfo.first, &Invalid);
+  SLocEntry &Entry = getSLocEntry(LocInfo.first, &Invalid);
   if (!Entry.isFile() || Invalid)
     return;
 
-  const SrcMgr::FileInfo &FileInfo = Entry.getFile();
+  SrcMgr::FileInfo &FileInfo = Entry.getFile();
 
   // Remember that this file has #line directives now if it doesn't already.
-  const_cast<SrcMgr::FileInfo&>(FileInfo).setHasLineDirectives();
+  FileInfo.setHasLineDirectives();
 
   (void) getLineTable();
 
@@ -324,8 +332,7 @@ SourceManager::~SourceManager() {
       ContentCacheAlloc.Deallocate(MemBufferInfos[i]);
     }
   }
-  for (llvm::DenseMap<const FileEntry*, SrcMgr::ContentCache*>::iterator
-       I = FileInfos.begin(), E = FileInfos.end(); I != E; ++I) {
+  for (auto I = FileInfos.begin(), E = FileInfos.end(); I != E; ++I) {
     if (I->second) {
       I->second->~ContentCache();
       ContentCacheAlloc.Deallocate(I->second);
@@ -432,6 +439,10 @@ ContentCache &SourceManager::createMemBufferContentCache(
 
 const SrcMgr::SLocEntry &SourceManager::loadSLocEntry(unsigned Index,
                                                       bool *Invalid) const {
+  return const_cast<SourceManager *>(this)->loadSLocEntry(Index, Invalid);
+}
+
+SrcMgr::SLocEntry &SourceManager::loadSLocEntry(unsigned Index, bool *Invalid) {
   assert(!SLocEntryLoaded[Index]);
   if (ExternalSLocEntries->ReadSLocEntry(-(static_cast<int>(Index) + 2))) {
     if (Invalid)
@@ -463,6 +474,7 @@ SourceManager::AllocateLoadedSLocEntries(unsigned NumSLocEntries,
   SLocEntryLoaded.resize(LoadedSLocEntryTable.size());
   SLocEntryOffsetLoaded.resize(LoadedSLocEntryTable.size());
   CurrentLoadedOffset -= TotalSize;
+  updateSlocUsageStats();
   int BaseID = -int(LoadedSLocEntryTable.size()) - 1;
   LoadedSLocEntryAllocBegin.push_back(FileID::get(BaseID));
   return std::make_pair(BaseID, CurrentLoadedOffset);
@@ -531,17 +543,6 @@ FileID SourceManager::getNextFileID(FileID FID) const {
 
 /// Create a new FileID that represents the specified file
 /// being \#included from the specified IncludePosition.
-///
-/// This translates NULL into standard input.
-FileID SourceManager::createFileID(const FileEntry *SourceFile,
-                                   SourceLocation IncludePos,
-                                   SrcMgr::CharacteristicKind FileCharacter,
-                                   int LoadedID,
-                                   SourceLocation::UIntTy LoadedOffset) {
-  return createFileID(SourceFile->getLastRef(), IncludePos, FileCharacter,
-                      LoadedID, LoadedOffset);
-}
-
 FileID SourceManager::createFileID(FileEntryRef SourceFile,
                                    SourceLocation IncludePos,
                                    SrcMgr::CharacteristicKind FileCharacter,
@@ -589,7 +590,7 @@ FileID SourceManager::createFileID(const llvm::MemoryBufferRef &Buffer,
 /// Get the FileID for \p SourceFile if it exists. Otherwise, create a
 /// new FileID for the \p SourceFile.
 FileID
-SourceManager::getOrCreateFileID(const FileEntry *SourceFile,
+SourceManager::getOrCreateFileID(FileEntryRef SourceFile,
                                  SrcMgr::CharacteristicKind FileCharacter) {
   FileID ID = translateFile(SourceFile);
   return ID.isValid() ? ID : createFileID(SourceFile, SourceLocation(),
@@ -617,7 +618,7 @@ FileID SourceManager::createFileIDImpl(ContentCache &File, StringRef Filename,
   unsigned FileSize = File.getSize();
   if (!(NextLocalOffset + FileSize + 1 > NextLocalOffset &&
         NextLocalOffset + FileSize + 1 <= CurrentLoadedOffset)) {
-    Diag.Report(IncludePos, diag::err_include_too_large);
+    Diag.Report(IncludePos, diag::err_sloc_space_too_large);
     noteSLocAddressSpaceUsage(Diag);
     return FileID();
   }
@@ -627,6 +628,7 @@ FileID SourceManager::createFileIDImpl(ContentCache &File, StringRef Filename,
   // We do a +1 here because we want a SourceLocation that means "the end of the
   // file", e.g. for the "no newline at the end of the file" diagnostic.
   NextLocalOffset += FileSize + 1;
+  updateSlocUsageStats();
 
   // Set LastFileIDLookup to the newly created file.  The next getFileID call is
   // almost guaranteed to be from that file.
@@ -675,24 +677,31 @@ SourceManager::createExpansionLocImpl(const ExpansionInfo &Info,
     return SourceLocation::getMacroLoc(LoadedOffset);
   }
   LocalSLocEntryTable.push_back(SLocEntry::get(NextLocalOffset, Info));
-  // FIXME: Produce a proper diagnostic for this case.
-  assert(NextLocalOffset + Length + 1 > NextLocalOffset &&
-         NextLocalOffset + Length + 1 <= CurrentLoadedOffset &&
-         "Ran out of source locations!");
+  if (NextLocalOffset + Length + 1 <= NextLocalOffset ||
+      NextLocalOffset + Length + 1 > CurrentLoadedOffset) {
+    Diag.Report(SourceLocation(), diag::err_sloc_space_too_large);
+    // FIXME: call `noteSLocAddressSpaceUsage` to report details to users and
+    // use a source location from `Info` to point at an error.
+    // Currently, both cause Clang to run indefinitely, this needs to be fixed.
+    // FIXME: return an error instead of crashing. Returning invalid source
+    // locations causes compiler to run indefinitely.
+    llvm::report_fatal_error("ran out of source locations");
+  }
   // See createFileID for that +1.
   NextLocalOffset += Length + 1;
+  updateSlocUsageStats();
   return SourceLocation::getMacroLoc(NextLocalOffset - (Length + 1));
 }
 
 std::optional<llvm::MemoryBufferRef>
-SourceManager::getMemoryBufferForFileOrNone(const FileEntry *File) {
-  SrcMgr::ContentCache &IR = getOrCreateContentCache(File->getLastRef());
+SourceManager::getMemoryBufferForFileOrNone(FileEntryRef File) {
+  SrcMgr::ContentCache &IR = getOrCreateContentCache(File);
   return IR.getBufferOrNone(Diag, getFileManager(), SourceLocation());
 }
 
 void SourceManager::overrideFileContents(
-    const FileEntry *SourceFile, std::unique_ptr<llvm::MemoryBuffer> Buffer) {
-  SrcMgr::ContentCache &IR = getOrCreateContentCache(SourceFile->getLastRef());
+    FileEntryRef SourceFile, std::unique_ptr<llvm::MemoryBuffer> Buffer) {
+  SrcMgr::ContentCache &IR = getOrCreateContentCache(SourceFile);
 
   IR.setBuffer(std::move(Buffer));
   IR.BufferOverridden = true;
@@ -705,7 +714,7 @@ void SourceManager::overrideFileContents(const FileEntry *SourceFile,
   assert(SourceFile->getSize() == NewFile.getSize() &&
          "Different sizes, use the FileManager to create a virtual file with "
          "the correct size");
-  assert(FileInfos.count(SourceFile) == 0 &&
+  assert(FileInfos.find_as(SourceFile) == FileInfos.end() &&
          "This function should be called at the initialization stage, before "
          "any parsing occurs.");
   // FileEntryRef is not default-constructible.
@@ -728,8 +737,8 @@ SourceManager::bypassFileContentsOverride(FileEntryRef File) {
   return BypassFile;
 }
 
-void SourceManager::setFileIsTransient(const FileEntry *File) {
-  getOrCreateContentCache(File->getLastRef()).IsTransient = true;
+void SourceManager::setFileIsTransient(FileEntryRef File) {
+  getOrCreateContentCache(File).IsTransient = true;
 }
 
 std::optional<StringRef>
@@ -959,7 +968,7 @@ SourceLocation SourceManager::getImmediateSpellingLoc(SourceLocation Loc) const{
 
 /// Return the filename of the file containing a SourceLocation.
 StringRef SourceManager::getFilename(SourceLocation SpellingLoc) const {
-  if (const FileEntry *F = getFileEntryForID(getFileID(SpellingLoc)))
+  if (OptionalFileEntryRef F = getFileEntryRefForID(getFileID(SpellingLoc)))
     return F->getName();
   return StringRef();
 }
@@ -1231,7 +1240,7 @@ LineOffsetMapping LineOffsetMapping::get(llvm::MemoryBufferRef Buffer,
   // This is much faster than scanning each byte independently.
   if ((unsigned long)(End - Start) > sizeof(Word)) {
     do {
-      Word = llvm::support::endian::read64(Buf, llvm::support::little);
+      Word = llvm::support::endian::read64(Buf, llvm::endianness::little);
       // no new line => jump over sizeof(Word) bytes.
       auto Mask = likelyhasbetween(Word, '\n', '\r');
       if (!Mask) {
@@ -1312,7 +1321,7 @@ unsigned SourceManager::getLineNumber(FileID FID, unsigned FilePos,
   }
 
   // If this is the first use of line information for this buffer, compute the
-  /// SourceLineCache for it on demand.
+  // SourceLineCache for it on demand.
   if (!Content->SourceLineCache) {
     std::optional<llvm::MemoryBufferRef> Buffer =
         Content->getBufferOrNone(Diag, getFileManager(), SourceLocation());
@@ -1845,6 +1854,12 @@ void SourceManager::associateFileChunkWithMacroArgExp(
   MacroArgsCache[EndOffs] = EndOffsMappedLoc;
 }
 
+void SourceManager::updateSlocUsageStats() const {
+  SourceLocation::UIntTy UsedBytes =
+      NextLocalOffset + (MaxLoadedOffset - CurrentLoadedOffset);
+  MaxUsedSLocBytes.updateMax(UsedBytes);
+}
+
 /// If \arg Loc points inside a function macro argument, the returned
 /// location will be the macro location in which the argument was expanded.
 /// If a macro argument is used multiple times, the expanded location will
@@ -1946,7 +1961,8 @@ bool SourceManager::isInTheSameTranslationUnitImpl(
     auto FindSLocEntryAlloc = [this](FileID FID) {
       // Loaded FileIDs are negative, we store the lowest FileID from each
       // allocation, later allocations have lower FileIDs.
-      return llvm::lower_bound(LoadedSLocEntryAllocBegin, FID, std::greater{});
+      return llvm::lower_bound(LoadedSLocEntryAllocBegin, FID,
+                               std::greater<FileID>{});
     };
 
     // If both are loaded from different AST files.
@@ -2144,14 +2160,16 @@ void SourceManager::PrintStats() const {
   llvm::errs() << "\n*** Source Manager Stats:\n";
   llvm::errs() << FileInfos.size() << " files mapped, " << MemBufferInfos.size()
                << " mem buffers mapped.\n";
-  llvm::errs() << LocalSLocEntryTable.size() << " local SLocEntry's allocated ("
+  llvm::errs() << LocalSLocEntryTable.size() << " local SLocEntries allocated ("
                << llvm::capacity_in_bytes(LocalSLocEntryTable)
-               << " bytes of capacity), "
-               << NextLocalOffset << "B of Sloc address space used.\n";
+               << " bytes of capacity), " << NextLocalOffset
+               << "B of SLoc address space used.\n";
   llvm::errs() << LoadedSLocEntryTable.size()
-               << " loaded SLocEntries allocated, "
+               << " loaded SLocEntries allocated ("
+               << llvm::capacity_in_bytes(LoadedSLocEntryTable)
+               << " bytes of capacity), "
                << MaxLoadedOffset - CurrentLoadedOffset
-               << "B of Sloc address space used.\n";
+               << "B of SLoc address space used.\n";
 
   unsigned NumLineNumsComputed = 0;
   unsigned NumFileBytesMapped = 0;
@@ -2335,11 +2353,11 @@ SourceManager::MemoryBufferSizes SourceManager::getMemoryBufferSizes() const {
 }
 
 size_t SourceManager::getDataStructureSizes() const {
-  size_t size = llvm::capacity_in_bytes(MemBufferInfos)
-    + llvm::capacity_in_bytes(LocalSLocEntryTable)
-    + llvm::capacity_in_bytes(LoadedSLocEntryTable)
-    + llvm::capacity_in_bytes(SLocEntryLoaded)
-    + llvm::capacity_in_bytes(FileInfos);
+  size_t size = llvm::capacity_in_bytes(MemBufferInfos) +
+                llvm::capacity_in_bytes(LocalSLocEntryTable) +
+                llvm::capacity_in_bytes(LoadedSLocEntryTable) +
+                llvm::capacity_in_bytes(SLocEntryLoaded) +
+                llvm::capacity_in_bytes(FileInfos);
 
   if (OverriddenFilesInfo)
     size += llvm::capacity_in_bytes(OverriddenFilesInfo->OverriddenFiles);
@@ -2367,8 +2385,9 @@ SourceManagerForFile::SourceManagerForFile(StringRef FileName,
       IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs),
       new DiagnosticOptions);
   SourceMgr = std::make_unique<SourceManager>(*Diagnostics, *FileMgr);
-  FileID ID = SourceMgr->createFileID(*FileMgr->getFile(FileName),
-                                      SourceLocation(), clang::SrcMgr::C_User);
+  FileEntryRef FE = llvm::cantFail(FileMgr->getFileRef(FileName));
+  FileID ID =
+      SourceMgr->createFileID(FE, SourceLocation(), clang::SrcMgr::C_User);
   assert(ID.isValid());
   SourceMgr->setMainFileID(ID);
 }

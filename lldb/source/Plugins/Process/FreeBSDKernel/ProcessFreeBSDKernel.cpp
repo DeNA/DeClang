@@ -10,7 +10,7 @@
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Target/DynamicLoader.h"
 
-#include "Plugins/DynamicLoader/Static/DynamicLoaderStatic.h"
+#include "Plugins/DynamicLoader/FreeBSD-Kernel/DynamicLoaderFreeBSDKernel.h"
 #include "ProcessFreeBSDKernel.h"
 #include "ThreadFreeBSDKernel.h"
 
@@ -50,7 +50,7 @@ private:
 class ProcessFreeBSDKernelKVM : public ProcessFreeBSDKernel {
 public:
   ProcessFreeBSDKernelKVM(lldb::TargetSP target_sp, lldb::ListenerSP listener,
-                          kvm_t *fvc);
+                          kvm_t *fvc, const FileSpec &core_file);
 
   ~ProcessFreeBSDKernelKVM();
 
@@ -263,7 +263,7 @@ Status ProcessFreeBSDKernel::DoLoadCore() {
 DynamicLoader *ProcessFreeBSDKernel::GetDynamicLoader() {
   if (m_dyld_up.get() == nullptr)
     m_dyld_up.reset(DynamicLoader::FindPlugin(
-        this, DynamicLoaderStatic::GetPluginNameStatic()));
+        this, DynamicLoaderFreeBSDKernel::GetPluginNameStatic()));
   return m_dyld_up.get();
 }
 
@@ -291,7 +291,8 @@ size_t ProcessFreeBSDKernelFVC::DoReadMemory(lldb::addr_t addr, void *buf,
   ssize_t rd = 0;
   rd = fvc_read(m_fvc, addr, buf, size);
   if (rd < 0 || static_cast<size_t>(rd) != size) {
-    error.SetErrorStringWithFormat("Reading memory failed: %s", GetError());
+    error = Status::FromErrorStringWithFormat("Reading memory failed: %s",
+                                              GetError());
     return rd > 0 ? rd : 0;
   }
   return rd;
@@ -319,7 +320,8 @@ size_t ProcessFreeBSDKernelKVM::DoReadMemory(lldb::addr_t addr, void *buf,
   ssize_t rd = 0;
   rd = kvm_read2(m_kvm, addr, buf, size);
   if (rd < 0 || static_cast<size_t>(rd) != size) {
-    error.SetErrorStringWithFormat("Reading memory failed: %s", GetError());
+    error = Status::FromErrorStringWithFormat("Reading memory failed: %s",
+                                              GetError());
     return rd > 0 ? rd : 0;
   }
   return rd;

@@ -15,6 +15,7 @@ CHECK: -flat
 CHECK: -gen-reproducer
 CHECK: -help
 CHECK: -keep-function-for-static
+CHECK: -no-object-timestamp
 CHECK: -no-odr
 CHECK: -no-output
 CHECK: -no-swiftmodule-timestamp
@@ -29,7 +30,6 @@ CHECK: -remarks-output-format <format>
 CHECK: -remarks-prepend-path <path>
 CHECK: -reproducer <mode>
 CHECK: -statistics
-CHECK: -symbol-map
 CHECK: -symtab
 CHECK: {{-S}}
 CHECK: -toolchain

@@ -16,7 +16,6 @@
 
 #include "lldb/Breakpoint/Watchpoint.h"
 #include "lldb/Breakpoint/WatchpointList.h"
-#include "lldb/Core/ValueObject.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/CommandOptionArgumentTable.h"
@@ -27,6 +26,7 @@
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/StreamString.h"
+#include "lldb/ValueObject/ValueObject.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -153,12 +153,7 @@ public:
             interpreter, "watchpoint list",
             "List all watchpoints at configurable levels of detail.", nullptr,
             eCommandRequiresTarget) {
-    CommandArgumentEntry arg;
-    CommandObject::AddIDsArgumentData(arg, eArgTypeWatchpointID,
-                                      eArgTypeWatchpointIDRange);
-    // Add the entry for the first argument for this command to the object's
-    // arguments vector.
-    m_arguments.push_back(arg);
+    CommandObject::AddIDsArgumentData(eWatchpointArgs);
   }
 
   ~CommandObjectWatchpointList() override = default;
@@ -208,7 +203,7 @@ public:
 
 protected:
   void DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = &GetSelectedTarget();
+    Target *target = &GetTarget();
 
     if (target->GetProcessSP() && target->GetProcessSP()->IsAlive()) {
       std::optional<uint32_t> num_supported_hardware_watchpoints =
@@ -276,12 +271,7 @@ public:
                             "Enable the specified disabled watchpoint(s). If "
                             "no watchpoints are specified, enable all of them.",
                             nullptr, eCommandRequiresTarget) {
-    CommandArgumentEntry arg;
-    CommandObject::AddIDsArgumentData(arg, eArgTypeWatchpointID,
-                                      eArgTypeWatchpointIDRange);
-    // Add the entry for the first argument for this command to the object's
-    // arguments vector.
-    m_arguments.push_back(arg);
+    CommandObject::AddIDsArgumentData(eWatchpointArgs);
   }
 
   ~CommandObjectWatchpointEnable() override = default;
@@ -296,7 +286,7 @@ public:
 
 protected:
   void DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = &GetSelectedTarget();
+    Target *target = &GetTarget();
     if (!CheckTargetForWatchpointOperations(target, result))
       return;
 
@@ -350,12 +340,7 @@ public:
                             "removing it/them.  If no watchpoints are "
                             "specified, disable them all.",
                             nullptr, eCommandRequiresTarget) {
-    CommandArgumentEntry arg;
-    CommandObject::AddIDsArgumentData(arg, eArgTypeWatchpointID,
-                                      eArgTypeWatchpointIDRange);
-    // Add the entry for the first argument for this command to the object's
-    // arguments vector.
-    m_arguments.push_back(arg);
+    CommandObject::AddIDsArgumentData(eWatchpointArgs);
   }
 
   ~CommandObjectWatchpointDisable() override = default;
@@ -370,7 +355,7 @@ public:
 
 protected:
   void DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = &GetSelectedTarget();
+    Target *target = &GetTarget();
     if (!CheckTargetForWatchpointOperations(target, result))
       return;
 
@@ -429,12 +414,7 @@ public:
                             "Delete the specified watchpoint(s).  If no "
                             "watchpoints are specified, delete them all.",
                             nullptr, eCommandRequiresTarget) {
-    CommandArgumentEntry arg;
-    CommandObject::AddIDsArgumentData(arg, eArgTypeWatchpointID,
-                                      eArgTypeWatchpointIDRange);
-    // Add the entry for the first argument for this command to the object's
-    // arguments vector.
-    m_arguments.push_back(arg);
+    CommandObject::AddIDsArgumentData(eWatchpointArgs);
   }
 
   ~CommandObjectWatchpointDelete() override = default;
@@ -484,7 +464,7 @@ public:
 
 protected:
   void DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = &GetSelectedTarget();
+    Target *target = &GetTarget();
     if (!CheckTargetForWatchpointOperations(target, result))
       return;
 
@@ -550,12 +530,7 @@ public:
                             "Set ignore count on the specified watchpoint(s).  "
                             "If no watchpoints are specified, set them all.",
                             nullptr, eCommandRequiresTarget) {
-    CommandArgumentEntry arg;
-    CommandObject::AddIDsArgumentData(arg, eArgTypeWatchpointID,
-                                      eArgTypeWatchpointIDRange);
-    // Add the entry for the first argument for this command to the object's
-    // arguments vector.
-    m_arguments.push_back(arg);
+    CommandObject::AddIDsArgumentData(eWatchpointArgs);
   }
 
   ~CommandObjectWatchpointIgnore() override = default;
@@ -584,8 +559,8 @@ public:
       switch (short_option) {
       case 'i':
         if (option_arg.getAsInteger(0, m_ignore_count))
-          error.SetErrorStringWithFormat("invalid ignore count '%s'",
-                                         option_arg.str().c_str());
+          error = Status::FromErrorStringWithFormat("invalid ignore count '%s'",
+                                                    option_arg.str().c_str());
         break;
       default:
         llvm_unreachable("Unimplemented option");
@@ -609,7 +584,7 @@ public:
 
 protected:
   void DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = &GetSelectedTarget();
+    Target *target = &GetTarget();
     if (!CheckTargetForWatchpointOperations(target, result))
       return;
 
@@ -673,12 +648,7 @@ public:
             "watchpoint.  "
             "Passing an empty argument clears the modification.",
             nullptr, eCommandRequiresTarget) {
-    CommandArgumentEntry arg;
-    CommandObject::AddIDsArgumentData(arg, eArgTypeWatchpointID,
-                                      eArgTypeWatchpointIDRange);
-    // Add the entry for the first argument for this command to the object's
-    // arguments vector.
-    m_arguments.push_back(arg);
+    CommandObject::AddIDsArgumentData(eWatchpointArgs);
   }
 
   ~CommandObjectWatchpointModify() override = default;
@@ -733,7 +703,7 @@ public:
 
 protected:
   void DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = &GetSelectedTarget();
+    Target *target = &GetTarget();
     if (!CheckTargetForWatchpointOperations(target, result))
       return;
 
@@ -811,18 +781,7 @@ Examples:
         "    Watches my_global_var for read/write access, with the region to watch \
 corresponding to the byte size of the data type.");
 
-    CommandArgumentEntry arg;
-    CommandArgumentData var_name_arg;
-
-    // Define the only variant of this arg.
-    var_name_arg.arg_type = eArgTypeVarName;
-    var_name_arg.arg_repetition = eArgRepeatPlain;
-
-    // Push the variant into the argument entry.
-    arg.push_back(var_name_arg);
-
-    // Push the data for the only argument into the m_arguments vector.
-    m_arguments.push_back(arg);
+    AddSimpleArgumentList(eArgTypeVarName);
 
     // Absorb the '-w' and '-s' options into our option group.
     m_option_group.Append(&m_option_watchpoint, LLDB_OPT_SET_1, LLDB_OPT_SET_1);
@@ -830,16 +789,6 @@ corresponding to the byte size of the data type.");
   }
 
   ~CommandObjectWatchpointSetVariable() override = default;
-
-  void
-  HandleArgumentCompletion(CompletionRequest &request,
-                           OptionElementVector &opt_element_vector) override {
-    if (request.GetCursorIndex() != 0)
-      return;
-    lldb_private::CommandCompletions::InvokeCommonCompletionCallbacks(
-        GetCommandInterpreter(), lldb::eVariablePathCompletion, request,
-        nullptr);
-  }
 
   Options *GetOptions() override { return &m_option_group; }
 
@@ -855,7 +804,7 @@ protected:
   }
 
   void DoExecute(Args &command, CommandReturnObject &result) override {
-    Target *target = GetDebugger().GetSelectedTarget().get();
+    Target *target = &GetTarget();
     StackFrame *frame = m_exe_ctx.GetFramePtr();
 
     // If no argument is present, issue an error message.  There's no way to
@@ -1019,18 +968,7 @@ Examples:
 
     Watches write access for the 1-byte region pointed to by the address 'foo + 32')");
 
-    CommandArgumentEntry arg;
-    CommandArgumentData expression_arg;
-
-    // Define the only variant of this arg.
-    expression_arg.arg_type = eArgTypeExpression;
-    expression_arg.arg_repetition = eArgRepeatPlain;
-
-    // Push the only variant into the argument entry.
-    arg.push_back(expression_arg);
-
-    // Push the data for the only argument into the m_arguments vector.
-    m_arguments.push_back(arg);
+    AddSimpleArgumentList(eArgTypeExpression);
 
     // Absorb the '-w' and '-s' options into our option group.
     m_option_group.Append(&m_option_watchpoint, LLDB_OPT_SET_ALL,
@@ -1053,7 +991,7 @@ protected:
     m_option_group.NotifyOptionParsingStarting(
         &exe_ctx); // This is a raw command, so notify the option group
 
-    Target *target = GetDebugger().GetSelectedTarget().get();
+    Target *target = &GetTarget();
     StackFrame *frame = m_exe_ctx.GetFramePtr();
 
     OptionsWithRaw args(raw_command);

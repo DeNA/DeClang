@@ -571,11 +571,17 @@ class PR34109_class {
   virtual ~PR34109_class() {}
 };
 
+#if !defined(__cpp_sized_deallocation)
 void operator delete(void *) throw();
 // expected-note@-1 {{previous declaration is here}}
 __declspec(dllexport) void operator delete(void *) throw();
 // expected-error@-1  {{redeclaration of 'operator delete' cannot add 'dllexport' attribute}}
-
+#else
+void operator delete(void *, unsigned int) throw();
+// expected-note@-1 {{previous declaration is here}}
+__declspec(dllexport) void operator delete(void *, unsigned int) throw();
+// expected-error@-1  {{redeclaration of 'operator delete' cannot add 'dllexport' attribute}}
+#endif
 void PR34109(int* a) {
   delete a;
 }
@@ -588,6 +594,18 @@ namespace PR42089 {
   void S::Foo(){} // expected-warning {{is missing exception specification}}
   __attribute__((nothrow)) void S::Bar(){}
 }
+
+namespace UnalignedConv {
+struct S {
+  bool operator==(int) const;
+};
+
+int func() {
+  S __unaligned s;
+  return s == 42;
+}
+}
+
 
 #elif TEST2
 

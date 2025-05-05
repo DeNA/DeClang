@@ -1,4 +1,4 @@
-//===--- APINotesReader.h - API Notes Reader ----------------------*- C++ -*-===//
+//===--- APINotesReader.h - API Notes Reader --------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines the \c APINotesReader class that reads source
-// API notes data providing additional information about source code as
-// a separate input, such as the non-nil/nilable annotations for
-// method parameters.
+// This file defines the \c APINotesReader class that reads source API notes
+// data providing additional information about source code as a separate input,
+// such as the non-nil/nilable annotations for method parameters.
 //
 //===----------------------------------------------------------------------===//
-#ifndef LLVM_CLANG_API_NOTES_READER_H
-#define LLVM_CLANG_API_NOTES_READER_H
+
+#ifndef LLVM_CLANG_APINOTES_READER_H
+#define LLVM_CLANG_APINOTES_READER_H
 
 #include "clang/APINotes/Types.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -27,11 +27,10 @@ namespace api_notes {
 /// the \c APINotesWriter.
 class APINotesReader {
   class Implementation;
+  std::unique_ptr<Implementation> Implementation;
 
-  Implementation &Impl;
-
-  APINotesReader(llvm::MemoryBuffer *inputBuffer, bool ownsInputBuffer,
-                 llvm::VersionTuple swiftVersion, bool &failed);
+  APINotesReader(llvm::MemoryBuffer *InputBuffer,
+                 llvm::VersionTuple SwiftVersion, bool &Failed);
 
 public:
   /// Create a new API notes reader from the given member buffer, which
@@ -39,16 +38,8 @@ public:
   ///
   /// \returns the new API notes reader, or null if an error occurred.
   static std::unique_ptr<APINotesReader>
-  get(std::unique_ptr<llvm::MemoryBuffer> inputBuffer,
-      llvm::VersionTuple swiftVersion);
-
-  /// Create a new API notes reader from the given member buffer, which
-  /// contains the contents of a binary API notes file.
-  ///
-  /// \returns the new API notes reader, or null if an error occurred.
-  static std::unique_ptr<APINotesReader>
-  getUnmanaged(llvm::MemoryBuffer *inputBuffer,
-               llvm::VersionTuple swiftVersion);
+  Create(std::unique_ptr<llvm::MemoryBuffer> InputBuffer,
+         llvm::VersionTuple SwiftVersion);
 
   ~APINotesReader();
 
@@ -59,171 +50,186 @@ public:
   /// notes.
   llvm::StringRef getModuleName() const;
 
-  /// Retrieve the size and modification time of the source file from
-  /// which this API notes file was created, if known.
-  std::optional<std::pair<off_t, time_t>> getSourceFileSizeAndModTime() const;
-
   /// Retrieve the module options
   ModuleOptions getModuleOptions() const;
 
   /// Captures the completed versioned information for a particular part of
   /// API notes, including both unversioned API notes and each versioned API
   /// note for that particular entity.
-  template<typename T>
-  class VersionedInfo {
+  template <typename T> class VersionedInfo {
     /// The complete set of results.
     llvm::SmallVector<std::pair<llvm::VersionTuple, T>, 1> Results;
 
     /// The index of the result that is the "selected" set based on the desired
-    /// Swift version, or \c Results.size() if nothing matched.
-    unsigned Selected;
+    /// Swift version, or null if nothing matched.
+    std::optional<unsigned> Selected;
 
   public:
     /// Form an empty set of versioned information.
-    VersionedInfo(std::nullopt_t) : Selected(0) { }
-    
+    VersionedInfo(std::nullopt_t) : Selected(std::nullopt) {}
+
     /// Form a versioned info set given the desired version and a set of
     /// results.
-    VersionedInfo(llvm::VersionTuple version,
-                  llvm::SmallVector<std::pair<llvm::VersionTuple, T>, 1> results);
-
-    /// Determine whether there is a result that should be applied directly
-    /// to the AST.
-    explicit operator bool() const { return Selected != size(); }
-
-    /// Retrieve the information to apply directly to the AST.
-    const T& operator*() const {
-      assert(*this && "No result to apply directly");
-      return (*this)[Selected].second;
-    }
+    VersionedInfo(
+        llvm::VersionTuple Version,
+        llvm::SmallVector<std::pair<llvm::VersionTuple, T>, 1> Results);
 
     /// Retrieve the selected index in the result set.
-    std::optional<unsigned> getSelected() const {
-      if (Selected == Results.size()) return std::nullopt;
-      return Selected;
-    }
+    std::optional<unsigned> getSelected() const { return Selected; }
 
     /// Return the number of versioned results we know about.
     unsigned size() const { return Results.size(); }
 
     /// Access all versioned results.
-    const std::pair<llvm::VersionTuple, T> *begin() const { return Results.begin(); }
-    const std::pair<llvm::VersionTuple, T> *end() const { return Results.end(); }
+    const std::pair<llvm::VersionTuple, T> *begin() const {
+      assert(!Results.empty());
+      return Results.begin();
+    }
+    const std::pair<llvm::VersionTuple, T> *end() const {
+      return Results.end();
+    }
 
     /// Access a specific versioned result.
     const std::pair<llvm::VersionTuple, T> &operator[](unsigned index) const {
+      assert(index < Results.size());
       return Results[index];
     }
   };
 
   /// Look for the context ID of the given Objective-C class.
   ///
-  /// \param name The name of the class we're looking for.
+  /// \param Name The name of the class we're looking for.
   ///
   /// \returns The ID, if known.
-  std::optional<ContextID> lookupObjCClassID(llvm::StringRef name);
+  std::optional<ContextID> lookupObjCClassID(llvm::StringRef Name);
 
   /// Look for information regarding the given Objective-C class.
   ///
-  /// \param name The name of the class we're looking for.
+  /// \param Name The name of the class we're looking for.
   ///
   /// \returns The information about the class, if known.
-  VersionedInfo<ObjCContextInfo> lookupObjCClassInfo(llvm::StringRef name);
+  VersionedInfo<ContextInfo> lookupObjCClassInfo(llvm::StringRef Name);
 
   /// Look for the context ID of the given Objective-C protocol.
   ///
-  /// \param name The name of the protocol we're looking for.
+  /// \param Name The name of the protocol we're looking for.
   ///
   /// \returns The ID of the protocol, if known.
-  std::optional<ContextID> lookupObjCProtocolID(llvm::StringRef name);
+  std::optional<ContextID> lookupObjCProtocolID(llvm::StringRef Name);
 
   /// Look for information regarding the given Objective-C protocol.
   ///
-  /// \param name The name of the protocol we're looking for.
+  /// \param Name The name of the protocol we're looking for.
   ///
   /// \returns The information about the protocol, if known.
-  VersionedInfo<ObjCContextInfo> lookupObjCProtocolInfo(llvm::StringRef name);
+  VersionedInfo<ContextInfo> lookupObjCProtocolInfo(llvm::StringRef Name);
 
   /// Look for information regarding the given Objective-C property in
   /// the given context.
   ///
-  /// \param contextID The ID that references the context we are looking for.
-  /// \param name The name of the property we're looking for.
-  /// \param isInstance Whether we are looking for an instance property (vs.
+  /// \param CtxID The ID that references the context we are looking for.
+  /// \param Name The name of the property we're looking for.
+  /// \param IsInstance Whether we are looking for an instance property (vs.
   /// a class property).
   ///
   /// \returns Information about the property, if known.
-  VersionedInfo<ObjCPropertyInfo> lookupObjCProperty(ContextID contextID,
-                                                     llvm::StringRef name,
-                                                     bool isInstance);
+  VersionedInfo<ObjCPropertyInfo>
+  lookupObjCProperty(ContextID CtxID, llvm::StringRef Name, bool IsInstance);
 
   /// Look for information regarding the given Objective-C method in
   /// the given context.
   ///
-  /// \param contextID The ID that references the context we are looking for.
-  /// \param selector The selector naming the method we're looking for.
-  /// \param isInstanceMethod Whether we are looking for an instance method.
+  /// \param CtxID The ID that references the context we are looking for.
+  /// \param Selector The selector naming the method we're looking for.
+  /// \param IsInstanceMethod Whether we are looking for an instance method.
   ///
   /// \returns Information about the method, if known.
-  VersionedInfo<ObjCMethodInfo> lookupObjCMethod(ContextID contextID,
-                                                 ObjCSelectorRef selector,
-                                                 bool isInstanceMethod);
+  VersionedInfo<ObjCMethodInfo> lookupObjCMethod(ContextID CtxID,
+                                                 ObjCSelectorRef Selector,
+                                                 bool IsInstanceMethod);
+
+  /// Look for information regarding the given field of a C struct.
+  ///
+  /// \param Name The name of the field.
+  ///
+  /// \returns information about the field, if known.
+  VersionedInfo<FieldInfo> lookupField(ContextID CtxID, llvm::StringRef Name);
+
+  /// Look for information regarding the given C++ method in the given C++ tag
+  /// context.
+  ///
+  /// \param CtxID The ID that references the parent context, i.e. a C++ tag.
+  /// \param Name The name of the C++ method we're looking for.
+  ///
+  /// \returns Information about the method, if known.
+  VersionedInfo<CXXMethodInfo> lookupCXXMethod(ContextID CtxID,
+                                               llvm::StringRef Name);
 
   /// Look for information regarding the given global variable.
   ///
-  /// \param name The name of the global variable.
+  /// \param Name The name of the global variable.
   ///
   /// \returns information about the global variable, if known.
   VersionedInfo<GlobalVariableInfo>
-  lookupGlobalVariable(llvm::StringRef name,
-                       std::optional<Context> context = std::nullopt);
+  lookupGlobalVariable(llvm::StringRef Name,
+                       std::optional<Context> Ctx = std::nullopt);
 
   /// Look for information regarding the given global function.
   ///
-  /// \param name The name of the global function.
+  /// \param Name The name of the global function.
   ///
   /// \returns information about the global function, if known.
   VersionedInfo<GlobalFunctionInfo>
-  lookupGlobalFunction(llvm::StringRef name,
-                       std::optional<Context> context = std::nullopt);
+  lookupGlobalFunction(llvm::StringRef Name,
+                       std::optional<Context> Ctx = std::nullopt);
 
   /// Look for information regarding the given enumerator.
   ///
-  /// \param name The name of the enumerator.
+  /// \param Name The name of the enumerator.
   ///
   /// \returns information about the enumerator, if known.
-  VersionedInfo<EnumConstantInfo> lookupEnumConstant(llvm::StringRef name);
+  VersionedInfo<EnumConstantInfo> lookupEnumConstant(llvm::StringRef Name);
+
+  /// Look for the context ID of the given C++ tag.
+  ///
+  /// \param Name The name of the tag we're looking for.
+  /// \param ParentCtx The context in which this tag is declared, e.g. a C++
+  /// namespace.
+  ///
+  /// \returns The ID, if known.
+  std::optional<ContextID>
+  lookupTagID(llvm::StringRef Name,
+              std::optional<Context> ParentCtx = std::nullopt);
 
   /// Look for information regarding the given tag
   /// (struct/union/enum/C++ class).
   ///
-  /// \param name The name of the tag.
+  /// \param Name The name of the tag.
   ///
   /// \returns information about the tag, if known.
-  VersionedInfo<TagInfo>
-  lookupTag(llvm::StringRef name,
-            std::optional<Context> context = std::nullopt);
+  VersionedInfo<TagInfo> lookupTag(llvm::StringRef Name,
+                                   std::optional<Context> Ctx = std::nullopt);
 
   /// Look for information regarding the given typedef.
   ///
-  /// \param name The name of the typedef.
+  /// \param Name The name of the typedef.
   ///
   /// \returns information about the typedef, if known.
   VersionedInfo<TypedefInfo>
-  lookupTypedef(llvm::StringRef name,
-                std::optional<Context> context = std::nullopt);
+  lookupTypedef(llvm::StringRef Name,
+                std::optional<Context> Ctx = std::nullopt);
 
   /// Look for the context ID of the given C++ namespace.
   ///
-  /// \param name The name of the class we're looking for.
+  /// \param Name The name of the class we're looking for.
   ///
   /// \returns The ID, if known.
   std::optional<ContextID>
-  lookupNamespaceID(llvm::StringRef name,
-                    std::optional<ContextID> parentNamespaceID = std::nullopt);
+  lookupNamespaceID(llvm::StringRef Name,
+                    std::optional<ContextID> ParentNamespaceID = std::nullopt);
 };
 
 } // end namespace api_notes
 } // end namespace clang
 
-#endif // LLVM_CLANG_API_NOTES_READER_H
+#endif // LLVM_CLANG_APINOTES_READER_H

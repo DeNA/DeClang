@@ -328,7 +328,7 @@ public:
   /// If Signed is a function that takes an n-bit tuple and maps to the
   /// integer domain as the tuples value interpreted as twos complement,
   /// and Unsigned a function that takes an n-bit tuple and maps to the
-  /// integer domain as as the base two value of input tuple, then a + b
+  /// integer domain as the base two value of input tuple, then a + b
   /// has IncrementNUSW iff:
   ///
   /// 0 <= Unsigned(a) + Signed(b) < 2^n
@@ -525,7 +525,7 @@ public:
   ///     loop { v2 = load @global2; }
   /// }
   /// No SCEV with operand V1, and v2 can exist in this program.
-  bool instructionCouldExistWitthOperands(const SCEV *A, const SCEV *B);
+  bool instructionCouldExistWithOperands(const SCEV *A, const SCEV *B);
 
   /// Return true if the SCEV is a scAddRecExpr or it contains
   /// scAddRecExpr. The result will be cached in HasRecMap.
@@ -570,6 +570,7 @@ public:
   const SCEV *getPtrToIntExpr(const SCEV *Op, Type *Ty);
   const SCEV *getTruncateExpr(const SCEV *Op, Type *Ty, unsigned Depth = 0);
   const SCEV *getVScale(Type *Ty);
+  const SCEV *getElementCount(Type *Ty, ElementCount EC);
   const SCEV *getZeroExtendExpr(const SCEV *Op, Type *Ty, unsigned Depth = 0);
   const SCEV *getZeroExtendExprImpl(const SCEV *Op, Type *Ty,
                                     unsigned Depth = 0);
@@ -855,7 +856,7 @@ public:
                                         const BasicBlock *ExitingBlock);
 
   /// The terms "backedge taken count" and "exit count" are used
-  /// interchangeably to refer to the number of times the backedge of a loop 
+  /// interchangeably to refer to the number of times the backedge of a loop
   /// has executed before the loop is exited.
   enum ExitCountKind {
     /// An expression exactly describing the number of times the backedge has
@@ -868,7 +869,7 @@ public:
   };
 
   /// Return the number of times the backedge executes before the given exit
-  /// would be taken; if not exactly computable, return SCEVCouldNotCompute. 
+  /// would be taken; if not exactly computable, return SCEVCouldNotCompute.
   /// For a single exit loop, this value is equivelent to the result of
   /// getBackedgeTakenCount.  The loop is guaranteed to exit (via *some* exit)
   /// before the backedge is executed (ExitCount + 1) times.  Note that there
@@ -911,6 +912,13 @@ public:
     return getBackedgeTakenCount(L, SymbolicMaximum);
   }
 
+  /// Similar to getSymbolicMaxBackedgeTakenCount, except it will add a set of
+  /// SCEV predicates to Predicates that are required to be true in order for
+  /// the answer to be correct. Predicates can be checked with run-time
+  /// checks and can be used to perform loop versioning.
+  const SCEV *getPredicatedSymbolicMaxBackedgeTakenCount(
+      const Loop *L, SmallVector<const SCEVPredicate *, 4> &Predicates);
+
   /// Return true if the backedge taken count is either the value returned by
   /// getConstantMaxBackedgeTakenCount or zero.
   bool isBackedgeTakenCountMaxOrZero(const Loop *L);
@@ -942,6 +950,10 @@ public:
   /// in a way that may effect its value, or which may disconnect it from a
   /// def-use chain linking it to a loop.
   void forgetValue(Value *V);
+
+  /// Forget LCSSA phi node V of loop L to which a new predecessor was added,
+  /// such that it may no longer be trivial.
+  void forgetLcssaPhiWithNewPredecessor(Loop *L, PHINode *V);
 
   /// Called when the client has changed the disposition of values in
   /// this loop.
@@ -1253,9 +1265,7 @@ public:
 
   /// Return the DataLayout associated with the module this SCEV instance is
   /// operating on.
-  const DataLayout &getDataLayout() const {
-    return F.getParent()->getDataLayout();
-  }
+  const DataLayout &getDataLayout() const { return DL; }
 
   const SCEVPredicate *getEqualPredicate(const SCEV *LHS, const SCEV *RHS);
   const SCEVPredicate *getComparePredicate(ICmpInst::Predicate Pred,
@@ -1289,8 +1299,26 @@ public:
   /// sharpen it.
   void setNoWrapFlags(SCEVAddRecExpr *AddRec, SCEV::NoWrapFlags Flags);
 
+  class LoopGuards {
+    DenseMap<const SCEV *, const SCEV *> RewriteMap;
+    bool PreserveNUW = false;
+    bool PreserveNSW = false;
+    ScalarEvolution &SE;
+
+    LoopGuards(ScalarEvolution &SE) : SE(SE) {}
+
+  public:
+    /// Collect rewrite map for loop guards for loop \p L, together with flags
+    /// indicating if NUW and NSW can be preserved during rewriting.
+    static LoopGuards collect(const Loop *L, ScalarEvolution &SE);
+
+    /// Try to apply the collected loop guards to \p Expr.
+    const SCEV *rewrite(const SCEV *Expr) const;
+  };
+
   /// Try to apply information from loop guards for \p L to \p Expr.
   const SCEV *applyLoopGuards(const SCEV *Expr, const Loop *L);
+  const SCEV *applyLoopGuards(const SCEV *Expr, const LoopGuards &Guards);
 
   /// Return true if the loop has no abnormal exits. That is, if the loop
   /// is not infinite, it must exit through an explicit edge in the CFG.
@@ -1303,6 +1331,19 @@ public:
   /// Return true if this loop is finite by assumption.  That is,
   /// to be infinite, it must also be undefined.
   bool loopIsFiniteByAssumption(const Loop *L);
+
+  /// Return the set of Values that, if poison, will definitively result in S
+  /// being poison as well. The returned set may be incomplete, i.e. there can
+  /// be additional Values that also result in S being poison.
+  void getPoisonGeneratingValues(SmallPtrSetImpl<const Value *> &Result,
+                                 const SCEV *S);
+
+  /// Check whether it is poison-safe to represent the expression S using the
+  /// instruction I. If such a replacement is performed, the poison flags of
+  /// instructions in DropPoisonGeneratingInsts must be dropped.
+  bool canReuseInstruction(
+      const SCEV *S, Instruction *I,
+      SmallVectorImpl<Instruction *> &DropPoisonGeneratingInsts);
 
   class FoldID {
     const SCEV *Op = nullptr;
@@ -1347,6 +1388,9 @@ private:
 
   /// The function we are analyzing.
   Function &F;
+
+  /// Data layout of the module.
+  const DataLayout &DL;
 
   /// Does the module have any calls to the llvm.experimental.guard intrinsic
   /// at all?  If this is false, we avoid doing work that will only help if
@@ -1531,7 +1575,9 @@ private:
                                ScalarEvolution *SE) const;
 
     /// Get the symbolic max backedge taken count for the loop.
-    const SCEV *getSymbolicMax(const Loop *L, ScalarEvolution *SE);
+    const SCEV *
+    getSymbolicMax(const Loop *L, ScalarEvolution *SE,
+                   SmallVector<const SCEVPredicate *, 4> *Predicates = nullptr);
 
     /// Get the symbolic max backedge taken count for the particular loop exit.
     const SCEV *getSymbolicMax(const BasicBlock *ExitingBlock,
@@ -1629,9 +1675,7 @@ private:
     DenseMap<const SCEV *, ConstantRange> &Cache =
         Hint == HINT_RANGE_UNSIGNED ? UnsignedRanges : SignedRanges;
 
-    auto Pair = Cache.try_emplace(S, std::move(CR));
-    if (!Pair.second)
-      Pair.first->second = std::move(CR);
+    auto Pair = Cache.insert_or_assign(S, std::move(CR));
     return Pair.first->second;
   }
 
@@ -1728,7 +1772,7 @@ private:
 
   /// Similar to getBackedgeTakenInfo, but will add predicates as required
   /// with the purpose of returning complete information.
-  const BackedgeTakenInfo &getPredicatedBackedgeTakenInfo(const Loop *L);
+  BackedgeTakenInfo &getPredicatedBackedgeTakenInfo(const Loop *L);
 
   /// Compute the number of times the specified loop will iterate.
   /// If AllowPredicates is set, we will create new SCEV predicates as
@@ -1741,12 +1785,7 @@ private:
   /// this call will try to use a minimal set of SCEV predicates in order to
   /// return an exact answer.
   ExitLimit computeExitLimit(const Loop *L, BasicBlock *ExitingBlock,
-                             bool AllowPredicates = false);
-
-  /// Return a symbolic upper bound for the backedge taken count of the loop.
-  /// This is more general than getConstantMaxBackedgeTakenCount as it returns
-  /// an arbitrary expression as opposed to only constants.
-  const SCEV *computeSymbolicMaxBackedgeTakenCount(const Loop *L);
+                             bool IsOnlyExit, bool AllowPredicates = false);
 
   // Helper functions for computeExitLimitFromCond to avoid exponential time
   // complexity.
@@ -1936,7 +1975,9 @@ private:
   /// true.  Utility function used by isImpliedCondOperands.  Tries to get
   /// cases like "X `sgt` 0 => X - 1 `sgt` -1".
   bool isImpliedCondOperandsViaRanges(ICmpInst::Predicate Pred, const SCEV *LHS,
-                                      const SCEV *RHS, const SCEV *FoundLHS,
+                                      const SCEV *RHS,
+                                      ICmpInst::Predicate FoundPred,
+                                      const SCEV *FoundLHS,
                                       const SCEV *FoundRHS);
 
   /// Return true if the condition denoted by \p LHS \p Pred \p RHS is implied
@@ -2234,6 +2275,7 @@ class ScalarEvolutionVerifierPass
     : public PassInfoMixin<ScalarEvolutionVerifierPass> {
 public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  static bool isRequired() { return true; }
 };
 
 /// Printer pass for the \c ScalarEvolutionAnalysis results.
@@ -2245,6 +2287,8 @@ public:
   explicit ScalarEvolutionPrinterPass(raw_ostream &OS) : OS(OS) {}
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+
+  static bool isRequired() { return true; }
 };
 
 class ScalarEvolutionWrapperPass : public FunctionPass {
@@ -2292,6 +2336,9 @@ public:
 
   /// Get the (predicated) backedge count for the analyzed loop.
   const SCEV *getBackedgeTakenCount();
+
+  /// Get the (predicated) symbolic max backedge count for the analyzed loop.
+  const SCEV *getSymbolicMaxBackedgeTakenCount();
 
   /// Adds a new predicate.
   void addPredicate(const SCEVPredicate &Pred);
@@ -2361,6 +2408,9 @@ private:
 
   /// The backedge taken count.
   const SCEV *BackedgeCount = nullptr;
+
+  /// The symbolic backedge taken count.
+  const SCEV *SymbolicMaxBackedgeCount = nullptr;
 };
 
 template <> struct DenseMapInfo<ScalarEvolution::FoldID> {

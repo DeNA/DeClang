@@ -8,12 +8,14 @@ import lldbsuite.test.lldbutil as lldbutil
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 
+
 class TestVTableValue(TestBase):
     # If your test case doesn't stress debug info, then
     # set this to true.  That way it won't be run once for
     # each debug info format.
     NO_DEBUG_INFO_TESTCASE = True
 
+    @skipIf(compiler="clang", compiler_version=["<", "9.0"])
     @skipUnlessPlatform(["linux", "macosx"])
     def test_vtable(self):
         self.build()
@@ -35,7 +37,7 @@ class TestVTableValue(TestBase):
         expected_addr = self.expected_vtable_addr(shape)
         self.assertEqual(vtable_addr, expected_addr)
 
-        for (idx, vtable_entry) in enumerate(vtable.children):
+        for idx, vtable_entry in enumerate(vtable.children):
             self.verify_vtable_entry(vtable_entry, vtable_addr, idx)
 
         # Test a shape reference to make sure we get the vtable correctly.
@@ -52,9 +54,8 @@ class TestVTableValue(TestBase):
         expected_addr = self.expected_vtable_addr(shape)
         self.assertEqual(vtable_addr, expected_addr)
 
-        for (idx, vtable_entry) in enumerate(vtable.children):
+        for idx, vtable_entry in enumerate(vtable.children):
             self.verify_vtable_entry(vtable_entry, vtable_addr, idx)
-
 
         # Test we get the right vtable for the Rectangle instance.
         rect = self.frame().FindVariable("rect")
@@ -71,9 +72,10 @@ class TestVTableValue(TestBase):
         expected_addr = self.expected_vtable_addr(rect)
         self.assertEqual(vtable_addr, expected_addr)
 
-        for (idx, vtable_entry) in enumerate(vtable.children):
+        for idx, vtable_entry in enumerate(vtable.children):
             self.verify_vtable_entry(vtable_entry, vtable_addr, idx)
 
+    @skipIf(compiler="clang", compiler_version=["<", "9.0"])
     @skipUnlessPlatform(["linux", "macosx"])
     def test_base_class_ptr(self):
         self.build()
@@ -88,13 +90,11 @@ class TestVTableValue(TestBase):
         shape_ptr_vtable = shape_ptr.GetVTable()
         self.assertEqual(shape_ptr_vtable.GetName(), "vtable for Rectangle")
         self.assertEqual(shape_ptr_vtable.GetNumChildren(), 5)
-        self.assertEqual(shape_ptr.GetValueAsUnsigned(0),
-                          rect.GetLoadAddress())
+        self.assertEqual(shape_ptr.GetValueAsUnsigned(0), rect.GetLoadAddress())
         lldbutil.continue_to_source_breakpoint(
             self, process, "Shape is Shape", lldb.SBFileSpec("main.cpp")
         )
-        self.assertEqual(shape_ptr.GetValueAsUnsigned(0),
-                          shape.GetLoadAddress())
+        self.assertEqual(shape_ptr.GetValueAsUnsigned(0), shape.GetLoadAddress())
         self.assertEqual(shape_ptr_vtable.GetNumChildren(), 4)
         self.assertEqual(shape_ptr_vtable.GetName(), "vtable for Shape")
 
@@ -106,12 +106,16 @@ class TestVTableValue(TestBase):
         )
 
         var = self.frame().FindVariable("not_virtual")
-        self.assertEqual(var.GetVTable().GetError().GetCString(),
-                         'type "NotVirtual" doesn\'t have a vtable')
+        self.assertEqual(
+            var.GetVTable().GetError().GetCString(),
+            'type "NotVirtual" doesn\'t have a vtable',
+        )
 
         var = self.frame().FindVariable("argc")
-        self.assertEqual(var.GetVTable().GetError().GetCString(),
-                         'no language runtime support for the language "c"')
+        self.assertEqual(
+            var.GetVTable().GetError().GetCString(),
+            'no language runtime support for the language "c"',
+        )
 
     @skipUnlessPlatform(["linux", "macosx"])
     def test_overwrite_vtable(self):
@@ -132,13 +136,19 @@ class TestVTableValue(TestBase):
         # Overwrite the first entry in the vtable and make sure we can still
         # see the bogus value which should have no summary
         vtable_addr = vtable.GetValueAsUnsigned()
-        data = str("\x01\x01\x01\x01\x01\x01\x01\x01")
+
+        is_64bit = self.process().GetAddressByteSize() == 8
+        data = str(
+            "\x01\x01\x01\x01\x01\x01\x01\x01" if is_64bit else "\x01\x01\x01\x01"
+        )
         error = lldb.SBError()
         process.WriteMemory(vtable_addr, data, error)
 
         scribbled_child = vtable.GetChildAtIndex(0)
-        self.assertEqual(scribbled_child.GetValueAsUnsigned(0),
-                          0x0101010101010101)
+        self.assertEqual(
+            scribbled_child.GetValueAsUnsigned(0),
+            0x0101010101010101 if is_64bit else 0x01010101,
+        )
         self.assertEqual(scribbled_child.GetSummary(), None)
 
     def expected_vtable_addr(self, var: lldb.SBValue) -> int:
@@ -153,13 +163,15 @@ class TestVTableValue(TestBase):
     def expected_vtable_entry_func_ptr(self, vtable_addr: int, idx: int):
         vtable_entry_addr = vtable_addr + idx * self.process().GetAddressByteSize()
         read_func_ptr_error = lldb.SBError()
-        func_ptr = self.process().ReadPointerFromMemory(vtable_entry_addr,
-                                                        read_func_ptr_error)
+        func_ptr = self.process().ReadPointerFromMemory(
+            vtable_entry_addr, read_func_ptr_error
+        )
         self.assertTrue(read_func_ptr_error.Success())
         return func_ptr
 
-    def verify_vtable_entry(self, vtable_entry: lldb.SBValue, vtable_addr: int,
-                            idx: int):
+    def verify_vtable_entry(
+        self, vtable_entry: lldb.SBValue, vtable_addr: int, idx: int
+    ):
         """Verify the vtable entry looks something like:
 
         (double ()) [0] = 0x0000000100003a10 a.out`Rectangle::Area() at main.cpp:14
@@ -178,8 +190,7 @@ class TestVTableValue(TestBase):
         # Make sure the type is the same as the function type
         func_type = sym_ctx.GetFunction().GetType()
         if func_type.IsValid():
-            self.assertEqual(vtable_entry.GetType(),
-                              func_type.GetPointerType())
+            self.assertEqual(vtable_entry.GetType(), func_type.GetPointerType())
 
         # The summary should be the address description of the function pointer
         summary = vtable_entry.GetSummary()

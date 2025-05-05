@@ -15,6 +15,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/FileSystem.h"
 #include <atomic>
 #include <mutex>
@@ -253,27 +254,28 @@ public:
   /// The in-memory \a HashMappedTrie uses LazyAtomicPointer to synchronize
   /// simultaneous writes, but that seems dangerous to use in a memory-mapped
   /// file in case a process crashes in the busy state.
-  pointer insertLazy(const_pointer Hint, ArrayRef<uint8_t> Hash,
-                     LazyInsertOnConstructCB OnConstruct = nullptr,
-                     LazyInsertOnLeakCB OnLeak = nullptr);
-  pointer insertLazy(ArrayRef<uint8_t> Hash,
-                     LazyInsertOnConstructCB OnConstruct = nullptr,
-                     LazyInsertOnLeakCB OnLeak = nullptr) {
+  Expected<pointer> insertLazy(const_pointer Hint, ArrayRef<uint8_t> Hash,
+                               LazyInsertOnConstructCB OnConstruct = nullptr,
+                               LazyInsertOnLeakCB OnLeak = nullptr);
+  Expected<pointer> insertLazy(ArrayRef<uint8_t> Hash,
+                               LazyInsertOnConstructCB OnConstruct = nullptr,
+                               LazyInsertOnLeakCB OnLeak = nullptr) {
     return insertLazy(const_pointer(), Hash, OnConstruct, OnLeak);
   }
 
-  pointer insert(const_pointer Hint, const ConstValueProxy &Value) {
+  Expected<pointer> insert(const_pointer Hint, const ConstValueProxy &Value) {
     return insertLazy(Hint, Value.Hash, [&](FileOffset, ValueProxy Allocated) {
       assert(Allocated.Hash == Value.Hash);
       assert(Allocated.Data.size() == Value.Data.size());
       llvm::copy(Value.Data, Allocated.Data.begin());
     });
   }
-  pointer insert(const ConstValueProxy &Value) {
+  Expected<pointer> insert(const ConstValueProxy &Value) {
     return insert(const_pointer(), Value);
   }
 
   size_t size() const;
+  size_t capacity() const;
 
   /// Gets or creates a file at \p Path with a hash-mapped trie named \p
   /// TrieName. The hash size is \p NumHashBits (in bits) and the records store
@@ -348,13 +350,15 @@ public:
         const_cast<const OnDiskDataAllocator *>(this)->beginData(Offset));
   }
 
-  pointer allocate(size_t Size);
-  pointer save(ArrayRef<char> Data) {
-    pointer P = allocate(Data.size());
-    llvm::copy(Data, P->begin());
+  Expected<pointer> allocate(size_t Size);
+  Expected<pointer> save(ArrayRef<char> Data) {
+    auto P = allocate(Data.size());
+    if (LLVM_UNLIKELY(!P))
+      return P.takeError();
+    llvm::copy(Data, (*P)->begin());
     return P;
   }
-  pointer save(StringRef Data) {
+  Expected<pointer> save(StringRef Data) {
     return save(ArrayRef<char>(Data.begin(), Data.size()));
   }
 
@@ -363,6 +367,7 @@ public:
   MutableArrayRef<uint8_t> getUserHeader();
 
   size_t size() const;
+  size_t capacity() const;
 
   static Expected<OnDiskDataAllocator>
   create(const Twine &Path, const Twine &TableName, uint64_t MaxFileSize,

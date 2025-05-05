@@ -26,6 +26,16 @@ using namespace clang;
 using namespace tooling;
 using namespace dependencies;
 
+void ModuleDeps::forEachFileDep(llvm::function_ref<void(StringRef)> Cb) const {
+  SmallString<0> PathBuf;
+  PathBuf.reserve(256);
+  for (StringRef FileDep : FileDeps) {
+    auto ResolvedFileDep =
+        ASTReader::ResolveImportedPath(PathBuf, FileDep, FileDepsBaseDir);
+    Cb(*ResolvedFileDep);
+  }
+}
+
 const std::vector<std::string> &ModuleDeps::getBuildArguments() {
   assert(!std::holds_alternative<std::monostate>(BuildInfo) &&
          "Using uninitialized ModuleDeps");
@@ -121,8 +131,7 @@ static void optimizeDiagnosticOpts(DiagnosticOptions &Opts,
   // warnings.
   Opts.Warnings.clear();
   Opts.UndefPrefixes.clear();
-  // FIXME: CAS currently depends on remarks. rdar://107619111
-  // Opts.Remarks.clear();
+  Opts.Remarks.clear();
 }
 
 static std::vector<std::string> splitString(std::string S, char Separator) {
@@ -418,8 +427,7 @@ static std::string getModuleContextHash(const ModuleDeps &MD,
                                         const CowCompilerInvocation &CI,
                                         bool EagerLoadModules,
                                         llvm::vfs::FileSystem &VFS) {
-  llvm::HashBuilder<llvm::TruncatedBLAKE3<16>,
-                    llvm::support::endianness::native>
+  llvm::HashBuilder<llvm::TruncatedBLAKE3<16>, llvm::endianness::native>
       HashBuilder;
   SmallString<32> Scratch;
 
@@ -578,7 +586,7 @@ void ModuleDepCollectorPP::handleImport(const Module *Imported) {
 void ModuleDepCollectorPP::EndOfMainFile() {
   FileID MainFileID = MDC.ScanInstance.getSourceManager().getMainFileID();
   MDC.MainFile = std::string(MDC.ScanInstance.getSourceManager()
-                                 .getFileEntryForID(MainFileID)
+                                 .getFileEntryRefForID(MainFileID)
                                  ->getName());
 
   auto &PP = MDC.ScanInstance.getPreprocessor();
@@ -642,12 +650,11 @@ ModuleDepCollectorPP::handleTopLevelModule(const Module *M) {
     return {};
 
   // If this module has been handled already, just return its ID.
-  auto ModI = MDC.ModularDeps.insert({M, nullptr});
-  if (!ModI.second)
-    return ModI.first->second->ID;
+  if (auto ModI = MDC.ModularDeps.find(M); ModI != MDC.ModularDeps.end())
+    return ModI->second->ID;
 
-  ModI.first->second = std::make_unique<ModuleDeps>();
-  ModuleDeps &MD = *ModI.first->second;
+  auto OwnedMD = std::make_unique<ModuleDeps>();
+  ModuleDeps &MD = *OwnedMD;
 
   MD.ID.ModuleName = M->getFullModuleName();
   MD.IsSystem = M->IsSystem;
@@ -659,9 +666,7 @@ ModuleDepCollectorPP::handleTopLevelModule(const Module *M) {
   ModuleMap &ModMapInfo =
       MDC.ScanInstance.getPreprocessor().getHeaderSearchInfo().getModuleMap();
 
-  OptionalFileEntryRef ModuleMap = ModMapInfo.getModuleMapFileForUniquing(M);
-
-  if (ModuleMap) {
+  if (auto ModuleMap = ModMapInfo.getModuleMapFileForUniquing(M)) {
     SmallString<128> Path = ModuleMap->getNameAsRequested();
     ModMapInfo.canonicalizeModuleMapPath(Path);
     MD.ClangModuleMapFile = std::string(Path);
@@ -669,20 +674,19 @@ ModuleDepCollectorPP::handleTopLevelModule(const Module *M) {
 
   serialization::ModuleFile *MF =
       MDC.ScanInstance.getASTReader()->getModuleManager().lookup(
-          M->getASTFile());
+          *M->getASTFile());
+  MD.FileDepsBaseDir = MF->BaseDirectory;
   MDC.ScanInstance.getASTReader()->visitInputFileInfos(
       *MF, /*IncludeSystem=*/true,
       [&](const serialization::InputFileInfo &IFI, bool IsSystem) {
-        // __inferred_module.map is the result of the way in which an implicit
-        // module build handles inferred modules. It adds an overlay VFS with
-        // this file in the proper directory and relies on the rest of Clang to
-        // handle it like normal. With explicitly built modules we don't need
-        // to play VFS tricks, so replace it with the correct module map.
-        if (StringRef(IFI.Filename).endswith("__inferred_module.map")) {
-          MDC.addFileDep(MD, ModuleMap->getName());
+        // The __inferred_module.map file is an insignificant implementation
+        // detail of implicitly-built modules. The PCM will also report the
+        // actual on-disk module map file that allowed inferring the module,
+        // which is what we need for building the module explicitly
+        // Let's ignore this file.
+        if (IFI.UnresolvedImportedFilename.ends_with("__inferred_module.map"))
           return;
-        }
-        MDC.addFileDep(MD, IFI.Filename);
+        MDC.addFileDep(MD, IFI.UnresolvedImportedFilename);
       });
 
   llvm::DenseSet<const Module *> SeenDeps;
@@ -690,15 +694,20 @@ ModuleDepCollectorPP::handleTopLevelModule(const Module *M) {
   addAllSubmoduleDeps(M, MD, SeenDeps);
   addAllAffectingClangModules(M, MD, SeenDeps);
 
+  SmallString<0> PathBuf;
+  PathBuf.reserve(256);
   MDC.ScanInstance.getASTReader()->visitInputFileInfos(
       *MF, /*IncludeSystem=*/true,
       [&](const serialization::InputFileInfo &IFI, bool IsSystem) {
         if (!(IFI.TopLevel && IFI.ModuleMap))
           return;
-        if (StringRef(IFI.FilenameAsRequested)
-                .endswith("__inferred_module.map"))
+        if (IFI.UnresolvedImportedFilenameAsRequested.ends_with(
+                "__inferred_module.map"))
           return;
-        MD.ModuleMapFileDeps.emplace_back(IFI.FilenameAsRequested);
+        auto ResolvedFilenameAsRequested = ASTReader::ResolveImportedPath(
+            PathBuf, IFI.UnresolvedImportedFilenameAsRequested,
+            MF->BaseDirectory);
+        MD.ModuleMapFileDeps.emplace_back(*ResolvedFilenameAsRequested);
       });
 
   if (!MF->IncludeTreeID.empty())
@@ -757,6 +766,8 @@ ModuleDepCollectorPP::handleTopLevelModule(const Module *M) {
 #endif
 
   MD.BuildInfo = std::move(CI);
+
+  MDC.ModularDeps.insert({M, std::move(OwnedMD)});
 
   return MD.ID;
 }
@@ -886,13 +897,18 @@ static StringRef makeAbsoluteAndPreferred(CompilerInstance &CI, StringRef Path,
 }
 
 void ModuleDepCollector::addFileDep(StringRef Path) {
+  if (IsStdModuleP1689Format) {
+    // Within P1689 format, we don't want all the paths to be absolute path
+    // since it may violate the traditional make style dependencies info.
+    FileDeps.emplace_back(Path);
+    return;
+  }
+
   llvm::SmallString<256> Storage;
   Path = makeAbsoluteAndPreferred(ScanInstance, Path, Storage);
-  FileDeps.push_back(std::string(Path));
+  FileDeps.emplace_back(Path);
 }
 
 void ModuleDepCollector::addFileDep(ModuleDeps &MD, StringRef Path) {
-  llvm::SmallString<256> Storage;
-  Path = makeAbsoluteAndPreferred(ScanInstance, Path, Storage);
-  MD.FileDeps.insert(Path);
+  MD.FileDeps.emplace_back(Path);
 }

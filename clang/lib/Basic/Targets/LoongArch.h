@@ -27,15 +27,22 @@ protected:
   std::string CPU;
   bool HasFeatureD;
   bool HasFeatureF;
+  bool HasFeatureLSX;
+  bool HasFeatureLASX;
+  bool HasFeatureFrecipe;
 
 public:
   LoongArchTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
     HasFeatureD = false;
     HasFeatureF = false;
+    HasFeatureLSX = false;
+    HasFeatureLASX = false;
+    HasFeatureFrecipe = false;
     LongDoubleWidth = 128;
     LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::IEEEquad();
+    MCountName = "_mcount";
     SuitableAlign = 128;
     WCharType = SignedInt;
     WIntType = UnsignedInt;
@@ -127,7 +134,8 @@ public:
       : LoongArchTargetInfo(Triple, Opts) {
     LongWidth = LongAlign = PointerWidth = PointerAlign = 64;
     IntMaxType = Int64Type = SignedLong;
-    resetDataLayout("e-m:e-p:64:64-i64:64-i128:128-n64-S128");
+    HasUnalignedAccess = true;
+    resetDataLayout("e-m:e-p:64:64-i64:64-i128:128-n32:64-S128");
     // TODO: select appropriate ABI.
     setABI("lp64d");
   }

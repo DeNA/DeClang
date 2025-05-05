@@ -18,9 +18,6 @@ Type:
 for available options.
 """
 
-from __future__ import absolute_import
-from __future__ import print_function
-
 # System modules
 import atexit
 import datetime
@@ -36,7 +33,7 @@ import sys
 import tempfile
 
 # Third-party modules
-import unittest2
+import unittest
 
 # LLDB Modules
 import lldbsuite
@@ -50,7 +47,7 @@ from ..support import seven
 
 def is_exe(fpath):
     """Returns true if fpath is an executable."""
-    if fpath == None:
+    if fpath is None:
         return False
     if sys.platform == "win32":
         if not fpath.endswith(".exe"):
@@ -251,7 +248,7 @@ def parseOptionsAndInitTestdirs():
             configuration.compiler = which(args.compiler)
         if not is_exe(configuration.compiler):
             logging.error(
-                "%s is not a valid compiler executable; aborting...", args.compiler
+                '"%s" is not a valid compiler executable; aborting...', args.compiler
             )
             sys.exit(-1)
     else:
@@ -268,6 +265,13 @@ def parseOptionsAndInitTestdirs():
                 if which(candidate):
                     configuration.compiler = candidate
                     break
+
+    if args.make:
+        configuration.make_path = args.make
+    elif platform_system == "FreeBSD" or platform_system == "NetBSD":
+        configuration.make_path = "gmake"
+    else:
+        configuration.make_path = "make"
 
     if args.dsymutil:
         configuration.dsymutil = args.dsymutil
@@ -307,7 +311,9 @@ def parseOptionsAndInitTestdirs():
         lldbtest_config.out_of_tree_debugserver = args.out_of_tree_debugserver
 
     # Set SDKROOT if we are using an Apple SDK
-    if platform_system == "Darwin" and args.apple_sdk:
+    if args.sysroot is not None:
+        configuration.sdkroot = args.sysroot
+    elif platform_system == "Darwin" and args.apple_sdk:
         configuration.sdkroot = seven.get_command_output(
             'xcrun --sdk "%s" --show-sdk-path 2> /dev/null' % (args.apple_sdk)
         )
@@ -551,12 +557,6 @@ def setupSysPath():
     lldbDAPExec = os.path.join(lldbDir, "lldb-dap")
     if is_exe(lldbDAPExec):
         os.environ["LLDBDAP_EXEC"] = lldbDAPExec
-    else:
-        if not configuration.shouldSkipBecauseOfCategories(["lldb-dap"]):
-            print(
-                "The 'lldb-dap' executable cannot be located.  The lldb-dap tests can not be run as a result."
-            )
-            configuration.skip_categories.append("lldb-dap")
 
     lldbPythonDir = None  # The directory that contains 'lldb/__init__.py'
 
@@ -670,7 +670,7 @@ def visit_file(dir, name):
     for filterspec in iter_filters():
         filtered = True
         print("adding filter spec %s to module %s" % (filterspec, repr(module)))
-        tests = unittest2.defaultTestLoader.loadTestsFromName(filterspec, module)
+        tests = unittest.defaultTestLoader.loadTestsFromName(filterspec, module)
         configuration.suite.addTests(tests)
 
     # Forgo this module if the (base, filterspec) combo is invalid
@@ -681,9 +681,7 @@ def visit_file(dir, name):
         # Add the entire file's worth of tests since we're not filtered.
         # Also the fail-over case when the filterspec branch
         # (base, filterspec) combo doesn't make sense.
-        configuration.suite.addTests(
-            unittest2.defaultTestLoader.loadTestsFromName(base)
-        )
+        configuration.suite.addTests(unittest.defaultTestLoader.loadTestsFromName(base))
 
 
 def visit(prefix, dir, names):
@@ -928,6 +926,36 @@ def checkForkVForkSupport():
         configuration.skip_categories.append("fork")
 
 
+def checkPexpectSupport():
+    from lldbsuite.test import lldbplatformutil
+
+    platform = lldbplatformutil.getPlatform()
+
+    # llvm.org/pr22274: need a pexpect replacement for windows
+    if platform in ["windows"]:
+        if configuration.verbose:
+            print("pexpect tests will be skipped because of unsupported platform")
+        configuration.skip_categories.append("pexpect")
+
+
+def checkDAPSupport():
+    import lldb
+
+    if "LLDBDAP_EXEC" not in os.environ:
+        msg = (
+            "The 'lldb-dap' executable cannot be located and its tests will not be run."
+        )
+    elif lldb.remote_platform:
+        msg = "lldb-dap tests are not compatible with remote platforms and will not be run."
+    else:
+        msg = None
+
+    if msg:
+        if configuration.verbose:
+            print(msg)
+        configuration.skip_categories.append("lldb-dap")
+
+
 def run_suite():
     # On MacOS X, check to make sure that domain for com.apple.DebugSymbols defaults
     # does not exist before proceeding to running the test suite.
@@ -1027,6 +1055,8 @@ def run_suite():
     checkDebugServerSupport()
     checkObjcSupport()
     checkForkVForkSupport()
+    checkPexpectSupport()
+    checkDAPSupport()
 
     skipped_categories_list = ", ".join(configuration.skip_categories)
     print(
@@ -1044,7 +1074,7 @@ def run_suite():
     #
 
     # Install the control-c handler.
-    unittest2.signals.installHandler()
+    unittest.signals.installHandler()
 
     #
     # Invoke the default TextTestRunner to run the test suite
@@ -1080,7 +1110,7 @@ def run_suite():
 
     # Invoke the test runner.
     if configuration.count == 1:
-        result = unittest2.TextTestRunner(
+        result = unittest.TextTestRunner(
             stream=sys.stderr,
             verbosity=configuration.verbose,
             resultclass=test_result.LLDBTestResult,
@@ -1091,7 +1121,7 @@ def run_suite():
         # not enforced.
         test_result.LLDBTestResult.__ignore_singleton__ = True
         for i in range(configuration.count):
-            result = unittest2.TextTestRunner(
+            result = unittest.TextTestRunner(
                 stream=sys.stderr,
                 verbosity=configuration.verbose,
                 resultclass=test_result.LLDBTestResult,

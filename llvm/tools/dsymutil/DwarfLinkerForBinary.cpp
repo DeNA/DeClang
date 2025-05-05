@@ -12,13 +12,9 @@
 #include "MachOUtils.h"
 #include "dsymutil.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/DenseMapInfo.h"
-#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
@@ -151,7 +147,7 @@ DwarfLinkerForBinary::loadObject(const DebugMapObject &Obj,
   if (!ObjectEntry) {
     auto Err = ObjectEntry.takeError();
     reportWarning(Twine(Obj.getObjectFilename()) + ": " +
-                      toString(std::move(Err)),
+                      toStringWithoutConsuming(Err),
                   Obj.getObjectFilename());
     return errorToErrorCode(std::move(Err));
   }
@@ -160,7 +156,7 @@ DwarfLinkerForBinary::loadObject(const DebugMapObject &Obj,
   if (!Object) {
     auto Err = Object.takeError();
     reportWarning(Twine(Obj.getObjectFilename()) + ": " +
-                      toString(std::move(Err)),
+                      toStringWithoutConsuming(Err),
                   Obj.getObjectFilename());
     return errorToErrorCode(std::move(Err));
   }
@@ -171,7 +167,7 @@ DwarfLinkerForBinary::loadObject(const DebugMapObject &Obj,
 static Error remarksErrorHandler(const DebugMapObject &DMO,
                                  DwarfLinkerForBinary &Linker,
                                  std::unique_ptr<FileError> FE) {
-  bool IsArchive = DMO.getObjectFilename().endswith(")");
+  bool IsArchive = DMO.getObjectFilename().ends_with(")");
   // Don't report errors for missing remark files from static
   // archives.
   if (!IsArchive)
@@ -638,25 +634,19 @@ bool DwarfLinkerForBinary::linkImpl(
 
   DebugMap DebugMap(Map.getTriple(), Map.getBinaryPath());
 
-  std::function<StringRef(StringRef)> TranslationLambda = [&](StringRef Input) {
-    assert(Options.Translator);
-    return Options.Translator(Input);
-  };
-
   std::unique_ptr<Linker> GeneralLinker = Linker::createLinker(
       [&](const Twine &Error, StringRef Context, const DWARFDie *DIE) {
         reportError(Error, Context, DIE);
       },
       [&](const Twine &Warning, StringRef Context, const DWARFDie *DIE) {
         reportWarning(Warning, Context, DIE);
-      },
-      Options.Translator ? TranslationLambda : nullptr);
+      });
 
   std::unique_ptr<classic::DwarfStreamer> Streamer;
   if (!Options.NoOutput) {
     if (Expected<std::unique_ptr<classic::DwarfStreamer>> StreamerOrErr =
             classic::DwarfStreamer::createStreamer(
-                Map.getTriple(), ObjectType, OutFile, Options.Translator,
+                Map.getTriple(), ObjectType, OutFile,
                 [&](const Twine &Warning, StringRef Context,
                     const DWARFDie *DIE) {
                   reportWarning(Warning, Context, DIE);
@@ -715,8 +705,8 @@ bool DwarfLinkerForBinary::linkImpl(
     } else {
       // Try and emit more helpful warnings by applying some heuristics.
       StringRef ObjFile = ContainerName;
-      bool IsClangModule = sys::path::extension(Path).equals(".pcm");
-      bool IsArchive = ObjFile.endswith(")");
+      bool IsClangModule = sys::path::extension(Path) == ".pcm";
+      bool IsArchive = ObjFile.ends_with(")");
 
       if (IsClangModule) {
         StringRef ModuleCacheDir = sys::path::parent_path(Path);
@@ -872,8 +862,8 @@ bool DwarfLinkerForBinary::linkImpl(
       !Map.getBinaryPath().empty() &&
       ObjectType == Linker::OutputFileType::Object)
     return MachOUtils::generateDsymCompanion(
-        Options.VFS, Map, Options.Translator,
-        *Streamer->getAsmPrinter().OutStreamer, OutFile, RelocationsToApply);
+        Options.VFS, Map, *Streamer->getAsmPrinter().OutStreamer, OutFile,
+        RelocationsToApply);
 
   Streamer->finish();
   return true;

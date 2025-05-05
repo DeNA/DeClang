@@ -9,8 +9,6 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03, c++11
 
-// UNSUPPORTED: availability-shared_mutex-missing
-
 // <shared_mutex>
 
 // class shared_timed_mutex;
@@ -21,9 +19,9 @@
 
 #include "test_macros.h"
 
-int main(int, char**)
-{
-    std::shared_timed_mutex m;
+int main(int, char**) {
+  std::shared_timed_mutex m;
+  (void)m;
 
   return 0;
 }

@@ -8,6 +8,13 @@ let Command = "target modules dump symtab" in {
     Desc<"Do not demangle symbol names before showing them.">;
 }
 
+let Command = "target modules dump separate debug info" in {
+  def tm_json : Option<"json", "j">, Group<1>,
+    Desc<"Output the details in JSON format.">;
+  def tm_errors_only : Option<"errors-only", "e">, Group<1>,
+    Desc<"Filter to show only debug info files with errors.">;
+}
+
 let Command = "help" in {
   def help_hide_aliases : Option<"hide-aliases", "a">,
     Desc<"Hide aliases in the command list.">;
@@ -323,6 +330,10 @@ let Command = "disassemble" in {
     Arg<"DisassemblyFlavor">, Desc<"Name of the disassembly flavor you want to "
     "use. Currently the only valid options are default, and for Intel "
     "architectures, att and intel.">;
+  def disassemble_options_cpu : Option<"cpu", "X">, Arg<"CPUName">,
+    Desc<"Override the CPU for disassembling.">;
+  def disassemble_options_features : Option<"features", "Y">, Arg<"CPUFeatures">,
+    Desc<"Specify additional CPU features for disassembling.">;
   def disassemble_options_arch : Option<"arch", "A">, Arg<"Architecture">,
     Desc<"Specify the architecture to use from cross disassembly.">;
   def disassemble_options_start_address : Option<"start-address", "s">,
@@ -396,7 +407,7 @@ let Command = "expression" in {
     Arg<"Boolean">,
     Desc<"Persist expression result in a variable for subsequent use. "
     "Expression results will be labeled with $-prefixed variables, e.g. $0, "
-    "$1, etc. Defaults to true.">;
+    "$1, etc.">;
   // BEGIN SWIFT
   def bind_generic_types : Option<"bind-generic-types", "\\x31">,
     EnumArg<"BindGenTypeParamValue">, Desc<"Controls whether any "
@@ -687,6 +698,10 @@ let Command = "platform shell" in {
 let Command = "process launch" in {
   def process_launch_stop_at_entry : Option<"stop-at-entry", "s">,
     Desc<"Stop at the entry point of the program when launching a process.">;
+  def process_launch_stop_at_user_entry : Option<"stop-at-user-entry", "m">,
+    Desc<"Stop at the user entry point when launching a process. For C based "
+    "languages this will be the 'main' function, but this might differ for "
+    "other languages.">;
   def process_launch_disable_aslr : Option<"disable-aslr", "A">, Arg<"Boolean">,
     Desc<"Set whether to disable address space layout randomization when launching a process.">;
   def process_launch_plugin : Option<"plugin", "P">, Arg<"Plugin">,
@@ -785,7 +800,7 @@ let Command = "process save_core" in {
     EnumArg<"SaveCoreStyle">, Desc<"Request a specific style "
     "of corefile to be saved.">;
   def process_save_core_plugin_name : Option<"plugin-name", "p">,
-    OptionalArg<"Plugin">, Desc<"Specify a plugin name to create the core file."
+    OptionalArg<"Plugin">, Desc<"Specify a plugin name to create the core file. "
     "This allows core files to be saved in different formats.">;
 }
 
@@ -836,10 +851,16 @@ let Command = "container add" in {
   Desc<"Overwrite an existing command at this node.">;
 }
 
-let Command = "script" in {
+let Command = "scripting run" in {
   def script_language : Option<"language", "l">,
     EnumArg<"ScriptLang">, Desc<"Specify the scripting "
     " language. If none is specific the default scripting language is used.">;
+}
+
+let Command = "scripting extension list" in {
+  def scripting_extension_list_language : Option<"language", "l">,
+    EnumArg<"ScriptLang">, Desc<"Specify the scripting "
+    " language. If none is specified the default scripting language is used.">;
 }
 
 let Command = "source info" in {
@@ -937,8 +958,8 @@ let Command = "target modules list" in {
     OptionalArg<"Width">, Desc<"Display the modification time with optional "
     "width of the module.">;
   def target_modules_list_ref_count : Option<"ref-count", "r">, Group<1>,
-    OptionalArg<"Width">, Desc<"Display the reference count if the module is "
-    "still in the shared module cache.">;
+    OptionalArg<"Width">, Desc<"Display whether the module is still in the "
+    "the shared module cache (Y/N), and its shared pointer use_count.">;
   def target_modules_list_pointer : Option<"pointer", "p">, Group<1>,
     OptionalArg<"None">, Desc<"Display the module pointer.">;
   def target_modules_list_global : Option<"global", "g">, Group<1>,
@@ -1043,6 +1064,8 @@ let Command = "thread backtrace" in {
   Arg<"FrameIndex">, Desc<"Frame in which to start the backtrace">;
   def thread_backtrace_extended : Option<"extended", "e">, Group<1>,
   Arg<"Boolean">, Desc<"Show the extended backtrace, if available">;
+  def thread_backtrace_unfiltered : Option<"unfiltered", "u">, Group<1>,
+  Desc<"Do not filter out frames according to installed frame recognizers">;
 }
 
 let Command = "thread step scope" in {
@@ -1122,6 +1145,12 @@ let Command = "thread plan list" in {
     "specified more than once.">;
   def thread_plan_list_unreported : Option<"unreported", "u">, Group<1>,
     Desc<"Display thread plans for unreported threads">;
+}
+
+let Command = "thread select" in {
+  def thread_select_thread_id : Option<"thread-id", "t">, Group<2>,
+    Arg<"ThreadID">, Completion<"ThreadID">,
+    Desc<"Provide a thread ID instead of a thread index.">;
 }
 
 let Command = "thread trace dump function calls" in {
@@ -1413,4 +1442,34 @@ let Command = "trace schema" in {
 let Command = "statistics dump" in {
   def statistics_dump_all: Option<"all-targets", "a">, Group<1>,
     Desc<"Include statistics for all targets.">;
+  def statistics_dump_summary: Option<"summary", "s">, Group<1>,
+    Desc<"Dump only high-level summary statistics. "
+         "Exclude targets, modules, breakpoints etc... details.">;
+  def statistics_dump_force: Option<"load-all-debug-info", "f">, Group<1>,
+    Desc<"Dump the total possible debug info statistics. "
+    "Force loading all the debug information if not yet loaded, and collect "
+    "statistics with those.">;
+  def statistics_dump_targets: Option<"targets", "r">, Group<1>,
+    Arg<"Boolean">,
+    Desc<"Dump statistics for the targets, including breakpoints, expression "
+    "evaluations, frame variables, etc. "
+    "Defaults to true in both default mode and summary mode. "
+    "In default mode, if both '--targets' and '--modules' are 'true', a list "
+    "of module identifiers will be added to the 'targets' section.">;
+  def statistics_dump_modules: Option<"modules", "m">, Group<1>,
+    Arg<"Boolean">,
+    Desc<"Dump statistics for the modules, including time and size of various "
+    "aspects of the module and debug information, type system, path, etc. "
+    "Defaults to true, unless the '--summary' mode is enabled, in which case "
+    "this is turned off unless specified. "
+    "In default mode, if both '--targets' and '--modules' are 'true', a list "
+    "of module identifiers will be added to the 'targets' section.">;
+  def statistics_dump_transcript: Option<"transcript", "t">, Group<1>,
+    Arg<"Boolean">,
+    Desc<"If the setting interpreter.save-transcript is enabled and this "
+    "option is 'true', include a JSON array with all commands the user and/or "
+    "scripts executed during a debug session. "
+    "Defaults to true, unless the '--summary' mode is enabled, in which case "
+    "this is turned off unless specified.">;
+
 }

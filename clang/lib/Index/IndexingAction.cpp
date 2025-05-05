@@ -583,7 +583,7 @@ private:
   }
 
   bool isInSysroot(StringRef Filename) {
-    return !SysrootPath.empty() && Filename.startswith(SysrootPath);
+    return !SysrootPath.empty() && Filename.starts_with(SysrootPath);
   }
 };
 
@@ -712,7 +712,7 @@ static std::string getClangVersion() {
   std::string RepositoryPath = getClangRepositoryPath();
   StringRef BuildNumber = StringRef(RepositoryPath);
   size_t DashOffset = BuildNumber.find('-');
-  if (BuildNumber.startswith("clang") && DashOffset != StringRef::npos) {
+  if (BuildNumber.starts_with("clang") && DashOffset != StringRef::npos) {
     BuildNumber = BuildNumber.substr(DashOffset + 1);
     return std::string(BuildNumber);
   }
@@ -725,7 +725,7 @@ static void writeUnitData(const CompilerInstance &CI,
                           IndexDependencyProvider &DepProvider,
                           IndexingOptions IndexOpts,
                           RecordingOptions RecordOpts, StringRef OutputFile,
-                          const FileEntry *RootFile, Module *UnitModule,
+                          OptionalFileEntryRef RootFile, Module *UnitModule,
                           StringRef SysrootPath);
 
 void IndexRecordActionBase::finish(CompilerInstance &CI) {
@@ -767,12 +767,12 @@ void IndexRecordActionBase::finish(CompilerInstance &CI) {
     OutputFile += ".o";
   }
 
-  const FileEntry *RootFile = nullptr;
+  OptionalFileEntryRef RootFile;
   Module *UnitMod = nullptr;
   bool isModuleGeneration = CI.getLangOpts().isCompilingModule();
   if (!isModuleGeneration &&
       CI.getFrontendOpts().ProgramAction != frontend::GeneratePCH) {
-    RootFile = SM.getFileEntryForID(SM.getMainFileID());
+    RootFile = SM.getFileEntryRefForID(SM.getMainFileID());
   }
   if (isModuleGeneration) {
     UnitMod = HS.lookupModule(CI.getLangOpts().CurrentModule, SourceLocation(),
@@ -796,7 +796,7 @@ static void writeUnitData(const CompilerInstance &CI,
                           IndexDependencyProvider &DepProvider,
                           IndexingOptions IndexOpts,
                           RecordingOptions RecordOpts, StringRef OutputFile,
-                          const FileEntry *RootFile, Module *UnitModule,
+                          OptionalFileEntryRef RootFile, Module *UnitModule,
                           StringRef SysrootPath) {
 
   SourceManager &SM = CI.getSourceManager();
@@ -917,7 +917,7 @@ public:
           // Ignore module map files, they are not as important to track as
           // source files and they may be auto-generated which would create an
           // undesirable dependency on an intermediate build byproduct.
-          if (FE->getName().endswith("module.modulemap"))
+          if (FE->getName().ends_with("module.modulemap"))
             return;
 
           visitor(*FE, isSystem);
@@ -979,7 +979,7 @@ static void indexModule(serialization::ModuleFile &Mod,
 
   ModuleFileIndexDependencyCollector DepCollector(Mod, RecordOpts);
   writeUnitData(CI, Recorder, DepCollector, IndexOpts, RecordOpts, Mod.FileName,
-                /*RootFile=*/nullptr, UnitMod, SysrootPath);
+                /*RootFile=*/std::nullopt, UnitMod, SysrootPath);
 }
 
 static bool produceIndexDataForModuleFile(serialization::ModuleFile &Mod,
@@ -1056,7 +1056,7 @@ bool index::emitIndexDataForModuleFile(const Module *Mod,
 
   auto astReader = CI.getASTReader();
   serialization::ModuleFile *ModFile =
-      astReader->getModuleManager().lookup(Mod->getASTFile());
+      astReader->getModuleManager().lookup(*Mod->getASTFile());
   assert(ModFile && "no module file loaded for module ?");
   return produceIndexDataForModuleFile(*ModFile, CI, IndexOpts, RecordOpts,
                                        ParentUnitWriter);

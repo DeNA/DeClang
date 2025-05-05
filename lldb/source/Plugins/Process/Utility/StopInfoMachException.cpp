@@ -48,10 +48,13 @@ GetPtrauthInstructionInfo(Target &target, const ArchSpec &arch,
                           const Address &at_addr) {
   const char *plugin_name = nullptr;
   const char *flavor = nullptr;
+  const char *cpu = nullptr;
+  const char *features = nullptr;
   AddressRange range_bounds(at_addr, 4);
   const bool prefer_file_cache = true;
-  DisassemblerSP disassembler_sp = Disassembler::DisassembleRange(
-      arch, plugin_name, flavor, target, range_bounds, prefer_file_cache);
+  DisassemblerSP disassembler_sp =
+      Disassembler::DisassembleRange(arch, plugin_name, flavor, cpu, features,
+                                     target, range_bounds, prefer_file_cache);
   if (!disassembler_sp)
     return std::nullopt;
 
@@ -512,10 +515,6 @@ static StopInfoSP GetStopInfoForHardwareBP(Thread &thread, Target *target,
         process_sp->GetBreakpointSiteList().FindByAddress(
             (lldb::addr_t)exc_sub_code);
     if (bp_sp && bp_sp->IsEnabled()) {
-      // Debugserver may piggyback the hardware index of the fired breakpoint
-      // in the exception data. Set the hardware index if that's the case.
-      if (exc_data_count >= 3)
-        bp_sp->SetHardwareIndex((uint32_t)exc_sub_sub_code);
       return StopInfo::CreateStopReasonWithBreakpointSiteID(thread,
                                                             bp_sp->GetID());
     }
@@ -686,11 +685,6 @@ StopInfoSP StopInfoMachException::CreateStopReasonWithMachException(
           wp_sp = target->GetWatchpointList().FindByAddress(
               (lldb::addr_t)exc_sub_code);
         if (wp_sp && wp_sp->IsEnabled()) {
-          // Debugserver may piggyback the hardware index of the fired
-          // watchpoint in the exception data. Set the hardware index if
-          // that's the case.
-          if (exc_data_count >= 3)
-            wp_sp->SetHardwareIndex((uint32_t)exc_sub_sub_code);
           return StopInfo::CreateStopReasonWithWatchpointID(thread,
                                                             wp_sp->GetID());
         } else {
@@ -748,11 +742,6 @@ StopInfoSP StopInfoMachException::CreateStopReasonWithMachException(
           wp_sp = target->GetWatchpointList().FindByAddress(
               (lldb::addr_t)exc_sub_code);
         if (wp_sp && wp_sp->IsEnabled()) {
-          // Debugserver may piggyback the hardware index of the fired
-          // watchpoint in the exception data. Set the hardware index if
-          // that's the case.
-          if (exc_data_count >= 3)
-            wp_sp->SetHardwareIndex((uint32_t)exc_sub_sub_code);
           return StopInfo::CreateStopReasonWithWatchpointID(thread,
                                                             wp_sp->GetID());
         }
@@ -791,13 +780,8 @@ StopInfoSP StopInfoMachException::CreateStopReasonWithMachException(
         // but if it is for another thread, we can just report no reason.  We
         // don't need to worry about stepping over the breakpoint here, that
         // will be taken care of when the thread resumes and notices that
-        // there's a breakpoint under the pc. If we have an operating system
-        // plug-in, we might have set a thread specific breakpoint using the
-        // operating system thread ID, so we can't make any assumptions about
-        // the thread ID so we must always report the breakpoint regardless
-        // of the thread.
-        if (bp_site_sp->ValidForThisThread(thread) ||
-            thread.GetProcess()->GetOperatingSystem() != nullptr)
+        // there's a breakpoint under the pc.
+        if (bp_site_sp->ValidForThisThread(thread))
           return StopInfo::CreateStopReasonWithBreakpointSiteID(
               thread, bp_site_sp->GetID());
         else if (is_trace_if_actual_breakpoint_missing)

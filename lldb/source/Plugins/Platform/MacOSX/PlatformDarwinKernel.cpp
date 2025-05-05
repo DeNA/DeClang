@@ -22,7 +22,6 @@
 #include "lldb/Interpreter/OptionValueFileSpecList.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
 #include "lldb/Interpreter/Property.h"
-#include "lldb/Symbol/LocateSymbolFile.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
@@ -128,7 +127,7 @@ PlatformSP PlatformDarwinKernel::CreateInstance(bool force,
       case llvm::Triple::IOS:
       case llvm::Triple::WatchOS:
       case llvm::Triple::TvOS:
-      // NEED_BRIDGEOS_TRIPLE case llvm::Triple::BridgeOS:
+      case llvm::Triple::BridgeOS:
         break;
       // Only accept "vendor" for vendor if the host is Apple and it "unknown"
       // wasn't specified (it was just returned because it was NOT specified)
@@ -188,8 +187,8 @@ enum {
 
 class PlatformDarwinKernelProperties : public Properties {
 public:
-  static ConstString &GetSettingName() {
-    static ConstString g_setting_name("darwin-kernel");
+  static llvm::StringRef GetSettingName() {
+    static constexpr llvm::StringLiteral g_setting_name("darwin-kernel");
     return g_setting_name;
   }
 
@@ -488,8 +487,8 @@ PlatformDarwinKernel::GetKernelsAndKextsInDirectoryHelper(
 
   llvm::StringRef filename = file_spec.GetFilename().GetStringRef();
   bool is_kernel_filename =
-      filename.startswith("kernel") || filename.startswith("mach");
-  bool is_dsym_yaa = filename.endswith(".dSYM.yaa");
+      filename.starts_with("kernel") || filename.starts_with("mach");
+  bool is_dsym_yaa = filename.ends_with(".dSYM.yaa");
 
   if (ft == llvm::sys::fs::file_type::regular_file ||
       ft == llvm::sys::fs::file_type::symlink_file) {

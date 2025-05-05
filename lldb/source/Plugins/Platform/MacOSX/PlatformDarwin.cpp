@@ -29,6 +29,7 @@
 #include "lldb/Interpreter/OptionValueProperties.h"
 #include "lldb/Interpreter/OptionValueString.h"
 #include "lldb/Interpreter/Options.h"
+#include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/SymbolVendor.h"
@@ -41,6 +42,7 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Timer.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/VersionTuple.h"
@@ -64,8 +66,8 @@ static Status ExceptionMaskValidator(const char *string, void *unused) {
           || candidate == "EXC_RESOURCE"
           || candidate == "EXC_GUARD"
           || candidate == "EXC_SYSCALL")) {
-      error.SetErrorStringWithFormat("invalid exception type: '%s'",
-          candidate.str().c_str());
+      error = Status::FromErrorStringWithFormat("invalid exception type: '%s'",
+                                                candidate.str().c_str());
       return error;
     }
   }
@@ -121,8 +123,8 @@ enum {
 
 class PlatformDarwinProperties : public Properties {
 public:
-  static ConstString &GetSettingName() {
-    static ConstString g_setting_name("darwin");
+  static llvm::StringRef GetSettingName() {
+    static constexpr llvm::StringLiteral g_setting_name("darwin");
     return g_setting_name;
   }
 
@@ -712,7 +714,8 @@ lldb::ProcessSP PlatformDarwin::DebugProcess(ProcessLaunchInfo &launch_info,
       process_sp = m_remote_platform_sp->DebugProcess(launch_info, debugger,
                                                       target, error);
     else
-      error.SetErrorString("the platform is not currently connected");
+      error =
+          Status::FromErrorString("the platform is not currently connected");
   }
   return process_sp;
 }
@@ -856,20 +859,37 @@ PlatformDarwin::ParseVersionBuildDir(llvm::StringRef dir) {
 
 llvm::Expected<StructuredData::DictionarySP>
 PlatformDarwin::FetchExtendedCrashInformation(Process &process) {
-  StructuredData::DictionarySP extended_crash_info =
-      std::make_shared<StructuredData::Dictionary>();
+  static constexpr llvm::StringLiteral crash_info_key("Crash-Info Annotations");
+  static constexpr llvm::StringLiteral asi_info_key(
+      "Application Specific Information");
 
-  StructuredData::ArraySP annotations = ExtractCrashInfoAnnotations(process);
-  if (annotations && annotations->GetSize())
-    extended_crash_info->AddItem("Crash-Info Annotations", annotations);
+  // We cache the information we find in the process extended info dict:
+  StructuredData::DictionarySP process_dict_sp =
+      process.GetExtendedCrashInfoDict();
+  StructuredData::Array *annotations = nullptr;
+  StructuredData::ArraySP new_annotations_sp;
+  if (!process_dict_sp->GetValueForKeyAsArray(crash_info_key, annotations)) {
+    new_annotations_sp = ExtractCrashInfoAnnotations(process);
+    if (new_annotations_sp && new_annotations_sp->GetSize()) {
+      process_dict_sp->AddItem(crash_info_key, new_annotations_sp);
+      annotations = new_annotations_sp.get();
+    }
+  }
 
-  StructuredData::DictionarySP app_specific_info =
-      ExtractAppSpecificInfo(process);
-  if (app_specific_info && app_specific_info->GetSize())
-    extended_crash_info->AddItem("Application Specific Information",
-                                 app_specific_info);
+  StructuredData::Dictionary *app_specific_info;
+  StructuredData::DictionarySP new_app_specific_info_sp;
+  if (!process_dict_sp->GetValueForKeyAsDictionary(asi_info_key,
+                                                   app_specific_info)) {
+    new_app_specific_info_sp = ExtractAppSpecificInfo(process);
+    if (new_app_specific_info_sp && new_app_specific_info_sp->GetSize()) {
+      process_dict_sp->AddItem(asi_info_key, new_app_specific_info_sp);
+      app_specific_info = new_app_specific_info_sp.get();
+    }
+  }
 
-  return extended_crash_info->GetSize() ? extended_crash_info : nullptr;
+  // Now get anything else that was in the process info dict, and add it to the
+  // return here:
+  return process_dict_sp->GetSize() ? process_dict_sp : nullptr;
 }
 
 StructuredData::ArraySP
@@ -990,7 +1010,7 @@ PlatformDarwin::ExtractAppSpecificInfo(Process &process) {
   StructuredData::DictionarySP dict_sp =
       std::make_shared<StructuredData::Dictionary>();
 
-  auto flatten_asi_dict = [&dict_sp](ConstString key,
+  auto flatten_asi_dict = [&dict_sp](llvm::StringRef key,
                                      StructuredData::Object *val) -> bool {
     if (!val)
       return false;
@@ -999,7 +1019,7 @@ PlatformDarwin::ExtractAppSpecificInfo(Process &process) {
     if (!arr || !arr->GetSize())
       return false;
 
-    dict_sp->AddItem(key.AsCString(), arr->GetItemAtIndex(0));
+    dict_sp->AddItem(key, arr->GetItemAtIndex(0));
     return true;
   };
 
@@ -1105,8 +1125,21 @@ void PlatformDarwin::AddClangModuleCompilationOptionsForSDKType(
   }
 
   FileSpec sysroot_spec;
-  // Scope for mutex locker below
-  {
+
+  if (target) {
+    if (ModuleSP exe_module_sp = target->GetExecutableModule()) {
+      auto path_or_err = ResolveSDKPathFromDebugInfo(*exe_module_sp);
+      if (path_or_err) {
+        sysroot_spec = FileSpec(*path_or_err);
+      } else {
+        LLDB_LOG_ERROR(GetLog(LLDBLog::Types | LLDBLog::Host),
+                       path_or_err.takeError(),
+                       "Failed to resolve SDK path: {0}");
+      }
+    }
+  }
+
+  if (!FileSystem::Instance().IsDirectory(sysroot_spec.GetPath())) {
     std::lock_guard<std::mutex> guard(m_mutex);
     sysroot_spec = GetSDKDirectoryForModules(sdk_type);
   }
@@ -1346,4 +1379,90 @@ llvm::Triple::OSType PlatformDarwin::GetHostOSType() {
 #error "LLDB being compiled for an unrecognized Darwin OS"
 #endif
 #endif // __APPLE__
+}
+
+llvm::Expected<std::pair<XcodeSDK, bool>>
+PlatformDarwin::GetSDKPathFromDebugInfo(Module &module) {
+  SymbolFile *sym_file = module.GetSymbolFile();
+  if (!sym_file)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        llvm::formatv("No symbol file available for module '{0}'",
+                      module.GetFileSpec().GetFilename().AsCString("")));
+
+  bool found_public_sdk = false;
+  bool found_internal_sdk = false;
+  XcodeSDK merged_sdk;
+  for (unsigned i = 0; i < sym_file->GetNumCompileUnits(); ++i) {
+    if (auto cu_sp = sym_file->GetCompileUnitAtIndex(i)) {
+      auto cu_sdk = sym_file->ParseXcodeSDK(*cu_sp);
+      bool is_internal_sdk = cu_sdk.IsAppleInternalSDK();
+      found_public_sdk |= !is_internal_sdk;
+      found_internal_sdk |= is_internal_sdk;
+
+      merged_sdk.Merge(cu_sdk);
+    }
+  }
+
+  const bool found_mismatch = found_internal_sdk && found_public_sdk;
+
+  return std::pair{std::move(merged_sdk), found_mismatch};
+}
+
+llvm::Expected<std::string>
+PlatformDarwin::ResolveSDKPathFromDebugInfo(Module &module) {
+  auto sdk_or_err = GetSDKPathFromDebugInfo(module);
+  if (!sdk_or_err)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        llvm::formatv("Failed to parse SDK path from debug-info: {0}",
+                      llvm::toString(sdk_or_err.takeError())));
+
+  auto [sdk, _] = std::move(*sdk_or_err);
+
+  auto path_or_err = HostInfo::GetSDKRoot(HostInfo::SDKOptions{sdk});
+  if (!path_or_err)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        llvm::formatv("Error while searching for SDK (XcodeSDK '{0}'): {1}",
+                      sdk.GetString(),
+                      llvm::toString(path_or_err.takeError())));
+
+  return path_or_err->str();
+}
+
+llvm::Expected<XcodeSDK>
+PlatformDarwin::GetSDKPathFromDebugInfo(CompileUnit &unit) {
+  ModuleSP module_sp = unit.CalculateSymbolContextModule();
+  if (!module_sp)
+    return llvm::createStringError("compile unit has no module");
+  SymbolFile *sym_file = module_sp->GetSymbolFile();
+  if (!sym_file)
+    return llvm::createStringError(
+        llvm::formatv("No symbol file available for module '{0}'",
+                      module_sp->GetFileSpec().GetFilename()));
+
+  return sym_file->ParseXcodeSDK(unit);
+}
+
+llvm::Expected<std::string>
+PlatformDarwin::ResolveSDKPathFromDebugInfo(CompileUnit &unit) {
+  auto sdk_or_err = GetSDKPathFromDebugInfo(unit);
+  if (!sdk_or_err)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        llvm::formatv("Failed to parse SDK path from debug-info: {0}",
+                      llvm::toString(sdk_or_err.takeError())));
+
+  auto sdk = std::move(*sdk_or_err);
+
+  auto path_or_err = HostInfo::GetSDKRoot(HostInfo::SDKOptions{sdk});
+  if (!path_or_err)
+    return llvm::createStringError(
+        llvm::inconvertibleErrorCode(),
+        llvm::formatv("Error while searching for SDK (XcodeSDK '{0}'): {1}",
+                      sdk.GetString(),
+                      llvm::toString(path_or_err.takeError())));
+
+  return path_or_err->str();
 }

@@ -56,10 +56,13 @@ static llvm::Expected<std::string> TransformPackType(
   if (!tss)
     return llvm::createStringError(llvm::errc::not_supported,
                                    "unexpected typesystem");
-  auto &ts = tss->GetTypeSystemSwiftTypeRef();
+  auto ts = tss->GetTypeSystemSwiftTypeRef();
+  if (!ts)
+    return llvm::createStringError(llvm::errc::not_supported,
+                                   "no typeref typesystem");
   using namespace swift::Demangle;
   Demangler dem;
-  NodePointer node = ts.GetCanonicalDemangleTree(
+  NodePointer node = ts->GetCanonicalDemangleTree(
       dem, type.GetMangledTypeName().GetStringRef());
 
   node = TypeSystemSwiftTypeRef::Transform(dem, node, [](NodePointer n) {
@@ -73,7 +76,7 @@ static llvm::Expected<std::string> TransformPackType(
   });
 
   bool error = false;
-  ConstString type_name = ts.RemangleAsType(dem, node).GetMangledTypeName();
+  ConstString type_name = ts->RemangleAsType(dem, node).GetMangledTypeName();
   swift::Demangle::DemangleOptions options;
   options = swift::Demangle::DemangleOptions::SimplifiedUIDemangleOptions();
   options.DisplayStdlibModule = false;
@@ -442,7 +445,7 @@ do {
       auto c = MakeGenericSignaturesAndCalls(local_variables, generic_sig,
                                              needs_object_ptr);
       if (!c) {
-        status.SetErrorString(llvm::toString(c.takeError()));
+        status = Status::FromError(c.takeError());
         return status;
       }
       wrapped_stream.Printf(
@@ -506,7 +509,7 @@ func $__lldb_expr(_ $__lldb_arg : UnsafeMutablePointer<Any>) {
     auto c = MakeGenericSignaturesAndCalls(local_variables, generic_sig,
                                            needs_object_ptr);
     if (!c) {
-      status.SetErrorString(llvm::toString(c.takeError()));
+      status = Status::FromError(c.takeError());
       return status;
     }
     wrapped_stream.Printf(R"(
@@ -578,7 +581,7 @@ Status SwiftExpressionSourceCode::GetText(
     }
 
     if (wrapping_language.name != llvm::dwarf::DW_LNAME_Swift) {
-      status.SetErrorString("language is not Swift");
+      status = Status::FromErrorString("language is not Swift");
       return status;
     }
 
@@ -597,7 +600,7 @@ Status SwiftExpressionSourceCode::GetText(
       if (auto process_sp = exe_ctx.GetProcessSP()) {
         os_vers << getAvailabilityName(triple) << " ";
         auto platform = target->GetPlatform();
-        bool is_simulator = platform->GetPluginName().endswith("-simulator");
+        bool is_simulator = platform->GetPluginName().ends_with("-simulator");
         if (is_simulator) {
           // The simulators look like the host OS to Process, but Platform
           // can the version out of an environment variable.
@@ -614,7 +617,7 @@ Status SwiftExpressionSourceCode::GetText(
             target->GetPersistentExpressionStateForLanguage(
                 lldb::eLanguageTypeSwift));
     if (!persistent_state) {
-      status.SetErrorString("no persistent state");
+      status = Status::FromErrorString("no persistent state");
       return status;
     }
     std::vector<CompilerDecl> persistent_results;

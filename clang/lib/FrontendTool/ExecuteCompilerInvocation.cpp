@@ -54,6 +54,8 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
   case DumpTokens:             return std::make_unique<DumpTokensAction>();
   case EmitAssembly:           return std::make_unique<EmitAssemblyAction>();
   case EmitBC:                 return std::make_unique<EmitBCAction>();
+  case EmitCIR:
+    llvm_unreachable("CIR suppport not built into clang");
   case EmitHTML:               return std::make_unique<HTMLPrintAction>();
   case EmitLLVM:               return std::make_unique<EmitLLVMAction>();
   case EmitLLVMOnly:           return std::make_unique<EmitLLVMOnlyAction>();
@@ -66,6 +68,8 @@ CreateFrontendBaseAction(CompilerInstance &CI) {
     return std::make_unique<GenerateModuleFromModuleMapAction>();
   case GenerateModuleInterface:
     return std::make_unique<GenerateModuleInterfaceAction>();
+  case GenerateReducedModuleInterface:
+    return std::make_unique<GenerateReducedModuleInterfaceAction>();
   case GenerateHeaderUnit:
     return std::make_unique<GenerateHeaderUnitAction>();
   case GeneratePCH:            return std::make_unique<GeneratePCHAction>();
@@ -211,8 +215,8 @@ bool ExecuteCompilerInvocation(CompilerInstance *Clang) {
     driver::getDriverOptTable().printHelp(
         llvm::outs(), "clang -cc1 [options] file...",
         "LLVM 'Clang' Compiler: http://clang.llvm.org",
-        /*Include=*/driver::options::CC1Option,
-        /*Exclude=*/0, /*ShowAllAliases=*/false);
+        /*ShowHidden=*/false, /*ShowAllAliases=*/false,
+        llvm::opt::Visibility(driver::options::CC1Option));
     return true;
   }
 

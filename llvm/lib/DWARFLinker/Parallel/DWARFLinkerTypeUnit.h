@@ -25,7 +25,7 @@ class TypeUnit : public DwarfUnit {
 public:
   TypeUnit(LinkingGlobalData &GlobalData, unsigned ID,
            std::optional<uint16_t> Language, dwarf::FormParams Format,
-           support::endianness Endianess);
+           llvm::endianness Endianess);
 
   /// Generates DIE tree based on information from TypesMap.
   void createDIETree(BumpPtrAllocator &Allocator);

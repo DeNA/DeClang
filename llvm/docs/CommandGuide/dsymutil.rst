@@ -34,7 +34,7 @@ OPTIONS
 
 .. option:: --build-variant-suffix <suffix=buildvariant>
 
- Specify the build variant suffix used to build the executabe file.
+ Specify the build variant suffix used to build the executable file.
  There can be multiple variants for the binary of a product, each built
  slightly differently. The most common build variants are 'debug' and
  'profile'. Setting the DYLD_IMAGE_SUFFIX environment variable will
@@ -82,6 +82,10 @@ OPTIONS
  dsymutil currently has better equivalents: .apple_names and .apple_types. When
  used in conjunction with ``--update`` option, this option will cause redundant
  accelerator tables to be removed.
+
+.. option:: --no-object-timestamp
+
+ Don't check timestamp for object files.
 
 .. option:: --no-odr
 
@@ -143,10 +147,6 @@ OPTIONS
  size of the debug info in the object file (in bytes) and the size contributed
  (in bytes) to the linked dSYM. The table is sorted by the output size listing
  the object files with the largest contribution first.
-
-.. option:: --symbol-map <bcsymbolmap>
-
- Update the existing dSYMs inplace using symbol map specified.
 
 .. option:: -s, --symtab
 

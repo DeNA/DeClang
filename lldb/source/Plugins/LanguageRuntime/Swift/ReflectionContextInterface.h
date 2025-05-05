@@ -18,6 +18,7 @@
 #include "lldb/lldb-types.h"
 #include "swift/ABI/ObjectFile.h"
 #include "swift/Remote/RemoteAddress.h"
+#include "swift/RemoteInspection/ReflectionContext.h"
 #include "swift/RemoteInspection/TypeRef.h"
 #include <optional>
 #include "llvm/ADT/STLFunctionalExtras.h"
@@ -129,6 +130,11 @@ public:
       const swift::reflection::TypeRef *enum_type_ref,
       swift::remote::TypeInfoProvider *provider,
       swift::reflection::DescriptorFinder *descriptor_finder) = 0;
+  virtual const swift::reflection::TypeRef *
+  LookupTypeWitness(const std::string &MangledTypeName,
+                    const std::string &Member, StringRef Protocol) = 0;
+  virtual swift::reflection::ConformanceCollectionResult
+  GetAllConformances() = 0;
   virtual const swift::reflection::TypeRef *ReadTypeFromMetadata(
       lldb::addr_t metadata_address,
       swift::reflection::DescriptorFinder *descriptor_finder,
@@ -145,6 +151,23 @@ public:
       swift::reflection::DescriptorFinder *descriptor_finder) = 0;
   virtual swift::remote::RemoteAbsolutePointer
   StripSignedPointer(swift::remote::RemoteAbsolutePointer pointer) = 0;
+  struct AsyncTaskInfo {
+    bool isChildTask = false;
+    bool isFuture = false;
+    bool isGroupChildTask = false;
+    bool isAsyncLetTask = false;
+    bool isCancelled = false;
+    bool isStatusRecordLocked = false;
+    bool isEscalated = false;
+    /// If false, the IsRunning flag is not valid.
+    bool hasIsRunning = false;
+    bool isRunning = false;
+    bool isEnqueued = false;
+  };
+  // The default limits are copied from swift-inspect.
+  virtual llvm::Expected<AsyncTaskInfo>
+  asyncTaskInfo(lldb::addr_t AsyncTaskPtr, unsigned ChildTaskLimit = 1000000,
+                unsigned AsyncBacktraceLimit = 1000) = 0;
 };
 
 using ThreadSafeReflectionContext = LockGuarded<ReflectionContextInterface>;

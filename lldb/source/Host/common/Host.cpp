@@ -93,8 +93,9 @@ using namespace lldb_private;
 #include <syslog.h>
 void Host::SystemLog(Severity severity, llvm::StringRef message) {
   static llvm::once_flag g_openlog_once;
-  llvm::call_once(g_openlog_once,
-                  [] { openlog("lldb", LOG_PID | LOG_NDELAY, LOG_USER); });
+  llvm::call_once(g_openlog_once, [] {
+    openlog("lldb", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_USER);
+  });
   int level = LOG_DEBUG;
   switch (severity) {
   case lldb::eSeverityInfo:
@@ -165,11 +166,7 @@ private:
 #endif // __linux__
 
 #ifdef __linux__
-#if defined(__GNUC__) && (__GNUC__ < 4 || (__GNUC__ == 4 && __GNUC_MINOR__ < 8))
-static __thread volatile sig_atomic_t g_usr1_called;
-#else
 static thread_local volatile sig_atomic_t g_usr1_called;
-#endif
 
 static void SigUsr1Handler(int) { g_usr1_called = 1; }
 #endif // __linux__
@@ -505,11 +502,12 @@ Status Host::RunShellCommand(llvm::StringRef shell_path, const Args &args,
   const lldb::pid_t pid = launch_info.GetProcessID();
 
   if (error.Success() && pid == LLDB_INVALID_PROCESS_ID)
-    error.SetErrorString("failed to get process ID");
+    error = Status::FromErrorString("failed to get process ID");
 
   if (error.Success()) {
     if (!shell_info_sp->process_reaped.WaitForValueEqualTo(true, timeout)) {
-      error.SetErrorString("timed out waiting for shell command to complete");
+      error = Status::FromErrorString(
+          "timed out waiting for shell command to complete");
 
       // Kill the process since it didn't complete within the timeout specified
       Kill(pid, SIGKILL);
@@ -529,7 +527,7 @@ Status Host::RunShellCommand(llvm::StringRef shell_path, const Args &args,
             FileSystem::Instance().GetByteSize(output_file_spec);
         if (file_size > 0) {
           if (file_size > command_output_ptr->max_size()) {
-            error.SetErrorStringWithFormat(
+            error = Status::FromErrorStringWithFormat(
                 "shell command output is too large to fit into a std::string");
           } else {
             WritableDataBufferSP Buffer =
@@ -590,7 +588,7 @@ bool Host::IsInteractiveGraphicSession() { return false; }
 
 std::unique_ptr<Connection> Host::CreateDefaultConnection(llvm::StringRef url) {
 #if defined(_WIN32)
-  if (url.startswith("file://"))
+  if (url.starts_with("file://"))
     return std::unique_ptr<Connection>(new ConnectionGenericFile());
 #endif
   return std::unique_ptr<Connection>(new ConnectionFileDescriptor());

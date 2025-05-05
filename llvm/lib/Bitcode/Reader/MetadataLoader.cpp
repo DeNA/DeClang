@@ -549,17 +549,17 @@ class MetadataLoader::MetadataLoaderImpl {
   /// DISubprogram's retainedNodes.
   void upgradeCULocals() {
     if (NamedMDNode *CUNodes = TheModule.getNamedMetadata("llvm.dbg.cu")) {
-      for (unsigned I = 0, E = CUNodes->getNumOperands(); I != E; ++I) {
-        auto *CU = dyn_cast<DICompileUnit>(CUNodes->getOperand(I));
+      for (MDNode *N : CUNodes->operands()) {
+        auto *CU = dyn_cast<DICompileUnit>(N);
         if (!CU)
           continue;
 
-        if (auto *RawImported = CU->getRawImportedEntities()) {
+        if (CU->getRawImportedEntities()) {
           // Collect a set of imported entities to be moved.
           SetVector<Metadata *> EntitiesToRemove;
           for (Metadata *Op : CU->getImportedEntities()->operands()) {
             auto *IE = cast<DIImportedEntity>(Op);
-            if (auto *S = dyn_cast_or_null<DILocalScope>(IE->getScope())) {
+            if (dyn_cast_or_null<DILocalScope>(IE->getScope())) {
               EntitiesToRemove.insert(IE);
             }
           }
@@ -609,17 +609,25 @@ class MetadataLoader::MetadataLoaderImpl {
     if (!NeedDeclareExpressionUpgrade)
       return;
 
+    auto UpdateDeclareIfNeeded = [&](auto *Declare) {
+      auto *DIExpr = Declare->getExpression();
+      if (!DIExpr || !DIExpr->startsWithDeref() ||
+          !isa_and_nonnull<Argument>(Declare->getAddress()))
+        return;
+      SmallVector<uint64_t, 8> Ops;
+      Ops.append(std::next(DIExpr->elements_begin()), DIExpr->elements_end());
+      Declare->setExpression(DIExpression::get(Context, Ops));
+    };
+
     for (auto &BB : F)
-      for (auto &I : BB)
+      for (auto &I : BB) {
+        for (DbgVariableRecord &DVR : filterDbgVars(I.getDbgRecordRange())) {
+          if (DVR.isDbgDeclare())
+            UpdateDeclareIfNeeded(&DVR);
+        }
         if (auto *DDI = dyn_cast<DbgDeclareInst>(&I))
-          if (auto *DIExpr = DDI->getExpression())
-            if (DIExpr->startsWithDeref() &&
-                isa_and_nonnull<Argument>(DDI->getAddress())) {
-              SmallVector<uint64_t, 8> Ops;
-              Ops.append(std::next(DIExpr->elements_begin()),
-                         DIExpr->elements_end());
-              DDI->setExpression(DIExpression::get(Context, Ops));
-            }
+          UpdateDeclareIfNeeded(DDI);
+      }
   }
 
   /// Upgrade the expression from previous versions.
@@ -704,10 +712,11 @@ class MetadataLoader::MetadataLoaderImpl {
     return Error::success();
   }
 
-  void upgradeDebugInfo() {
+  void upgradeDebugInfo(bool ModuleLevel) {
     upgradeCUSubprograms();
     upgradeCUVariables();
-    upgradeCULocals();
+    if (ModuleLevel)
+      upgradeCULocals();
   }
 
   void callMDTypeCallback(Metadata **Val, unsigned TypeID);
@@ -1084,7 +1093,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseMetadata(bool ModuleLevel) {
       // Reading the named metadata created forward references and/or
       // placeholders, that we flush here.
       resolveForwardRefsAndPlaceholders(Placeholders);
-      upgradeDebugInfo();
+      upgradeDebugInfo(ModuleLevel);
       // Return at the beginning of the block, since it is easy to skip it
       // entirely from there.
       Stream.ReadBlockEnd(); // Pop the abbrev block context.
@@ -1115,7 +1124,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseMetadata(bool ModuleLevel) {
       return error("Malformed block");
     case BitstreamEntry::EndBlock:
       resolveForwardRefsAndPlaceholders(Placeholders);
-      upgradeDebugInfo();
+      upgradeDebugInfo(ModuleLevel);
       return Error::success();
     case BitstreamEntry::Record:
       // The interesting case.
@@ -1210,6 +1219,26 @@ void MetadataLoader::MetadataLoaderImpl::resolveForwardRefsAndPlaceholders(
   // Finally, everything is in place, we can replace the placeholders operands
   // with the final node they refer to.
   Placeholders.flush(MetadataList);
+}
+
+static Value *getValueFwdRef(BitcodeReaderValueList &ValueList, unsigned Idx,
+                             Type *Ty, unsigned TyID) {
+  Value *V = ValueList.getValueFwdRef(Idx, Ty, TyID,
+                                      /*ConstExprInsertBB*/ nullptr);
+  if (V)
+    return V;
+
+  // This is a reference to a no longer supported constant expression.
+  // Pretend that the constant was deleted, which will replace metadata
+  // references with undef.
+  // TODO: This is a rather indirect check. It would be more elegant to use
+  // a separate ErrorInfo for constant materialization failure and thread
+  // the error reporting through getValueFwdRef().
+  if (Idx < ValueList.size() && ValueList[Idx] &&
+      ValueList[Idx]->getType() == Ty)
+    return UndefValue::get(Ty);
+
+  return nullptr;
 }
 
 Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
@@ -1314,7 +1343,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
 
     unsigned TyID = Record[0];
     Type *Ty = Callbacks.GetTypeByID(TyID);
-    if (Ty->isMetadataTy() || Ty->isVoidTy()) {
+    if (!Ty || Ty->isMetadataTy() || Ty->isVoidTy()) {
       dropRecord();
       break;
     }
@@ -1343,8 +1372,7 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
       if (Ty->isMetadataTy())
         Elts.push_back(getMD(Record[i + 1]));
       else if (!Ty->isVoidTy()) {
-        Value *V = ValueList.getValueFwdRef(Record[i + 1], Ty, TyID,
-                                            /*ConstExprInsertBB*/ nullptr);
+        Value *V = getValueFwdRef(ValueList, Record[i + 1], Ty, TyID);
         if (!V)
           return error("Invalid value reference from old metadata");
         Metadata *MD = ValueAsMetadata::get(V);
@@ -1365,11 +1393,10 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
 
     unsigned TyID = Record[0];
     Type *Ty = Callbacks.GetTypeByID(TyID);
-    if (Ty->isMetadataTy() || Ty->isVoidTy())
+    if (!Ty || Ty->isMetadataTy() || Ty->isVoidTy())
       return error("Invalid record");
 
-    Value *V = ValueList.getValueFwdRef(Record[1], Ty, TyID,
-                                        /*ConstExprInsertBB*/ nullptr);
+    Value *V = getValueFwdRef(ValueList, Record[1], Ty, TyID);
     if (!V)
       return error("Invalid value reference from metadata");
 
@@ -1548,12 +1575,17 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
       DWARFAddressSpace = Record[12] - 1;
 
     Metadata *Annotations = nullptr;
-    if (Record.size() > 13 && Record[13])
-      Annotations = getMDOrNull(Record[13]);
-
     std::optional<DIDerivedType::PtrAuthData> PtrAuthData;
-    if (Record.size() > 14 && Record[14])
-      PtrAuthData = DIDerivedType::PtrAuthData(Record[14]);
+
+    // Only look for annotations/ptrauth if both are allocated.
+    // If not, we can't tell which was intended to be embedded, as both ptrauth
+    // and annotations have been expected at Record[13] at various times.
+    if (Record.size() > 14) {
+      if (Record[13])
+        Annotations = getMDOrNull(Record[13]);
+      if (Record[14])
+        PtrAuthData.emplace(Record[14]);
+    }
 
     IsDistinct = Record[0];
     DINode::DIFlags Flags = static_cast<DINode::DIFlags>(Record[10]);
@@ -1570,13 +1602,10 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_COMPOSITE_TYPE: {
-    // The last field is a variable sized APInt, so the metadata loader can't
-    // reliably check the end for this record.
     if (Record.size() < 16)
       return error("Invalid record");
 
     IsDistinct = Record[0] & 1;
-    bool IsBigInt = (Record[0] >> 3) & 1;
     // If we have a UUID and this is not a forward declaration, lookup the
     // mapping.
     IsDistinct = Record[0] & 0x1;
@@ -1604,30 +1633,35 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     Metadata *Allocated = nullptr;
     Metadata *Rank = nullptr;
     Metadata *Annotations = nullptr;
-    Metadata *SpecificationOf = nullptr;
+    Metadata *Specification = nullptr;
     auto *Identifier = getMDString(Record[15]);
     // If this module is being parsed so that it can be ThinLTO imported
-    // into another module, composite types only need to be imported
-    // as type declarations (unless full type definitions requested).
-    // Create type declarations up front to save memory. Also, buildODRType
-    // handles the case where this is type ODRed with a definition needed
-    // by the importing module, in which case the existing definition is
-    // used.
-    if (IsImporting && !ImportFullTypeDefinitions && Identifier &&
+    // into another module, composite types only need to be imported as
+    // type declarations (unless full type definitions are requested).
+    // Create type declarations up front to save memory. This is only
+    // done for types which have an Identifier, and are therefore
+    // subject to the ODR.
+    //
+    // buildODRType handles the case where this is type ODRed with a
+    // definition needed by the importing module, in which case the
+    // existing definition is used.
+    //
+    // We always import full definitions for anonymous composite types,
+    // as without a name, debuggers cannot easily resolve a declaration
+    // to its definition.
+    if (IsImporting && !ImportFullTypeDefinitions && Identifier && Name &&
         (Tag == dwarf::DW_TAG_enumeration_type ||
          Tag == dwarf::DW_TAG_class_type ||
          Tag == dwarf::DW_TAG_structure_type ||
          Tag == dwarf::DW_TAG_union_type)) {
       Flags = Flags | DINode::FlagFwdDecl;
-      if (Name) {
-        // This is a hack around preserving template parameters for simplified
-        // template names - it should probably be replaced with a
-        // DICompositeType flag specifying whether template parameters are
-        // required on declarations of this type.
-        StringRef NameStr = Name->getString();
-        if (!NameStr.contains('<') || NameStr.startswith("_STN|"))
-          TemplateParams = getMDOrNull(Record[14]);
-      }
+      // This is a hack around preserving template parameters for simplified
+      // template names - it should probably be replaced with a
+      // DICompositeType flag specifying whether template parameters are
+      // required on declarations of this type.
+      StringRef NameStr = Name->getString();
+      if (!NameStr.contains('<') || NameStr.starts_with("_STN|"))
+        TemplateParams = getMDOrNull(Record[14]);
     } else {
       BaseType = getDITypeRefOrNull(Record[6]);
       OffsetInBits = Record[9];
@@ -1649,32 +1683,17 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
         Annotations = getMDOrNull(Record[21]);
       }
       if (Record.size() > 23) {
-        SpecificationOf = getMDOrNull(Record[23]);
+        Specification = getMDOrNull(Record[23]);
       }
     }
     DICompositeType *CT = nullptr;
-    APInt SpareBitsMask;
-    // SpareBitsMask is an optional field so the metadata loader has to check if
-    // it was emitted before accessing it.
-    if (Record.size() > 24) {
-      if (IsBigInt) {
-        const uint64_t BitWidth = Record[24];
-        const size_t NumWords = Record.size() - 3;
-        SpareBitsMask =
-            readWideAPInt(ArrayRef(&Record[25], NumWords), BitWidth);
-      } else {
-        const uint64_t IntValue = Record[24];
-        SpareBitsMask = APInt(64, IntValue);
-      }
-    }
-
     if (Identifier)
       CT = DICompositeType::buildODRType(
           Context, *Identifier, Tag, Name, File, Line, Scope, BaseType,
-          SizeInBits, AlignInBits, OffsetInBits, SpecificationOf,
-          NumExtraInhabitants, SpareBitsMask, Flags, Elements, RuntimeLang,
-          VTableHolder, TemplateParams, Discriminator, DataLocation, Associated,
-          Allocated, Rank, Annotations);
+          SizeInBits, AlignInBits, OffsetInBits, Specification,
+          NumExtraInhabitants, Flags, Elements, RuntimeLang, VTableHolder,
+          TemplateParams, Discriminator, DataLocation, Associated, Allocated,
+          Rank, Annotations);
 
     // Create a node if we didn't get a lazy ODR type.
     if (!CT)
@@ -1683,8 +1702,8 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
                             SizeInBits, AlignInBits, OffsetInBits, Flags,
                             Elements, RuntimeLang, VTableHolder, TemplateParams,
                             Identifier, Discriminator, DataLocation, Associated,
-                            Allocated, Rank, Annotations, SpecificationOf,
-                            NumExtraInhabitants, SpareBitsMask));
+                            Allocated, Rank, Annotations, Specification,
+                            NumExtraInhabitants));
     if (!IsNotUsedInTypeRef && Identifier)
       MetadataList.addTypeRef(*Identifier, *cast<DICompositeType>(CT));
 

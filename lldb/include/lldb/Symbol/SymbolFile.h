@@ -18,10 +18,13 @@
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/SourceModule.h"
+#include "lldb/Symbol/Symbol.h"
+#include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/Type.h"
 #include "lldb/Symbol/TypeList.h"
 #include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Target/Statistics.h"
+#include "lldb/Utility/StructuredData.h"
 #include "lldb/Utility/XcodeSDK.h"
 #include "lldb/lldb-private.h"
 #include "llvm/ADT/DenseSet.h"
@@ -304,6 +307,21 @@ public:
                              bool include_inlines, SymbolContextList &sc_list);
   virtual void FindFunctions(const RegularExpression &regex,
                              bool include_inlines, SymbolContextList &sc_list);
+  /// Finds imported declarations whose name match \p name.
+  ///
+  /// \param[in] name
+  ///     The name to search the imported declaration by.
+  ///
+  /// \param[in] results
+  ///     Any matching types will be populated into the \a results object.
+  ///
+  /// \param[in] find_one
+  ///     If set to true, the search will stop after the first imported
+  ///     declaration is found.
+  virtual void
+  FindImportedDeclaration(ConstString name,
+                          std::vector<ImportedDeclaration> &declarations,
+                          bool find_one) {}
 
   /// Find types using a type-matching object that contains all search
   /// parameters.
@@ -410,7 +428,8 @@ public:
 
   /// Metrics gathering functions
 
-  /// Return the size in bytes of all debug information in the symbol file.
+  /// Return the size in bytes of all loaded debug information or total possible
+  /// debug info in the symbol file.
   ///
   /// If the debug information is contained in sections of an ObjectFile, then
   /// this call should add the size of all sections that contain debug
@@ -420,7 +439,14 @@ public:
   /// entire file should be returned. The default implementation of this
   /// function will iterate over all sections in a module and add up their
   /// debug info only section byte sizes.
-  virtual uint64_t GetDebugInfoSize() = 0;
+  ///
+  /// \param load_all_debug_info
+  ///   If true, force loading any symbol files if they are not yet loaded and
+  ///   add to the total size. Default to false.
+  ///
+  /// \returns
+  ///   Total currently loaded debug info size in bytes
+  virtual uint64_t GetDebugInfoSize(bool load_all_debug_info = false) = 0;
 
   /// Return the time taken to parse the debug information.
   ///
@@ -464,6 +490,23 @@ public:
   /// GetFrameVariableError() for details on what are considered errors.
   virtual bool GetDebugInfoHadFrameVariableErrors() const = 0;
   virtual void SetDebugInfoHadFrameVariableErrors() = 0;
+
+  /// Return true if separate debug info files are supported and this function
+  /// succeeded, false otherwise.
+  ///
+  /// \param[out] d
+  ///     If this function succeeded, then this will be a dictionary that
+  ///     contains the keys "type", "symfile", and "separate-debug-info-files".
+  ///     "type" can be used to assume the structure of each object in
+  ///     "separate-debug-info-files".
+  /// \param errors_only
+  ///     If true, then only return separate debug info files that encountered
+  ///     errors during loading. If false, then return all expected separate
+  ///     debug info files, regardless of whether they were successfully loaded.
+  virtual bool GetSeparateDebugInfo(StructuredData::Dictionary &d,
+                                    bool errors_only) {
+    return false;
+  };
 
   virtual lldb::TypeSP
   MakeType(lldb::user_id_t uid, ConstString name,
@@ -546,7 +589,7 @@ public:
 
   void Dump(Stream &s) override;
 
-  uint64_t GetDebugInfoSize() override;
+  uint64_t GetDebugInfoSize(bool load_all_debug_info = false) override;
 
   bool GetDebugInfoIndexWasLoadedFromCache() const override {
     return m_index_was_loaded_from_cache;

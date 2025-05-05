@@ -29,7 +29,7 @@ class SymbolFileDWARF;
 
 class DWARFASTParser {
 public:
-  enum class Kind { DWARFASTParserClang, DWARFASTParserSwift};
+  enum class Kind { DWARFASTParserClang, DWARFASTParserSwift };
   DWARFASTParser(Kind kind) : m_kind(kind) {}
 
   virtual ~DWARFASTParser() = default;
@@ -58,7 +58,7 @@ public:
   virtual void EnsureAllDIEsInDeclContextHaveBeenParsed(
       CompilerDeclContext decl_context) = 0;
 
-  virtual ConstString GetDIEClassTemplateParams(const DWARFDIE &die) = 0;
+  virtual std::string GetDIEClassTemplateParams(const DWARFDIE &die) = 0;
 
   static std::optional<SymbolFile::ArrayInfo>
   ParseChildArrayInfo(const DWARFDIE &parent_die,

@@ -9,6 +9,7 @@
 #include "BuiltinCAS.h"
 #include "llvm/CAS/OnDiskGraphDB.h"
 #include "llvm/CAS/UnifiedOnDiskCache.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Path.h"
 
 using namespace llvm;
@@ -98,7 +99,7 @@ std::optional<ObjectRef> OnDiskCAS::getReference(const CASID &ID) const {
 }
 
 Expected<bool> OnDiskCAS::isMaterialized(ObjectRef ExternalRef) const {
-  return DB->containsObject(convertRef(ExternalRef));
+  return DB->isMaterialized(convertRef(ExternalRef));
 }
 
 ArrayRef<char> OnDiskCAS::getDataConst(ObjectHandle Node) const {
@@ -125,10 +126,12 @@ Expected<ObjectRef> OnDiskCAS::storeImpl(ArrayRef<uint8_t> ComputedHash,
     IDs.push_back(convertRef(Ref));
   }
 
-  ondisk::ObjectID StoredID = DB->getReference(ComputedHash);
-  if (Error E = DB->store(StoredID, IDs, Data))
+  auto StoredID = DB->getReference(ComputedHash);
+  if (LLVM_UNLIKELY(!StoredID))
+    return StoredID.takeError();
+  if (Error E = DB->store(*StoredID, IDs, Data))
     return std::move(E);
-  return convertRef(StoredID);
+  return convertRef(*StoredID);
 }
 
 Error OnDiskCAS::forEachRef(ObjectHandle Node,

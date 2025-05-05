@@ -1,6 +1,5 @@
 llvm_canonicalize_cmake_booleans(
   BUILD_SHARED_LIBS
-  LLVM_HAVE_LIBXAR
   HAVE_OCAMLOPT
   LLVM_ENABLE_DIA_SDK
   LLVM_ENABLE_FFI
@@ -27,6 +26,9 @@ llvm_canonicalize_cmake_booleans(
   LLVM_ENABLE_ONDISK_CAS
   LLVM_CAS_ENABLE_REMOTE_CACHE
   LLVM_TOOL_LLVM_DRIVER_BUILD
+  LLVM_INCLUDE_SPIRV_TOOLS_TESTS
+  LLVM_APPEND_VC_REV
+  LLVM_HAS_LOGF128
   )
 
 configure_lit_site_cfg(
@@ -60,7 +62,6 @@ set(LLVM_TEST_DEPENDS
           BugpointPasses
           CASPluginTest
           FileCheck
-          LLVMHello
           LLVMWindowsDriver
           UnitTests
           bugpoint
@@ -126,7 +127,6 @@ set(LLVM_TEST_DEPENDS
           llvm-readobj
           llvm-readelf
           llvm-reduce
-          llvm-remark-size-diff
           llvm-remarkutil
           llvm-rtdyld
           llvm-sim
@@ -220,6 +220,7 @@ if(TARGET ocaml_llvm)
           ocaml_llvm_executionengine
           ocaml_llvm_irreader
           ocaml_llvm_linker
+          ocaml_llvm_passbuilder
           ocaml_llvm_target
           ocaml_llvm_transform_utils
         )
@@ -233,8 +234,13 @@ if(LLVM_ENABLE_HTTPLIB)
   list(APPEND LLVM_TEST_DEPENDS llvm-debuginfod)
 endif()
 
+if (LLVM_INCLUDE_SPIRV_TOOLS_TESTS)
+  list(APPEND LLVM_TEST_DEPENDS spirv-dis)
+  list(APPEND LLVM_TEST_DEPENDS spirv-val)
+endif()
+
 add_custom_target(llvm-test-depends DEPENDS ${LLVM_TEST_DEPENDS})
-set_target_properties(llvm-test-depends PROPERTIES FOLDER "Tests")
+set_target_properties(llvm-test-depends PROPERTIES FOLDER "LLVM/Tests")
 
 if(LLVM_BUILD_TOOLS)
   set(exclude_from_check_all "")
@@ -247,7 +253,7 @@ add_lit_testsuite(check-llvm "Running the LLVM regression tests"
   ${exclude_from_check_all}
   DEPENDS ${LLVM_TEST_DEPENDS}
   )
-set_target_properties(check-llvm PROPERTIES FOLDER "Tests")
+set_target_properties(check-llvm PROPERTIES FOLDER "LLVM/Tests")
 
 add_lit_testsuites(LLVM ${CMAKE_CURRENT_SOURCE_DIR}
   ${exclude_from_check_all}
@@ -258,4 +264,4 @@ add_lit_testsuites(LLVM ${CMAKE_CURRENT_SOURCE_DIR}
 # Setup an alias for 'check-all'.
 add_custom_target(check)
 add_dependencies(check check-all)
-set_target_properties(check PROPERTIES FOLDER "Tests")
+set_target_properties(check PROPERTIES FOLDER "LLVM/Tests")

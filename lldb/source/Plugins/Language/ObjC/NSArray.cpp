@@ -14,8 +14,6 @@
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 
-#include "lldb/Core/ValueObject.h"
-#include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Expression/FunctionCaller.h"
 #include "lldb/Target/Language.h"
@@ -24,6 +22,8 @@
 #include "lldb/Utility/Endian.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/Stream.h"
+#include "lldb/ValueObject/ValueObject.h"
+#include "lldb/ValueObject/ValueObjectConstResult.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -548,9 +548,8 @@ lldb_private::formatters::NSArrayMSyntheticFrontEndBase::GetIndexOfChildWithName
 }
 
 template <typename D32, typename D64>
-lldb_private::formatters::
-  GenericNSArrayMSyntheticFrontEnd<D32, D64>::
-    ~GenericNSArrayMSyntheticFrontEnd<D32, D64>() {
+lldb_private::formatters::GenericNSArrayMSyntheticFrontEnd<D32, D64>::
+    GenericNSArrayMSyntheticFrontEnd::~GenericNSArrayMSyntheticFrontEnd() {
   delete m_data_32;
   m_data_32 = nullptr;
   delete m_data_64;
@@ -616,7 +615,7 @@ lldb_private::formatters::GenericNSArrayISyntheticFrontEnd<D32, D64, Inline>::
 
 template <typename D32, typename D64, bool Inline>
 lldb_private::formatters::GenericNSArrayISyntheticFrontEnd<D32, D64, Inline>::
-  ~GenericNSArrayISyntheticFrontEnd<D32, D64, Inline>() {
+    GenericNSArrayISyntheticFrontEnd::~GenericNSArrayISyntheticFrontEnd() {
   delete m_data_32;
   m_data_32 = nullptr;
   delete m_data_64;

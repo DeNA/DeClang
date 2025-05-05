@@ -24,6 +24,8 @@ namespace lldb_private {
 
 class IRExecutionUnit;
 class SwiftASTContextForExpressions;
+typedef std::shared_ptr<SwiftASTContextForExpressions>
+    SwiftASTContextForExpressionsSP;
 
 //----------------------------------------------------------------------
 /// @class SwiftREPL SwiftREPL.h "lldb/Expression/SwiftREPL.h"
@@ -70,11 +72,15 @@ protected:
                         lldb::ValueObjectSP &valobj_sp,
                         ExpressionVariable *var = nullptr) override;
 
+  /// Retrieve the SwiftASTContext to use for completion and line parsing
+  /// checks.
+  SwiftASTContextForExpressions *getSwiftASTContext();
+
   void CompleteCode(const std::string &current_code,
                     CompletionRequest &request) override;
 
 private:
-  SwiftASTContextForExpressions *m_swift_ast = nullptr;
+  SwiftASTContextForExpressionsSP m_swift_ast;
   bool m_completion_module_initialized = false;
 };
 }

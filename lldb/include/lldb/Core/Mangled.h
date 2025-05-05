@@ -8,7 +8,6 @@
 
 #ifndef LLDB_CORE_MANGLED_H
 #define LLDB_CORE_MANGLED_H
-#if defined(__cplusplus)
 
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-forward.h"
@@ -45,9 +44,7 @@ public:
     eManglingSchemeItanium,
     eManglingSchemeRustV0,
     eManglingSchemeD,
-#ifdef LLDB_ENABLE_SWIFT
-    eManglingSchemeSwift
-#endif // LLDB_ENABLE_SWIFT
+    eManglingSchemeSwift,
   };
 
   /// Default constructor.
@@ -290,5 +287,4 @@ Stream &operator<<(Stream &s, const Mangled &obj);
 
 } // namespace lldb_private
 
-#endif // #if defined(__cplusplus)
 #endif // LLDB_CORE_MANGLED_H

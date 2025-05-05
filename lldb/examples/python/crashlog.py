@@ -166,7 +166,7 @@ class CrashLog(symbolication.Symbolicator):
             this_thread_crashed = self.app_specific_backtrace
             if not this_thread_crashed:
                 this_thread_crashed = self.did_crash()
-                if options.crashed_only and this_thread_crashed == False:
+                if options.crashed_only and not this_thread_crashed:
                     return
 
             print("%s" % self)
@@ -358,7 +358,11 @@ class CrashLog(symbolication.Symbolicator):
             # Keep track of unresolved source paths.
             unavailable_source_paths = set()
             if os.path.exists(self.dsymForUUIDBinary):
-                dsym_for_uuid_command = "%s %s" % (self.dsymForUUIDBinary, uuid_str)
+                dsym_for_uuid_command = (
+                    "{} --copyExecutable --ignoreNegativeCache {}".format(
+                        self.dsymForUUIDBinary, uuid_str
+                    )
+                )
                 s = subprocess.check_output(dsym_for_uuid_command, shell=True)
                 if s:
                     try:

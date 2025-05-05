@@ -11,6 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "flang/Optimizer/Dialect/FIRDialect.h"
+#include "flang/Optimizer/Dialect/FIROpsSupport.h"
 #include "flang/Optimizer/Transforms/Passes.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -24,7 +26,6 @@ namespace fir {
 #include "flang/Optimizer/Transforms/Passes.h.inc"
 } // namespace fir
 
-using namespace fir;
 using namespace mlir;
 
 namespace {
@@ -34,12 +35,13 @@ public:
   OMPFunctionFilteringPass() = default;
 
   void runOnOperation() override {
+    MLIRContext *context = &getContext();
+    OpBuilder opBuilder(context);
     auto op = dyn_cast<omp::OffloadModuleInterface>(getOperation());
-    if (!op)
+    if (!op || !op.getIsTargetDevice())
       return;
 
-    bool isDeviceCompilation = op.getIsTargetDevice();
-    op->walk<WalkOrder::PostOrder>([&](func::FuncOp funcOp) {
+    op->walk<WalkOrder::PreOrder>([&](func::FuncOp funcOp) {
       // Do not filter functions with target regions inside, because they have
       // to be available for both host and device so that regular and reverse
       // offloading can be supported.
@@ -48,8 +50,6 @@ public:
               ->walk<WalkOrder::PreOrder>(
                   [&](omp::TargetOp) { return WalkResult::interrupt(); })
               .wasInterrupted();
-      if (hasTargetRegion)
-        return;
 
       omp::DeclareTargetDeviceType declareType =
           omp::DeclareTargetDeviceType::host;
@@ -58,16 +58,48 @@ public:
       if (declareTargetOp && declareTargetOp.isDeclareTarget())
         declareType = declareTargetOp.getDeclareTargetDeviceType();
 
-      if ((isDeviceCompilation &&
-           declareType == omp::DeclareTargetDeviceType::host) ||
-          (!isDeviceCompilation &&
-           declareType == omp::DeclareTargetDeviceType::nohost))
-        funcOp->erase();
+      // Filtering a function here means deleting it if it doesn't contain a
+      // target region. Else we explicitly set the omp.declare_target
+      // attribute. The second stage of function filtering at the MLIR to LLVM
+      // IR translation level will remove functions that contain the target
+      // region from the generated llvm IR.
+      if (declareType == omp::DeclareTargetDeviceType::host) {
+        SymbolTable::UseRange funcUses = *funcOp.getSymbolUses(op);
+        for (SymbolTable::SymbolUse use : funcUses) {
+          Operation *callOp = use.getUser();
+          if (auto internalFunc = mlir::dyn_cast<func::FuncOp>(callOp)) {
+            // Do not delete internal procedures holding the symbol of their
+            // Fortran host procedure as attribute.
+            internalFunc->removeAttr(fir::getHostSymbolAttrName());
+            // Set public visibility so that the function is not deleted by MLIR
+            // because unused. Changing it is OK here because the function will
+            // be deleted anyway in the second filtering phase.
+            internalFunc.setVisibility(mlir::SymbolTable::Visibility::Public);
+            continue;
+          }
+          // If the callOp has users then replace them with Undef values.
+          if (!callOp->use_empty()) {
+            SmallVector<Value> undefResults;
+            for (Value res : callOp->getResults()) {
+              opBuilder.setInsertionPoint(callOp);
+              undefResults.emplace_back(
+                  opBuilder.create<fir::UndefOp>(res.getLoc(), res.getType()));
+            }
+            callOp->replaceAllUsesWith(undefResults);
+          }
+          // Remove the callOp
+          callOp->erase();
+        }
+        if (!hasTargetRegion) {
+          funcOp.erase();
+          return WalkResult::skip();
+        }
+        if (declareTargetOp)
+          declareTargetOp.setDeclareTarget(declareType,
+                                           omp::DeclareTargetCaptureClause::to);
+      }
+      return WalkResult::advance();
     });
   }
 };
 } // namespace
-
-std::unique_ptr<Pass> fir::createOMPFunctionFilteringPass() {
-  return std::make_unique<OMPFunctionFilteringPass>();
-}

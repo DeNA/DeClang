@@ -11,8 +11,6 @@
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
 #include "lldb/Breakpoint/WatchpointResource.h"
 #include "lldb/Core/Value.h"
-#include "lldb/Core/ValueObject.h"
-#include "lldb/Core/ValueObjectMemory.h"
 #include "lldb/DataFormatters/DumpValueObjectOptions.h"
 #include "lldb/Expression/UserExpression.h"
 #include "lldb/Symbol/TypeSystem.h"
@@ -22,6 +20,8 @@
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Stream.h"
+#include "lldb/ValueObject/ValueObject.h"
+#include "lldb/ValueObject/ValueObjectMemory.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -31,8 +31,7 @@ Watchpoint::Watchpoint(Target &target, lldb::addr_t addr, uint32_t size,
     : StoppointSite(0, addr, size, hardware), m_target(target),
       m_enabled(false), m_is_hardware(hardware), m_is_watch_variable(false),
       m_is_ephemeral(false), m_disabled_count(0), m_watch_read(0),
-      m_watch_write(0), m_watch_modify(0), m_ignore_count(0),
-      m_being_created(true) {
+      m_watch_write(0), m_watch_modify(0), m_ignore_count(0) {
 
   if (type && type->IsValid())
     m_type = *type;
@@ -66,7 +65,6 @@ Watchpoint::Watchpoint(Target &target, lldb::addr_t addr, uint32_t size,
     m_target.GetProcessSP()->CalculateExecutionContext(exe_ctx);
     CaptureWatchedValue(exe_ctx);
   }
-  m_being_created = false;
 }
 
 Watchpoint::~Watchpoint() = default;
@@ -75,7 +73,7 @@ Watchpoint::~Watchpoint() = default;
 void Watchpoint::SetCallback(WatchpointHitCallback callback, void *baton,
                              bool is_synchronous) {
   // The default "Baton" class will keep a copy of "baton" and won't free or
-  // delete it when it goes goes out of scope.
+  // delete it when it goes out of scope.
   m_options.SetCallback(callback, std::make_shared<UntypedBaton>(baton),
                         is_synchronous);
 
@@ -386,8 +384,8 @@ void Watchpoint::DumpWithLevel(Stream *s,
   }
 
   if (description_level >= lldb::eDescriptionLevelVerbose) {
-    s->Printf("\n    hw_index = %i  hit_count = %-4u  ignore_count = %-4u",
-              GetHardwareIndex(), GetHitCount(), GetIgnoreCount());
+    s->Printf("\n    hit_count = %-4u  ignore_count = %-4u", GetHitCount(),
+              GetIgnoreCount());
   }
 }
 
@@ -412,9 +410,7 @@ bool Watchpoint::IsDisabledDuringEphemeralMode() {
 
 void Watchpoint::SetEnabled(bool enabled, bool notify) {
   if (!enabled) {
-    if (!m_is_ephemeral)
-      SetHardwareIndex(LLDB_INVALID_INDEX32);
-    else
+    if (m_is_ephemeral)
       ++m_disabled_count;
 
     // Don't clear the snapshots for now.
@@ -487,24 +483,12 @@ const char *Watchpoint::GetConditionText() const {
 
 void Watchpoint::SendWatchpointChangedEvent(
     lldb::WatchpointEventType eventKind) {
-  if (!m_being_created &&
-      GetTarget().EventTypeHasListeners(
+  if (GetTarget().EventTypeHasListeners(
           Target::eBroadcastBitWatchpointChanged)) {
-    WatchpointEventData *data =
-        new Watchpoint::WatchpointEventData(eventKind, shared_from_this());
-    GetTarget().BroadcastEvent(Target::eBroadcastBitWatchpointChanged, data);
+    auto data_sp =
+        std::make_shared<WatchpointEventData>(eventKind, shared_from_this());
+    GetTarget().BroadcastEvent(Target::eBroadcastBitWatchpointChanged, data_sp);
   }
-}
-
-void Watchpoint::SendWatchpointChangedEvent(WatchpointEventData *data) {
-  if (data == nullptr)
-    return;
-
-  if (!m_being_created &&
-      GetTarget().EventTypeHasListeners(Target::eBroadcastBitWatchpointChanged))
-    GetTarget().BroadcastEvent(Target::eBroadcastBitWatchpointChanged, data);
-  else
-    delete data;
 }
 
 Watchpoint::WatchpointEventData::WatchpointEventData(

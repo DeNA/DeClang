@@ -77,8 +77,7 @@ bool IndexingContext::handleReference(const NamedDecl *D, SourceLocation Loc,
                                       const DeclContext *DC,
                                       SymbolRoleSet Roles,
                                       ArrayRef<SymbolRelation> Relations,
-                                      const Expr *RefE,
-                                      const Decl *RefD) {
+                                      const Expr *RefE) {
   if (!shouldIndexFunctionLocalSymbols() && isFunctionLocalSymbol(D))
     return true;
 
@@ -88,7 +87,7 @@ bool IndexingContext::handleReference(const NamedDecl *D, SourceLocation Loc,
     return true;
   }
   return handleDeclOccurrence(D, Loc, /*IsRef=*/true, Parent, Roles, Relations,
-                              RefE, RefD, DC);
+                              RefE, nullptr, DC);
 }
 
 static void reportModuleReferences(const Module *Mod,
@@ -234,7 +233,7 @@ bool IndexingContext::isSystemFile(FileID FID) {
   bool &isSystemDir = pair.first->second;
   bool wasInserted = pair.second;
   if (wasInserted) {
-    isSystemDir = StringRef(dirEntry.getName()).startswith(SysrootPath);
+    isSystemDir = StringRef(dirEntry.getName()).starts_with(SysrootPath);
   }
   return result(isSystemDir);
 }

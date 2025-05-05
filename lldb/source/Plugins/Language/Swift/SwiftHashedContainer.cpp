@@ -16,10 +16,10 @@
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
-#include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/ValueObject/ValueObjectConstResult.h"
 
 #include "Plugins/Language/ObjC/NSDictionary.h"
 #include "lldb/lldb-enumerations.h"
@@ -254,7 +254,7 @@ bool
 HashedCollectionConfig::IsNativeStorageName(ConstString name) const {
   assert(m_nativeStorage_demangledPrefix);
   auto n = name.GetStringRef();
-  return n.startswith(m_nativeStorage_demangledPrefix.GetStringRef());
+  return n.starts_with(m_nativeStorage_demangledPrefix.GetStringRef());
 }
 
 bool
@@ -267,7 +267,7 @@ bool
 HashedCollectionConfig::IsDeferredBridgedStorageName(ConstString name) const {
   assert(m_deferredBridgedStorage_demangledPrefix);
   auto n = name.GetStringRef();
-  return n.startswith(m_deferredBridgedStorage_demangledPrefix.GetStringRef());
+  return n.starts_with(m_deferredBridgedStorage_demangledPrefix.GetStringRef());
 }
 
 HashedStorageHandlerUP
@@ -291,14 +291,12 @@ HashedCollectionConfig::StorageObjectAtAddress(
   // same address.
   Status error;
   ExecutionContextScope *exe_scope = exe_ctx.GetBestExecutionContextScope();
-  std::optional<SwiftScratchContextReader> reader =
-    process_sp->GetTarget().GetSwiftScratchContext(error, *exe_scope);
-  if (!reader)
+
+  auto scratch_ctx = TypeSystemSwiftTypeRefForExpressions::GetForTarget(
+      process_sp->GetTarget());
+  if (!scratch_ctx)
     return nullptr;
   if (error.Fail())
-    return nullptr;
-  auto scratch_ctx = reader->get();
-  if (!scratch_ctx)
     return nullptr;
   CompilerType rawStorage_type =
       scratch_ctx->GetTypeFromMangledTypename(m_nativeStorageRoot_mangled);
@@ -365,7 +363,7 @@ HashedCollectionConfig::CreateNativeHandler(
     return CreateEmptyHandler();
   }
   
-  if (typeName.startswith(m_nativeStorage_demangledPrefix.GetStringRef())) {
+  if (typeName.starts_with(m_nativeStorage_demangledPrefix.GetStringRef())) {
     auto type_system = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
     if (!type_system)
       return nullptr;
@@ -532,7 +530,7 @@ bool NativeHashedStorageHandler::IsValid() {
 uint64_t
 NativeHashedStorageHandler::GetMetadataWord(int index, Status &error) {
   if (static_cast<size_t>(index) >= GetWordCount()) {
-    error.SetErrorToGenericError();
+    error = Status::FromErrorString("index out of bounds");
     return 0;
   }
   const lldb::addr_t effective_ptr = m_metadata_ptr + (index * m_ptr_size);

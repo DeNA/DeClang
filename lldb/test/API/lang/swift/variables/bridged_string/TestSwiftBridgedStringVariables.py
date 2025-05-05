@@ -20,7 +20,6 @@ from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
 import os
-import unittest2
 
 
 class TestSwiftBridgedStringVariables(TestBase):
@@ -38,6 +37,7 @@ class TestSwiftBridgedStringVariables(TestBase):
         s4 = self.frame().FindVariable("s4")
         s5 = self.frame().FindVariable("s5")
         s6 = self.frame().FindVariable("s6")
+        s7 = self.frame().FindVariable("s7")
 
         lldbutil.check_variable(self, s1, summary='"Hello world"')
         lldbutil.check_variable(self, s2, summary='"ΞΕΛΛΘ"')
@@ -45,4 +45,5 @@ class TestSwiftBridgedStringVariables(TestBase):
         lldbutil.check_variable(self, s4, summary='"ΞΕΛΛΘ"')
         lldbutil.check_variable(self, s5, use_dynamic=True, summary='"abc"')
         lldbutil.check_variable(self, s6, summary='"abc"')
+        lldbutil.check_variable(self, s7, summary='"kCFRunLoopDefaultMode"')
 

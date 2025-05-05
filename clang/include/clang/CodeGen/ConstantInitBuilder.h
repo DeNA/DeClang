@@ -44,7 +44,7 @@ class CodeGenModule;
 ///    for (auto &widget : widgets) {
 ///      auto widgetDesc = widgetArray.beginStruct();
 ///      widgetDesc.addInt(CGM.SizeTy, widget.getPower());
-///      widgetDesc.add(CGM.GetAddrOfConstantString(widget.getName()));
+///      widgetDesc.add(CGM.GetAddrOfConstantStringFromLiteral(widget.getName()));
 ///      widgetDesc.add(CGM.GetAddrOfGlobal(widget.getInitializerDecl()));
 ///      widgetDesc.finishAndAddTo(widgetArray);
 ///    }
@@ -203,24 +203,19 @@ public:
   }
 
   /// Add a signed pointer using the given pointer authentication schema.
-  void addSignedPointer(llvm::Constant *pointer,
-                        const PointerAuthSchema &schema, GlobalDecl calleeDecl,
-                        QualType calleeType);
+  void addSignedPointer(llvm::Constant *Pointer,
+                        const PointerAuthSchema &Schema, GlobalDecl CalleeDecl,
+                        QualType CalleeType);
 
   /// Add a signed pointer using the given pointer authentication schema.
   void addSignedPointer(llvm::Constant *pointer,
                         unsigned key,
                         bool useAddressDiscrimination,
-                        llvm::Constant *otherDiscriminator);
+                        llvm::ConstantInt *otherDiscriminator);
 
   /// Add a null pointer of a specific type.
   void addNullPointer(llvm::PointerType *ptrTy) {
     add(llvm::ConstantPointerNull::get(ptrTy));
-  }
-
-  /// Add a bitcast of a value to a specific type.
-  void addBitCast(llvm::Constant *value, llvm::Type *type) {
-    add(llvm::ConstantExpr::getBitCast(value, type));
   }
 
   /// Add a bunch of new values to this initializer.

@@ -128,9 +128,10 @@ static lldb::offset_t DumpInstructions(const DataExtractor &DE, Stream *s,
   if (exe_scope)
     target_sp = exe_scope->CalculateTarget();
   if (target_sp) {
-    DisassemblerSP disassembler_sp(
-        Disassembler::FindPlugin(target_sp->GetArchitecture(),
-                                 target_sp->GetDisassemblyFlavor(), nullptr));
+    DisassemblerSP disassembler_sp(Disassembler::FindPlugin(
+        target_sp->GetArchitecture(), target_sp->GetDisassemblyFlavor(),
+        target_sp->GetDisassemblyCPU(), target_sp->GetDisassemblyFeatures(),
+        nullptr));
     if (disassembler_sp) {
       lldb::addr_t addr = base_addr + start_offset;
       lldb_private::Address so_addr;
@@ -620,10 +621,17 @@ lldb::offset_t lldb_private::DumpDataExtractor(
       case 2:
       case 4:
       case 8:
-        s->Printf(wantsuppercase ? "0x%*.*" PRIX64 : "0x%*.*" PRIx64,
-                  (int)(2 * item_byte_size), (int)(2 * item_byte_size),
-                  DE.GetMaxU64Bitfield(&offset, item_byte_size, item_bit_size,
-                                       item_bit_offset));
+        if (Target::GetGlobalProperties()
+                .ShowHexVariableValuesWithLeadingZeroes()) {
+          s->Printf(wantsuppercase ? "0x%*.*" PRIX64 : "0x%*.*" PRIx64,
+                    (int)(2 * item_byte_size), (int)(2 * item_byte_size),
+                    DE.GetMaxU64Bitfield(&offset, item_byte_size, item_bit_size,
+                                         item_bit_offset));
+        } else {
+          s->Printf(wantsuppercase ? "0x%" PRIX64 : "0x%" PRIx64,
+                    DE.GetMaxU64Bitfield(&offset, item_byte_size, item_bit_size,
+                                         item_bit_offset));
+        }
         break;
       default: {
         assert(item_bit_size == 0 && item_bit_offset == 0);

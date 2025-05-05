@@ -39,9 +39,9 @@ bool ABIInfo::isOHOSFamily() const {
   return getTarget().getTriple().isOHOSFamily();
 }
 
-Address ABIInfo::EmitMSVAArg(CodeGenFunction &CGF, Address VAListAddr,
-                             QualType Ty) const {
-  return Address::invalid();
+RValue ABIInfo::EmitMSVAArg(CodeGenFunction &CGF, Address VAListAddr,
+                            QualType Ty, AggValueSlot Slot) const {
+  return RValue::getIgnored();
 }
 
 bool ABIInfo::isHomogeneousAggregateBaseType(QualType Ty) const {
@@ -61,7 +61,7 @@ bool ABIInfo::isZeroLengthBitfieldPermittedInHomogeneousAggregate() const {
 bool ABIInfo::isHomogeneousAggregate(QualType Ty, const Type *&Base,
                                      uint64_t &Members) const {
   if (const ConstantArrayType *AT = getContext().getAsConstantArrayType(Ty)) {
-    uint64_t NElements = AT->getSize().getZExtValue();
+    uint64_t NElements = AT->getZExtSize();
     if (NElements == 0)
       return false;
     if (!isHomogeneousAggregate(AT->getElementType(), Base, Members))
@@ -98,7 +98,7 @@ bool ABIInfo::isHomogeneousAggregate(QualType Ty, const Type *&Base,
       QualType FT = FD->getType();
       while (const ConstantArrayType *AT =
              getContext().getAsConstantArrayType(FT)) {
-        if (AT->getSize().getZExtValue() == 0)
+        if (AT->isZeroSize())
           return false;
         FT = AT->getElementType();
       }
@@ -273,6 +273,15 @@ bool SwiftABIInfo::occupiesMoreThan(ArrayRef<llvm::Type *> scalarTypes,
 bool SwiftABIInfo::shouldPassIndirectly(ArrayRef<llvm::Type *> ComponentTys,
                                         bool AsReturnValue) const {
   return occupiesMoreThan(ComponentTys, /*total=*/4);
+}
+
+bool SwiftABIInfo::shouldReturnTypedErrorIndirectly(
+    ArrayRef<llvm::Type *> ComponentTys) const {
+  for (llvm::Type *type : ComponentTys) {
+    if (!type->isIntegerTy() && !type->isPointerTy())
+      return true;
+  }
+  return shouldPassIndirectly(ComponentTys, /*AsReturnValue=*/true);
 }
 
 bool SwiftABIInfo::isLegalVectorType(CharUnits VectorSize, llvm::Type *EltTy,

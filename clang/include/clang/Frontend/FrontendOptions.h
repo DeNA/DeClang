@@ -16,6 +16,7 @@
 #include "clang/Serialization/ModuleFileExtension.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/CAS/CASReference.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include <cassert>
 #include <map>
@@ -65,6 +66,9 @@ enum ActionKind {
   /// Translate input source into HTML.
   EmitHTML,
 
+  /// Emit a .cir file
+  EmitCIR,
+
   /// Emit a .ll file.
   EmitLLVM,
 
@@ -86,8 +90,12 @@ enum ActionKind {
   /// Generate pre-compiled module from a module map.
   GenerateModule,
 
-  /// Generate pre-compiled module from a C++ module interface file.
+  /// Generate pre-compiled module from a standard C++ module interface unit.
   GenerateModuleInterface,
+
+  /// Generate reduced module interface for a standard C++ module interface
+  /// unit.
+  GenerateReducedModuleInterface,
 
   /// Generate a C++20 header unit module from a header file.
   GenerateHeaderUnit,
@@ -148,16 +156,13 @@ enum ActionKind {
 
 /// The kind of a file that we've been handed as an input.
 class InputKind {
-private:
-  Language Lang;
-  unsigned Fmt : 3;
-  unsigned Preprocessed : 1;
-  unsigned HeaderUnit : 3;
-  unsigned IsHeader : 1;
-
 public:
   /// The input file format.
-  enum Format { Source, ModuleMap, Precompiled };
+  enum Format {
+    Source,
+    ModuleMap,
+    Precompiled
+  };
 
   // If we are building a header unit, what kind it is; this affects whether
   // we look for the file in the user or system include search paths before
@@ -169,6 +174,18 @@ public:
     HeaderUnit_Abs
   };
 
+private:
+  Language Lang;
+  LLVM_PREFERRED_TYPE(Format)
+  unsigned Fmt : 3;
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned Preprocessed : 1;
+  LLVM_PREFERRED_TYPE(HeaderUnitKind)
+  unsigned HeaderUnit : 3;
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned IsHeader : 1;
+
+public:
   constexpr InputKind(Language L = Language::Unknown, Format F = Source,
                       bool PP = false, HeaderUnitKind HU = HeaderUnit_None,
                       bool HD = false)
@@ -280,79 +297,112 @@ public:
 class FrontendOptions {
 public:
   /// Disable memory freeing on exit.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned DisableFree : 1;
 
   /// When generating PCH files, instruct the AST writer to create relocatable
   /// PCH files.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned RelocatablePCH : 1;
 
   /// Show the -help text.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ShowHelp : 1;
 
   /// Show frontend performance metrics and statistics.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ShowStats : 1;
 
+  LLVM_PREFERRED_TYPE(bool)
   unsigned AppendStats : 1;
 
   /// print the supported cpus for the current target
+  LLVM_PREFERRED_TYPE(bool)
   unsigned PrintSupportedCPUs : 1;
 
+  /// Print the supported extensions for the current target.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned PrintSupportedExtensions : 1;
+
+  /// Print the extensions enabled for the current target.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned PrintEnabledExtensions : 1;
+
   /// Show the -version text.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ShowVersion : 1;
 
   /// Apply fixes even if there are unfixable errors.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned FixWhatYouCan : 1;
 
   /// Apply fixes only for warnings.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned FixOnlyWarnings : 1;
 
   /// Apply fixes and recompile.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned FixAndRecompile : 1;
 
   /// Apply fixes to temporary files.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned FixToTemporaries : 1;
 
   /// Emit ARC errors even if the migrator can fix them.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ARCMTMigrateEmitARCErrors : 1;
 
   /// Skip over function bodies to speed up parsing in cases you do not need
   /// them (e.g. with code completion).
+  LLVM_PREFERRED_TYPE(bool)
   unsigned SkipFunctionBodies : 1;
 
   /// Whether we can use the global module index if available.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned UseGlobalModuleIndex : 1;
 
   /// Whether we can generate the global module index if needed.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned GenerateGlobalModuleIndex : 1;
 
   /// Whether we include declaration dumps in AST dumps.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ASTDumpDecls : 1;
 
   /// Whether we deserialize all decls when forming AST dumps.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ASTDumpAll : 1;
 
   /// Whether we include lookup table dumps in AST dumps.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ASTDumpLookups : 1;
 
   /// Whether we include declaration type dumps in AST dumps.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ASTDumpDeclTypes : 1;
 
   /// Whether we are performing an implicit module build.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned BuildingImplicitModule : 1;
 
   /// Whether to use a filesystem lock when building implicit modules.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned BuildingImplicitModuleUsesLock : 1;
 
   /// Whether we should embed all used files into the PCM file.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ModulesEmbedAllFiles : 1;
 
   /// Whether timestamps should be written to the produced PCH file.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned IncludeTimestamps : 1;
 
   /// Should a temporary file be used during compilation.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned UseTemporary : 1;
 
   /// When using -emit-module, treat the modulemap as a system module.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned IsSystemModule : 1;
 
   unsigned IndexIgnoreSystemSymbols : 1;
@@ -387,22 +437,36 @@ public:
   unsigned WriteOutputAsCASID : 1;
 
   /// Output (and read) PCM files regardless of compiler errors.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned AllowPCMWithCompilerErrors : 1;
 
   /// Whether to share the FileManager when building modules.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned ModulesShareFileManager : 1;
 
   /// Whether to emit symbol graph files as a side effect of compilation.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned EmitSymbolGraph : 1;
 
   /// Whether to emit additional symbol graphs for extended modules.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned EmitExtensionSymbolGraphs : 1;
 
   /// Whether to emit symbol labels for testing in generated symbol graphs
+  LLVM_PREFERRED_TYPE(bool)
   unsigned EmitSymbolGraphSymbolLabelsForTesting : 1;
 
   /// Whether to emit symbol labels for testing in generated symbol graphs
+  LLVM_PREFERRED_TYPE(bool)
   unsigned EmitPrettySymbolGraphs : 1;
+
+  /// Whether to generate reduced BMI for C++20 named modules.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned GenReducedBMI : 1;
+
+  /// Use Clang IR pipeline to emit code
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned UseClangIRPipeline : 1;
 
   CodeCompleteOptions CodeCompleteOpts;
 
@@ -461,11 +525,11 @@ public:
     /// Enable converting setter/getter expressions to property-dot syntx.
     ObjCMT_PropertyDotSyntax = 0x1000,
 
-    ObjCMT_MigrateDecls =
-        (ObjCMT_ReadonlyProperty | ObjCMT_ReadwriteProperty |
-         ObjCMT_Annotation | ObjCMT_Instancetype | ObjCMT_NsMacros |
-         ObjCMT_ProtocolConformance | ObjCMT_NsAtomicIOSOnlyProperty |
-         ObjCMT_DesignatedInitializer),
+    ObjCMT_MigrateDecls = (ObjCMT_ReadonlyProperty | ObjCMT_ReadwriteProperty |
+                           ObjCMT_Annotation | ObjCMT_Instancetype |
+                           ObjCMT_NsMacros | ObjCMT_ProtocolConformance |
+                           ObjCMT_NsAtomicIOSOnlyProperty |
+                           ObjCMT_DesignatedInitializer),
     ObjCMT_MigrateAll = (ObjCMT_Literals | ObjCMT_Subscripting |
                          ObjCMT_MigrateDecls | ObjCMT_PropertyDotSyntax)
   };
@@ -487,6 +551,9 @@ public:
 
   /// Use the provided CAS include tree.
   std::string CASIncludeTreeID;
+
+  /// If ignore all the CAS info from serialized AST like modules and PCHs.
+  bool ModuleLoadIgnoreCAS = false;
 
   /// When the input is a module map, the original module map file from which
   /// that map was inferred, if any (for umbrella modules).
@@ -523,7 +590,7 @@ public:
   std::vector<std::string> PathPrefixMappings;
 
   // Currently this is only used as part of the `-extract-api` action.
-  // A comma seperated list of files providing a list of APIs to
+  // A comma separated list of files providing a list of APIs to
   // ignore when extracting documentation.
   std::vector<std::string> ExtractAPIIgnoresFileList;
 
@@ -583,8 +650,16 @@ public:
   /// Minimum time granularity (in microseconds) traced by time profiler.
   unsigned TimeTraceGranularity;
 
+  /// Make time trace capture verbose event details (e.g. source filenames).
+  /// This can increase the size of the output by 2-3 times.
+  LLVM_PREFERRED_TYPE(bool)
+  unsigned TimeTraceVerbose : 1;
+
   /// Path which stores the output files for -ftime-trace
   std::string TimeTracePath;
+
+  /// Output Path for module output file.
+  std::string ModuleOutputPath;
 
 public:
   FrontendOptions()
@@ -599,12 +674,13 @@ public:
         IncludeTimestamps(true), UseTemporary(true), CacheCompileJob(false),
         ForIncludeTreeScan(false), DisableCachedCompileJobReplay(false),
         IncludeTreePreservePCHPath(false),
-        MayEmitDiagnosticsAfterProcessingSourceFiles(false),
-        WriteOutputAsCASID(false), AllowPCMWithCompilerErrors(false),
-        ModulesShareFileManager(true), EmitSymbolGraph(false),
-        EmitExtensionSymbolGraphs(false),
+        MayEmitDiagnosticsAfterProcessingSourceFiles(false), WriteOutputAsCASID(false),
+        AllowPCMWithCompilerErrors(false), ModulesShareFileManager(true),
+        EmitSymbolGraph(false), EmitExtensionSymbolGraphs(false),
         EmitSymbolGraphSymbolLabelsForTesting(false),
-        EmitPrettySymbolGraphs(false), TimeTraceGranularity(500) {}
+        EmitPrettySymbolGraphs(false), GenReducedBMI(false),
+        UseClangIRPipeline(false), TimeTraceGranularity(500),
+        TimeTraceVerbose(false) {}
 
   /// getInputKindForExtension - Return the appropriate input kind for a file
   /// extension. For example, "c" would return Language::C.

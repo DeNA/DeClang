@@ -43,7 +43,7 @@ ThreadPlanStepInRange::ThreadPlanStepInRange(
                           "Step Range stepping in", thread, range, addr_context,
                           stop_others),
       ThreadPlanShouldStopHere(this), m_step_past_prologue(true),
-      m_virtual_step(false), m_step_into_target(step_into_target) {
+      m_virtual_step(eLazyBoolCalculate), m_step_into_target(step_into_target) {
   SetCallbacks();
   SetFlagsToDefault();
   SetupAvoidNoDebug(step_in_avoids_code_without_debug_info,
@@ -152,7 +152,7 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
       m_sub_plan_sp.reset();
   }
 
-  if (m_virtual_step) {
+  if (m_virtual_step == eLazyBoolYes) {
     // If we've just completed a virtual step, all we need to do is check for a
     // ShouldStopHere plan, and otherwise we're done.
     // FIXME - This can be both a step in and a step out.  Probably should
@@ -347,7 +347,7 @@ bool ThreadPlanStepInRange::StepInDeepBreakpointExplainsStop(
       // at this site:
       explains_stop = true;
       hit_step_in_deep_bp = true;
-      size_t num_owners = bp_site_sp->GetNumberOfConstituents();
+      size_t num_constituents = bp_site_sp->GetNumberOfConstituents();
 
       // If all the owners are internal, then we are probably just stepping over
       // this range from multiple threads,
@@ -357,10 +357,10 @@ bool ThreadPlanStepInRange::StepInDeepBreakpointExplainsStop(
       // Of course, if there's only one owner, it's us so we don't need to
       // check.
 
-      if (num_owners == 1)
+      if (num_constituents == 1)
         continue;
 
-      for (size_t i = 0; i < num_owners; i++) {
+      for (size_t i = 0; i < num_constituents; i++) {
         BreakpointLocationSP owner_loc_sp(bp_site_sp->GetConstituentAtIndex(i));
         Breakpoint &owner_bp(owner_loc_sp->GetBreakpoint());
         if (owner_loc_sp->ValidForThisThread(GetThread()) &&
@@ -370,10 +370,11 @@ bool ThreadPlanStepInRange::StepInDeepBreakpointExplainsStop(
         }
       }
       if (log)
-        log->Printf("ThreadPlanStepRange::StepInDeepBreakpointExplainsStop - "
-                    "Hit step in deep breakpoint %d which has %zu owners - "
-                    "explains stop: %u.",
-                    m_step_in_deep_bps[i], num_owners, explains_stop);
+        log->Printf(
+            "ThreadPlanStepRange::StepInDeepBreakpointExplainsStop - "
+            "Hit step in deep breakpoint %d which has %zu constituents - "
+            "explains stop: %u.",
+            m_step_in_deep_bps[i], num_constituents, explains_stop);
     }
   }
 
@@ -563,7 +564,7 @@ bool ThreadPlanStepInRange::DoPlanExplainsStop(Event *event_ptr) {
 
   bool return_value = false;
 
-  if (m_virtual_step) {
+  if (m_virtual_step == eLazyBoolYes) {
     return_value = true;
   } else {
     StopInfoSP stop_info_sp = GetPrivateStopInfo();
@@ -598,10 +599,13 @@ bool ThreadPlanStepInRange::DoPlanExplainsStop(Event *event_ptr) {
 
 bool ThreadPlanStepInRange::DoWillResume(lldb::StateType resume_state,
                                          bool current_plan) {
-  m_virtual_step = false;
+  m_virtual_step = eLazyBoolCalculate;
   if (resume_state == eStateStepping && current_plan) {
     Thread &thread = GetThread();
     // See if we are about to step over a virtual inlined call.
+    // But if we already know we're virtual stepping, don't decrement the
+    // inlined depth again...
+
     bool step_without_resume = thread.DecrementCurrentInlinedDepth();
     if (step_without_resume) {
       Log *log = GetLog(LLDBLog::Step);
@@ -614,11 +618,21 @@ bool ThreadPlanStepInRange::DoWillResume(lldb::StateType resume_state,
       // FIXME: Maybe it would be better to create a InlineStep stop reason, but
       // then
       // the whole rest of the world would have to handle that stop reason.
-      m_virtual_step = true;
+      m_virtual_step = eLazyBoolYes;
     }
     return !step_without_resume;
   }
   return true;
 }
 
-bool ThreadPlanStepInRange::IsVirtualStep() { return m_virtual_step; }
+bool ThreadPlanStepInRange::IsVirtualStep() {
+  if (m_virtual_step == eLazyBoolCalculate) {
+    Thread &thread = GetThread();
+    uint32_t cur_inline_depth = thread.GetCurrentInlinedDepth();
+    if (cur_inline_depth == UINT32_MAX || cur_inline_depth == 0)
+      m_virtual_step = eLazyBoolNo;
+    else
+      m_virtual_step = eLazyBoolYes;
+  }
+  return m_virtual_step == eLazyBoolYes;
+}

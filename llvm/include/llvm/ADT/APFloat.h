@@ -19,6 +19,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/float128.h"
 #include <memory>
 
 #define APFLOAT_DISPATCH_ON_SEMANTICS(METHOD_CALL)                             \
@@ -165,6 +166,9 @@ struct APFloatBase {
     // This format's exponent bias is 16, instead of the 15 (2 ** (5 - 1) - 1)
     // that IEEE precedent would imply.
     S_Float8E5M2FNUZ,
+    // 8-bit floating point number following IEEE-754 conventions with bit
+    // layout S1E4M3.
+    S_Float8E4M3,
     // 8-bit floating point number mostly following IEEE-754 conventions with
     // bit layout S1E4M3 as described in https://arxiv.org/abs/2209.05433.
     // Unlike IEEE-754 types, there are no infinity values, and NaN is
@@ -188,6 +192,18 @@ struct APFloatBase {
     // improved range compared to half (16-bit) formats, at (potentially)
     // greater throughput than single precision (32-bit) formats.
     S_FloatTF32,
+    // 6-bit floating point number with bit layout S1E3M2. Unlike IEEE-754
+    // types, there are no infinity or NaN values. The format is detailed in
+    // https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+    S_Float6E3M2FN,
+    // 6-bit floating point number with bit layout S1E2M3. Unlike IEEE-754
+    // types, there are no infinity or NaN values. The format is detailed in
+    // https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+    S_Float6E2M3FN,
+    // 4-bit floating point number with bit layout S1E2M1. Unlike IEEE-754
+    // types, there are no infinity or NaN values. The format is detailed in
+    // https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+    S_Float4E2M1FN,
 
     S_x87DoubleExtended,
     S_MaxSemantics = S_x87DoubleExtended,
@@ -204,10 +220,14 @@ struct APFloatBase {
   static const fltSemantics &PPCDoubleDouble() LLVM_READNONE;
   static const fltSemantics &Float8E5M2() LLVM_READNONE;
   static const fltSemantics &Float8E5M2FNUZ() LLVM_READNONE;
+  static const fltSemantics &Float8E4M3() LLVM_READNONE;
   static const fltSemantics &Float8E4M3FN() LLVM_READNONE;
   static const fltSemantics &Float8E4M3FNUZ() LLVM_READNONE;
   static const fltSemantics &Float8E4M3B11FNUZ() LLVM_READNONE;
   static const fltSemantics &FloatTF32() LLVM_READNONE;
+  static const fltSemantics &Float6E3M2FN() LLVM_READNONE;
+  static const fltSemantics &Float6E2M3FN() LLVM_READNONE;
+  static const fltSemantics &Float4E2M1FN() LLVM_READNONE;
   static const fltSemantics &x87DoubleExtended() LLVM_READNONE;
 
   /// A Pseudo fltsemantic used to construct APFloats that cannot conflict with
@@ -354,6 +374,9 @@ public:
   Expected<opStatus> convertFromString(StringRef, roundingMode);
   APInt bitcastToAPInt() const;
   double convertToDouble() const;
+#ifdef HAS_IEE754_FLOAT128
+  float128 convertToQuad() const;
+#endif
   float convertToFloat() const;
 
   /// @}
@@ -489,6 +512,18 @@ public:
   /// return true.
   bool getExactInverse(APFloat *inv) const;
 
+  // If this is an exact power of two, return the exponent while ignoring the
+  // sign bit. If it's not an exact power of 2, return INT_MIN
+  LLVM_READONLY
+  int getExactLog2Abs() const;
+
+  // If this is an exact power of two, return the exponent. If it's not an exact
+  // power of 2, return INT_MIN
+  LLVM_READONLY
+  int getExactLog2() const {
+    return isNegative() ? INT_MIN : getExactLog2Abs();
+  }
+
   /// Returns the exponent of the internal representation of the APFloat.
   ///
   /// Because the radix of APFloat is 2, this is equivalent to floor(log2(x)).
@@ -607,10 +642,14 @@ private:
   APInt convertPPCDoubleDoubleAPFloatToAPInt() const;
   APInt convertFloat8E5M2APFloatToAPInt() const;
   APInt convertFloat8E5M2FNUZAPFloatToAPInt() const;
+  APInt convertFloat8E4M3APFloatToAPInt() const;
   APInt convertFloat8E4M3FNAPFloatToAPInt() const;
   APInt convertFloat8E4M3FNUZAPFloatToAPInt() const;
   APInt convertFloat8E4M3B11FNUZAPFloatToAPInt() const;
   APInt convertFloatTF32APFloatToAPInt() const;
+  APInt convertFloat6E3M2FNAPFloatToAPInt() const;
+  APInt convertFloat6E2M3FNAPFloatToAPInt() const;
+  APInt convertFloat4E2M1FNAPFloatToAPInt() const;
   void initFromAPInt(const fltSemantics *Sem, const APInt &api);
   template <const fltSemantics &S> void initFromIEEEAPInt(const APInt &api);
   void initFromHalfAPInt(const APInt &api);
@@ -622,10 +661,14 @@ private:
   void initFromPPCDoubleDoubleAPInt(const APInt &api);
   void initFromFloat8E5M2APInt(const APInt &api);
   void initFromFloat8E5M2FNUZAPInt(const APInt &api);
+  void initFromFloat8E4M3APInt(const APInt &api);
   void initFromFloat8E4M3FNAPInt(const APInt &api);
   void initFromFloat8E4M3FNUZAPInt(const APInt &api);
   void initFromFloat8E4M3B11FNUZAPInt(const APInt &api);
   void initFromFloatTF32APInt(const APInt &api);
+  void initFromFloat6E3M2FNAPInt(const APInt &api);
+  void initFromFloat6E2M3FNAPInt(const APInt &api);
+  void initFromFloat4E2M1FNAPInt(const APInt &api);
 
   void assign(const IEEEFloat &);
   void copySignificand(const IEEEFloat &);
@@ -747,12 +790,19 @@ public:
 
   bool getExactInverse(APFloat *inv) const;
 
+  LLVM_READONLY
+  int getExactLog2() const;
+  LLVM_READONLY
+  int getExactLog2Abs() const;
+
   friend DoubleAPFloat scalbn(const DoubleAPFloat &X, int Exp, roundingMode);
   friend DoubleAPFloat frexp(const DoubleAPFloat &X, int &Exp, roundingMode);
   friend hash_code hash_value(const DoubleAPFloat &Arg);
 };
 
 hash_code hash_value(const DoubleAPFloat &Arg);
+DoubleAPFloat scalbn(const DoubleAPFloat &Arg, int Exp, IEEEFloat::roundingMode RM);
+DoubleAPFloat frexp(const DoubleAPFloat &X, int &Exp, IEEEFloat::roundingMode);
 
 } // End detail namespace
 
@@ -941,6 +991,13 @@ public:
     return Val;
   }
 
+  /// Factory for Positive and Negative One.
+  ///
+  /// \param Negative True iff the number should be negative.
+  static APFloat getOne(const fltSemantics &Sem, bool Negative = false) {
+    return APFloat(Sem, Negative ? -1 : 1);
+  }
+
   /// Factory for Positive and Negative Infinity.
   ///
   /// \param Negative True iff the number should be negative.
@@ -1015,6 +1072,18 @@ public:
   ///
   /// \param Semantics - type float semantics
   static APFloat getAllOnesValue(const fltSemantics &Semantics);
+
+  static bool hasNanOrInf(const fltSemantics &Sem) {
+    switch (SemanticsToEnum(Sem)) {
+    default:
+      return true;
+    // Below Semantics do not support {NaN or Inf}
+    case APFloat::S_Float6E3M2FN:
+    case APFloat::S_Float6E2M3FN:
+    case APFloat::S_Float4E2M1FN:
+      return false;
+    }
+  }
 
   /// Used to insert APFloat objects, or objects that contain APFloat objects,
   /// into FoldingSets.
@@ -1202,6 +1271,15 @@ public:
   /// Converts this APFloat to host float value.
   ///
   /// \pre The APFloat must be built using semantics, that can be represented by
+  /// the host float type without loss of precision. It can be IEEEquad and
+  /// shorter semantics, like IEEEdouble and others.
+#ifdef HAS_IEE754_FLOAT128
+  float128 convertToQuad() const;
+#endif
+
+  /// Converts this APFloat to host float value.
+  ///
+  /// \pre The APFloat must be built using semantics, that can be represented by
   /// the host float type without loss of precision. It can be IEEEsingle and
   /// shorter semantics, like IEEEhalf.
   float convertToFloat() const;
@@ -1316,6 +1394,16 @@ public:
     APFLOAT_DISPATCH_ON_SEMANTICS(getExactInverse(inv));
   }
 
+  LLVM_READONLY
+  int getExactLog2Abs() const {
+    APFLOAT_DISPATCH_ON_SEMANTICS(getExactLog2Abs());
+  }
+
+  LLVM_READONLY
+  int getExactLog2() const {
+    APFLOAT_DISPATCH_ON_SEMANTICS(getExactLog2());
+  }
+
   friend hash_code hash_value(const APFloat &Arg);
   friend int ilogb(const APFloat &Arg) { return ilogb(Arg.getIEEE()); }
   friend APFloat scalbn(APFloat X, int Exp, roundingMode RM);
@@ -1360,29 +1448,35 @@ inline APFloat neg(APFloat X) {
   return X;
 }
 
-/// Implements IEEE minNum semantics. Returns the smaller of the 2 arguments if
-/// both are not NaN. If either argument is a NaN, returns the other argument.
+/// Implements IEEE-754 2019 minimumNumber semantics. Returns the smaller of the
+/// 2 arguments if both are not NaN. If either argument is a NaN, returns the
+/// other argument. -0 is treated as ordered less than +0.
 LLVM_READONLY
 inline APFloat minnum(const APFloat &A, const APFloat &B) {
   if (A.isNaN())
     return B;
   if (B.isNaN())
     return A;
+  if (A.isZero() && B.isZero() && (A.isNegative() != B.isNegative()))
+    return A.isNegative() ? A : B;
   return B < A ? B : A;
 }
 
-/// Implements IEEE maxNum semantics. Returns the larger of the 2 arguments if
-/// both are not NaN. If either argument is a NaN, returns the other argument.
+/// Implements IEEE-754 2019 maximumNumber semantics. Returns the larger of the
+/// 2 arguments if both are not NaN. If either argument is a NaN, returns the
+/// other argument. +0 is treated as ordered greater than -0.
 LLVM_READONLY
 inline APFloat maxnum(const APFloat &A, const APFloat &B) {
   if (A.isNaN())
     return B;
   if (B.isNaN())
     return A;
+  if (A.isZero() && B.isZero() && (A.isNegative() != B.isNegative()))
+    return A.isNegative() ? B : A;
   return A < B ? B : A;
 }
 
-/// Implements IEEE 754-2018 minimum semantics. Returns the smaller of 2
+/// Implements IEEE 754-2019 minimum semantics. Returns the smaller of 2
 /// arguments, propagating NaNs and treating -0 as less than +0.
 LLVM_READONLY
 inline APFloat minimum(const APFloat &A, const APFloat &B) {
@@ -1395,7 +1489,20 @@ inline APFloat minimum(const APFloat &A, const APFloat &B) {
   return B < A ? B : A;
 }
 
-/// Implements IEEE 754-2018 maximum semantics. Returns the larger of 2
+/// Implements IEEE 754-2019 minimumNumber semantics. Returns the smaller
+/// of 2 arguments, not propagating NaNs and treating -0 as less than +0.
+LLVM_READONLY
+inline APFloat minimumnum(const APFloat &A, const APFloat &B) {
+  if (A.isNaN())
+    return B.isNaN() ? B.makeQuiet() : B;
+  if (B.isNaN())
+    return A;
+  if (A.isZero() && B.isZero() && (A.isNegative() != B.isNegative()))
+    return A.isNegative() ? A : B;
+  return B < A ? B : A;
+}
+
+/// Implements IEEE 754-2019 maximum semantics. Returns the larger of 2
 /// arguments, propagating NaNs and treating -0 as less than +0.
 LLVM_READONLY
 inline APFloat maximum(const APFloat &A, const APFloat &B) {
@@ -1403,6 +1510,19 @@ inline APFloat maximum(const APFloat &A, const APFloat &B) {
     return A;
   if (B.isNaN())
     return B;
+  if (A.isZero() && B.isZero() && (A.isNegative() != B.isNegative()))
+    return A.isNegative() ? B : A;
+  return A < B ? B : A;
+}
+
+/// Implements IEEE 754-2019 maximumNumber semantics. Returns the larger
+/// of 2 arguments, not propagating NaNs and treating -0 as less than +0.
+LLVM_READONLY
+inline APFloat maximumnum(const APFloat &A, const APFloat &B) {
+  if (A.isNaN())
+    return B.isNaN() ? B.makeQuiet() : B;
+  if (B.isNaN())
+    return A;
   if (A.isZero() && B.isZero() && (A.isNegative() != B.isNegative()))
     return A.isNegative() ? B : A;
   return A < B ? B : A;

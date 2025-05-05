@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 # System modules
 import argparse
 import sys
@@ -56,6 +54,15 @@ def create_parser():
         dest="swiftcompiler",
         help="The path to a valid Swift compiler",
     )
+    group.add_argument(
+        "--sysroot",
+        metavar="sysroot",
+        dest="sysroot",
+        default="",
+        help=textwrap.dedent(
+            """Specify the path to sysroot. This overrides apple_sdk sysroot."""
+        ),
+    )
     if sys.platform == "darwin":
         group.add_argument(
             "--apple-sdk",
@@ -94,6 +101,12 @@ def create_parser():
         ),
     )
 
+    group.add_argument(
+        "--make",
+        metavar="make",
+        dest="make",
+        help=textwrap.dedent("Specify which make to use."),
+    )
     group.add_argument(
         "--dsymutil",
         metavar="dsymutil",

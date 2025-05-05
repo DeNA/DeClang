@@ -13,14 +13,12 @@
 #include "LLDBMemoryReader.h"
 #include "ReflectionContextInterface.h"
 #include "SwiftLanguageRuntime.h"
-#include "SwiftLanguageRuntimeImpl.h"
 #include "SwiftMetadataCache.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangUtil.h"
 #include "Plugins/Language/Swift/LogChannelSwift.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Plugins/TypeSystem/Swift/SwiftDemangle.h"
-#include "lldb/Core/ValueObjectMemory.h"
 #include "lldb/Host/SafeMachO.h"
 #include "lldb/Symbol/Variable.h"
 #include "lldb/Symbol/VariableList.h"
@@ -30,6 +28,7 @@
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Timer.h"
+#include "lldb/ValueObject/ValueObjectMemory.h"
 #include "llvm/ADT/STLExtras.h"
 
 #include "swift/AST/ASTContext.h"
@@ -201,11 +200,11 @@ lldb::addr_t SwiftLanguageRuntime::MaybeMaskNonTrivialReferencePointer(
 
     // The masked value of address is a pointer to the runtime structure.
     // The first field of the structure is the actual pointer.
-    Process *process = GetProcess();
     Status error;
 
     lldb::addr_t masked_addr = addr & ~mask;
-    lldb::addr_t isa_addr = process->ReadPointerFromMemory(masked_addr, error);
+    lldb::addr_t isa_addr =
+        GetProcess().ReadPointerFromMemory(masked_addr, error);
     if (error.Fail()) {
       LLDB_LOG(GetLog(LLDBLog::Expressions | LLDBLog::Types),
                "Couldn't deref masked pointer");
@@ -226,14 +225,14 @@ lldb::addr_t SwiftLanguageRuntime::MaybeMaskNonTrivialReferencePointer(
   return addr & ~mask;
 }
 
-const CompilerType &SwiftLanguageRuntimeImpl::GetBoxMetadataType() {
+const CompilerType &SwiftLanguageRuntime::GetBoxMetadataType() {
   if (m_box_metadata_type.IsValid())
     return m_box_metadata_type;
 
   static ConstString g_type_name("__lldb_autogen_boxmetadata");
   const bool is_packed = false;
   if (TypeSystemClangSP clang_ts_sp =
-          ScratchTypeSystemClang::GetForTarget(m_process.GetTarget())) {
+          ScratchTypeSystemClang::GetForTarget(GetProcess().GetTarget())) {
     CompilerType voidstar =
         clang_ts_sp->GetBasicType(lldb::eBasicTypeVoid).GetPointerType();
     CompilerType uint32 = clang_ts_sp->GetIntTypeFromBitSize(32, false);
@@ -245,11 +244,10 @@ const CompilerType &SwiftLanguageRuntimeImpl::GetBoxMetadataType() {
   return m_box_metadata_type;
 }
 
-std::shared_ptr<LLDBMemoryReader>
-SwiftLanguageRuntimeImpl::GetMemoryReader() {
+std::shared_ptr<LLDBMemoryReader> SwiftLanguageRuntime::GetMemoryReader() {
   if (!m_memory_reader_sp) {
     m_memory_reader_sp.reset(new LLDBMemoryReader(
-        m_process, [&](swift::remote::RemoteAbsolutePointer pointer) {
+        GetProcess(), [&](swift::remote::RemoteAbsolutePointer pointer) {
           ThreadSafeReflectionContext reflection_context =
               GetReflectionContext();
           if (!reflection_context)
@@ -261,39 +259,35 @@ SwiftLanguageRuntimeImpl::GetMemoryReader() {
   return m_memory_reader_sp;
 }
 
-void SwiftLanguageRuntimeImpl::PushLocalBuffer(uint64_t local_buffer,
-                                               uint64_t local_buffer_size) {
+void SwiftLanguageRuntime::PushLocalBuffer(uint64_t local_buffer,
+                                           uint64_t local_buffer_size) {
   ((LLDBMemoryReader *)GetMemoryReader().get())
       ->pushLocalBuffer(local_buffer, local_buffer_size);
 }
 
-void SwiftLanguageRuntimeImpl::PopLocalBuffer() {
+void SwiftLanguageRuntime::PopLocalBuffer() {
   ((LLDBMemoryReader *)GetMemoryReader().get())->popLocalBuffer();
 }
 
 class LLDBTypeInfoProvider : public swift::remote::TypeInfoProvider {
-  SwiftLanguageRuntimeImpl &m_runtime;
+  SwiftLanguageRuntime &m_runtime;
   Status m_error;
-  std::optional<SwiftScratchContextReader> m_reader;
+  TypeSystemSwiftTypeRefForExpressionsSP m_ts;
 
 public:
-  LLDBTypeInfoProvider(SwiftLanguageRuntimeImpl &runtime,
+  LLDBTypeInfoProvider(SwiftLanguageRuntime &runtime,
                        ExecutionContextScope *exe_scope)
       : m_runtime(runtime),
-        m_reader(m_runtime.GetProcess().GetTarget().GetSwiftScratchContext(
-            m_error,
-            exe_scope ? *exe_scope : m_runtime.GetProcess().GetTarget())) {}
-  LLDBTypeInfoProvider(SwiftLanguageRuntimeImpl &runtime,
-                       ExecutionContext *exe_ctx)
+        m_ts(TypeSystemSwiftTypeRefForExpressions::GetForTarget(
+            m_runtime.GetProcess().GetTarget())) {}
+  LLDBTypeInfoProvider(SwiftLanguageRuntime &runtime, ExecutionContext *exe_ctx)
       : m_runtime(runtime),
-        m_reader(m_runtime.GetProcess().GetTarget().GetSwiftScratchContext(
-            m_error, exe_ctx ? *exe_ctx->GetBestExecutionContextScope()
-                             : m_runtime.GetProcess().GetTarget())) {}
+        m_ts(TypeSystemSwiftTypeRefForExpressions::GetForTarget(
+            m_runtime.GetProcess().GetTarget())) {}
 
   swift::remote::TypeInfoProvider::IdType getId() override {
-    if (m_reader)
-      return (void *)((char *)m_reader->get() +
-                      m_reader->get()->GetGeneration() +
+    if (m_ts)
+      return (void *)((char *)m_ts.get() + m_ts->GetGeneration() +
                       m_runtime.GetGeneration());
     return (void *)0;
   }
@@ -305,24 +299,38 @@ public:
              "[LLDBTypeInfoProvider] Looking up debug type info for {0}",
              mangledName);
 
-    if (!m_reader) {
+    if (!m_ts) {
       LLDB_LOG(GetLog(LLDBLog::Types),
                "[LLDBTypeInfoProvider] no scratch context");
       return nullptr;
     }
-    TypeSystemSwiftTypeRef &typesystem = *m_reader->get();
+    TypeSystemSwiftTypeRef &typesystem = *m_ts;
 
     // Materialize a Clang type from the debug info.
     assert(swift::Demangle::getManglingPrefixLength(mangledName) == 0);
     std::string wrapped;
     // The mangled name passed in is bare. Add global prefix ($s) and type (D).
     llvm::raw_string_ostream(wrapped) << "$s" << mangledName << 'D';
+    swift::Demangle::Demangler dem;
+    auto *node = dem.demangleSymbol(wrapped);
+    if (!node) {
+      // Try `mangledName` as plain ObjC class name. Ex: NSObject, NSView, etc.
+      auto maybeMangled = swift_demangle::MangleClass(
+          dem, swift::MANGLING_MODULE_OBJC, mangledName);
+      if (!maybeMangled.isSuccess()) {
+        LLDB_LOG(GetLog(LLDBLog::Types),
+                 "[LLDBTypeInfoProvider] invalid mangled name: {0}",
+                 mangledName);
+        return nullptr;
+      }
+      wrapped = maybeMangled.result();
+      LLDB_LOG(GetLog(LLDBLog::Types),
+               "[LLDBTypeInfoProvider] using mangled ObjC class name: {0}",
+               wrapped);
+    } else {
 #ifndef NDEBUG
-    {
       // Check that our hardcoded mangling wrapper is still up-to-date.
-      swift::Demangle::Context dem;
-      auto node = dem.demangleSymbolAsNode(wrapped);
-      assert(node && node->getKind() == swift::Demangle::Node::Kind::Global);
+      assert(node->getKind() == swift::Demangle::Node::Kind::Global);
       assert(node->getNumChildren() == 1);
       node = node->getChild(0);
       assert(node->getKind() == swift::Demangle::Node::Kind::TypeMangling);
@@ -332,8 +340,9 @@ public:
       assert(node->getNumChildren() == 1);
       node = node->getChild(0);
       assert(node->getKind() != swift::Demangle::Node::Kind::Type);
-    }
 #endif
+    }
+
     ConstString mangled(wrapped);
     CompilerType swift_type = typesystem.GetTypeFromMangledTypename(mangled);
     auto ts = swift_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
@@ -364,7 +373,9 @@ public:
     ExecutionContext exe_ctx;
     process.CalculateExecutionContext(exe_ctx);
     auto *exe_scope = exe_ctx.GetBestExecutionContextScope();
-    TypeSystemSwiftTypeRef &typesystem = *m_reader->get();
+    if (!m_ts)
+      return nullptr;
+    TypeSystemSwiftTypeRef &typesystem = *m_ts;
     // Build a TypeInfo for the Clang type.
     auto size = clang_type.GetByteSize(exe_scope);
     auto bit_align = clang_type.GetTypeBitAlign(exe_scope);
@@ -409,20 +420,19 @@ public:
   }
 };
 
-void SwiftLanguageRuntimeImpl::RegisterAnonymousClangType(
-    const char *key, CompilerType clang_type) {
+void SwiftLanguageRuntime::RegisterAnonymousClangType(const char *key,
+                                                      CompilerType clang_type) {
   const std::lock_guard<std::recursive_mutex> locker(m_clang_type_info_mutex);
   m_anonymous_clang_types.insert({key, clang_type});
 }
 
-CompilerType
-SwiftLanguageRuntimeImpl::LookupAnonymousClangType(const char *key) {
+CompilerType SwiftLanguageRuntime::LookupAnonymousClangType(const char *key) {
   const std::lock_guard<std::recursive_mutex> locker(m_clang_type_info_mutex);
   return m_anonymous_clang_types.lookup(key);
 }
 
 std::optional<const swift::reflection::TypeInfo *>
-SwiftLanguageRuntimeImpl::lookupClangTypeInfo(CompilerType clang_type) {
+SwiftLanguageRuntime::lookupClangTypeInfo(CompilerType clang_type) {
   std::lock_guard<std::recursive_mutex> locker(m_clang_type_info_mutex);
   {
     auto it = m_clang_type_info.find(clang_type.GetOpaqueQualType());
@@ -443,8 +453,7 @@ SwiftLanguageRuntimeImpl::lookupClangTypeInfo(CompilerType clang_type) {
   return {};
 }
 
-const swift::reflection::TypeInfo *
-SwiftLanguageRuntimeImpl::emplaceClangTypeInfo(
+const swift::reflection::TypeInfo *SwiftLanguageRuntime::emplaceClangTypeInfo(
     CompilerType clang_type, std::optional<uint64_t> byte_size,
     std::optional<size_t> bit_align,
     llvm::ArrayRef<swift::reflection::FieldInfo> fields) {
@@ -478,7 +487,7 @@ SwiftLanguageRuntimeImpl::emplaceClangTypeInfo(
 }
 
 std::optional<uint64_t>
-SwiftLanguageRuntimeImpl::GetMemberVariableOffsetRemoteMirrors(
+SwiftLanguageRuntime::GetMemberVariableOffsetRemoteMirrors(
     CompilerType instance_type, ValueObject *instance,
     llvm::StringRef member_name, Status *error) {
   LLDB_LOG(GetLog(LLDBLog::Types), "using remote mirrors");
@@ -486,7 +495,7 @@ SwiftLanguageRuntimeImpl::GetMemberVariableOffsetRemoteMirrors(
       instance_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwiftTypeRef>();
   if (!ts) {
     if (error)
-      error->SetErrorString("not a Swift type");
+      *error = Status::FromErrorString("not a Swift type");
     return {};
   }
 
@@ -503,7 +512,7 @@ SwiftLanguageRuntimeImpl::GetMemberVariableOffsetRemoteMirrors(
       if (member_name.getAsInteger(10, tuple_idx) ||
           tuple_idx >= ti->getNumFields()) {
         if (error)
-          error->SetErrorString("tuple index out of bounds");
+          *error = Status::FromErrorString("tuple index out of bounds");
         return {};
       }
       return fields[tuple_idx].Offset;
@@ -534,7 +543,7 @@ SwiftLanguageRuntimeImpl::GetMemberVariableOffsetRemoteMirrors(
   return result;
 }
 
-std::optional<uint64_t> SwiftLanguageRuntimeImpl::GetMemberVariableOffset(
+std::optional<uint64_t> SwiftLanguageRuntime::GetMemberVariableOffset(
     CompilerType instance_type, ValueObject *instance,
     llvm::StringRef member_name, Status *error) {
   LLDB_SCOPED_TIMER();
@@ -592,7 +601,7 @@ std::optional<uint64_t> SwiftLanguageRuntimeImpl::GetMemberVariableOffset(
     LLDB_LOG(GetLog(LLDBLog::Types), "[GetMemberVariableOffset] failed for {0}",
              member_name);
     if (error)
-      error->SetErrorStringWithFormat("could not resolve member offset");
+      *error = Status::FromErrorString("could not resolve member offset");
   }
   return offset;
 }
@@ -688,8 +697,8 @@ void LogUnimplementedTypeKind(const char *function, CompilerType type) {
 } // namespace
 
 llvm::Expected<uint32_t>
-SwiftLanguageRuntimeImpl::GetNumChildren(CompilerType type,
-                                         ExecutionContextScope *exe_scope) {
+SwiftLanguageRuntime::GetNumChildren(CompilerType type,
+                                     ExecutionContextScope *exe_scope) {
   LLDB_SCOPED_TIMER();
 
   auto ts = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwiftTypeRef>();
@@ -823,8 +832,8 @@ SwiftLanguageRuntimeImpl::GetNumChildren(CompilerType type,
 }
 
 std::optional<unsigned>
-SwiftLanguageRuntimeImpl::GetNumFields(CompilerType type,
-                                       ExecutionContext *exe_ctx) {
+SwiftLanguageRuntime::GetNumFields(CompilerType type,
+                                   ExecutionContext *exe_ctx) {
   auto ts = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwiftTypeRef>();
   if (!ts)
     return {};
@@ -856,6 +865,10 @@ SwiftLanguageRuntimeImpl::GetNumFields(CompilerType type,
     default:
       return rti->getNumFields();
     }
+  }
+  case TypeInfoKind::Builtin: {
+    // Clang types without debug info may present themselves like this.
+    return {};
   }
   case TypeInfoKind::Enum: {
     auto *eti = llvm::cast<EnumTypeInfo>(ti);
@@ -937,15 +950,20 @@ findFieldWithName(const std::vector<swift::reflection::FieldInfo> &fields,
   return {SwiftLanguageRuntime::eFound, child_indexes.size()};
 }
 
-std::optional<std::string> SwiftLanguageRuntimeImpl::GetEnumCaseName(
+llvm::Expected<std::string> SwiftLanguageRuntime::GetEnumCaseName(
     CompilerType type, const DataExtractor &data, ExecutionContext *exe_ctx) {
   using namespace swift::reflection;
   using namespace swift::remote;
   auto *ti = GetSwiftRuntimeTypeInfo(type, exe_ctx->GetFramePtr());
   if (!ti)
-    return {};
+    return llvm::createStringError("could not get runtime type info for " +
+                                   type.GetMangledTypeName().GetStringRef());
+
+  // FIXME: Not reported as an error. There seems to be an odd
+  // compiler optimization happening with single-case payload carrying
+  // enums, which report their type as the inner type.
   if (ti->getKind() != TypeInfoKind::Enum)
-    return {};
+    return "";
 
   auto *eti = llvm::cast<EnumTypeInfo>(ti);
   PushLocalBuffer((int64_t)data.GetDataStart(), data.GetByteSize());
@@ -955,12 +973,13 @@ std::optional<std::string> SwiftLanguageRuntimeImpl::GetEnumCaseName(
   if (eti->projectEnumValue(*GetMemoryReader(), addr, &case_index))
     return eti->getCases()[case_index].Name;
 
-  LogUnimplementedTypeKind(__FUNCTION__, type);
-  return {};
+  // TODO: uncomment this after fixing projection for every type: rdar://138424904
+  // LogUnimplementedTypeKind(__FUNCTION__, type);
+  return llvm::createStringError("unimplemented enum kind");
 }
 
 std::pair<SwiftLanguageRuntime::LookupResult, std::optional<size_t>>
-SwiftLanguageRuntimeImpl::GetIndexOfChildMemberWithName(
+SwiftLanguageRuntime::GetIndexOfChildMemberWithName(
     CompilerType type, llvm::StringRef name, ExecutionContext *exe_ctx,
     bool omit_empty_base_classes, std::vector<uint32_t> &child_indexes) {
   LLDB_SCOPED_TIMER();
@@ -989,7 +1008,7 @@ SwiftLanguageRuntimeImpl::GetIndexOfChildMemberWithName(
       //     An existential is a three-word buffer followed by value metadata...
       // The buffer is exposed as children named `payload_data_{0,1,2}`, and
       // the number of fields are increased to match.
-      if (name.startswith("payload_data_")) {
+      if (name.starts_with("payload_data_")) {
         uint32_t index;
         if (name.take_back().getAsInteger(10, index) && index < 3) {
           child_indexes.push_back(index);
@@ -1090,8 +1109,7 @@ SwiftLanguageRuntimeImpl::GetIndexOfChildMemberWithName(
   }
 }
 
-llvm::Expected<CompilerType>
-SwiftLanguageRuntimeImpl::GetChildCompilerTypeAtIndex(
+llvm::Expected<CompilerType> SwiftLanguageRuntime::GetChildCompilerTypeAtIndex(
     CompilerType type, size_t idx, bool transparent_pointers,
     bool omit_empty_base_classes, bool ignore_array_bounds,
     std::string &child_name, uint32_t &child_byte_size,
@@ -1160,7 +1178,7 @@ SwiftLanguageRuntimeImpl::GetChildCompilerTypeAtIndex(
         return {};
       // The indirect enum field should point to a closure context.
       LLDBTypeInfoProvider tip(*this, &exe_ctx);
-      lldb::addr_t instance = MaskMaybeBridgedPointer(m_process, pointer);
+      lldb::addr_t instance = ::MaskMaybeBridgedPointer(GetProcess(), pointer);
       auto *ti = reflection_ctx->GetTypeInfoFromInstance(
           instance, &tip, ts->GetDescriptorFinder());
       if (!ti)
@@ -1437,7 +1455,7 @@ SwiftLanguageRuntimeImpl::GetChildCompilerTypeAtIndex(
   return llvm::createStringError("not implemented");
 }
 
-bool SwiftLanguageRuntimeImpl::ForEachSuperClassType(
+bool SwiftLanguageRuntime::ForEachSuperClassType(
     ValueObject &instance, std::function<bool(SuperClassType)> fn) {
   ThreadSafeReflectionContext reflection_ctx = GetReflectionContext();
   if (!reflection_ctx)
@@ -1450,9 +1468,11 @@ bool SwiftLanguageRuntimeImpl::ForEachSuperClassType(
   ExecutionContext exe_ctx(instance.GetExecutionContextRef());
   LLDBTypeInfoProvider tip(*this, &exe_ctx);
   lldb::addr_t pointer = instance.GetPointerValue();
+  auto tr_ts = ts->GetTypeSystemSwiftTypeRef();
+  if (!tr_ts)
+    return false;
   return reflection_ctx->ForEachSuperClassType(
-      &tip, ts->GetTypeSystemSwiftTypeRef().GetDescriptorFinder(),
-      pointer, fn);
+      &tip, tr_ts->GetDescriptorFinder(), pointer, fn);
 }
 
 bool SwiftLanguageRuntime::IsSelf(Variable &variable) {
@@ -1504,7 +1524,7 @@ CreatePackType(swift::Demangle::Demangler &dem, TypeSystemSwiftTypeRef &ts,
   return pack;
 }
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Pack(
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_Pack(
     ValueObject &in_value, CompilerType pack_type,
     lldb::DynamicValueType use_dynamic, TypeAndOrName &pack_type_or_name,
     Address &address, Value::ValueType &value_type) {
@@ -1540,8 +1560,8 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Pack(
     if (info->expanded)
       return false;
 
-  Target &target = m_process.GetTarget();
-  size_t ptr_size = m_process.GetAddressByteSize();
+  Target &target = GetProcess().GetTarget();
+  size_t ptr_size = GetProcess().GetAddressByteSize();
 
   swift::Demangle::Demangler dem;
 
@@ -1691,7 +1711,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Pack(
           dem.demangleSymbol(sil_pack_type.GetMangledTypeName().GetStringRef());
       using Kind = Node::Kind;
       auto *dem_sil_pack_type =
-          swift_demangle::nodeAtPath(global, {Kind::TypeMangling, Kind::Type});
+          swift_demangle::ChildAtPath(global, {Kind::TypeMangling, Kind::Type});
       return dem_sil_pack_type;
     } else {
       return CreatePackType(dem, *ts, elements);
@@ -1736,7 +1756,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Pack(
   value_type = Value::GetValueTypeFromAddressType(address_type);
   if (indirect) {
     Status status;
-    addr = m_process.ReadPointerFromMemory(addr, status);
+    addr = GetProcess().ReadPointerFromMemory(addr, status);
     if (status.Fail()) {
       LLDB_LOG(log, "failed to dereference indirect pack: {0}",
                expanded_type.GetMangledTypeName());
@@ -1746,20 +1766,6 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Pack(
   address.SetRawAddress(addr);
   return true;
 }
-
-#ifndef NDEBUG
-bool SwiftLanguageRuntimeImpl::IsScratchContextLocked(Target &target) {
-  if (target.GetSwiftScratchContextLock().try_lock()) {
-    target.GetSwiftScratchContextLock().unlock();
-    return false;
-  }
-  return true;
-}
-
-bool SwiftLanguageRuntimeImpl::IsScratchContextLocked(TargetSP target) {
-  return target ? IsScratchContextLocked(*target) : true;
-}
-#endif
 
 static bool IsPrivateNSClass(NodePointer node) {
   if (!node || node->getKind() != Node::Kind::Type ||
@@ -1771,12 +1777,12 @@ static bool IsPrivateNSClass(NodePointer node) {
     return false;
   for (NodePointer child : *classNode)
     if (child->getKind() == Node::Kind::Identifier && child->hasText())
-      return child->getText().startswith("__NS") ||
-             child->getText().startswith("NSTaggedPointer");
+      return child->getText().starts_with("__NS") ||
+             child->getText().starts_with("NSTaggedPointer");
   return false;
 }
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_Class(
     ValueObject &in_value, CompilerType class_type,
     lldb::DynamicValueType use_dynamic, TypeAndOrName &class_type_or_name,
     Address &address, Value::ValueType &value_type) {
@@ -1797,10 +1803,13 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
   if (!tss)
     return false;
   address.SetRawAddress(instance_ptr);
-  auto &ts = tss->GetTypeSystemSwiftTypeRef();
+  auto ts = tss->GetTypeSystemSwiftTypeRef();
+  if (!ts)
+    return false;
   // Ask the Objective-C runtime about Objective-C types.
   if (tss->IsImportedType(class_type.GetOpaqueQualType(), nullptr))
-    if (auto *objc_runtime = SwiftLanguageRuntime::GetObjCRuntime(m_process)) {
+    if (auto *objc_runtime =
+            SwiftLanguageRuntime::GetObjCRuntime(GetProcess())) {
       Value::ValueType value_type;
       if (objc_runtime->GetDynamicTypeAndAddress(
               in_value, use_dynamic, class_type_or_name, address, value_type)) {
@@ -1814,7 +1823,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
             // useful to users.
             if (IsPrivateNSClass(node))
               return false;
-            class_type_or_name.SetCompilerType(ts.RemangleAsType(dem, node));
+            class_type_or_name.SetCompilerType(ts->RemangleAsType(dem, node));
             found = true;
             return true;
           }
@@ -1825,37 +1834,40 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
       return false;
     }
   Log *log(GetLog(LLDBLog::Types));
-  ThreadSafeReflectionContext reflection_ctx = GetReflectionContext();
-  if (!reflection_ctx)
-    return false;
+  // Scope reflection_ctx to minimize its lock scope.
+  {
+    ThreadSafeReflectionContext reflection_ctx = GetReflectionContext();
+    if (!reflection_ctx)
+      return false;
 
-  const auto *typeref = reflection_ctx->ReadTypeFromInstance(
-      instance_ptr, ts.GetDescriptorFinder(), true);
+    const auto *typeref = reflection_ctx->ReadTypeFromInstance(
+        instance_ptr, ts->GetDescriptorFinder(), true);
 
-  // If we couldn't find the typeref from the instance, the best we can do is
-  // use the static type. This is a valid use case when the binary doesn't
-  // contain any metadata (for example, embedded Swift).
-  if (!typeref) 
-    typeref = reflection_ctx->GetTypeRefOrNull(class_type.GetMangledTypeName(),
-                                               ts.GetDescriptorFinder());
+    // If we couldn't find the typeref from the instance, the best we can do is
+    // use the static type. This is a valid use case when the binary doesn't
+    // contain any metadata (for example, embedded Swift).
+    if (!typeref)
+      typeref = reflection_ctx->GetTypeRefOrNull(
+          class_type.GetMangledTypeName(), ts->GetDescriptorFinder());
 
-  if (!typeref) {
-    HEALTH_LOG("could not read typeref for type: {0} (instance_ptr = {0:x})",
-               class_type.GetMangledTypeName(), instance_ptr);
-    return false;
+    if (!typeref) {
+      HEALTH_LOG("could not read typeref for type: {0} (instance_ptr = {0:x})",
+                 class_type.GetMangledTypeName(), instance_ptr);
+      return false;
+    }
+    swift::Demangle::Demangler dem;
+    swift::Demangle::NodePointer node = typeref->getDemangling(dem);
+    CompilerType dynamic_type = ts->RemangleAsType(dem, node);
+    LLDB_LOG(log, "dynamic type of instance_ptr {0:x} is {1}", instance_ptr,
+             class_type.GetMangledTypeName());
+    class_type_or_name.SetCompilerType(dynamic_type);
   }
-  swift::Demangle::Demangler dem;
-  swift::Demangle::NodePointer node = typeref->getDemangling(dem);
-  CompilerType dynamic_type = ts.RemangleAsType(dem, node);
-  LLDB_LOG(log, "dynamic type of instance_ptr {0:x} is {1}", instance_ptr,
-           class_type.GetMangledTypeName());
-  class_type_or_name.SetCompilerType(dynamic_type);
 
 #ifndef NDEBUG
   if (ModuleList::GetGlobalModuleListProperties()
           .GetSwiftValidateTypeSystem()) {
     ConstString a = class_type_or_name.GetCompilerType().GetMangledTypeName();
-    ConstString b = SwiftLanguageRuntimeImpl::GetDynamicTypeName_ClassRemoteAST(
+    ConstString b = SwiftLanguageRuntime::GetDynamicTypeName_ClassRemoteAST(
         in_value, instance_ptr);
     if (b && a != b)
       llvm::dbgs() << "RemoteAST and runtime diverge " << a << " != " << b
@@ -1865,7 +1877,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
   return true;
 }
 
-bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
+bool SwiftLanguageRuntime::IsValidErrorValue(ValueObject &in_value) {
   CompilerType var_type = in_value.GetStaticValue()->GetCompilerType();
   auto tss = var_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
   if (!tss)
@@ -1883,7 +1895,8 @@ bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
     return false;
 
   if (auto swift_native_nserror_isa = GetSwiftNativeNSErrorISA()) {
-    if (auto objc_runtime = SwiftLanguageRuntime::GetObjCRuntime(m_process)) {
+    if (auto objc_runtime =
+            SwiftLanguageRuntime::GetObjCRuntime(GetProcess())) {
       if (auto descriptor =
               objc_runtime->GetClassDescriptor(*instance_type_sp)) {
         if (descriptor->GetISA() != *swift_native_nserror_isa) {
@@ -1895,11 +1908,11 @@ bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
     }
   }
 
-  if (SwiftLanguageRuntime::GetObjCRuntime(m_process)) {
+  if (SwiftLanguageRuntime::GetObjCRuntime(GetProcess())) {
     // this is a swift native error but it can be bridged to ObjC
     // so it needs to be layout compatible
 
-    size_t ptr_size = m_process.GetAddressByteSize();
+    size_t ptr_size = GetProcess().GetAddressByteSize();
     size_t metadata_offset =
         ptr_size + 4 + (ptr_size == 8 ? 4 : 0);        // CFRuntimeBase
     metadata_offset += ptr_size + ptr_size + ptr_size; // CFIndex + 2*CFRef
@@ -1907,7 +1920,7 @@ bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
     metadata_location += metadata_offset;
     Status error;
     lldb::addr_t metadata_ptr_value =
-        m_process.ReadPointerFromMemory(metadata_location, error);
+        GetProcess().ReadPointerFromMemory(metadata_location, error);
     if (metadata_ptr_value == 0 || metadata_ptr_value == LLDB_INVALID_ADDRESS ||
         error.Fail())
       return false;
@@ -1917,11 +1930,11 @@ bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
 
     Status error;
 
-    size_t ptr_size = m_process.GetAddressByteSize();
+    size_t ptr_size = GetProcess().GetAddressByteSize();
     size_t metadata_offset = 2 * ptr_size;
     metadata_location += metadata_offset;
     lldb::addr_t metadata_ptr_value =
-        m_process.ReadPointerFromMemory(metadata_location, error);
+        GetProcess().ReadPointerFromMemory(metadata_location, error);
     if (metadata_ptr_value == 0 || metadata_ptr_value == LLDB_INVALID_ADDRESS ||
         error.Fail())
       return false;
@@ -1930,24 +1943,24 @@ bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
   return true;
 }
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Protocol(
-    ValueObject &in_value, CompilerType protocol_type,
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_Existential(
+    ValueObject &in_value, CompilerType existential_type,
     lldb::DynamicValueType use_dynamic, TypeAndOrName &class_type_or_name,
     Address &address) {
   Log *log(GetLog(LLDBLog::Types));
   auto tss =
-      protocol_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
+      existential_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
   if (!tss) {
     if (log)
       log->Printf("Could not get type system swift");
     return false;
   }
 
-  const swift::reflection::TypeRef *protocol_typeref =
-      GetTypeRef(protocol_type, &tss->GetTypeSystemSwiftTypeRef());
-  if (!protocol_typeref) {
+  const swift::reflection::TypeRef *existential_typeref =
+      GetTypeRef(existential_type, tss->GetTypeSystemSwiftTypeRef().get());
+  if (!existential_typeref) {
     if (log)
-      log->Printf("Could not get protocol typeref");
+      log->Printf("Could not get existential typeref");
     return false;
   }
 
@@ -1989,10 +2002,12 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Protocol(
   ThreadSafeReflectionContext reflection_ctx = GetReflectionContext();
   if (!reflection_ctx)
     return false;
-
+  auto tr_ts = tss->GetTypeSystemSwiftTypeRef();
+  if (!tr_ts)
+    return false;
   auto pair = reflection_ctx->ProjectExistentialAndUnwrapClass(
-      remote_existential, *protocol_typeref,
-      tss->GetTypeSystemSwiftTypeRef().GetDescriptorFinder());
+      remote_existential, *existential_typeref,
+      tr_ts->GetDescriptorFinder());
   if (use_local_buffer)
     PopLocalBuffer();
 
@@ -2005,17 +2020,19 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Protocol(
   const swift::reflection::TypeRef *typeref;
   swift::remote::RemoteAddress out_address(nullptr);
   std::tie(typeref, out_address) = *pair;
-  auto &ts = tss->GetTypeSystemSwiftTypeRef();
+  auto ts = tss->GetTypeSystemSwiftTypeRef();
+  if (!ts)
+    return false;
   swift::Demangle::Demangler dem;
   swift::Demangle::NodePointer node = typeref->getDemangling(dem);
-  class_type_or_name.SetCompilerType(ts.RemangleAsType(dem, node));
+  class_type_or_name.SetCompilerType(ts->RemangleAsType(dem, node));
   address.SetRawAddress(out_address.getAddressData());
 
 #ifndef NDEBUG
   if (ModuleList::GetGlobalModuleListProperties()
           .GetSwiftValidateTypeSystem()) {
-    auto reference_pair = GetDynamicTypeAndAddress_ProtocolRemoteAST(
-        in_value, protocol_type, use_local_buffer, existential_address);
+    auto reference_pair = GetDynamicTypeAndAddress_ExistentialRemoteAST(
+        in_value, existential_type, use_local_buffer, existential_address);
     assert(pair.has_value() >= reference_pair.has_value() &&
            "RemoteAST and runtime diverge");
 
@@ -2033,7 +2050,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Protocol(
   return true;
 }
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ExistentialMetatype(
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_ExistentialMetatype(
     ValueObject &in_value, CompilerType meta_type,
     lldb::DynamicValueType use_dynamic, TypeAndOrName &class_type_or_name,
     Address &address) {
@@ -2051,9 +2068,12 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ExistentialMetatype(
   if (!tss)
     return false;
 
+  auto tr_ts = tss->GetTypeSystemSwiftTypeRef();
+  if (!tr_ts)
+    return false;
+
   const swift::reflection::TypeRef *type_ref =
-      reflection_ctx->ReadTypeFromMetadata(
-          ptr, tss->GetTypeSystemSwiftTypeRef().GetDescriptorFinder());
+      reflection_ctx->ReadTypeFromMetadata(ptr, tr_ts->GetDescriptorFinder());
 
   if (!type_ref)
     return false;
@@ -2070,14 +2090,14 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ExistentialMetatype(
   meta->addChild(node, dem);
   wrapped->addChild(meta,dem);
 
-  meta_type = tss->GetTypeSystemSwiftTypeRef().RemangleAsType(dem, wrapped);
+  meta_type = tr_ts->RemangleAsType(dem, wrapped);
   class_type_or_name.SetCompilerType(meta_type);
   address.SetRawAddress(ptr);
   return true;
 }
 
-CompilerType SwiftLanguageRuntimeImpl::GetTypeFromMetadata(TypeSystemSwift &ts,
-                                                           Address address) {
+CompilerType SwiftLanguageRuntime::GetTypeFromMetadata(TypeSystemSwift &ts,
+                                                       Address address) {
   lldb::addr_t ptr = address.GetLoadAddress(&GetProcess().GetTarget());
   if (ptr == LLDB_INVALID_ADDRESS)
     return {};
@@ -2086,19 +2106,22 @@ CompilerType SwiftLanguageRuntimeImpl::GetTypeFromMetadata(TypeSystemSwift &ts,
   if (!reflection_ctx)
     return {};
 
+  auto tr_ts = ts.GetTypeSystemSwiftTypeRef();
+  if (!tr_ts)
+    return {};
+
   const swift::reflection::TypeRef *type_ref =
-      reflection_ctx->ReadTypeFromMetadata(
-          ptr, ts.GetTypeSystemSwiftTypeRef().GetDescriptorFinder());
+      reflection_ctx->ReadTypeFromMetadata(ptr, tr_ts->GetDescriptorFinder());
 
   using namespace swift::Demangle;
   Demangler dem;
   NodePointer node = type_ref->getDemangling(dem);
-  return ts.GetTypeSystemSwiftTypeRef().RemangleAsType(dem, node);
+  return tr_ts->RemangleAsType(dem, node);
 }
 
 std::optional<lldb::addr_t>
-SwiftLanguageRuntimeImpl::GetTypeMetadataForTypeNameAndFrame(
-    StringRef mdvar_name, StackFrame &frame) {
+SwiftLanguageRuntime::GetTypeMetadataForTypeNameAndFrame(StringRef mdvar_name,
+                                                         StackFrame &frame) {
   VariableList *var_list = frame.GetVariableList(false, nullptr);
   if (!var_list)
     return {};
@@ -2146,7 +2169,7 @@ void SwiftLanguageRuntime::ForEachGenericParameter(
   }
 }
 
-CompilerType SwiftLanguageRuntimeImpl::BindGenericTypeParameters(
+CompilerType SwiftLanguageRuntime::BindGenericTypeParameters(
     CompilerType unbound_type,
     std::function<CompilerType(unsigned, unsigned)> type_resolver) {
   LLDB_SCOPED_TIMER();
@@ -2165,9 +2188,13 @@ CompilerType SwiftLanguageRuntimeImpl::BindGenericTypeParameters(
   Demangler dem;
   NodePointer unbound_node =
       dem.demangleSymbol(unbound_type.GetMangledTypeName().GetStringRef());
+
+  auto tr_ts = ts->GetTypeSystemSwiftTypeRef();
+  if (!tr_ts)
+    return unbound_type;
+
   auto type_ref = reflection_ctx->GetTypeRefOrNull(
-      dem, unbound_node,
-      ts->GetTypeSystemSwiftTypeRef().GetDescriptorFinder());
+      dem, unbound_node, tr_ts->GetDescriptorFinder());
   if (!type_ref) {
     LLDB_LOG(GetLog(LLDBLog::Expressions | LLDBLog::Types),
              "Couldn't get TypeRef of unbound type");
@@ -2192,7 +2219,7 @@ CompilerType SwiftLanguageRuntimeImpl::BindGenericTypeParameters(
 
     const auto *type_ref = reflection_ctx->GetTypeRefOrNull(
         type.GetMangledTypeName().GetStringRef(),
-        ts->GetTypeSystemSwiftTypeRef().GetDescriptorFinder());
+        tr_ts->GetDescriptorFinder());
     if (!type_ref) {
       LLDB_LOG(GetLog(LLDBLog::Expressions | LLDBLog::Types),
                "Couldn't get TypeRef when binding generic type parameters.");
@@ -2210,15 +2237,15 @@ CompilerType SwiftLanguageRuntimeImpl::BindGenericTypeParameters(
   const swift::reflection::TypeRef *bound_type_ref =
       reflection_ctx->ApplySubstitutions(
           type_ref, substitutions,
-          ts->GetTypeSystemSwiftTypeRef().GetDescriptorFinder());
+          tr_ts->GetDescriptorFinder());
   NodePointer node = bound_type_ref->getDemangling(dem);
-  return ts->GetTypeSystemSwiftTypeRef().RemangleAsType(dem, node);
+  return tr_ts->RemangleAsType(dem, node);
 }
 
 CompilerType
-SwiftLanguageRuntimeImpl::BindGenericTypeParameters(StackFrame &stack_frame,
-                                                    TypeSystemSwiftTypeRef &ts,
-                                                    ConstString mangled_name) {
+SwiftLanguageRuntime::BindGenericTypeParameters(StackFrame &stack_frame,
+                                                TypeSystemSwiftTypeRef &ts,
+                                                ConstString mangled_name) {
   LLDB_SCOPED_TIMER();
   using namespace swift::Demangle;
 
@@ -2284,14 +2311,8 @@ SwiftLanguageRuntimeImpl::BindGenericTypeParameters(StackFrame &stack_frame,
   // function, we don't want to do this earlier, because the
   // canonicalization in GetCanonicalDemangleTree() must be performed in
   // the original context as to resolve type aliases correctly.
-  auto &target = m_process.GetTarget();
-  auto maybe_scratch_ctx = target.GetSwiftScratchContext(error, stack_frame);
-  if (!maybe_scratch_ctx) {
-    LLDB_LOG(GetLog(LLDBLog::Expressions | LLDBLog::Types),
-             "No scratch context available.");
-    return ts.GetTypeFromMangledTypename(mangled_name);
-  }
-  auto scratch_ctx = maybe_scratch_ctx->get();
+  auto &target = GetProcess().GetTarget();
+  auto scratch_ctx = TypeSystemSwiftTypeRefForExpressions::GetForTarget(target);
   if (!scratch_ctx) {
     LLDB_LOG(GetLog(LLDBLog::Expressions | LLDBLog::Types),
              "No scratch context available.");
@@ -2304,8 +2325,8 @@ SwiftLanguageRuntimeImpl::BindGenericTypeParameters(StackFrame &stack_frame,
 }
 
 CompilerType
-SwiftLanguageRuntimeImpl::BindGenericTypeParameters(StackFrame &stack_frame,
-                                                    CompilerType base_type) {
+SwiftLanguageRuntime::BindGenericTypeParameters(StackFrame &stack_frame,
+                                                CompilerType base_type) {
   // If this is a TypeRef type, bind that.
   auto sc = stack_frame.GetSymbolContext(lldb::eSymbolContextEverything);
   if (auto ts =
@@ -2326,7 +2347,7 @@ bool SwiftLanguageRuntime::GetAbstractTypeName(StreamString &name,
   return true;
 }
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Value(
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_Value(
     ValueObject &in_value, CompilerType &bound_type,
     lldb::DynamicValueType use_dynamic, TypeAndOrName &class_type_or_name,
     Address &address, Value::ValueType &value_type) {
@@ -2348,7 +2369,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Value(
   return true;
 }
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_IndirectEnumCase(
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_IndirectEnumCase(
     ValueObject &in_value, lldb::DynamicValueType use_dynamic,
     TypeAndOrName &class_type_or_name, Address &address,
     Value::ValueType &value_type) {
@@ -2361,17 +2382,17 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_IndirectEnumCase(
   if (box_addr == LLDB_INVALID_ADDRESS)
     return false;
 
-  box_addr =
-    MaskMaybeBridgedPointer(m_process, box_addr);
-  lldb::addr_t box_location = m_process.ReadPointerFromMemory(box_addr, error);
+  box_addr = ::MaskMaybeBridgedPointer(GetProcess(), box_addr);
+  lldb::addr_t box_location =
+      GetProcess().ReadPointerFromMemory(box_addr, error);
   if (box_location == LLDB_INVALID_ADDRESS)
     return false;
 
-  ABISP abi_sp = m_process.GetABI();
+  ABISP abi_sp = GetProcess().GetABI();
   if (abi_sp)
     box_location = abi_sp->FixCodeAddress(box_location);
 
-  box_location = MaskMaybeBridgedPointer(m_process, box_location);
+  box_location = ::MaskMaybeBridgedPointer(GetProcess(), box_location);
   lldb::addr_t box_value = box_addr + in_value.GetByteOffset();
   Flags type_info(child_type.GetTypeInfo());
   if (type_info.AllSet(eTypeIsSwift) &&
@@ -2386,14 +2407,15 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_IndirectEnumCase(
                                     address, value_type);
   } else {
     // This is most likely a statically known type.
-    address.SetLoadAddress(box_value, &m_process.GetTarget());
+    address.SetLoadAddress(box_value, &GetProcess().GetTarget());
     value_type = Value::GetValueTypeFromAddressType(eAddressTypeLoad);
     return true;
   }
 }
 
-void SwiftLanguageRuntimeImpl::DumpTyperef(
-    CompilerType type, TypeSystemSwiftTypeRef *module_holder, Stream *s) {
+void SwiftLanguageRuntime::DumpTyperef(CompilerType type,
+                                       TypeSystemSwiftTypeRef *module_holder,
+                                       Stream *s) {
   if (!s)
     return;
 
@@ -2406,24 +2428,9 @@ void SwiftLanguageRuntimeImpl::DumpTyperef(
   s->PutCString(string_stream.str());
 }
 
-
-Process &SwiftLanguageRuntimeImpl::GetProcess() const {
-  return m_process;
-}
-
-// Dynamic type resolution tends to want to generate scalar data - but there are
-// caveats
-// Per original comment here
-// "Our address is the location of the dynamic type stored in memory.  It isn't
-// a load address,
-//  because we aren't pointing to the LOCATION that stores the pointer to us,
-//  we're pointing to us..."
-// See inlined comments for exceptions to this general rule.
-Value::ValueType
-SwiftLanguageRuntimeImpl::GetValueType(ValueObject &in_value,
-                                       CompilerType dynamic_type,
-                                       Value::ValueType static_value_type,
-                                       bool is_indirect_enum_case) {
+Value::ValueType SwiftLanguageRuntime::GetValueType(
+    ValueObject &in_value, CompilerType dynamic_type,
+    Value::ValueType static_value_type, bool is_indirect_enum_case) {
   CompilerType static_type = in_value.GetCompilerType();
   Flags static_type_flags(static_type.GetTypeInfo());
   Flags dynamic_type_flags(dynamic_type.GetTypeInfo());
@@ -2563,7 +2570,7 @@ std::optional<SwiftNominalType> GetSwiftClass(ValueObject &valobj,
   swift::Demangle::Context ctx;
   auto *global = ctx.demangleSymbolAsNode(*swift_symbol);
   using Kind = Node::Kind;
-  auto *class_node = swift_demangle::nodeAtPath(
+  auto *class_node = swift_demangle::ChildAtPath(
       global, {Kind::TypeMetadata, Kind::Type, Kind::Class});
   if (class_node && class_node->getNumChildren() == 2) {
     auto module_node = class_node->getFirstChild();
@@ -2581,12 +2588,12 @@ std::optional<SwiftNominalType> GetSwiftClass(ValueObject &valobj,
 
 } // namespace
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ClangType(
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_ClangType(
     ValueObject &in_value, lldb::DynamicValueType use_dynamic,
     TypeAndOrName &class_type_or_name, Address &address,
     Value::ValueType &value_type) {
   AppleObjCRuntime *objc_runtime =
-      SwiftLanguageRuntime::GetObjCRuntime(m_process);
+      SwiftLanguageRuntime::GetObjCRuntime(GetProcess());
   if (!objc_runtime)
     return false;
 
@@ -2604,7 +2611,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ClangType(
   StringRef dyn_name = dyn_class_type_or_name.GetName().GetStringRef();
   // If this is an Objective-C runtime value, skip; this is handled elsewhere.
   if (swift::Demangle::isOldFunctionTypeMangling(dyn_name) ||
-      dyn_name.startswith("__NS"))
+      dyn_name.starts_with("__NS"))
     return false;
 
   SwiftNominalType swift_class;
@@ -2657,15 +2664,12 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ClangType(
   }
 
   // Import the remangled dynamic name into the scratch context.
-  assert(IsScratchContextLocked(in_value.GetTargetSP()) &&
-         "Swift scratch context not locked ahead of dynamic type resolution");
-  std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
-      in_value.GetSwiftScratchContext();
-  if (!maybe_scratch_ctx)
+  auto scratch_ctx = TypeSystemSwiftTypeRefForExpressions::GetForTarget(
+      in_value.GetTargetSP());
+  if (!scratch_ctx)
     return false;
   CompilerType swift_type =
-      maybe_scratch_ctx->get()->GetTypeFromMangledTypename(
-          ConstString(remangled));
+      scratch_ctx->GetTypeFromMangledTypename(ConstString(remangled));
 
   // Roll back the ObjC dynamic type resolution.
   if (!swift_type)
@@ -2697,7 +2701,7 @@ static bool CouldHaveDynamicValue(ValueObject &in_value) {
   return var_type.IsPossibleDynamicType(nullptr, false, false);
 }
 
-bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress(
+bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
     ValueObject &in_value, lldb::DynamicValueType use_dynamic,
     TypeAndOrName &class_type_or_name, Address &address,
     Value::ValueType &value_type) {
@@ -2740,7 +2744,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress(
     success = GetDynamicTypeAndAddress_ExistentialMetatype(
         in_value, val_type, use_dynamic, class_type_or_name, address);
   else if (type_info.AnySet(eTypeIsProtocol))
-    success = GetDynamicTypeAndAddress_Protocol(in_value, val_type, use_dynamic,
+    success = GetDynamicTypeAndAddress_Existential(in_value, val_type, use_dynamic,
                                                 class_type_or_name, address);
   else {
     CompilerType bound_type;
@@ -2763,7 +2767,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress(
                                                use_dynamic, class_type_or_name,
                                                address, static_value_type);
     } else if (subst_type_info.AnySet(eTypeIsProtocol)) {
-      success = GetDynamicTypeAndAddress_Protocol(
+      success = GetDynamicTypeAndAddress_Existential(
           in_value, bound_type, use_dynamic, class_type_or_name, address);
     } else {
       success = GetDynamicTypeAndAddress_Value(in_value, bound_type,
@@ -2784,8 +2788,9 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress(
   return success;
 }
 
-TypeAndOrName SwiftLanguageRuntimeImpl::FixUpDynamicType(
-    const TypeAndOrName &type_and_or_name, ValueObject &static_value) {
+TypeAndOrName
+SwiftLanguageRuntime::FixUpDynamicType(const TypeAndOrName &type_and_or_name,
+                                       ValueObject &static_value) {
   CompilerType static_type = static_value.GetCompilerType();
   CompilerType dynamic_type = type_and_or_name.GetCompilerType();
   // The logic in this function only applies to static/dynamic Swift types.
@@ -2831,17 +2836,17 @@ TypeAndOrName SwiftLanguageRuntimeImpl::FixUpDynamicType(
   return type_and_or_name;
 }
 
-bool SwiftLanguageRuntimeImpl::IsTaggedPointer(lldb::addr_t addr,
-                                               CompilerType type) {
+bool SwiftLanguageRuntime::IsTaggedPointer(lldb::addr_t addr,
+                                           CompilerType type) {
   Demangler dem;
   auto *root = dem.demangleSymbol(type.GetMangledTypeName().GetStringRef());
   using Kind = Node::Kind;
-  auto *unowned_node = swift_demangle::nodeAtPath(
+  auto *unowned_node = swift_demangle::ChildAtPath(
       root, {Kind::TypeMangling, Kind::Type, Kind::Unowned});
   if (!unowned_node)
     return false;
 
-  Target &target = m_process.GetTarget();
+  Target &target = GetProcess().GetTarget();
   llvm::Triple triple = target.GetArchitecture().GetTriple();
   // On Darwin the Swift runtime stores unowned references to
   // Objective-C objects as a pointer to a struct that has the
@@ -2861,8 +2866,7 @@ bool SwiftLanguageRuntimeImpl::IsTaggedPointer(lldb::addr_t addr,
 }
 
 std::pair<lldb::addr_t, bool>
-SwiftLanguageRuntimeImpl::FixupPointerValue(lldb::addr_t addr,
-                                            CompilerType type) {
+SwiftLanguageRuntime::FixupPointerValue(lldb::addr_t addr, CompilerType type) {
   // Check for an unowned Darwin Objective-C reference.
   if (IsTaggedPointer(addr, type)) {
     // Clear the discriminator bit to get at the pointer to Objective-C object.
@@ -2871,7 +2875,7 @@ SwiftLanguageRuntimeImpl::FixupPointerValue(lldb::addr_t addr,
   }
 
   // Adjust the pointer to strip away the spare bits.
-  Target &target = m_process.GetTarget();
+  Target &target = GetProcess().GetTarget();
   llvm::Triple triple = target.GetArchitecture().GetTriple();
   switch (triple.getArch()) {
   case llvm::Triple::ArchType::aarch64:
@@ -2892,17 +2896,17 @@ SwiftLanguageRuntimeImpl::FixupPointerValue(lldb::addr_t addr,
   return {addr, false};
 }
 
-lldb::addr_t SwiftLanguageRuntimeImpl::FixupAddress(lldb::addr_t addr,
-                                                    CompilerType type,
-                                                    Status &error) {
+lldb::addr_t SwiftLanguageRuntime::FixupAddress(lldb::addr_t addr,
+                                                CompilerType type,
+                                                Status &error) {
   // Peek into the reference to see whether it needs an extra deref.
   // If yes, return the fixed-up address we just read.
   lldb::addr_t stripped_addr = LLDB_INVALID_ADDRESS;
   bool extra_deref;
   std::tie(stripped_addr, extra_deref) = FixupPointerValue(addr, type);
   if (extra_deref) {
-    Target &target = m_process.GetTarget();
-    size_t ptr_size = m_process.GetAddressByteSize();
+    Target &target = GetProcess().GetTarget();
+    size_t ptr_size = GetProcess().GetAddressByteSize();
     lldb::addr_t refd_addr = LLDB_INVALID_ADDRESS;
     target.ReadMemory(stripped_addr, &refd_addr, ptr_size, error, true);
     return refd_addr;
@@ -2911,13 +2915,14 @@ lldb::addr_t SwiftLanguageRuntimeImpl::FixupAddress(lldb::addr_t addr,
 }
 
 const swift::reflection::TypeRef *
-SwiftLanguageRuntimeImpl::GetTypeRef(CompilerType type,
-                                     TypeSystemSwiftTypeRef *module_holder) {
+SwiftLanguageRuntime::GetTypeRef(CompilerType type,
+                                 TypeSystemSwiftTypeRef *module_holder) {
   Log *log(GetLog(LLDBLog::Types));
   if (log && log->GetVerbose())
-    LLDB_LOGF(log, "[SwiftLanguageRuntimeImpl::GetTypeRef] Getting typeref for "
-                "type: %s\n",
-                type.GetMangledTypeName().GetCString());
+    LLDB_LOGF(log,
+              "[SwiftLanguageRuntime::GetTypeRef] Getting typeref for "
+              "type: %s\n",
+              type.GetMangledTypeName().GetCString());
 
   // Demangle the mangled name.
   swift::Demangle::Demangler dem;
@@ -2934,6 +2939,9 @@ SwiftLanguageRuntimeImpl::GetTypeRef(CompilerType type,
   auto it = known_types_with_redefined_modules.find(mangled_name);
   if (it != known_types_with_redefined_modules.end())
     mangled_name = it->second;
+
+  if (!module_holder)
+    return nullptr;
 
   swift::Demangle::NodePointer node =
       module_holder->GetCanonicalDemangleTree(dem, mangled_name);
@@ -2953,7 +2961,7 @@ SwiftLanguageRuntimeImpl::GetTypeRef(CompilerType type,
     std::stringstream ss;
     type_ref->dump(ss);
     LLDB_LOG(log,
-             "[SwiftLanguageRuntimeImpl::GetTypeRef] Found typeref for "
+             "[SwiftLanguageRuntime::GetTypeRef] Found typeref for "
              "type: {0}:\n{0}",
              type.GetMangledTypeName(), ss.str());
   }
@@ -2961,18 +2969,22 @@ SwiftLanguageRuntimeImpl::GetTypeRef(CompilerType type,
 }
 
 const swift::reflection::TypeInfo *
-SwiftLanguageRuntimeImpl::GetSwiftRuntimeTypeInfo(
+SwiftLanguageRuntime::GetSwiftRuntimeTypeInfo(
     CompilerType type, ExecutionContextScope *exe_scope,
     swift::reflection::TypeRef const **out_tr) {
   Log *log(GetLog(LLDBLog::Types));
 
   if (log && log->GetVerbose())
-    LLDB_LOG(log, "[SwiftLanguageRuntimeImpl::GetSwiftRuntimeTypeInfo] Getting "
+    LLDB_LOG(log,
+             "[SwiftLanguageRuntime::GetSwiftRuntimeTypeInfo] Getting "
              "type info for type: {0}",
              type.GetMangledTypeName());
 
   auto ts = type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
   if (!ts)
+    return nullptr;
+  auto tr_ts = ts->GetTypeSystemSwiftTypeRef();
+  if (!tr_ts)
     return nullptr;
 
   // Resolve all type aliases.
@@ -2980,21 +2992,18 @@ SwiftLanguageRuntimeImpl::GetSwiftRuntimeTypeInfo(
 
   // Resolve all generic type parameters in the type for the current
   // frame. Generic parameter binding has to happen in the scratch
-  // context, so we lock it while we are in this function.
-  std::unique_ptr<SwiftScratchContextLock> lock;
+  // context.
   if (exe_scope)
     if (StackFrame *frame = exe_scope->CalculateStackFrame().get()) {
       ExecutionContext exe_ctx;
       frame->CalculateExecutionContext(exe_ctx);
-      lock = std::make_unique<SwiftScratchContextLock>(&exe_ctx);
       type = BindGenericTypeParameters(*frame, type);
     }
 
   // BindGenericTypeParameters imports the type into the scratch
   // context, but we need to resolve (any DWARF links in) the typeref
   // in the original module.
-  const swift::reflection::TypeRef *type_ref =
-      GetTypeRef(type, &ts->GetTypeSystemSwiftTypeRef());
+  const swift::reflection::TypeRef *type_ref = GetTypeRef(type, tr_ts.get());
   if (!type_ref)
     return nullptr;
 
@@ -3006,35 +3015,151 @@ SwiftLanguageRuntimeImpl::GetSwiftRuntimeTypeInfo(
     return nullptr;
 
   LLDBTypeInfoProvider provider(*this, exe_scope);
-  return reflection_ctx->GetTypeInfo(
-      type_ref, &provider,
-      ts->GetTypeSystemSwiftTypeRef().GetDescriptorFinder());
+  return reflection_ctx->GetTypeInfo(type_ref, &provider,
+                                     tr_ts->GetDescriptorFinder());
 }
 
-bool SwiftLanguageRuntimeImpl::IsStoredInlineInBuffer(CompilerType type) {
+bool SwiftLanguageRuntime::IsStoredInlineInBuffer(CompilerType type) {
   if (auto *type_info = GetSwiftRuntimeTypeInfo(type, nullptr))
     return type_info->isBitwiseTakable() && type_info->getSize() <= 24;
   return true;
 }
 
+llvm::Expected<CompilerType>
+SwiftLanguageRuntime::ResolveTypeAlias(CompilerType alias) {
+  using namespace swift::Demangle;
+  Demangler dem;
+
+  auto tss = alias.GetTypeSystem().dyn_cast_or_null<TypeSystemSwift>();
+  if (!tss)
+    return llvm::createStringError("not a Swift type");
+  auto tr_ts = tss->GetTypeSystemSwiftTypeRef();
+  if (!tr_ts)
+    return llvm::createStringError("could not get typesystem");
+
+  // Extract the mangling of the alias type's parent type and its
+  // generic substitutions if any.
+  auto mangled = alias.GetMangledTypeName().GetStringRef();
+  NodePointer type = swift_demangle::GetDemangledType(dem, mangled);
+  if (!type || type->getKind() != Node::Kind::TypeAlias ||
+      type->getNumChildren() != 2)
+    return llvm::createStringError("not a type alias");
+
+  NodePointer alias_node = type->getChild(1);
+  if (!alias_node || alias_node->getKind() != Node::Kind::Identifier ||
+      !alias_node->hasText())
+    return llvm::createStringError("type alias has no name");
+  std::string member = alias_node->getText().str();
+
+  NodePointer parent_node = type->getChild(0);
+  if (!parent_node)
+    return llvm::createStringError("top-level type alias");
+  NodePointer subst_node = nullptr;
+
+  switch (parent_node->getKind()) {
+  case Node::Kind::Class:
+  case Node::Kind::Structure:
+  case Node::Kind::Enum:
+    break;
+    // For the lookup, get the unbound type.
+  case Node::Kind::BoundGenericClass:
+    subst_node =
+        swift_demangle::ChildAtPath(parent_node, {Node::Kind::TypeList});
+    parent_node = swift_demangle::ChildAtPath(
+        parent_node, {Node::Kind::Type, Node::Kind::Class});
+    break;
+  case Node::Kind::BoundGenericStructure:
+    subst_node =
+        swift_demangle::ChildAtPath(parent_node, {Node::Kind::TypeList});
+    parent_node = swift_demangle::ChildAtPath(
+        parent_node, {Node::Kind::Type, Node::Kind::Structure});
+    break;
+  case Node::Kind::BoundGenericEnum:
+    subst_node =
+        swift_demangle::ChildAtPath(parent_node, {Node::Kind::TypeList});
+    parent_node = swift_demangle::ChildAtPath(
+        parent_node, {Node::Kind::Type, Node::Kind::Enum});
+    break;
+  default:
+    return llvm::createStringError("unsupported parent kind");
+  }
+  if (!parent_node)
+    return llvm::createStringError("unsupported generic parent kind");
+
+  NodePointer global = dem.createNode(Node::Kind::Global);
+  global->addChild(parent_node, dem);
+  auto mangling = swift::Demangle::mangleNode(global);
+  if (!mangling.isSuccess())
+    return llvm::createStringError("mangling error");
+  std::string in_type =
+      swift::Demangle::dropSwiftManglingPrefix(mangling.result()).str();
+
+  // `in_type` now holds the type alias' parent type.
+  // `member` is the name of the type alias.
+  // Scan through the witness tables of all of the parent's conformances.
+  ThreadSafeReflectionContext reflection_ctx = GetReflectionContext();
+  if (!reflection_ctx)
+    return llvm::createStringError("no reflection context");
+
+  // FIXME: The current implementation that loads all conformances
+  // up-front creates too much small memory traffic during the
+  // LookupTypeWitness step.
+  if (!ModuleList::GetGlobalModuleListProperties().GetSwiftLoadConformances())
+    return llvm::createStringError("conformance loading disabled in settings");
+
+  for (const std::string &protocol : GetConformances(in_type)) {
+    auto *type_ref =
+        reflection_ctx->LookupTypeWitness(in_type, member, protocol);
+    if (!type_ref)
+      continue;
+
+    // Success, we found an associated type in the conformance.  If
+    // the parent type was generic, the type alias could point to a
+    // type parameter. Reapply any substitutions from the parent type.
+    if (subst_node) {
+      swift::reflection::GenericArgumentMap substitutions;
+      unsigned idx = 0;
+      for (auto &child : *subst_node) {
+        auto mangling = swift_demangle::GetMangledName(dem, child);
+        if (!mangling.isSuccess())
+          continue;
+        const auto *type_ref = reflection_ctx->GetTypeRefOrNull(
+            mangling.result(), tr_ts->GetDescriptorFinder());
+        if (!type_ref)
+          continue;
+
+        substitutions.insert({{0, idx++}, type_ref});
+      }
+      type_ref = reflection_ctx->ApplySubstitutions(
+          type_ref, substitutions, tr_ts->GetDescriptorFinder());
+    }
+
+    CompilerType resolved = GetTypeFromTypeRef(*tr_ts, type_ref);
+    LLDB_LOG(GetLog(LLDBLog::Types),
+             "Resolved type alias {0} = {1} using reflection metadata.",
+             alias.GetMangledTypeName(), resolved.GetMangledTypeName());
+    return resolved;
+  }
+  return llvm::createStringError("cannot resolve type alias via reflection");
+}
+
 std::optional<uint64_t>
-SwiftLanguageRuntimeImpl::GetBitSize(CompilerType type,
-                                     ExecutionContextScope *exe_scope) {
+SwiftLanguageRuntime::GetBitSize(CompilerType type,
+                                 ExecutionContextScope *exe_scope) {
   if (auto *type_info = GetSwiftRuntimeTypeInfo(type, exe_scope))
     return type_info->getSize() * 8;
   return {};
 }
 
-std::optional<uint64_t>
-SwiftLanguageRuntimeImpl::GetByteStride(CompilerType type) {
+std::optional<uint64_t> SwiftLanguageRuntime::GetByteStride(CompilerType type) {
   if (auto *type_info = GetSwiftRuntimeTypeInfo(type, nullptr))
     return type_info->getStride();
   return {};
 }
 
 std::optional<size_t>
-SwiftLanguageRuntimeImpl::GetBitAlignment(CompilerType type,
-                                          ExecutionContextScope *exe_scope) {
+SwiftLanguageRuntime::GetBitAlignment(CompilerType type,
+                                      ExecutionContextScope *exe_scope) {
   if (auto *type_info = GetSwiftRuntimeTypeInfo(type, exe_scope))
     return type_info->getAlignment() * 8;
   return {};
@@ -3049,8 +3174,8 @@ bool SwiftLanguageRuntime::CouldHaveDynamicValue(ValueObject &in_value) {
 }
 
 CompilerType
-SwiftLanguageRuntimeImpl::GetConcreteType(ExecutionContextScope *exe_scope,
-                                          ConstString abstract_type_name) {
+SwiftLanguageRuntime::GetConcreteType(ExecutionContextScope *exe_scope,
+                                      ConstString abstract_type_name) {
   if (!exe_scope)
     return CompilerType();
 
@@ -3058,12 +3183,12 @@ SwiftLanguageRuntimeImpl::GetConcreteType(ExecutionContextScope *exe_scope,
   if (!frame)
     return CompilerType();
 
-  SwiftLanguageRuntimeImpl::MetadataPromiseSP promise_sp(
+  SwiftLanguageRuntime::MetadataPromiseSP promise_sp(
       GetPromiseForTypeNameAndFrame(abstract_type_name.GetCString(), frame));
   if (!promise_sp)
     return CompilerType();
 
-  const SymbolContext *sc = &frame->GetSymbolContext(eSymbolContextFunction);
+  const SymbolContext &sc = frame->GetSymbolContext(eSymbolContextFunction);
   return promise_sp->FulfillTypePromise(sc);
 }
 

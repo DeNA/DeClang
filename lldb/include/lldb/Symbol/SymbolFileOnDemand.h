@@ -178,7 +178,7 @@ public:
 
   void PreloadSymbols() override;
 
-  uint64_t GetDebugInfoSize() override;
+  uint64_t GetDebugInfoSize(bool load_all_debug_info = false) override;
   lldb_private::StatsDuration::Duration GetDebugInfoParseTime() override;
   lldb_private::StatsDuration::Duration GetDebugInfoIndexTime() override;
 
@@ -217,6 +217,11 @@ public:
   }
   void SetDebugInfoHadFrameVariableErrors() override {
     return m_sym_file_impl->SetDebugInfoHadFrameVariableErrors();
+  }
+
+  bool GetSeparateDebugInfo(StructuredData::Dictionary &d,
+                            bool errors_only) override {
+    return m_sym_file_impl->GetSeparateDebugInfo(d, errors_only);
   }
 
   lldb::TypeSP MakeType(lldb::user_id_t uid, ConstString name,

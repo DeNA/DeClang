@@ -595,18 +595,18 @@ define i32 @reject_multiple_usages(i32 %0) {
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    mov w8, #4369 // =0x1111
 ; CHECK-NEXT:    mov w9, #3 // =0x3
-; CHECK-NEXT:    movk w8, #17, lsl #16
 ; CHECK-NEXT:    mov w10, #17 // =0x11
+; CHECK-NEXT:    movk w8, #17, lsl #16
+; CHECK-NEXT:    mov w11, #12 // =0xc
 ; CHECK-NEXT:    cmp w0, w8
 ; CHECK-NEXT:    mov w8, #9 // =0x9
-; CHECK-NEXT:    mov w11, #12 // =0xc
 ; CHECK-NEXT:    csel w8, w8, w9, eq
 ; CHECK-NEXT:    csel w9, w11, w10, hi
+; CHECK-NEXT:    mov w10, #53312 // =0xd040
+; CHECK-NEXT:    movk w10, #2, lsl #16
 ; CHECK-NEXT:    add w8, w8, w9
-; CHECK-NEXT:    mov w9, #53312 // =0xd040
-; CHECK-NEXT:    movk w9, #2, lsl #16
-; CHECK-NEXT:    cmp w0, w9
 ; CHECK-NEXT:    mov w9, #26304 // =0x66c0
+; CHECK-NEXT:    cmp w0, w10
 ; CHECK-NEXT:    movk w9, #1433, lsl #16
 ; CHECK-NEXT:    csel w0, w8, w9, hi
 ; CHECK-NEXT:    ret
@@ -629,14 +629,15 @@ define dso_local i32 @neigh_periodic_work_tbl_1() {
 ; CHECK-NEXT:    add x8, x8, :lo12:neigh_periodic_work_tbl_1
 ; CHECK-NEXT:    add x8, x8, #18, lsl #12 // =73728
 ; CHECK-NEXT:    cmn x8, #1272
-; CHECK-NEXT:    b.pl .LBB35_2
-; CHECK-NEXT:  .LBB35_1: // %for.cond
-; CHECK-NEXT:    // =>This Inner Loop Header: Depth=1
-; CHECK-NEXT:    b .LBB35_1
-; CHECK-NEXT:  .LBB35_2: // %if.end
+; CHECK-NEXT:    b.mi .LBB35_2
+; CHECK-NEXT:  // %bb.1: // %if.end
 ; CHECK-NEXT:    ret
+; CHECK-NEXT:  .LBB35_2: // %for.cond
+; CHECK-NEXT:    // =>This Inner Loop Header: Depth=1
+; CHECK-NEXT:    b .LBB35_2
 entry:
-  br i1 icmp slt (i64 add (i64 ptrtoint (ptr @neigh_periodic_work_tbl_1 to i64), i64 75000), i64 0), label %for.cond, label %if.end
+  %cmp = icmp slt i64 add (i64 ptrtoint (ptr @neigh_periodic_work_tbl_1 to i64), i64 75000), 0
+  br i1 %cmp, label %for.cond, label %if.end
 for.cond:                                         ; preds = %entry, %for.cond
   br label %for.cond
 if.end:                                           ; preds = %entry
@@ -651,9 +652,6 @@ declare dso_local i32 @crng_reseed(...) local_unnamed_addr
 define dso_local i32 @_extract_crng_crng() {
 ; CHECK-LABEL: _extract_crng_crng:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    str x30, [sp, #-16]! // 8-byte Folded Spill
-; CHECK-NEXT:    .cfi_def_cfa_offset 16
-; CHECK-NEXT:    .cfi_offset w30, -16
 ; CHECK-NEXT:    adrp x8, _extract_crng_crng
 ; CHECK-NEXT:    add x8, x8, :lo12:_extract_crng_crng
 ; CHECK-NEXT:    tbnz x8, #63, .LBB36_2
@@ -666,17 +664,17 @@ define dso_local i32 @_extract_crng_crng() {
 ; CHECK-NEXT:    b.pl .LBB36_3
 ; CHECK-NEXT:  .LBB36_2: // %if.then
 ; CHECK-NEXT:    adrp x8, primary_crng
-; CHECK-NEXT:    adrp x9, input_pool
-; CHECK-NEXT:    add x9, x9, :lo12:input_pool
 ; CHECK-NEXT:    ldr w8, [x8, :lo12:primary_crng]
 ; CHECK-NEXT:    cmp w8, #0
-; CHECK-NEXT:    csel x0, xzr, x9, eq
-; CHECK-NEXT:    bl crng_reseed
+; CHECK-NEXT:    adrp x8, input_pool
+; CHECK-NEXT:    add x8, x8, :lo12:input_pool
+; CHECK-NEXT:    csel x0, xzr, x8, eq
+; CHECK-NEXT:    b crng_reseed
 ; CHECK-NEXT:  .LBB36_3: // %if.end
-; CHECK-NEXT:    ldr x30, [sp], #16 // 8-byte Folded Reload
 ; CHECK-NEXT:    ret
 entry:
-  br i1 icmp slt (ptr @_extract_crng_crng, ptr null), label %if.then, label %lor.lhs.false
+  %cmp2 = icmp slt ptr @_extract_crng_crng, null
+  br i1 %cmp2, label %if.then, label %lor.lhs.false
 lor.lhs.false:                                    ; preds = %entry
   %0 = load i32, ptr @jiffies, align 4
   %idx.ext = sext i32 %0 to i64

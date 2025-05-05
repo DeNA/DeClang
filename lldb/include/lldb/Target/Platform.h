@@ -27,8 +27,12 @@
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/Utility/Timeout.h"
 #include "lldb/Utility/UserIDResolver.h"
+#include "lldb/Utility/XcodeSDK.h"
 #include "lldb/lldb-private-forward.h"
 #include "lldb/lldb-public.h"
+
+#include "llvm/Support/Compiler.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/VersionTuple.h"
 
 namespace lldb_private {
@@ -44,7 +48,7 @@ class PlatformProperties : public Properties {
 public:
   PlatformProperties();
 
-  static ConstString GetSettingName();
+  static llvm::StringRef GetSettingName();
 
   bool GetUseModuleCache() const;
   bool SetUseModuleCache(bool use_module_cache);
@@ -106,21 +110,6 @@ public:
   static ArchSpec GetAugmentedArchSpec(Platform *platform,
                                        llvm::StringRef triple);
 
-  /// Find a platform plugin for a given process.
-  ///
-  /// Scans the installed Platform plug-ins and tries to find an instance that
-  /// can be used for \a process
-  ///
-  /// \param[in] process
-  ///     The process for which to try and locate a platform
-  ///     plug-in instance.
-  ///
-  /// \param[in] plugin_name
-  ///     An optional name of a specific platform plug-in that
-  ///     should be used. If nullptr, pick the best plug-in.
-  //        static lldb::PlatformSP
-  //        FindPlugin (Process *process, ConstString plugin_name);
-
   /// Set the target's executable based off of the existing architecture
   /// information in \a target given a path to an executable \a exe_file.
   ///
@@ -137,7 +126,7 @@ public:
   ///     Returns \b true if this Platform plug-in was able to find
   ///     a suitable executable, \b false otherwise.
   virtual Status ResolveExecutable(const ModuleSpec &module_spec,
-                                   lldb::ModuleSP &module_sp,
+                                   lldb::ModuleSP &exe_module_sp,
                                    const FileSpecList *module_search_paths_ptr);
 
   /// Find a symbol file given a symbol file module specification.
@@ -319,6 +308,11 @@ public:
       lldb::ModuleSP &module_sp, const FileSpecList *module_search_paths_ptr,
       llvm::SmallVectorImpl<lldb::ModuleSP> *old_modules, bool *did_create_ptr);
 
+  void CallLocateModuleCallbackIfSet(const ModuleSpec &module_spec,
+                                     lldb::ModuleSP &module_sp,
+                                     FileSpec &symbol_file_spec,
+                                     bool *did_create_ptr);
+
   virtual bool GetModuleSpec(const FileSpec &module_file_spec,
                              const ArchSpec &arch, ModuleSpec &module_spec);
 
@@ -428,6 +422,8 @@ public:
   virtual uint32_t FindProcesses(const ProcessInstanceInfoMatch &match_info,
                                  ProcessInstanceInfoList &proc_infos);
 
+  ProcessInstanceInfoList GetAllProcesses();
+
   virtual bool GetProcessInfo(lldb::pid_t pid, ProcessInstanceInfo &proc_info);
 
   // Set a breakpoint on all functions that can end up creating a thread for
@@ -440,6 +436,67 @@ public:
   virtual lldb_private::ConstString
   GetSDKDirectory(lldb_private::Target &target) {
     return lldb_private::ConstString();
+  }
+
+  /// Search each CU associated with the specified 'module' for
+  /// the SDK paths the CUs were compiled against. In the presence
+  /// of different SDKs, we try to pick the most appropriate one
+  /// using \ref XcodeSDK::Merge.
+  ///
+  /// \param[in] module Module whose debug-info CUs to parse for
+  ///                   which SDK they were compiled against.
+  ///
+  /// \returns If successful, returns a pair of a parsed XcodeSDK
+  ///          object and a boolean that is 'true' if we encountered
+  ///          a conflicting combination of SDKs when parsing the CUs
+  ///          (e.g., a public and internal SDK).
+  virtual llvm::Expected<std::pair<XcodeSDK, bool>>
+  GetSDKPathFromDebugInfo(Module &module) {
+    return llvm::createStringError(
+        llvm::formatv("{0} not implemented for '{1}' platform.",
+                      LLVM_PRETTY_FUNCTION, GetName()));
+  }
+
+  /// Returns the full path of the most appropriate SDK for the
+  /// specified 'module'. This function gets this path by parsing
+  /// debug-info (see \ref `GetSDKPathFromDebugInfo`).
+  ///
+  /// \param[in] module Module whose debug-info to parse for
+  ///                   which SDK it was compiled against.
+  ///
+  /// \returns If successful, returns the full path to an
+  ///          Xcode SDK.
+  virtual llvm::Expected<std::string>
+  ResolveSDKPathFromDebugInfo(Module &module) {
+    return llvm::createStringError(
+        llvm::formatv("{0} not implemented for '{1}' platform.",
+                      LLVM_PRETTY_FUNCTION, GetName()));
+  }
+
+  /// Search CU for the SDK path the CUs was compiled against.
+  ///
+  /// \param[in] unit The CU
+  ///
+  /// \returns If successful, returns a parsed XcodeSDK object.
+  virtual llvm::Expected<XcodeSDK> GetSDKPathFromDebugInfo(CompileUnit &unit) {
+    return llvm::createStringError(
+        llvm::formatv("{0} not implemented for '{1}' platform.",
+                      LLVM_PRETTY_FUNCTION, GetName()));
+  }
+
+  /// Returns the full path of the most appropriate SDK for the
+  /// specified compile unit. This function gets this path by parsing
+  /// debug-info (see \ref `GetSDKPathFromDebugInfo`).
+  ///
+  /// \param[in] unit The CU to scan.
+  ///
+  /// \returns If successful, returns the full path to an
+  ///          Xcode SDK.
+  virtual llvm::Expected<std::string>
+  ResolveSDKPathFromDebugInfo(CompileUnit &unit) {
+    return llvm::createStringError(
+        llvm::formatv("{0} not implemented for '{1}' platform.",
+                      LLVM_PRETTY_FUNCTION, GetName()));
   }
 
   const std::string &GetRemoteURL() const { return m_remote_url; }
@@ -640,8 +697,8 @@ public:
 
   virtual std::string GetPlatformSpecificConnectionInformation() { return ""; }
 
-  virtual bool CalculateMD5(const FileSpec &file_spec, uint64_t &low,
-                            uint64_t &high);
+  virtual llvm::ErrorOr<llvm::MD5::MD5Result>
+  CalculateMD5(const FileSpec &file_spec);
 
   virtual uint32_t GetResumeCountForLaunchInfo(ProcessLaunchInfo &launch_info) {
     return 1;
@@ -904,7 +961,7 @@ public:
   }
 
   virtual CompilerType GetSiginfoType(const llvm::Triple &triple);
-  
+
   virtual Args GetExtraStartupCommands();
 
   typedef std::function<Status(const ModuleSpec &module_spec,
@@ -994,11 +1051,6 @@ protected:
                                     const FileSpec &dst_file_spec);
 
   virtual const char *GetCacheHostname();
-
-  virtual Status
-  ResolveRemoteExecutable(const ModuleSpec &module_spec,
-                          lldb::ModuleSP &exe_module_sp,
-                          const FileSpecList *module_search_paths_ptr);
 
 private:
   typedef std::function<Status(const ModuleSpec &)> ModuleResolver;

@@ -4,7 +4,6 @@
 ; We keep using comdats for garbage collection if odr indicators are
 ; enabled as indicator symbols will cause link time odr violations.
 ; This is to fix PR 47925.
-;
 ; RUN: rm -rf %t && split-file %s %t && cd %t
 ; RUN: opt < a.ll -passes=asan -asan-globals-live-support=1 -asan-use-odr-indicator=0 -S | FileCheck %s --check-prefixes=CHECK,NOCOMDAT
 ; Check that enabling odr indicators enables comdat for globals.
@@ -103,8 +102,8 @@ target triple = "x86_64-unknown-linux-gnu"
 ;; Don't place the instrumented globals in a comdat when the unique module ID is empty.
 ; NOMODULEID:      @.str = internal constant { [4 x i8], [28 x i8] } { [4 x i8] c"str\00", [28 x i8] zeroinitializer }, align 32
 ; NOMODULEID:      @_ZL3buf = internal global { [4 x i8], [28 x i8] } zeroinitializer, align 32
-; NOMODULEID:      @__asan_global_.str = private global {{.*}}, section "asan_globals", !associated !0
-; NOMODULEID:      @__asan_global__ZL3buf = private global {{.*}}, section "asan_globals", !associated !1
+; NOMODULEID:      @__asan_global_.str = private global {{.*}}, section "asan_globals"{{.*}}, !associated !0
+; NOMODULEID:      @__asan_global__ZL3buf = private global {{.*}}, section "asan_globals"{{.*}}, !associated !1
 ; NOMODULEID:      @llvm.compiler.used = appending global [4 x ptr] [ptr @.str, ptr @_ZL3buf, ptr @__asan_global_.str, ptr @__asan_global__ZL3buf]
 
 ; NOMODULEID:      define internal void @asan.module_ctor() #[[#]] comdat {

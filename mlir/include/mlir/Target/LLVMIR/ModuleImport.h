@@ -23,6 +23,7 @@
 namespace llvm {
 class BasicBlock;
 class CallBase;
+class DbgVariableIntrinsic;
 class Function;
 class Instruction;
 class Value;
@@ -46,7 +47,7 @@ class LoopAnnotationImporter;
 class ModuleImport {
 public:
   ModuleImport(ModuleOp mlirModule, std::unique_ptr<llvm::Module> llvmModule,
-               bool emitExpensiveWarnings);
+               bool emitExpensiveWarnings, bool importEmptyDICompositeTypes);
 
   /// Calls the LLVMImportInterface initialization that queries the registered
   /// dialect interfaces for the supported LLVM IR intrinsics and metadata kinds
@@ -151,6 +152,14 @@ public:
   /// Converts `value` to a label attribute. Asserts if the matching fails.
   DILabelAttr matchLabelAttr(llvm::Value *value);
 
+  /// Converts `value` to a FP exception behavior attribute. Asserts if the
+  /// matching fails.
+  FPExceptionBehaviorAttr matchFPExceptionBehaviorAttr(llvm::Value *value);
+
+  /// Converts `value` to a rounding mode attribute. Asserts if the matching
+  /// fails.
+  RoundingModeAttr matchRoundingModeAttr(llvm::Value *value);
+
   /// Converts `value` to an array of alias scopes or returns failure if the
   /// conversion fails.
   FailureOr<SmallVector<AliasScopeAttr>>
@@ -171,10 +180,19 @@ public:
   /// attributes of LLVMFuncOp `funcOp`.
   void processFunctionAttributes(llvm::Function *func, LLVMFuncOp funcOp);
 
+  /// Sets the integer overflow flags (nsw/nuw) attribute for the imported
+  /// operation `op` given the original instruction `inst`. Asserts if the
+  /// operation does not implement the integer overflow flag interface.
+  void setIntegerOverflowFlags(llvm::Instruction *inst, Operation *op) const;
+
   /// Sets the fastmath flags attribute for the imported operation `op` given
   /// the original instruction `inst`. Asserts if the operation does not
   /// implement the fastmath interface.
   void setFastmathFlagsAttr(llvm::Instruction *inst, Operation *op) const;
+
+  /// Converts !llvm.linker.options metadata to the llvm.linker.options
+  /// LLVM dialect operation.
+  LogicalResult convertLinkerOptionsMetadata();
 
   /// Converts all LLVM metadata nodes that translate to attributes such as
   /// alias analysis or access group metadata, and builds a map from the
@@ -205,12 +223,29 @@ public:
   FailureOr<SmallVector<AliasScopeAttr>>
   lookupAliasScopeAttrs(const llvm::MDNode *node) const;
 
+  /// Adds a debug intrinsics to the list of intrinsics that should be converted
+  /// after the function conversion has finished.
+  void addDebugIntrinsic(llvm::CallInst *intrinsic);
+
+  /// Converts the LLVM values for an intrinsic to mixed MLIR values and
+  /// attributes for LLVM_IntrOpBase. Attributes correspond to LLVM immargs. The
+  /// list `immArgPositions` contains the positions of immargs on the LLVM
+  /// intrinsic, and `immArgAttrNames` list (of the same length) contains the
+  /// corresponding MLIR attribute names.
+  LogicalResult
+  convertIntrinsicArguments(ArrayRef<llvm::Value *> values,
+                            ArrayRef<unsigned> immArgPositions,
+                            ArrayRef<StringLiteral> immArgAttrNames,
+                            SmallVectorImpl<Value> &valuesOut,
+                            SmallVectorImpl<NamedAttribute> &attrsOut);
+
 private:
-  /// Clears the block and value mapping before processing a new region.
-  void clearBlockAndValueMapping() {
+  /// Clears the accumulated state before processing a new region.
+  void clearRegionState() {
     valueMapping.clear();
     noResultOpMapping.clear();
     blockMapping.clear();
+    debugIntrinsics.clear();
   }
   /// Sets the constant insertion point to the start of the given block.
   void setConstantInsertionPointToStart(Block *block) {
@@ -227,6 +262,12 @@ private:
   FlatSymbolRefAttr getPersonalityAsAttr(llvm::Function *func);
   /// Imports `bb` into `block`, which must be initially empty.
   LogicalResult processBasicBlock(llvm::BasicBlock *bb, Block *block);
+  /// Converts all debug intrinsics in `debugIntrinsics`. Assumes that the
+  /// function containing the intrinsics has been fully converted to MLIR.
+  LogicalResult processDebugIntrinsics();
+  /// Converts a single debug intrinsic.
+  LogicalResult processDebugIntrinsic(llvm::DbgVariableIntrinsic *dbgIntr,
+                                      DominanceInfo &domInfo);
   /// Converts an LLVM intrinsic to an MLIR LLVM dialect operation if an MLIR
   /// counterpart exists. Otherwise, returns failure.
   LogicalResult convertIntrinsic(llvm::CallInst *inst);
@@ -339,6 +380,9 @@ private:
   /// operations for all operations that return no result. All operations that
   /// return a result have a valueMapping entry instead.
   DenseMap<llvm::Instruction *, Operation *> noResultOpMapping;
+  /// Function-local list of debug intrinsics that need to be imported after the
+  /// function conversion has finished.
+  SetVector<llvm::Instruction *> debugIntrinsics;
   /// Mapping between LLVM alias scope and domain metadata nodes and
   /// attributes in the LLVM dialect corresponding to these nodes.
   DenseMap<const llvm::MDNode *, Attribute> aliasScopeMapping;

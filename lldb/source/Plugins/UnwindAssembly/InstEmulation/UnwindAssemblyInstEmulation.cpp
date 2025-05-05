@@ -70,8 +70,8 @@ bool UnwindAssemblyInstEmulation::GetNonCallSiteUnwindPlanFromAssembly(
 
     const bool prefer_file_cache = true;
     DisassemblerSP disasm_sp(Disassembler::DisassembleBytes(
-        m_arch, nullptr, nullptr, range.GetBaseAddress(), opcode_data,
-        opcode_size, 99999, prefer_file_cache));
+        m_arch, nullptr, nullptr, nullptr, nullptr, range.GetBaseAddress(),
+        opcode_data, opcode_size, 99999, prefer_file_cache));
 
     Log *log = GetLog(LLDBLog::Unwind);
 
@@ -424,8 +424,6 @@ size_t UnwindAssemblyInstEmulation::WriteMemory(
     log->PutString(strm.GetString());
   }
 
-  const bool cant_replace = false;
-
   switch (context.type) {
   default:
   case EmulateInstruction::eContextInvalid:
@@ -467,7 +465,7 @@ size_t UnwindAssemblyInstEmulation::WriteMemory(
         m_pushed_regs[reg_num] = addr;
         const int32_t offset = addr - m_initial_sp;
         m_curr_row->SetRegisterLocationToAtCFAPlusOffset(reg_num, offset,
-                                                         cant_replace);
+                                                         /*can_replace=*/true);
         m_curr_row_modified = true;
       }
     }

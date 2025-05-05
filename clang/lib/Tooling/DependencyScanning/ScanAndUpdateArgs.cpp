@@ -11,13 +11,23 @@
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Tooling/DependencyScanning/DependencyScanningTool.h"
-#include "llvm/CAS/CachingOnDiskFileSystem.h"
 #include "llvm/CAS/ObjectStore.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/PrefixMapper.h"
 
 using namespace clang;
 using namespace clang::tooling::dependencies;
 using llvm::Error;
+
+static void updateRelativePath(std::string &Path,
+                               const std::string &WorkingDir) {
+  if (Path.empty() || llvm::sys::path::is_absolute(Path) || WorkingDir.empty())
+    return;
+
+  SmallString<128> PathStorage(WorkingDir);
+  llvm::sys::path::append(PathStorage, Path);
+  Path = PathStorage.str();
+}
 
 void tooling::dependencies::configureInvocationForCaching(
     CompilerInvocation &CI, CASOptions CASOpts, std::string RootID,
@@ -34,7 +44,7 @@ void tooling::dependencies::configureInvocationForCaching(
     CodeGenOpts.UseCASBackend = false;
     CodeGenOpts.EmitCASIDFile = false;
     auto &LLVMArgs = FrontendOpts.LLVMArgs;
-    llvm::erase_value(LLVMArgs, "-cas-friendly-debug-info");
+    llvm::erase(LLVMArgs, "-cas-friendly-debug-info");
   }
   CodeGenOpts.DwarfDebugFlags.clear();
   resetBenignCodeGenOptions(FrontendOpts.ProgramAction, CI.getLangOpts(),
@@ -64,6 +74,9 @@ void tooling::dependencies::configureInvocationForCaching(
     HSOpts.PrebuiltModuleFiles = std::move(OriginalHSOpts.PrebuiltModuleFiles);
     // Preserve -gmodules (see below for caveats).
     HSOpts.ModuleFormat = OriginalHSOpts.ModuleFormat;
+    HSOpts.UseBuiltinIncludes = false;
+    HSOpts.UseStandardSystemIncludes = false;
+    HSOpts.UseStandardCXXIncludes = false;
 
     auto &PPOpts = CI.getPreprocessorOpts();
     // We don't need this because we save the contents of the PCH file in the
@@ -88,6 +101,14 @@ void tooling::dependencies::configureInvocationForCaching(
     }
     // Clear APINotes options.
     CI.getAPINotesOpts().ModuleSearchPaths = {};
+
+    // Update output paths, and clear working directory.
+    auto CWD = FileSystemOpts.WorkingDir;
+    updateRelativePath(FrontendOpts.OutputFile, CWD);
+    updateRelativePath(CI.getDiagnosticOpts().DiagnosticSerializationFile, CWD);
+    updateRelativePath(CI.getDiagnosticOpts().DiagnosticLogFile, CWD);
+    updateRelativePath(CI.getDependencyOutputOpts().OutputFile, CWD);
+    FileSystemOpts.WorkingDir.clear();
   } else {
     FileSystemOpts.CASFileSystemRootID = std::move(RootID);
     FileSystemOpts.CASFileSystemWorkingDirectory = std::move(WorkingDir);

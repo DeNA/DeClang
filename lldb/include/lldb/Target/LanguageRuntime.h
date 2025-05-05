@@ -15,11 +15,11 @@
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Core/StructuredDataImpl.h"
 #include "lldb/Core/Value.h"
-#include "lldb/Core/ValueObject.h"
 #include "lldb/Expression/LLVMUserExpression.h"
 #include "lldb/Symbol/DeclVendor.h"
 #include "lldb/Target/ExecutionContextScope.h"
 #include "lldb/Target/Runtime.h"
+#include "lldb/ValueObject/ValueObject.h"
 #include "lldb/lldb-private.h"
 #include "lldb/lldb-public.h"
 #include <optional>
@@ -188,9 +188,9 @@ public:
     return m_process->GetTarget().GetSearchFilterForModule(nullptr);
   }
 
-  virtual bool GetTypeBitSize(const CompilerType &compiler_type,
-                              uint64_t &size) {
-    return false;
+  virtual std::optional<uint64_t>
+  GetTypeBitSize(const CompilerType &compiler_type) {
+    return {};
   }
 
   virtual void SymbolsDidLoad(const ModuleList &module_list) {}
@@ -230,22 +230,6 @@ public:
   virtual bool isA(const void *ClassID) const { return ClassID == &ID; }
   static char ID;
 
-  /// Query the runtime for language specific metadata about the given frame.
-  ///
-  /// Properties that are common to all languages are exposed as dedicated APIs
-  /// of \c Frame and \c Function. This function complements those APIs by
-  /// producing a \c StructuredData instance that encapsulates non-common
-  /// properties about the frame and function.
-  ///
-  /// \param[in] frame
-  ///     The frame to compute metadata for.
-  ///
-  /// \return
-  ///     Returns a StructuredData containing the metadata.
-  virtual StructuredDataImpl *GetLanguageSpecificData(StackFrame &frame) {
-    return nullptr;
-  }
-
   virtual void FindFunctionPointersInCall(StackFrame &frame,
                                           std::vector<Address> &addresses,
                                           bool debug_only = true,
@@ -284,6 +268,11 @@ public:
   GetRuntimeUnwindPlan(lldb_private::Thread &thread,
                        lldb_private::RegisterContext *regctx,
                        bool &behaves_like_zeroth_frame);
+
+  /// Language runtime plugins can use this API to report
+  /// language-specific runtime information about this compile unit,
+  /// such as additional language version details or feature flags.
+  virtual StructuredData::ObjectSP GetLanguageSpecificData(SymbolContext sc);
 
 protected:
   // The static GetRuntimeUnwindPlan method above is only implemented in the

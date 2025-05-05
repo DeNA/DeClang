@@ -11,7 +11,6 @@
 
 #include "clang/Basic/LLVM.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
-#include "llvm/Support/VirtualFileSystem.h"
 #include <memory>
 
 namespace llvm {
@@ -32,6 +31,7 @@ namespace clang {
   class TargetOptions;
   class LangOptions;
   class CASOptions; // MCCAS
+  class BackendConsumer;
 
   enum BackendAction {
     Backend_EmitAssembly,  ///< Emit native assembly files
@@ -49,7 +49,8 @@ namespace clang {
                          StringRef TDesc, llvm::Module *M, BackendAction Action,
                          llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS,
                          std::unique_ptr<raw_pwrite_stream> OS,
-                         std::unique_ptr<raw_pwrite_stream> CasidOS = nullptr);
+                         std::unique_ptr<raw_pwrite_stream> CasidOS = nullptr,
+                         BackendConsumer *BC = nullptr);
 
   void EmbedBitcode(llvm::Module *M, const CodeGenOptions &CGOpts,
                     llvm::MemoryBufferRef Buf);

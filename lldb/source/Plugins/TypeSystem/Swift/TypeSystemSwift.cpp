@@ -71,13 +71,6 @@ void TypeSystemSwift::Terminate() {
 
 /// \}
 
-void TypeSystemSwift::DumpValue(
-    lldb::opaque_compiler_type_t type, ExecutionContext *exe_ctx, Stream &s,
-    lldb::Format format, const DataExtractor &data, lldb::offset_t data_offset,
-    size_t data_byte_size, uint32_t bitfield_bit_size,
-    uint32_t bitfield_bit_offset, bool show_types, bool show_summary,
-    bool verbose, uint32_t depth) {}
-
 void TypeSystemSwift::Dump(llvm::raw_ostream &output) {
   // TODO: What to dump?
 }
@@ -142,6 +135,20 @@ lldb::Format TypeSystemSwift::GetFormat(opaque_compiler_type_t type) {
     return eFormatAddressInfo;
 
   return eFormatBytes;
+}
+
+unsigned TypeSystemSwift::GetPtrAuthKey(lldb::opaque_compiler_type_t type) {
+  return 0;
+}
+
+unsigned
+TypeSystemSwift::GetPtrAuthDiscriminator(lldb::opaque_compiler_type_t type) {
+  return 0;
+}
+
+bool TypeSystemSwift::GetPtrAuthAddressDiversity(
+    lldb::opaque_compiler_type_t type) {
+  return false;
 }
 
 namespace llvm {

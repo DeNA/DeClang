@@ -6,17 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_LIBC_SRC_SUPPORT_UINT128_H
-#define LLVM_LIBC_SRC_SUPPORT_UINT128_H
+#ifndef LLVM_LIBC_SRC___SUPPORT_UINT128_H
+#define LLVM_LIBC_SRC___SUPPORT_UINT128_H
 
-#include "UInt.h"
+#include "big_int.h"
+#include "src/__support/macros/properties/types.h" // LIBC_TYPES_HAS_INT128
 
-#if !defined(__SIZEOF_INT128__)
-using UInt128 = __llvm_libc::cpp::UInt<128>;
-using Int128 = __llvm_libc::cpp::Int<128>;
-#else
+#ifdef LIBC_TYPES_HAS_INT128
 using UInt128 = __uint128_t;
 using Int128 = __int128_t;
-#endif
+#else
+using UInt128 = LIBC_NAMESPACE::UInt<128>;
+using Int128 = LIBC_NAMESPACE::Int<128>;
+#endif // LIBC_TYPES_HAS_INT128
 
-#endif // LLVM_LIBC_SRC_SUPPORT_UINT128_H
+#endif // LLVM_LIBC_SRC___SUPPORT_UINT128_H

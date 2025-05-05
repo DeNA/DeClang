@@ -271,14 +271,19 @@ public:
 
   /// Form a reference for the provided hash. The reference can be used as part
   /// of a CAS object even if it's not associated with an object yet.
-  ObjectID getReference(ArrayRef<uint8_t> Hash);
+  Expected<ObjectID> getReference(ArrayRef<uint8_t> Hash);
 
   /// Get an existing reference to the object \p Digest.
   ///
   /// Returns \p nullopt if the object is not stored in this CAS.
   std::optional<ObjectID> getExistingReference(ArrayRef<uint8_t> Digest);
 
-  /// \returns true if the object associated with \p Ref is stored in the CAS.
+  /// Check whether the object associated with \p Ref is stored in the CAS.
+  /// Note that this function will fault-in according to the policy.
+  Expected<bool> isMaterialized(ObjectID Ref);
+
+  /// Check whether the object associated with \p Ref is stored in the CAS.
+  /// Note that this function does not fault-in.
   bool containsObject(ObjectID Ref) const {
     return containsObject(Ref, /*CheckUpstream=*/true);
   }
@@ -296,6 +301,11 @@ public:
   /// NOTE: There's a possibility that the returned size is not including a
   /// large object if the process crashed right at the point of inserting it.
   size_t getStorageSize() const;
+
+  /// \returns The precentage of space utilization of hard space limits.
+  ///
+  /// Return value is an integer between 0 and 100 for percentage.
+  unsigned getHardStorageLimitUtilization() const;
 
   void print(raw_ostream &OS) const;
 
@@ -332,7 +342,24 @@ private:
   class TempFile;
   class MappedTempFile;
 
-  bool containsObject(ObjectID Ref, bool CheckUpstream) const;
+  enum class ObjectPresence {
+    Missing,
+    InPrimaryDB,
+    OnlyInUpstreamDB,
+  };
+
+  ObjectPresence getObjectPresence(ObjectID Ref, bool CheckUpstream) const;
+
+  bool containsObject(ObjectID Ref, bool CheckUpstream) const {
+    switch (getObjectPresence(Ref, CheckUpstream)) {
+    case ObjectPresence::Missing:
+      return false;
+    case ObjectPresence::InPrimaryDB:
+      return true;
+    case ObjectPresence::OnlyInUpstreamDB:
+      return true;
+    }
+  }
 
   /// When \p load is called for a node that doesn't exist, this function tries
   /// to load it from the upstream store and copy it to the primary one.
@@ -340,7 +367,7 @@ private:
   Error importFullTree(ObjectID PrimaryID, ObjectHandle UpstreamNode);
   Error importSingleNode(ObjectID PrimaryID, ObjectHandle UpstreamNode);
 
-  IndexProxy indexHash(ArrayRef<uint8_t> Hash);
+  Expected<IndexProxy> indexHash(ArrayRef<uint8_t> Hash);
 
   Error createStandaloneLeaf(IndexProxy &I, ArrayRef<char> Data);
 

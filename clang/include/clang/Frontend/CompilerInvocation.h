@@ -303,6 +303,11 @@ public:
   std::shared_ptr<PreprocessorOptions> getPreprocessorOptsPtr() {
     return PPOpts;
   }
+  std::shared_ptr<LangOptions> getLangOptsPtr() { return LangOpts; }
+  std::shared_ptr<CASOptions> getCASOptsPtr() { return CASOpts; }
+  void setCASOption(std::shared_ptr<CASOptions> CASOpts) {
+    this->CASOpts = CASOpts;
+  }
   /// @}
 
   /// Create a compiler invocation from a list of input options.
@@ -330,6 +335,15 @@ public:
   /// \param MainAddr - The address of main (or some other function in the main
   /// executable), for finding the builtin compiler path.
   static std::string GetResourcesPath(const char *Argv0, void *MainAddr);
+
+  /// Populate \p Opts with the default set of pointer authentication-related
+  /// options given \p LangOpts and \p Triple.
+  ///
+  /// Note: This is intended to be used by tools which must be aware of
+  /// pointer authentication-related code generation, e.g. lldb.
+  static void setDefaultPointerAuthOptions(PointerAuthOptions &Opts,
+                                           const LangOptions &LangOpts,
+                                           const llvm::Triple &Triple);
 
   /// Retrieve a module hash string that is suitable for uniquely
   /// identifying the conditions under which the module was built.

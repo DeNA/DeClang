@@ -186,6 +186,8 @@ public:
   /// Returns true iff this expression is using any imported C++ modules.
   bool DidImportCxxModules() const { return !m_imported_cpp_modules.empty(); }
 
+  llvm::StringRef GetFilename() const { return m_filename; }
+
 private:
   /// Populate m_in_cplusplus_method and m_in_objectivec_method based on the
   /// environment.
@@ -194,9 +196,9 @@ private:
   /// The parameter have the same meaning as in ClangUserExpression::Parse.
   /// \see ClangUserExpression::Parse
   bool TryParse(DiagnosticManager &diagnostic_manager,
-                ExecutionContextScope *exe_scope, ExecutionContext &exe_ctx,
-                lldb_private::ExecutionPolicy execution_policy, bool keep_result_in_memory,
-                bool generate_debug_info);
+                ExecutionContext &exe_ctx,
+                lldb_private::ExecutionPolicy execution_policy,
+                bool keep_result_in_memory, bool generate_debug_info);
 
   void SetupCppModuleImports(ExecutionContext &exe_ctx);
 
@@ -213,7 +215,7 @@ private:
                         bool for_completion);
 
   lldb::addr_t GetCppObjectPointer(lldb::StackFrameSP frame,
-                                   ConstString &object_name, Status &err);
+                                   llvm::StringRef object_name, Status &err);
 
   /// Defines how the current expression should be wrapped.
   ClangExpressionSourceCode::WrapKind GetWrapKind() const;

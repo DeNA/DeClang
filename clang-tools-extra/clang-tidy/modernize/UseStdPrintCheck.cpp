@@ -39,10 +39,10 @@ UseStdPrintCheck::UseStdPrintCheck(StringRef Name, ClangTidyContext *Context)
       MaybeHeaderToInclude(Options.get("PrintHeader")) {
 
   if (PrintfLikeFunctions.empty() && FprintfLikeFunctions.empty()) {
-    PrintfLikeFunctions.push_back("::printf");
-    PrintfLikeFunctions.push_back("absl::PrintF");
-    FprintfLikeFunctions.push_back("::fprintf");
-    FprintfLikeFunctions.push_back("absl::FPrintF");
+    PrintfLikeFunctions.emplace_back("::printf");
+    PrintfLikeFunctions.emplace_back("absl::PrintF");
+    FprintfLikeFunctions.emplace_back("::fprintf");
+    FprintfLikeFunctions.emplace_back("absl::FPrintF");
   }
 
   if (!MaybeHeaderToInclude && (ReplacementPrintFunction == "std::print" ||
@@ -129,8 +129,11 @@ void UseStdPrintCheck::check(const MatchFinder::MatchResult &Result) {
     FormatArgOffset = 1;
   }
 
+  utils::FormatStringConverter::Configuration ConverterConfig;
+  ConverterConfig.StrictMode = StrictMode;
+  ConverterConfig.AllowTrailingNewlineRemoval = true;
   utils::FormatStringConverter Converter(
-      Result.Context, Printf, FormatArgOffset, StrictMode, getLangOpts());
+      Result.Context, Printf, FormatArgOffset, ConverterConfig, getLangOpts());
   const Expr *PrintfCall = Printf->getCallee();
   const StringRef ReplacementFunction = Converter.usePrintNewlineFunction()
                                             ? ReplacementPrintlnFunction
@@ -138,7 +141,8 @@ void UseStdPrintCheck::check(const MatchFinder::MatchResult &Result) {
   if (!Converter.canApply()) {
     diag(PrintfCall->getBeginLoc(),
          "unable to use '%0' instead of %1 because %2")
-        << ReplacementFunction << OldFunction->getIdentifier()
+        << PrintfCall->getSourceRange() << ReplacementFunction
+        << OldFunction->getIdentifier()
         << Converter.conversionNotPossibleReason();
     return;
   }

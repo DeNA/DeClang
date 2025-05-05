@@ -46,7 +46,7 @@ TEST(AlarmTest, Create) {
                                     ALARM_TIMEOUT);
 
     alarm.Create([&callbacks_actual, &m, i]() {
-      std::lock_guard guard(m);
+      std::lock_guard<std::mutex> guard(m);
       callbacks_actual[i] = std::chrono::system_clock::now();
     });
 
@@ -55,6 +55,9 @@ TEST(AlarmTest, Create) {
 
   // Leave plenty of time for all the alarms to fire.
   std::this_thread::sleep_for(TEST_TIMEOUT);
+
+  // Acquire the lock to check the callbacks.
+  std::lock_guard<std::mutex> guard(m);
 
   // Make sure all the alarms fired around the expected time.
   for (size_t i = 0; i < 5; ++i)
@@ -75,13 +78,16 @@ TEST(AlarmTest, Exit) {
       callbacks.emplace_back(false);
 
       handles.push_back(alarm.Create([&callbacks, &m, i]() {
-        std::lock_guard guard(m);
+        std::lock_guard<std::mutex> guard(m);
         callbacks[i] = true;
       }));
     }
 
     // Let the alarm go out of scope before any alarm had a chance to fire.
   }
+
+  // Acquire the lock to check the callbacks.
+  std::lock_guard<std::mutex> guard(m);
 
   // Make sure none of the alarms fired.
   for (bool callback : callbacks)
@@ -101,7 +107,7 @@ TEST(AlarmTest, Cancel) {
     callbacks.emplace_back(false);
 
     handles.push_back(alarm.Create([&callbacks, &m, i]() {
-      std::lock_guard guard(m);
+      std::lock_guard<std::mutex> guard(m);
       callbacks[i] = true;
     }));
   }
@@ -112,6 +118,9 @@ TEST(AlarmTest, Cancel) {
 
   // Leave plenty of time for all the alarms to fire.
   std::this_thread::sleep_for(TEST_TIMEOUT);
+
+  // Acquire the lock to check the callbacks.
+  std::lock_guard<std::mutex> guard(m);
 
   // Make sure none of the first 4 alarms fired.
   for (size_t i = 0; i < 4; ++i)
@@ -137,7 +146,7 @@ TEST(AlarmTest, Restart) {
                                     ALARM_TIMEOUT);
 
     handles.push_back(alarm.Create([&callbacks_actual, &m, i]() {
-      std::lock_guard guard(m);
+      std::lock_guard<std::mutex> guard(m);
       callbacks_actual[i] = std::chrono::system_clock::now();
     }));
 
@@ -146,12 +155,16 @@ TEST(AlarmTest, Restart) {
 
   // Update the last 2 alarms.
   for (size_t i = 3; i < 5; ++i) {
+    std::lock_guard<std::mutex> guard(m);
     callbacks_expected[i] = std::chrono::system_clock::now() + ALARM_TIMEOUT;
     EXPECT_TRUE(alarm.Restart(handles[i]));
   }
 
   // Leave plenty of time for all the alarms to fire.
   std::this_thread::sleep_for(TEST_TIMEOUT);
+
+  // Acquire the lock to check the callbacks.
+  std::lock_guard<std::mutex> guard(m);
 
   // Make sure all the alarms around the expected time.
   for (size_t i = 0; i < 5; ++i)

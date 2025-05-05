@@ -8,10 +8,10 @@
 
 #include "LibStdcpp.h"
 
-#include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/ValueObject/ValueObject.h"
 
 #include <memory>
 #include <vector>
@@ -69,9 +69,9 @@ lldb::ChildCacheState LibStdcppTupleSyntheticFrontEnd::Update() {
     for (size_t i = 0; i < child_count; ++i) {
       ValueObjectSP child_sp = current_child->GetChildAtIndex(i);
       llvm::StringRef name_str = child_sp->GetName().GetStringRef();
-      if (name_str.startswith("std::_Tuple_impl<")) {
+      if (name_str.starts_with("std::_Tuple_impl<")) {
         next_child_sp = child_sp;
-      } else if (name_str.startswith("std::_Head_base<")) {
+      } else if (name_str.starts_with("std::_Head_base<")) {
         ValueObjectSP value_sp =
             child_sp->GetChildMemberWithName("_M_head_impl");
         if (value_sp) {

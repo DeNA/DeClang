@@ -49,4 +49,3 @@ int getNdkVersion(const char *path) {
 DONE:
 	return version;
 }
-

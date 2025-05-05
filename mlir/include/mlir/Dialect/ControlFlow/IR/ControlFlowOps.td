@@ -28,8 +28,6 @@ def ControlFlow_Dialect : Dialect {
     constructs. These constructs generally represent control flow directly
     on SSA blocks of a control flow graph.
   }];
-  let usePropertiesForAttributes = 1;
-
 }
 
 class CF_Op<string mnemonic, list<Trait> traits = []> :
@@ -39,10 +37,12 @@ class CF_Op<string mnemonic, list<Trait> traits = []> :
 // AssertOp
 //===----------------------------------------------------------------------===//
 
-def AssertOp : CF_Op<"assert"> {
+def AssertOp : CF_Op<"assert",
+    [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "Assert operation with message attribute";
   let description = [{
-    Assert operation with single boolean operand and an error message attribute.
+    Assert operation at runtime with single boolean operand and an error
+    message attribute.
     If the argument is `true` this operation has no effect. Otherwise, the
     program execution will abort. The provided error message may be used by a
     runtime to propagate the error to the user.

@@ -14,7 +14,6 @@ from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
 import os
-import unittest2
 
 
 class TestSwiftDWARFImporterBridgingHeader(lldbtest.TestBase):
@@ -39,8 +38,6 @@ class TestSwiftDWARFImporterBridgingHeader(lldbtest.TestBase):
     @skipIf(archs=['ppc64le'], bugnumber='SR-10214')
     # This test needs a working Remote Mirrors implementation.
     @skipIf(oslist=['windows'])
-    # FIMXE: This broke when adapting the swift-driver based Makefile.rules
-    @expectedFailureAll(oslist=['linux'])
     # We delete the pch that would contains the debug info as part of the setup.
     #@skipIf(debug_info=no_match(["dsym"]))
     @swiftTest

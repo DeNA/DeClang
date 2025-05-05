@@ -63,7 +63,7 @@
 },
 {
   "directory": "DIR",
-  "command": "clang -c DIR/tu2.m -I modules/A -DFඞ \"-DF\\\\u{0D9E}\" -DK -DK -fmodules -fmodules-cache-path=DIR/module-cache -fimplicit-module-maps -v",
+  "command": "clang -c DIR/tu2.m -I modules/A -DFඞ \"-DF\\\\u{0D9E}\" -DK -DK -fmodules -fmodules-cache-path=DIR/module-cache -fimplicit-module-maps",
   "file": "DIR/tu2.m"
 }
 ]

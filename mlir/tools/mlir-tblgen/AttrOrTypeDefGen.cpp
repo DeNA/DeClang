@@ -50,7 +50,7 @@ static void collectAllDefs(StringRef selectedDialect,
   } else {
     // Otherwise, generate the defs that belong to the selected dialect.
     auto dialectDefs = llvm::make_filter_range(defs, [&](const auto &def) {
-      return def.getDialect().getName().equals(selectedDialect);
+      return def.getDialect().getName() == selectedDialect;
     });
     resultDefs.assign(dialectDefs.begin(), dialectDefs.end());
   }
@@ -87,6 +87,10 @@ private:
   /// Emit top-level declarations: using declarations and any extra class
   /// declarations.
   void emitTopLevelDeclarations();
+  /// Emit the function that returns the type or attribute name.
+  void emitName();
+  /// Emit the dialect name as a static member variable.
+  void emitDialectName();
   /// Emit attribute or type builders.
   void emitBuilders();
   /// Emit a verifier for the def.
@@ -180,6 +184,10 @@ DefGen::DefGen(const AttrOrTypeDef &def)
   // Emit builders for defs with parameters
   if (storageCls)
     emitBuilders();
+  // Emit the type name.
+  emitName();
+  // Emit the dialect name.
+  emitDialectName();
   // Emit the verifier.
   if (storageCls && def.genVerifyDecl())
     emitVerifier();
@@ -264,6 +272,26 @@ void DefGen::emitTopLevelDeclarations() {
                                         std::move(extraDef));
 }
 
+void DefGen::emitName() {
+  StringRef name;
+  if (auto *attrDef = dyn_cast<AttrDef>(&def)) {
+    name = attrDef->getAttrName();
+  } else {
+    auto *typeDef = cast<TypeDef>(&def);
+    name = typeDef->getTypeName();
+  }
+  std::string nameDecl =
+      strfmt("static constexpr ::llvm::StringLiteral name = \"{0}\";\n", name);
+  defCls.declare<ExtraClassDeclaration>(std::move(nameDecl));
+}
+
+void DefGen::emitDialectName() {
+  std::string decl =
+      strfmt("static constexpr ::llvm::StringLiteral dialectName = \"{0}\";\n",
+             def.getDialect().getName());
+  defCls.declare<ExtraClassDeclaration>(std::move(decl));
+}
+
 void DefGen::emitBuilders() {
   if (!def.skipDefaultBuilders()) {
     emitDefaultBuilder();
@@ -280,7 +308,7 @@ void DefGen::emitBuilders() {
 void DefGen::emitVerifier() {
   defCls.declare<UsingDeclaration>("Base::getChecked");
   defCls.declareStaticMethod(
-      "::mlir::LogicalResult", "verify",
+      "::llvm::LogicalResult", "verify",
       getBuilderParams({{"::llvm::function_ref<::mlir::InFlightDiagnostic()>",
                          "emitError"}}));
 }
@@ -353,7 +381,7 @@ void DefGen::emitDefaultBuilder() {
   MethodBody &body = m->body().indent();
   auto scope = body.scope("return Base::get(context", ");");
   for (const auto &param : params)
-    body << ", " << param.getName();
+    body << ", std::move(" << param.getName() << ")";
 }
 
 void DefGen::emitCheckedBuilder() {
@@ -474,8 +502,10 @@ void DefGen::emitTraitMethod(const InterfaceMethod &method) {
 void DefGen::emitStorageConstructor() {
   Constructor *ctor =
       storageCls->addConstructor<Method::Inline>(getBuilderParams({}));
-  for (auto &param : params)
-    ctor->addMemberInitializer(param.getName(), param.getName());
+  for (auto &param : params) {
+    std::string movedValue = ("std::move(" + param.getName() + ")").str();
+    ctor->addMemberInitializer(param.getName(), movedValue);
+  }
 }
 
 void DefGen::emitKeyType() {
@@ -525,11 +555,11 @@ void DefGen::emitConstruct() {
                                         : Method::Static,
       MethodParameter(strfmt("::mlir::{0}StorageAllocator &", valueType),
                       "allocator"),
-      MethodParameter("const KeyTy &", "tblgenKey"));
+      MethodParameter("KeyTy &&", "tblgenKey"));
   if (!def.hasStorageCustomConstructor()) {
     auto &body = construct->body().indent();
     for (const auto &it : llvm::enumerate(params)) {
-      body << formatv("auto {0} = std::get<{1}>(tblgenKey);\n",
+      body << formatv("auto {0} = std::move(std::get<{1}>(tblgenKey));\n",
                       it.value().getName(), it.index());
     }
     // Use the parameters' custom allocator code, if provided.
@@ -544,8 +574,9 @@ void DefGen::emitConstruct() {
         body.scope(strfmt("return new (allocator.allocate<{0}>()) {0}(",
                           def.getStorageClassName()),
                    ");");
-    llvm::interleaveComma(params, body,
-                          [&](auto &param) { body << param.getName(); });
+    llvm::interleaveComma(params, body, [&](auto &param) {
+      body << "std::move(" << param.getName() << ")";
+    });
   }
 }
 
@@ -584,7 +615,12 @@ protected:
   DefGenerator(std::vector<llvm::Record *> &&defs, raw_ostream &os,
                StringRef defType, StringRef valueType, bool isAttrGenerator)
       : defRecords(std::move(defs)), os(os), defType(defType),
-        valueType(valueType), isAttrGenerator(isAttrGenerator) {}
+        valueType(valueType), isAttrGenerator(isAttrGenerator) {
+    // Sort by occurrence in file.
+    llvm::sort(defRecords, [](llvm::Record *lhs, llvm::Record *rhs) {
+      return lhs->getID() < rhs->getID();
+    });
+  }
 
   /// Emit the list of def type names.
   void emitTypeDefList(ArrayRef<AttrOrTypeDef> defs);
@@ -794,7 +830,7 @@ void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
                strfmt("generated{0}Parser", valueType), Method::StaticInline,
                std::move(params));
   // Declare the printer.
-  Method printer("::mlir::LogicalResult",
+  Method printer("::llvm::LogicalResult",
                  strfmt("generated{0}Printer", valueType), Method::StaticInline,
                  {{strfmt("::mlir::{0}", valueType), "def"},
                   {"::mlir::AsmPrinter &", "printer"}});
@@ -814,7 +850,7 @@ void DefGenerator::emitParsePrintDispatch(ArrayRef<AttrOrTypeDef> defs) {
   // The printer dispatch uses llvm::TypeSwitch to find and call the correct
   // printer.
   printer.body() << "  return ::llvm::TypeSwitch<::mlir::" << valueType
-                 << ", ::mlir::LogicalResult>(def)";
+                 << ", ::llvm::LogicalResult>(def)";
   const char *const printValue = R"(    .Case<{0}>([&](auto t) {{
       printer << {0}::getMnemonic();{1}
       return ::mlir::success();

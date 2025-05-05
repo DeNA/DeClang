@@ -133,7 +133,7 @@ unsigned SourceMgr::SrcBuffer::getLineNumberSpecialized(const char *Ptr) const {
   return llvm::lower_bound(Offsets, PtrOffset) - Offsets.begin() + 1;
 }
 
-/// Look up a given \p Ptr in in the buffer, determining which line it came
+/// Look up a given \p Ptr in the buffer, determining which line it came
 /// from.
 unsigned SourceMgr::SrcBuffer::getLineNumber(const char *Ptr) const {
   size_t Sz = Buffer->getBufferSize();
@@ -398,7 +398,7 @@ SMDiagnostic::SMDiagnostic(const SourceMgr &sm, SMLoc L, StringRef FN, int Line,
                            ArrayRef<SMFixIt> Hints)
     : SM(&sm), Loc(L), Filename(std::string(FN)), LineNo(Line), ColumnNo(Col),
       Kind(Kind), Message(Msg), LineContents(LineStr), Ranges(Ranges.vec()),
-      FixIts(Hints.begin(), Hints.end()) {
+      FixIts(Hints) {
   llvm::sort(FixIts);
 }
 

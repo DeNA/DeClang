@@ -13,6 +13,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -29,6 +30,7 @@
 // RUN:                -DIOS=1         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=1    \
@@ -45,6 +47,7 @@
 // RUN:                -DIOS=1         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=1 \
 // RUN:                -DEMBEDDED=0    \
@@ -61,6 +64,7 @@
 // RUN:                -DIOS=1         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -77,6 +81,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=1          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=1    \
@@ -93,6 +98,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=1          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -109,6 +115,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=1       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=1    \
@@ -125,6 +132,41 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=1       \
+// RUN:                -DVISION=0      \
+// RUN:                -DDRIVERKIT=0   \
+// RUN:                -DMACCATALYST=0 \
+// RUN:                -DEMBEDDED=0    \
+// RUN:                -DSIMULATOR=1   \
+// RUN:                -DWINDOWS=0     \
+// RUN:                -DLINUX=0       \
+// RUN:                -DUNIX=0
+
+// RUN: %clang -dM -E --target=arm64-apple-xros \
+// RUN:        -fdefine-target-os-macros %s 2>&1 \
+// RUN: | FileCheck %s -DMAC=1         \
+// RUN:                -DOSX=0         \
+// RUN:                -DIPHONE=1      \
+// RUN:                -DIOS=0         \
+// RUN:                -DTV=0          \
+// RUN:                -DWATCH=0       \
+// RUN:                -DVISION=1      \
+// RUN:                -DDRIVERKIT=0   \
+// RUN:                -DMACCATALYST=0 \
+// RUN:                -DEMBEDDED=1    \
+// RUN:                -DSIMULATOR=0   \
+// RUN:                -DWINDOWS=0     \
+// RUN:                -DLINUX=0       \
+// RUN:                -DUNIX=0
+
+// RUN: %clang -dM -E --target=arm64-apple-xros-simulator \
+// RUN:        -fdefine-target-os-macros %s 2>&1 \
+// RUN: | FileCheck %s -DMAC=1         \
+// RUN:                -DOSX=0         \
+// RUN:                -DIPHONE=1      \
+// RUN:                -DIOS=0         \
+// RUN:                -DTV=0          \
+// RUN:                -DWATCH=0       \
+// RUN:                -DVISION=1      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -141,6 +183,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=1   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -157,6 +200,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -173,6 +217,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -189,6 +234,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -205,6 +251,7 @@
 // RUN:                -DIOS=0         \
 // RUN:                -DTV=0          \
 // RUN:                -DWATCH=0       \
+// RUN:                -DVISION=0      \
 // RUN:                -DDRIVERKIT=0   \
 // RUN:                -DMACCATALYST=0 \
 // RUN:                -DEMBEDDED=0    \
@@ -235,6 +282,7 @@
 // CHECK-DAG: #define TARGET_OS_IOS [[IOS]]
 // CHECK-DAG: #define TARGET_OS_TV [[TV]]
 // CHECK-DAG: #define TARGET_OS_WATCH [[WATCH]]
+// CHECK-DAG: #define TARGET_OS_VISION [[VISION]]
 // CHECK-DAG: #define TARGET_OS_DRIVERKIT [[DRIVERKIT]]
 // CHECK-DAG: #define TARGET_OS_MACCATALYST [[MACCATALYST]]
 // CHECK-DAG: #define TARGET_OS_SIMULATOR [[SIMULATOR]]

@@ -25,6 +25,7 @@
 #include "swift/AST/Import.h"
 #include "swift/AST/Module.h"
 #include "swift/Parse/ParseVersion.h"
+#include "swift/Serialization/SerializationOptions.h"
 #include "swift/SymbolGraphGen/SymbolGraphOptions.h"
 
 #include "llvm/ADT/SmallVector.h"
@@ -78,10 +79,15 @@ namespace llvm {
 class LLVMContext;
 }
 
-class DWARFASTParser;
 class SwiftEnumDescriptor;
 
 namespace lldb_private {
+
+namespace plugin {
+namespace dwarf {
+class DWARFASTParser;
+} // namespace dwarf
+} // namespace plugin
 
 struct SourceModule;
 class SwiftASTContext;
@@ -176,7 +182,7 @@ public:
 protected:
   // Constructors and destructors
   SwiftASTContext(std::string description,
-                  TypeSystemSwiftTypeRef &typeref_typesystem);
+                  TypeSystemSwiftTypeRefSP typeref_typesystem);
 
 public:
 
@@ -192,27 +198,23 @@ public:
   /// Create a SwiftASTContext from a Module.  This context is used
   /// for frame variable and uses ClangImporter options specific to
   /// this lldb::Module.  The optional target is necessary when
-  /// creating a module-specific scratch context.  If \p fallback is
-  /// true, then a SwiftASTContextForExpressions is created.
+  /// creating a module-specific scratch context.
   static lldb::TypeSystemSP
   CreateInstance(lldb::LanguageType language, Module &module,
-                 TypeSystemSwiftTypeRef &typeref_typesystem,
-                 bool fallback = false);
-  /// Create a SwiftASTContext from a Target.  This context is global
-  /// and used for the expression evaluator.
-  static lldb::TypeSystemSP
-  CreateInstance(lldb::LanguageType language,
-                 TypeSystemSwiftTypeRefForExpressions &typeref_typesystem,
-                 const char *extra_options);
-
+                 TypeSystemSwiftTypeRef &typeref_typesystem);
   /// Create a SwiftASTContextForExpressions taylored to a specific symbol
   /// context.
   static lldb::TypeSystemSP
   CreateInstance(const SymbolContext &sc,
-                 TypeSystemSwiftTypeRefForExpressions &typeref_typesystem);
+                 TypeSystemSwiftTypeRef &typeref_typesystem,
+                 const char *extra_options = nullptr);
 
-  /// Returns true if Swift C++ interop is enabled for the given compiler unit.
+  /// Returns true if the given flag is present in the given compile unit.
+  static bool CheckFlagInCU(CompileUnit *cu, const char *flag);
+
   static bool ShouldEnableCXXInterop(CompileUnit *cu);
+
+  static bool ShouldEnableEmbeddedSwift(CompileUnit *cu);
 
   static void EnumerateSupportedLanguages(
       std::set<lldb::LanguageType> &languages_for_types,
@@ -223,20 +225,21 @@ public:
   
   bool SupportsLanguage(lldb::LanguageType language) override;
 
-  SwiftASTContext *GetSwiftASTContext(const SymbolContext *sc) const override {
-    return GetTypeSystemSwiftTypeRef().GetSwiftASTContext(sc);
+  SwiftASTContextSP GetSwiftASTContext(const SymbolContext &sc) const override {
+    if (auto ts = GetTypeSystemSwiftTypeRef())
+      return ts->GetSwiftASTContext(sc);
+    return {};
   }
 
-  TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() override {
-    // Always non-null outside of unit tests.
-    return *m_typeref_typesystem;
+  TypeSystemSwiftTypeRefSP GetTypeSystemSwiftTypeRef() override {
+    return m_typeref_typesystem.lock();
   }
 
-  const TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() const override {
-    // Always non-null outside of unit tests.
-    return *m_typeref_typesystem;
+  std::shared_ptr<const TypeSystemSwiftTypeRef>
+  GetTypeSystemSwiftTypeRef() const override {
+    return m_typeref_typesystem.lock();
   }
-  
+
   Status IsCompatible() override;
 
   swift::SourceManager &GetSourceManager();
@@ -252,6 +255,8 @@ public:
   swift::DiagnosticEngine &GetDiagnosticEngine();
 
   swift::SearchPathOptions &GetSearchPathOptions();
+
+  swift::SerializationOptions &GetSerializationOptions();
 
   void InitializeSearchPathOptions(
       llvm::ArrayRef<std::string> module_search_paths,
@@ -276,10 +281,17 @@ public:
 
   /// Add a list of Clang arguments to the ClangImporter options and
   /// apply the working directory to any relative paths.
-  void AddExtraClangArgs(const std::vector<std::string> &ExtraArgs,
-                         llvm::StringRef overrideOpts = "");
-  void AddExtraClangCC1Args(const std::vector<std::string>& source,
-                                std::vector<std::string>& dest);
+  void AddExtraClangArgs(
+      const std::vector<std::string> &ExtraArgs,
+      const std::vector<std::string> &module_search_paths,
+      const std::vector<std::pair<std::string, bool>> framework_search_paths,
+      llvm::StringRef overrideOpts = "");
+
+  void AddExtraClangCC1Args(
+      const std::vector<std::string> &source,
+      const std::vector<std::string> &module_search_paths,
+      const std::vector<std::pair<std::string, bool>> framework_search_paths,
+      std::vector<std::string> &dest);
   static void AddExtraClangArgs(const std::vector<std::string>& source,
                                 std::vector<std::string>& dest);
   static std::string GetPluginServer(llvm::StringRef plugin_library_path);
@@ -305,24 +317,22 @@ public:
   /// \return the ExtraArgs of the ClangImporterOptions.
   const std::vector<std::string> &GetClangArguments();
 
-  /// Attempt to create a Swift module, returning \c nullptr and setting
-  /// \p error if unsuccessful.
+  /// Attempt to create a Swift module.
   ///
   /// \param importInfo Information about which modules should be implicitly
   /// imported by each file of the module.
-  swift::ModuleDecl *CreateModule(const SourceModule &module, Status &error,
-                                  swift::ImplicitImportInfo importInfo);
+  llvm::Expected<swift::ModuleDecl &>
+  CreateModule(std::string module_name, swift::ImplicitImportInfo importInfo);
 
   // This function should only be called when all search paths
   // for all items in a swift::ASTContext have been setup to
   // allow for imports to happen correctly. Use with caution,
   // or use the GetModule() call that takes a FileSpec.
-  swift::ModuleDecl *GetModule(const SourceModule &module, Status &error,
-                               bool *cached = nullptr);
+  llvm::Expected<swift::ModuleDecl &> GetModule(const SourceModule &module,
+                                                bool *cached = nullptr);
+  llvm::Expected<swift::ModuleDecl &> GetModule(const FileSpec &module_spec);
 
-  swift::ModuleDecl *GetModule(const FileSpec &module_spec, Status &error);
-
-  void CacheModule(swift::ModuleDecl *module);
+  void CacheModule(std::string module_name, swift::ModuleDecl *module);
 
   /// Call this after the search paths are set up, it will find the module given
   /// by module, load the module into the AST context, and (if import_dylib is
@@ -417,9 +427,7 @@ public:
   llvm::Triple GetTriple() const;
 
   bool SetTriple(const llvm::Triple triple, lldb_private::Module *module);
-  void SetTriple(const llvm::Triple triple) override {
-    SetTriple(triple, nullptr);
-  }
+  void SetTriple(const SymbolContext &sc, const llvm::Triple triple) override;
 
   /// Condition a triple to be safe for use with Swift.  Swift is
   /// really peculiar about what CPU types it thinks it has standard
@@ -433,10 +441,6 @@ public:
   /// Import compiler_type into this context and return the swift::CanType.
   swift::CanType GetCanonicalSwiftType(CompilerType compiler_type);
 private:
-  /// Reconstruct a Swift AST type from a mangled name by looking its
-  /// components up in Swift modules.
-  llvm::Expected<swift::TypeBase *>
-  ReconstructTypeImpl(ConstString mangled_typename);
 
 protected:
   swift::Type GetSwiftType(lldb::opaque_compiler_type_t opaque_type);
@@ -474,9 +478,7 @@ public:
   bool HasClangImporterErrors() const;
 
   void AddDiagnostic(lldb::Severity severity, llvm::StringRef message);
-  void RaiseFatalError(std::string msg) const {
-    m_fatal_errors.SetErrorString(msg);
-  }
+  void RaiseFatalError(std::string msg) const { m_fatal_errors = Status(msg); }
   static bool HasFatalErrors(swift::ASTContext *ast_context);
   bool HasFatalErrors() const {
     return m_fatal_errors.Fail() || HasFatalErrors(m_ast_context_ap.get());
@@ -485,9 +487,8 @@ public:
   /// Return only fatal errors.
   Status GetFatalErrors() const;
   /// Notify the Process about any Swift or ClangImporter errors.
-  void DiagnoseWarnings(Process &process, Module &module) const override;
-  
-  bool SetColorizeDiagnostics(bool b);
+  void DiagnoseWarnings(Process &process,
+                        const SymbolContext &sc) const override;
 
   void PrintDiagnostics(DiagnosticManager &diagnostic_manager,
                         uint32_t bufferID = UINT32_MAX, uint32_t first_line = 0,
@@ -525,8 +526,11 @@ public:
     std::optional<ErrorKind> GetOptionalErrorKind() const;
     bool HasErrors() const;
     /// Return all errors and warnings that happened during the lifetime of this
-    /// object.
+    /// object as a StringError.
     llvm::Error GetAllErrors() const;
+    /// Return all errors and warnings that happened during the lifetime of this
+    /// object an ExpressionError.
+    llvm::Error GetAsExpressionError(lldb::ExpressionResults result) const;
   };
   std::unique_ptr<ScopedDiagnostics> getScopedDiagnosticConsumer();
   /// \}
@@ -537,15 +541,16 @@ public:
   swift::TBDGenOptions &GetTBDGenOptions();
 
   void ClearModuleDependentCaches() override;
-  void LogConfiguration();
+  void LogConfiguration(bool is_repl = false);
   bool HasTarget();
+  bool HasExplicitModules() const { return m_has_explicit_modules; }
   bool CheckProcessChanged();
 
   // FIXME: this should be removed once we figure out who should really own the
   // DebuggerClient's that we are sticking into the Swift Modules.
   void AddDebuggerClient(swift::DebuggerClient *debugger_client);
 
-  typedef llvm::StringMap<swift::ModuleDecl *> SwiftModuleMap;
+  typedef llvm::StringMap<const swift::ModuleDecl &> SwiftModuleMap;
 
   const SwiftModuleMap &GetModuleCache() { return m_swift_module_cache; }
 
@@ -888,7 +893,7 @@ protected:
 
   swift::MemoryBufferSerializedModuleLoader *GetMemoryBufferModuleLoader();
 
-  swift::ModuleDecl *GetCachedModule(const SourceModule &module);
+  swift::ModuleDecl *GetCachedModule(std::string module_name);
 
   void CacheDemangledType(ConstString mangled_name,
                           swift::TypeBase *found_type);
@@ -907,14 +912,9 @@ protected:
 
   CompilerType GetAsClangType(ConstString mangled_name);
 
-  /// Inserts the mapping from the module's ABI name to it's regular name into
-  /// m_module_abi_to_regular_name if they're different.
-  void RegisterModuleABINameToRealName(swift::ModuleDecl *module);
-
   /// Data members.
   /// @{
-  // Always non-null outside of unit tests.
-  TypeSystemSwiftTypeRef *m_typeref_typesystem;
+  std::weak_ptr<TypeSystemSwiftTypeRef> m_typeref_typesystem;
   std::unique_ptr<swift::CompilerInvocation> m_compiler_invocation_ap;
   std::unique_ptr<swift::SourceManager> m_source_manager_up;
   std::unique_ptr<swift::DiagnosticEngine> m_diagnostic_engine_ap;
@@ -974,9 +974,6 @@ protected:
   mutable bool m_reported_fatal_error = false;
   mutable bool m_logged_fatal_error = false;
 
-  /// Holds the source module name (value) for all modules with a custom ABI
-  /// name (key).
-  llvm::StringMap<llvm::StringRef> m_module_abi_to_regular_name;
   /// Whether this is a scratch or a module AST context.
   bool m_is_scratch_context = false;
 
@@ -1026,7 +1023,7 @@ public:
   /// \}
 
   SwiftASTContextForModule(std::string description,
-                           TypeSystemSwiftTypeRef &typeref_typesystem)
+                           TypeSystemSwiftTypeRefSP typeref_typesystem)
       : SwiftASTContext(description, typeref_typesystem) {}
   virtual ~SwiftASTContextForModule();
 };
@@ -1045,9 +1042,8 @@ public:
   /// \}
 
   SwiftASTContextForExpressions(std::string description,
-                                TypeSystemSwiftTypeRef &typeref_typesystem);
+                                TypeSystemSwiftTypeRefSP typeref_typesystem);
   virtual ~SwiftASTContextForExpressions();
-  lldb::TargetWP GetTargetWP() const override;
 
   UserExpression *GetUserExpression(llvm::StringRef expr,
                                     llvm::StringRef prefix,
@@ -1055,8 +1051,10 @@ public:
                                     Expression::ResultType desired_type,
                                     const EvaluateExpressionOptions &options,
                                     ValueObject *ctx_obj) override {
-    return m_typeref_typesystem->GetUserExpression(
-        expr, prefix, language, desired_type, options, ctx_obj);
+    if (auto ts = m_typeref_typesystem.lock())
+      return ts->GetUserExpression(expr, prefix, language, desired_type,
+                                   options, ctx_obj);
+    return nullptr;
   }
 
   PersistentExpressionState *GetPersistentExpressionState() override;
@@ -1098,9 +1096,6 @@ protected:
   /// These are the names of modules that we have loaded by hand into
   /// the Contexts we make for parsing.
   HandLoadedModuleSet m_hand_loaded_modules;
-
-private:
-  std::unique_ptr<SwiftPersistentExpressionState> m_persistent_state_up;
 };
 
 } // namespace lldb_private

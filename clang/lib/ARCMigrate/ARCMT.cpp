@@ -201,7 +201,7 @@ createInvocationForMigration(CompilerInvocation &origCI,
   for (std::vector<std::string>::iterator
          I = CInvok->getDiagnosticOpts().Warnings.begin(),
          E = CInvok->getDiagnosticOpts().Warnings.end(); I != E; ++I) {
-    if (!StringRef(*I).startswith("error"))
+    if (!StringRef(*I).starts_with("error"))
       WarnOpts.push_back(*I);
   }
   WarnOpts.push_back("error=arc-unsafe-retained-assign");
@@ -597,7 +597,8 @@ bool MigrationProcess::applyTransform(TransformFn trans,
         I = rewriter.buffer_begin(), E = rewriter.buffer_end(); I != E; ++I) {
     FileID FID = I->first;
     RewriteBuffer &buf = I->second;
-    const FileEntry *file = Ctx.getSourceManager().getFileEntryForID(FID);
+    OptionalFileEntryRef file =
+        Ctx.getSourceManager().getFileEntryRefForID(FID);
     assert(file);
     std::string newFname = std::string(file->getName());
     newFname += "-trans";
@@ -605,8 +606,7 @@ bool MigrationProcess::applyTransform(TransformFn trans,
     llvm::raw_svector_ostream vecOS(newText);
     buf.write(vecOS);
     std::unique_ptr<llvm::MemoryBuffer> memBuf(
-        llvm::MemoryBuffer::getMemBufferCopy(
-            StringRef(newText.data(), newText.size()), newFname));
+        llvm::MemoryBuffer::getMemBufferCopy(newText.str(), newFname));
     SmallString<64> filePath(file->getName());
     Unit->getFileManager().FixupRelativePath(filePath);
     Remapper.remap(filePath.str(), std::move(memBuf));

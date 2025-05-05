@@ -16,7 +16,6 @@ import lldb
 from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
-import unittest2
 import os
 
 
@@ -64,8 +63,8 @@ class TestSwiftDeploymentTarget(TestBase):
         )
         self.expect("expression f", substrs=["i = 23"])
         self.filecheck('platform shell cat ""%s"' % log, __file__)
-#       CHECK: SwiftASTContextForExpressions::SetTriple({{.*}}apple-macosx11.0.0
-#       CHECK-NOT: SwiftASTContextForExpressions::RegisterSectionModules("a.out"){{.*}} AST Data blobs
+#       CHECK: SwiftASTContextForExpressions(module: "a", cu: "main.swift")::SetTriple({{.*}}apple-macosx11.0.0
+#       CHECK-NOT: SwiftASTContextForExpressions(module: "a", cu: "main.swift")::RegisterSectionModules("a.out"){{.*}} AST Data blobs
 
     @skipUnlessDarwin  # This test uses macOS triples explicitly.
     @skipIfDarwinEmbedded
@@ -92,5 +91,5 @@ class TestSwiftDeploymentTarget(TestBase):
         self.filecheck(
             f'platform shell cat "{log}"', __file__, "-check-prefix=CHECK-PRECISE"
         )
-#       CHECK-PRECISE: SwiftASTContextForExpressions(module: "NewerTarget", cu: "NewerTarget.swift")::CreateInstance() -- Fully specified target triple {{.*}}-apple-macosx11.1.0
+#       CHECK-PRECISE: SwiftASTContextForExpressions(module: "NewerTarget", cu: "NewerTarget.swift")::CreateInstance() -- Fully specified triple {{.*}}-apple-macosx11.1.0
 #       CHECK-PRECISE: SwiftASTContextForExpressions(module: "NewerTarget", cu: "NewerTarget.swift")::SetTriple("{{.*}}-apple-macosx11.1.0")

@@ -793,6 +793,16 @@ void IoChecker::Leave(const parser::ReadStmt &readStmt) {
   CheckForProhibitedSpecifier(IoSpecKind::Delim); // C1212
   CheckForProhibitedSpecifier(IoSpecKind::Sign); // C1212
   CheckForProhibitedSpecifier(IoSpecKind::Rec, IoSpecKind::End); // C1220
+  if (specifierSet_.test(IoSpecKind::Size)) {
+    // F'2023 C1214 - allow with a warning
+    if (context_.ShouldWarn(common::LanguageFeature::ListDirectedSize)) {
+      if (specifierSet_.test(IoSpecKind::Nml)) {
+        context_.Say("If NML appears, SIZE should not appear"_port_en_US);
+      } else if (flags_.test(Flag::StarFmt)) {
+        context_.Say("If FMT=* appears, SIZE should not appear"_port_en_US);
+      }
+    }
+  }
   CheckForRequiredSpecifier(IoSpecKind::Eor,
       specifierSet_.test(IoSpecKind::Advance) && !flags_.test(Flag::AdvanceYes),
       "ADVANCE with value 'NO'"); // C1222 + 12.6.2.1p2
@@ -910,7 +920,7 @@ void IoChecker::CheckStringValue(IoSpecKind specKind, const std::string &value,
           // Open values; Close values are {"DELETE", "KEEP"}.
           {"NEW", "OLD", "REPLACE", "SCRATCH", "UNKNOWN"}},
       {IoSpecKind::Carriagecontrol, {"LIST", "FORTRAN", "NONE"}},
-      {IoSpecKind::Convert, {"BIG_ENDIAN", "LITTLE_ENDIAN", "NATIVE"}},
+      {IoSpecKind::Convert, {"BIG_ENDIAN", "LITTLE_ENDIAN", "NATIVE", "SWAP"}},
       {IoSpecKind::Dispose, {"DELETE", "KEEP"}},
   };
   auto upper{Normalize(value)};
@@ -1024,11 +1034,16 @@ void IoChecker::CheckForDefinableVariable(
       if (auto whyNot{WhyNotDefinable(at, context_.FindScope(at),
               DefinabilityFlags{DefinabilityFlag::VectorSubscriptIsOk},
               *expr)}) {
-        const Symbol *base{GetFirstSymbol(*expr)};
-        context_
-            .Say(at, "%s variable '%s' is not definable"_err_en_US, s,
-                (base ? base->name() : at).ToString())
-            .Attach(std::move(*whyNot));
+        if (whyNot->IsFatal()) {
+          const Symbol *base{GetFirstSymbol(*expr)};
+          context_
+              .Say(at, "%s variable '%s' is not definable"_err_en_US, s,
+                  (base ? base->name() : at).ToString())
+              .Attach(
+                  std::move(whyNot->set_severity(parser::Severity::Because)));
+        } else {
+          context_.Say(std::move(*whyNot));
+        }
       }
     }
   }
@@ -1036,12 +1051,9 @@ void IoChecker::CheckForDefinableVariable(
 
 void IoChecker::CheckForPureSubprogram() const { // C1597
   CHECK(context_.location());
-  if (const Scope *
-      scope{context_.globalScope().FindScope(*context_.location())}) {
-    if (FindPureProcedureContaining(*scope)) {
-      context_.Say(
-          "External I/O is not allowed in a pure subprogram"_err_en_US);
-    }
+  const Scope &scope{context_.FindScope(*context_.location())};
+  if (FindPureProcedureContaining(scope)) {
+    context_.Say("External I/O is not allowed in a pure subprogram"_err_en_US);
   }
 }
 
@@ -1171,11 +1183,23 @@ parser::Message *IoChecker::CheckForBadIoType(const Symbol &symbol,
 
 void IoChecker::CheckNamelist(const Symbol &namelist, common::DefinedIo which,
     parser::CharBlock namelistLocation) const {
-  const auto &details{namelist.GetUltimate().get<NamelistDetails>()};
-  for (const Symbol &object : details.objects()) {
-    context_.CheckIndexVarRedefine(namelistLocation, object);
-    if (auto *msg{CheckForBadIoType(object, which, namelistLocation)}) {
-      evaluate::AttachDeclaration(*msg, namelist);
+  if (!context_.HasError(namelist)) {
+    const auto &details{namelist.GetUltimate().get<NamelistDetails>()};
+    for (const Symbol &object : details.objects()) {
+      context_.CheckIndexVarRedefine(namelistLocation, object);
+      if (auto *msg{CheckForBadIoType(object, which, namelistLocation)}) {
+        evaluate::AttachDeclaration(*msg, namelist);
+      } else if (which == common::DefinedIo::ReadFormatted) {
+        if (auto why{WhyNotDefinable(namelistLocation, namelist.owner(),
+                DefinabilityFlags{}, object)}) {
+          context_
+              .Say(namelistLocation,
+                  "NAMELIST input group must not contain undefinable item '%s'"_err_en_US,
+                  object.name())
+              .Attach(std::move(why->set_severity(parser::Severity::Because)));
+          context_.SetError(namelist);
+        }
+      }
     }
   }
 }

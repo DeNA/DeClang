@@ -47,7 +47,7 @@ storeDepDirectives(cas::ObjectStore &CAS,
                    ArrayRef<dependency_directives_scan::Directive> Directives) {
   llvm::SmallString<1024> Buffer;
   llvm::raw_svector_ostream OS(Buffer);
-  llvm::support::endian::Writer W(OS, llvm::support::endianness::little);
+  llvm::support::endian::Writer W(OS, llvm::endianness::little);
   size_t NumTokens = 0;
   for (const auto &Directive : Directives)
     NumTokens += Directive.Tokens.size();
@@ -79,7 +79,7 @@ template <typename T> static void readle(StringRef &Slice, T &Out) {
   using namespace llvm::support::endian;
   if (Slice.size() < sizeof(T))
     llvm::report_fatal_error("buffer too small");
-  Out = read<T, llvm::support::little>(Slice.begin());
+  Out = read<T, llvm::endianness::little>(Slice.begin());
   Slice = Slice.drop_front(sizeof(T));
 }
 
@@ -210,7 +210,7 @@ static bool shouldCacheStatFailures(StringRef Filename) {
   // negative 'stat' caching of `.framework` directories enabled,
   // because they do not always explicitly specify their target
   // dependencies and may be either getting lucky wih build timing, or
-  // compiling against wrong dependenceis a lot of the time: e.g. an
+  // compiling against wrong dependencies a lot of the time: e.g. an
   // SDK variant of a dependency module, instead of one in the
   // project's own build directory. Temporarily disable negative
   // 'stat' caching here until all such projects are fixed.

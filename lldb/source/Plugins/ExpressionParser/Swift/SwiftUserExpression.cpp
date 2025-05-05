@@ -503,14 +503,6 @@ static llvm::Error RegisterAllVariables(
   return llvm::Error::success();
 }
 
-static SwiftPersistentExpressionState *
-GetPersistentState(Target *target, ExecutionContext &exe_ctx) {
-  auto exe_scope = exe_ctx.GetBestExecutionContextScope();
-  if (!exe_scope)
-    return nullptr;
-  return target->GetSwiftPersistentExpressionState(*exe_scope);
-}
-
 /// Check if we can evaluate the expression as generic.
 /// Currently, evaluating expression as a generic has several limitations:
 /// - Only self will be evaluated with unbound generics.
@@ -634,13 +626,14 @@ SwiftUserExpression::GetTextAndSetExpressionParser(
     return ParseResult::retry_no_bind_generic_params;
   }
 
-  if (stack_frame) {
+  auto ts = m_swift_ast_ctx->GetTypeSystemSwiftTypeRef();
+  if (ts && stack_frame) {
     // Extract the generic signature of the context.
     ConstString func_name =
         stack_frame->GetSymbolContext(lldb::eSymbolContextFunction)
             .GetFunctionName(Mangled::ePreferMangled);
     m_generic_signature = SwiftLanguageRuntime::GetGenericSignature(
-        func_name.GetStringRef(), m_swift_ast_ctx->GetTypeSystemSwiftTypeRef());
+        func_name.GetStringRef(), *ts);
   }
 
   if (m_options.GetBindGenericTypes() == lldb::eDontBind &&
@@ -721,28 +714,40 @@ bool SwiftUserExpression::Parse(DiagnosticManager &diagnostic_manager,
     return error("couldn't start parsing - no stack frame");
 
   ExecutionContextScope *exe_scope =
-      m_options.GetREPLEnabled() ? static_cast<ExecutionContextScope *>(target)
-                                 : static_cast<ExecutionContextScope *>(frame);
+      m_options.GetREPLEnabled() || m_options.GetPlaygroundTransformEnabled()
+          ? static_cast<ExecutionContextScope *>(target)
+          : static_cast<ExecutionContextScope *>(frame);
 
-exe_scope = exe_ctx.GetBestExecutionContextScope();
+  exe_scope = exe_ctx.GetBestExecutionContextScope();
 
-  m_swift_scratch_ctx = target->GetSwiftScratchContext(m_err, *exe_scope);
-  if (!m_swift_scratch_ctx)
+  auto ts_or_err = target->GetScratchTypeSystemForLanguage(
+      lldb::eLanguageTypeSwift, /*create_on_demand=*/true);
+  if (!ts_or_err)
     return error("could not create a Swift scratch context: ",
-                 m_err.AsCString());
+                 llvm::toString(ts_or_err.takeError()).c_str());
+  m_swift_scratch_ctx =
+      std::static_pointer_cast<TypeSystemSwiftTypeRefForExpressions>(
+          *ts_or_err);
+  if (!m_swift_scratch_ctx)
+    return error("could not create a Swift scratch context: ", "unknown error");
+  // Notify SwiftASTContext that this is a Playground.
+  if (m_options.GetPlaygroundTransformEnabled())
+    m_swift_scratch_ctx->SetCompilerOptions("");
 
   // For playgrounds, the target triple should be used for expression
   // evaluation, not the current module. This requires disabling precise
   // compiler invocations.
-  //
-  // To disable precise compiler invocations, pass a null SymbolContext.
-  const SymbolContext *sc = nullptr;
-  if (!m_runs_in_playground_or_repl)
-    sc = &frame->GetSymbolContext(lldb::eSymbolContextFunction);
-
-  auto *swift_ast_ctx = m_swift_scratch_ctx->get()->GetSwiftASTContext(sc);
-  m_swift_ast_ctx =
-      llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(swift_ast_ctx);
+  SymbolContext sc;
+  if (m_options.GetREPLEnabled() || m_options.GetPlaygroundTransformEnabled())
+    sc = SymbolContext(target->shared_from_this(),
+                       target->GetExecutableModule());
+  else
+    sc = frame->GetSymbolContext(lldb::eSymbolContextFunction);
+  auto swift_ast_ctx = m_swift_scratch_ctx->GetSwiftASTContext(sc);
+  if (llvm::dyn_cast_or_null<SwiftASTContextForExpressions>(
+          swift_ast_ctx.get()))
+    m_swift_ast_ctx =
+        std::static_pointer_cast<SwiftASTContextForExpressions>(swift_ast_ctx);
 
   if (!m_swift_ast_ctx)
     return error("could not create a Swift AST context");
@@ -754,21 +759,20 @@ exe_scope = exe_ctx.GetBestExecutionContextScope();
   }
   
   // This may destroy the scratch context.
-  auto *persistent_state = GetPersistentState(target, exe_ctx);
+  auto *persistent_state =
+      target->GetPersistentExpressionStateForLanguage(lldb::eLanguageTypeSwift);
   if (!persistent_state)
     return error("could not start parsing (no persistent data)");
 
-  Status status;
   SourceModule module_info;
   module_info.path.emplace_back("Swift");
-  swift::ModuleDecl *module_decl =
-      m_swift_ast_ctx->GetModule(module_info, status);
+  auto module_decl_or_err = m_swift_ast_ctx->GetModule(module_info);
+  if (!module_decl_or_err)
+    return error("could not load Swift Standard Library",
+                 llvm::toString(module_decl_or_err.takeError()).c_str());
 
-  if (status.Fail() || !module_decl)
-    return error("could not load Swift Standard Library", status.AsCString());
-
-  m_swift_ast_ctx->AddHandLoadedModule(ConstString("Swift"),
-                                       swift::ImportedModule(module_decl));
+  m_swift_ast_ctx->AddHandLoadedModule(
+      ConstString("Swift"), swift::ImportedModule(&*module_decl_or_err));
   m_result_delegate.RegisterPersistentState(persistent_state);
   m_error_delegate.RegisterPersistentState(persistent_state);
  
@@ -897,8 +901,10 @@ exe_scope = exe_ctx.GetBestExecutionContextScope();
       // We currently key off there being more than one external
       // function in the execution unit to determine whether it needs
       // to live in the process.
-      GetPersistentState(exe_ctx.GetTargetPtr(), exe_ctx)
-          ->RegisterExecutionUnit(m_execution_unit_sp);
+      if (auto *target = exe_ctx.GetTargetPtr())
+        if (auto *state = target->GetPersistentExpressionStateForLanguage(
+                lldb::eLanguageTypeSwift))
+          state->RegisterExecutionUnit(m_execution_unit_sp);
     }
   }
 
@@ -974,7 +980,8 @@ lldb::ExpressionVariableSP SwiftUserExpression::GetResultAfterDematerialization(
 
     if (target_sp) {
       if (auto *persistent_state =
-              target_sp->GetSwiftPersistentExpressionState(*exe_scope)) {
+              target_sp->GetPersistentExpressionStateForLanguage(
+                  lldb::eLanguageTypeSwift)) {
         if (error_is_valid) {
           persistent_state->RemovePersistentVariable(in_result_sp);
           result_sp = in_error_sp;

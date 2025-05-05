@@ -19,6 +19,16 @@
  * so that it doesn't add duplicate declarations to all of its includers'
  * modules.
  */
+#if defined(__MVS__) && __has_include_next(<stdarg.h>)
+#undef __need___va_list
+#undef __need_va_list
+#undef __need_va_arg
+#undef __need___va_copy
+#undef __need_va_copy
+#include <__stdarg_header_macro.h>
+#include_next <stdarg.h>
+
+#else
 #if !defined(__need___va_list) && !defined(__need_va_list) &&                  \
     !defined(__need_va_arg) && !defined(__need___va_copy) &&                   \
     !defined(__need_va_copy)
@@ -61,3 +71,5 @@
 #include <__stdarg_va_copy.h>
 #undef __need_va_copy
 #endif /* defined(__need_va_copy) */
+
+#endif /* __MVS__ */

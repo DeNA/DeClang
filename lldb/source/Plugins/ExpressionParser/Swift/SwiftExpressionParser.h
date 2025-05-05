@@ -50,7 +50,7 @@ class SwiftExpressionParser : public ExpressionParser {
 public:
   enum class ParseResult {
     success,
-    retry_fresh_context, 
+    retry_fresh_context,
     retry_no_bind_generic_params,
     unrecoverable_error
   };
@@ -144,10 +144,10 @@ public:
   ///     Test with Success().
   //------------------------------------------------------------------
   Status
-  PrepareForExecution(lldb::addr_t &func_addr, lldb::addr_t &func_end,
-                      lldb::IRExecutionUnitSP &execution_unit_ap,
-                      ExecutionContext &exe_ctx, bool &can_interpret,
-                      lldb_private::ExecutionPolicy execution_policy) override;
+  DoPrepareForExecution(lldb::addr_t &func_addr, lldb::addr_t &func_end,
+                        lldb::IRExecutionUnitSP &execution_unit_ap,
+                        ExecutionContext &exe_ctx, bool &can_interpret,
+                        lldb_private::ExecutionPolicy execution_policy) override;
 
   const EvaluateExpressionOptions &GetOptions() const { return m_options; }
 
@@ -212,6 +212,7 @@ private:
   /// The container for the IR, to be JIT-compiled or interpreted.
   lldb::IRExecutionUnitSP m_execution_unit_sp;
   /// The AST context to build the expression into.
+  /// A shared pointer of this is held by SwiftUserexpression.
   SwiftASTContextForExpressions &m_swift_ast_ctx;
   /// Used to manage the memory of a potential on-off context.
   //lldb::TypeSystemSP m_typesystem_sp;
@@ -254,7 +255,6 @@ public:
       llvm::SmallVectorImpl<swift::TypeAliasDecl *> &type_aliases);
 
 protected:
-  Log *m_log;
   swift::SourceFile &m_source_file;
   SwiftExpressionParser::SILVariableMap &m_variable_map;
   SymbolContext m_sc;

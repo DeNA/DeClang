@@ -12,7 +12,6 @@
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/DumpRegisterValue.h"
 #include "lldb/Core/Module.h"
-#include "lldb/Core/StreamFile.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Symbol/TypeList.h"
 #include "lldb/Symbol/TypeSystem.h"
@@ -96,8 +95,9 @@ ThreadPlanAssemblyTracer::ThreadPlanAssemblyTracer(Thread &thread)
 
 Disassembler *ThreadPlanAssemblyTracer::GetDisassembler() {
   if (!m_disassembler_sp)
-    m_disassembler_sp = Disassembler::FindPlugin(
-        m_process.GetTarget().GetArchitecture(), nullptr, nullptr);
+    m_disassembler_sp =
+        Disassembler::FindPlugin(m_process.GetTarget().GetArchitecture(),
+                                 nullptr, nullptr, nullptr, nullptr);
   return m_disassembler_sp.get();
 }
 

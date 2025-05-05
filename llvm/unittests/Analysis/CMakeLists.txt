@@ -1,6 +1,7 @@
 set(LLVM_LINK_COMPONENTS
   Analysis
   AsmParser
+  CodeGen
   Core
   Passes
   Support
@@ -40,8 +41,8 @@ set(ANALYSIS_TEST_SOURCES
   PluginInlineAdvisorAnalysisTest.cpp
   PluginInlineOrderAnalysisTest.cpp
   ProfileSummaryInfoTest.cpp
+  ReplaceWithVecLibTest.cpp
   ScalarEvolutionTest.cpp
-  VectorFunctionABITest.cpp
   SparsePropagation.cpp
   TargetLibraryInfoTest.cpp
   TensorSpecTest.cpp
@@ -63,6 +64,8 @@ endif()
 add_llvm_unittest_with_input_files(AnalysisTests
   ${ANALYSIS_TEST_SOURCES}
   )
+
+add_dependencies(AnalysisTests intrinsics_gen)
 
 target_link_libraries(AnalysisTests PRIVATE LLVMTestingSupport)
 

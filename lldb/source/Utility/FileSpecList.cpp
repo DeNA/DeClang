@@ -41,7 +41,7 @@ bool FileSpecList::AppendIfUnique(const FileSpec &file_spec) {
 bool SupportFileList::AppendIfUnique(const FileSpec &file_spec) {
   collection::iterator end = m_files.end();
   if (find_if(m_files.begin(), end,
-              [&](const std::unique_ptr<SupportFile> &support_file) {
+              [&](const std::shared_ptr<SupportFile> &support_file) {
                 return support_file->GetSpecOnly() == file_spec;
               }) == end) {
     Append(file_spec);
@@ -146,7 +146,7 @@ size_t SupportFileList::FindCompatibleIndex(size_t start_idx,
       auto is_suffix = [](llvm::StringRef a, llvm::StringRef b,
                           bool case_sensitive) -> bool {
         if (case_sensitive ? a.consume_back(b) : a.consume_back_insensitive(b))
-          return a.empty() || a.endswith("/");
+          return a.empty() || a.ends_with("/");
         return false;
       };
       const bool case_sensitive =
@@ -176,6 +176,13 @@ const FileSpec &SupportFileList::GetFileSpecAtIndex(size_t idx) const {
   return g_empty_file_spec;
 }
 
+std::shared_ptr<SupportFile>
+SupportFileList::GetSupportFileAtIndex(size_t idx) const {
+  if (idx < m_files.size())
+    return m_files[idx];
+  return {};
+}
+
 // Return the size in bytes that this object takes in memory. This returns the
 // size in bytes of this object's member variables and any FileSpec objects its
 // member variables contain, the result doesn't not include the string values
@@ -192,9 +199,3 @@ size_t FileSpecList::MemorySize() const {
 
 // Return the number of files in the file spec list.
 size_t FileSpecList::GetSize() const { return m_files.size(); }
-
-size_t FileSpecList::GetFilesMatchingPartialPath(const char *path,
-                                                 bool dir_okay,
-                                                 FileSpecList &matches) {
-  return 0;
-}

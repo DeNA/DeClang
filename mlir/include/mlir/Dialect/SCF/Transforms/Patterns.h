@@ -53,6 +53,16 @@ void populateSCFStructuralTypeConversionsAndLegality(
     TypeConverter &typeConverter, RewritePatternSet &patterns,
     ConversionTarget &target);
 
+/// Similar to `populateSCFStructuralTypeConversionsAndLegality` but does not
+/// populate the conversion target.
+void populateSCFStructuralTypeConversions(TypeConverter &typeConverter,
+                                          RewritePatternSet &patterns);
+
+/// Updates the ConversionTarget with dynamic legality of SCF operations based
+/// on the provided type converter.
+void populateSCFStructuralTypeConversionTarget(
+    const TypeConverter &typeConverter, ConversionTarget &target);
+
 /// Populates the provided pattern set with patterns that do 1:N type
 /// conversions on (some) SCF ops. This is intended to be used with
 /// applyPartialOneToNConversion.
@@ -68,6 +78,12 @@ void populateSCFLoopPipeliningPatterns(RewritePatternSet &patterns,
 /// At the moment, only affine.min/max computations with iteration variables,
 /// loop bounds and loop steps are canonicalized.
 void populateSCFForLoopCanonicalizationPatterns(RewritePatternSet &patterns);
+
+/// Populate patterns to uplift `scf.while` ops to `scf.for`.
+/// Uplifitng expects a specific ops pattern:
+///  * `before` block consisting of single arith.cmp op
+///  * `after` block containing arith.addi
+void populateUpliftWhileToForPatterns(RewritePatternSet &patterns);
 
 } // namespace scf
 } // namespace mlir

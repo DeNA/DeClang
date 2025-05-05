@@ -63,13 +63,11 @@ LValue CGObjCRuntime::EmitValueForIvarAtOffset(CodeGen::CodeGenFunction &CGF,
       CGF.CGM.getContext().getObjCObjectPointerType(InterfaceTy);
   QualType IvarTy =
       Ivar->getUsageType(ObjectPtrTy).withCVRQualifiers(CVRQualifiers);
-  llvm::Type *LTy = CGF.CGM.getTypes().ConvertTypeForMem(IvarTy);
-  llvm::Value *V = CGF.Builder.CreateBitCast(BaseValue, CGF.Int8PtrTy);
+  llvm::Value *V = BaseValue;
   V = CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, V, Offset, "add.ptr");
 
   if (!Ivar->isBitField()) {
-    V = CGF.Builder.CreateBitCast(V, llvm::PointerType::getUnqual(LTy));
-    LValue LV = CGF.MakeNaturalAlignAddrLValue(V, IvarTy);
+    LValue LV = CGF.MakeNaturalAlignRawAddrLValue(V, IvarTy);
     return LV;
   }
 
@@ -235,7 +233,7 @@ void CGObjCRuntime::EmitTryCatchStmt(CodeGenFunction &CGF,
       llvm::Instruction *CPICandidate = Handler.Block->getFirstNonPHI();
       if (auto *CPI = dyn_cast_or_null<llvm::CatchPadInst>(CPICandidate)) {
         CGF.CurrentFuncletPad = CPI;
-        CPI->setOperand(2, CGF.getExceptionSlot().getPointer());
+        CPI->setOperand(2, CGF.getExceptionSlot().emitRawPointer(CGF));
         CGF.EHStack.pushCleanup<CatchRetScope>(NormalCleanup, CPI);
       }
     }
@@ -407,7 +405,7 @@ bool CGObjCRuntime::canMessageReceiverBeNull(CodeGenFunction &CGF,
     auto self = curMethod->getSelfDecl();
     if (self->getType().isConstQualified()) {
       if (auto LI = dyn_cast<llvm::LoadInst>(receiver->stripPointerCasts())) {
-        llvm::Value *selfAddr = CGF.GetAddrOfLocalVar(self).getPointer();
+        llvm::Value *selfAddr = CGF.GetAddrOfLocalVar(self).emitRawPointer(CGF);
         if (selfAddr == LI->getPointerOperand()) {
           return false;
         }

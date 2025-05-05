@@ -15,7 +15,6 @@ from lldbsuite.test.lldbtest import *
 from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbutil as lldbutil
 import os
-import unittest2
 
 class TestSwiftDedupMacros(TestBase):
     # Don't run ClangImporter tests if Clangimporter is disabled.
@@ -50,7 +49,7 @@ class TestSwiftDedupMacros(TestBase):
 #       CHECK: SwiftASTContextForExpressions{{.*}}-DSPACE
 #       CHECK-NOT: {{ SPACE}}
 #       CHECK: SwiftASTContextForExpressions{{.*}}-UNDEBUG
-#       CHECK: SwiftASTContextForModule("libDylib{{.*}}-DDEBUG=1
-#       CHECK: SwiftASTContextForModule("libDylib{{.*}}-DSPACE
+#       CHECK: SwiftASTContext(module: "Dylib{{.*}}-DDEBUG=1
+#       CHECK: SwiftASTContext(module: "Dylib{{.*}}-DSPACE
 #       CHECK-NOT: {{ SPACE}}
-#       CHECK: SwiftASTContextForModule("libDylib{{.*}}-UNDEBUG
+#       CHECK: SwiftASTContext(module: "Dylib{{.*}}-UNDEBUG

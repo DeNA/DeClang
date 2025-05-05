@@ -83,8 +83,10 @@ enum NodeType {
   ExternalSymbol,
   BlockAddress,
 
-  /// A llvm.ptrauth global
-  /// wrapper llvm.ptrauth global, ptr, key, addr-disc, disc
+  /// A ptrauth constant.
+  /// ptr, key, addr-disc, disc
+  /// Note that the addr-disc can be a non-constant value, to allow representing
+  /// a constant global address signed using address-diversification, in code.
   PtrAuthGlobalAddress,
 
   /// The address of the GOT
@@ -209,6 +211,7 @@ enum NodeType {
   /// CopyFromReg - This node indicates that the input value is a virtual or
   /// physical register that is defined outside of the scope of this
   /// SelectionDAG.  The register is available from the RegisterSDNode object.
+  /// Note that CopyFromReg is considered as also freezing the value.
   CopyFromReg,
 
   /// UNDEF - An undefined node.
@@ -418,6 +421,13 @@ enum NodeType {
   STRICT_FLDEXP,
   STRICT_FSIN,
   STRICT_FCOS,
+  STRICT_FTAN,
+  STRICT_FASIN,
+  STRICT_FACOS,
+  STRICT_FATAN,
+  STRICT_FSINH,
+  STRICT_FCOSH,
+  STRICT_FTANH,
   STRICT_FEXP,
   STRICT_FEXP2,
   STRICT_FLOG,
@@ -649,6 +659,14 @@ enum NodeType {
   /// non-constant operands.
   STEP_VECTOR,
 
+  /// VECTOR_COMPRESS(Vec, Mask, Passthru)
+  /// consecutively place vector elements based on mask
+  /// e.g., vec = {A, B, C, D} and mask = {1, 0, 1, 0}
+  ///         --> {A, C, ?, ?} where ? is undefined
+  /// If passthru is defined, ?s are replaced with elements from passthru.
+  /// If passthru is undef, ?s remain undefined.
+  VECTOR_COMPRESS,
+
   /// MULHU/MULHS - Multiply high - Multiply two integers of type iN,
   /// producing an unsigned/signed value of type i[2*N], then return the top
   /// part.
@@ -679,6 +697,12 @@ enum NodeType {
   SMAX,
   UMIN,
   UMAX,
+
+  /// [US]CMP - 3-way comparison of signed or unsigned integers. Returns -1, 0,
+  /// or 1 depending on whether Op0 <, ==, or > Op1. The operands can have type
+  /// different to the result.
+  SCMP,
+  UCMP,
 
   /// Bitwise operators - logical and, logical or, logical xor.
   AND,
@@ -777,7 +801,10 @@ enum NodeType {
   /// into new bits.
   SIGN_EXTEND,
 
-  /// ZERO_EXTEND - Used for integer types, zeroing the new bits.
+  /// ZERO_EXTEND - Used for integer types, zeroing the new bits. Can carry
+  /// the NonNeg SDNodeFlag to indicate that the input is known to be
+  /// non-negative. If the flag is present and the input is negative, the result
+  /// is poison.
   ZERO_EXTEND,
 
   /// ANY_EXTEND - Used for integer types.  The high bits are undefined.
@@ -876,6 +903,7 @@ enum NodeType {
   ///  2 Round to +inf
   ///  3 Round to -inf
   ///  4 Round to nearest, ties to zero
+  ///  Other values are target dependent.
   /// Result is rounding mode and chain. Input is a chain.
   GET_ROUNDING,
 
@@ -921,9 +949,11 @@ enum NodeType {
   /// has native conversions.
   BF16_TO_FP,
   FP_TO_BF16,
+  STRICT_BF16_TO_FP,
+  STRICT_FP_TO_BF16,
 
   /// Perform various unary floating-point operations inspired by libm. For
-  /// FPOWI, the result is undefined if if the integer operand doesn't fit into
+  /// FPOWI, the result is undefined if the integer operand doesn't fit into
   /// sizeof(int).
   FNEG,
   FABS,
@@ -931,6 +961,13 @@ enum NodeType {
   FCBRT,
   FSIN,
   FCOS,
+  FTAN,
+  FASIN,
+  FACOS,
+  FATAN,
+  FSINH,
+  FCOSH,
+  FTANH,
   FPOW,
   FPOWI,
   /// FLDEXP - ldexp, inspired by libm (op0 * 2**op1).
@@ -946,6 +983,7 @@ enum NodeType {
   FLOG10,
   FEXP,
   FEXP2,
+  FEXP10,
   FCEIL,
   FTRUNC,
   FRINT,
@@ -968,16 +1006,22 @@ enum NodeType {
   FMINNUM,
   FMAXNUM,
 
-  /// FMINNUM_IEEE/FMAXNUM_IEEE - Perform floating-point minimum or maximum on
-  /// two values, following the IEEE-754 2008 definition. This differs from
-  /// FMINNUM/FMAXNUM in the handling of signaling NaNs. If one input is a
-  /// signaling NaN, returns a quiet NaN.
+  /// FMINNUM_IEEE/FMAXNUM_IEEE - Perform floating-point minimumNumber or
+  /// maximumNumber on two values, following IEEE-754 definitions. This differs
+  /// from FMINNUM/FMAXNUM in the handling of signaling NaNs, and signed zero.
+  ///
+  /// If one input is a signaling NaN, returns a quiet NaN. This matches
+  /// IEEE-754 2008's minnum/maxnum behavior for signaling NaNs (which differs
+  /// from 2019).
+  ///
+  /// These treat -0 as ordered less than +0, matching the behavior of IEEE-754
+  /// 2019's minimumNumber/maximumNumber.
   FMINNUM_IEEE,
   FMAXNUM_IEEE,
 
   /// FMINIMUM/FMAXIMUM - NaN-propagating minimum/maximum that also treat -0.0
   /// as less than 0.0. While FMINNUM_IEEE/FMAXNUM_IEEE follow IEEE 754-2008
-  /// semantics, FMINIMUM/FMAXIMUM follow IEEE 754-2018 draft semantics.
+  /// semantics, FMINIMUM/FMAXIMUM follow IEEE 754-2019 semantics.
   FMINIMUM,
   FMAXIMUM,
 
@@ -1007,6 +1051,19 @@ enum NodeType {
   /// chain, the second is a pointer to memory, where FP environment is loaded
   /// from. The result is a token chain.
   SET_FPENV_MEM,
+
+  /// Reads the current dynamic floating-point control modes. The operand is
+  /// a token chain.
+  GET_FPMODE,
+
+  /// Sets the current dynamic floating-point control modes. The first operand
+  /// is a token chain, the second is control modes set represented as integer
+  /// value.
+  SET_FPMODE,
+
+  /// Sets default dynamic floating-point control modes. The operand is a
+  /// token chain.
+  RESET_FPMODE,
 
   /// LOAD and STORE have token chains as their first operand, then the same
   /// operands as an LLVM load/store instruction, then an offset node that
@@ -1038,6 +1095,10 @@ enum NodeType {
   /// BR_JT - Jumptable branch. The first operand is the chain, the second
   /// is the jumptable index, the last one is the jumptable entry index.
   BR_JT,
+
+  /// JUMP_TABLE_DEBUG_INFO - Jumptable debug info. The first operand is the
+  /// chain, the second is the jumptable index.
+  JUMP_TABLE_DEBUG_INFO,
 
   /// BRCOND - Conditional branch.  The first operand is the chain, the
   /// second is the condition, the third is the block to branch to if the
@@ -1160,6 +1221,12 @@ enum NodeType {
   /// The result is the content of the architecture-specific cycle
   /// counter-like register (or other high accuracy low latency clock source).
   READCYCLECOUNTER,
+
+  /// READSTEADYCOUNTER - This corresponds to the readfixedcounter intrinsic.
+  /// It has the same semantics as the READCYCLECOUNTER implementation except
+  /// that the result is the content of the architecture-specific fixed
+  /// frequency counter suitable for measuring elapsed time.
+  READSTEADYCOUNTER,
 
   /// HANDLENODE node - Used as a handle for various purposes.
   HANDLENODE,
@@ -1360,6 +1427,25 @@ enum NodeType {
 #define BEGIN_REGISTER_VP_SDNODE(VPSDID, ...) VPSDID,
 #include "llvm/IR/VPIntrinsics.def"
 
+  // The `llvm.experimental.convergence.*` intrinsics.
+  CONVERGENCECTRL_ANCHOR,
+  CONVERGENCECTRL_ENTRY,
+  CONVERGENCECTRL_LOOP,
+  // This does not correspond to any convergence control intrinsic. It is used
+  // to glue a convergence control token to a convergent operation in the DAG,
+  // which is later translated to an implicit use in the MIR.
+  CONVERGENCECTRL_GLUE,
+
+  // Experimental vector histogram intrinsic
+  // Operands: Input Chain, Inc, Mask, Base, Index, Scale, ID
+  // Output: Output Chain
+  EXPERIMENTAL_VECTOR_HISTOGRAM,
+
+  // llvm.clear_cache intrinsic
+  // Operands: Input Chain, Start Addres, End Address
+  // Outputs: Output Chain
+  CLEAR_CACHE,
+
   /// BUILTIN_OP_END - This must be the last enum value in this list.
   /// The target-specific pre-isel opcode values start here.
   BUILTIN_OP_END
@@ -1532,6 +1618,12 @@ inline bool isUnsignedIntSetCC(CondCode Code) {
 /// comparison when used with integer operands.
 inline bool isIntEqualitySetCC(CondCode Code) {
   return Code == SETEQ || Code == SETNE;
+}
+
+/// Return true if this is a setcc instruction that performs an equality
+/// comparison when used with floating point operands.
+inline bool isFPEqualitySetCC(CondCode Code) {
+  return Code == SETOEQ || Code == SETONE || Code == SETUEQ || Code == SETUNE;
 }
 
 /// Return true if the specified condition returns true if the two operands to

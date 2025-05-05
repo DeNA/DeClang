@@ -25,6 +25,7 @@
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/EndianStream.h"
 #include <memory>
+#include <stack>
 
 // FIXME: Fix dependency here.
 #include "llvm/CASObjectFormats/Encoding.h"
@@ -123,13 +124,13 @@ struct CUInfo {
   uint16_t DwarfVersion;
 };
 static Expected<CUInfo> getAndSetDebugAbbrevOffsetAndSkip(
-    MutableArrayRef<char> CUData, support::endianness Endian,
+    MutableArrayRef<char> CUData, endianness Endian,
     std::optional<uint32_t> NewOffset, uint8_t AddressSize);
 Expected<cas::ObjectProxy>
 MCSchema::createFromMCAssemblerImpl(MachOCASWriter &ObjectWriter,
-                                    MCAssembler &Asm, const MCAsmLayout &Layout,
+                                    MCAssembler &Asm,
                                     raw_ostream *DebugOS) const {
-  return MCAssemblerRef::create(*this, ObjectWriter, Asm, Layout, DebugOS);
+  return MCAssemblerRef::create(*this, ObjectWriter, Asm, DebugOS);
 }
 
 Error MCSchema::serializeObjectFile(cas::ObjectProxy RootNode,
@@ -467,8 +468,7 @@ Expected<uint64_t> materializeAbbrevFromTagImpl(MCCASReader &Reader,
       return LoadedTopRef.takeError();
     Size += reconstructAbbrevSection(
         Reader.OS, LoadedTopRef->AbbrevEntries, MaxDIEAbbrevCount,
-        Reader.getEndian() == support::endianness::little,
-        Reader.getAddressSize());
+        Reader.getEndian() == endianness::little, Reader.getAddressSize());
   }
 
   // FIXME: Currently, one DIELevelTopRef corresponds to one Compile Unit, but
@@ -1242,7 +1242,10 @@ materializeDebugLineSection(MCCASReader &Reader,
       DistinctDebugLineRefSeen = true;
       auto Data = DistinctRef->getData();
       DistinctData.append(Data.begin(), Data.end());
-      DWARFDataExtractor LineTableDataReader(Data, Reader.getEndian(),
+      auto Endian = Reader.getEndian();
+      assert((Endian == endianness::big || Endian == endianness::little) &&
+             "Endian must be either big or little");
+      DWARFDataExtractor LineTableDataReader(Data, Endian == endianness::little,
                                              Reader.getAddressSize());
       auto Prologue = parseLineTableHeaderAndSkip(LineTableDataReader);
       if (!Prologue)
@@ -1263,9 +1266,12 @@ materializeDebugLineSection(MCCASReader &Reader,
       auto Data = LineRef->getData();
       uint64_t LineTableOffset = 0;
       while (LineTableOffset < Data.size()) {
+        auto Endian = Reader.getEndian();
+        assert((Endian == endianness::big || Endian == endianness::little) &&
+               "Endian must be either big or little");
         auto Sizes = getOpcodeAndOperandSize(
             toStringRef(DistinctData), Data, DistinctOffset, LineTableOffset,
-            Reader.getEndian(), OpcodeBase, Reader.getAddressSize());
+            Endian == endianness::little, OpcodeBase, Reader.getAddressSize());
         if (!Sizes)
           return Sizes.takeError();
         // Copy opcode and operand, only in the case of DW_LNS_set_file, the
@@ -1673,7 +1679,7 @@ Expected<uint64_t> MCFillFragmentRef::materialize(MCCASReader &Reader,
   char Data[MaxChunkSize];
   for (unsigned I = 0; I != ValueSize; ++I) {
     unsigned Index =
-        Reader.getEndian() == support::little ? I : (ValueSize - I - 1);
+        Reader.getEndian() == endianness::little ? I : (ValueSize - I - 1);
     Data[I] = uint8_t(Value >> (Index * 8));
   }
   for (unsigned I = ValueSize; I < MaxChunkSize; ++I)
@@ -1834,7 +1840,7 @@ DwarfSectionsCache mccasformats::v1::getDwarfSections(MCAssembler &Asm) {
 
 Error MCCASBuilder::prepare() {
   ObjectWriter.resetBuffer();
-  ObjectWriter.prepareObject(Asm, Layout);
+  ObjectWriter.prepareObject(Asm);
   assert(ObjectWriter.getContent().empty() &&
          "prepare stage writes no content");
   return Error::success();
@@ -1842,7 +1848,7 @@ Error MCCASBuilder::prepare() {
 
 Error MCCASBuilder::buildMachOHeader() {
   ObjectWriter.resetBuffer();
-  ObjectWriter.writeMachOHeader(Asm, Layout);
+  ObjectWriter.writeMachOHeader(Asm);
   auto Header = HeaderRef::create(*this, ObjectWriter.getContent());
   if (!Header)
     return Header.takeError();
@@ -1939,8 +1945,8 @@ static Error writeAlignFragment(MCCASBuilder &Builder,
                                    Twine(Count) + " bytes");
     return Error::success();
   }
-  auto Endian = Builder.ObjectWriter.Target.isLittleEndian() ? support::little
-                                                             : support::big;
+  auto Endian = Builder.ObjectWriter.Target.isLittleEndian() ? endianness::little
+                                                             : endianness::big;
   for (uint64_t I = 0; I != Count; ++I) {
     switch (AF.getValueSize()) {
     default:
@@ -2017,7 +2023,7 @@ void MCDataFragmentMerger::reset() {
 }
 
 Error MCCASBuilder::createPaddingRef(const MCSection *Sec) {
-  uint64_t Pad = ObjectWriter.getPaddingSize(Sec, Layout);
+  uint64_t Pad = ObjectWriter.getPaddingSize(Asm, Sec);
   auto Fill = PaddingRef::create(*this, Pad);
   if (!Fill)
     return Fill.takeError();
@@ -2027,7 +2033,7 @@ Error MCCASBuilder::createPaddingRef(const MCSection *Sec) {
 
 Error MCCASBuilder::createStringSection(
     StringRef S, std::function<Error(StringRef)> CreateFn) {
-  assert(S.endswith("\0") && "String sections are null terminated");
+  assert(S.ends_with("\0") && "String sections are null terminated");
   if (DebugInfoUnopt)
     // Drop the null terminator at the end when not splitting the debug_string
     // section as it is always added when materializing.
@@ -2068,10 +2074,10 @@ static Expected<size_t> getSizeFromDwarfHeader(DataExtractor &Extractor,
 /// Note: this is different from the length field of the Dwarf header, which
 /// does not account for the header size.
 static Expected<CUInfo> getAndSetDebugAbbrevOffsetAndSkip(
-    MutableArrayRef<char> CUData, support::endianness Endian,
+    MutableArrayRef<char> CUData, endianness Endian,
     std::optional<uint32_t> NewOffset, uint8_t AddressSize) {
-  DataExtractor Extractor(toStringRef(CUData),
-                          Endian == support::endianness::little, AddressSize);
+  DataExtractor Extractor(toStringRef(CUData), Endian == endianness::little,
+                          AddressSize);
   DataExtractor::Cursor Cursor(0);
   Expected<size_t> Size = getSizeFromDwarfHeader(Extractor, Cursor);
   if (!Size)
@@ -2130,10 +2136,11 @@ static Expected<CUInfo> getAndSetDebugAbbrevOffsetAndSkip(
 /// If any fragment is not an MCDataFragment, or the fragment is an
 /// MCDwarfLineAddrFragment and the section containing that fragment is not a
 /// debug_line section, an error is returned.
-Expected<SmallVector<char, 0>> MCCASBuilder::mergeMCFragmentContents(
-    const MCSection::FragmentListType &FragmentList, bool IsDebugLineSection) {
+Expected<SmallVector<char, 0>>
+MCCASBuilder::mergeMCFragmentContents(const MCSection *Section,
+                                      bool IsDebugLineSection) {
   SmallVector<char, 0> mergedData;
-  for (const MCFragment &Fragment : FragmentList) {
+  for (const MCFragment &Fragment : *Section) {
     if (const auto *DataFragment = dyn_cast<MCDataFragment>(&Fragment))
       llvm::append_range(mergedData, DataFragment->getContents());
     else if (const auto *CompactEncodedInstFragment =
@@ -2165,7 +2172,7 @@ Expected<SmallVector<char, 0>> MCCASBuilder::mergeMCFragmentContents(
                  dyn_cast<MCCVInlineLineTableFragment>(&Fragment))
       llvm::append_range(mergedData, CVInlineLineTableFragment->getContents());
     else if (const auto *AlignFragment = dyn_cast<MCAlignFragment>(&Fragment)) {
-      auto FragmentSize = Asm.computeFragmentSize(Layout, Fragment);
+      auto FragmentSize = Asm.computeFragmentSize(Fragment);
       raw_svector_ostream OS(mergedData);
       if (auto E = writeAlignFragment(*this, *AlignFragment, OS, FragmentSize))
         return std::move(E);
@@ -2200,8 +2207,8 @@ Error MCCASBuilder::createDebugInfoSection() {
   startSection(DwarfSections.DebugInfo);
 
   if (DebugInfoUnopt) {
-    Expected<SmallVector<char, 0>> DebugInfoData = mergeMCFragmentContents(
-        DwarfSections.DebugInfo->getFragmentList(), true);
+    Expected<SmallVector<char, 0>> DebugInfoData =
+        mergeMCFragmentContents(DwarfSections.DebugInfo, true);
     if (!DebugInfoData)
       return DebugInfoData.takeError();
     auto DbgInfoUnoptRef =
@@ -2223,7 +2230,7 @@ Error MCCASBuilder::createDebugAbbrevSection() {
   startSection(DwarfSections.Abbrev);
   if (DebugInfoUnopt) {
     Expected<SmallVector<char, 0>> DebugAbbrevData =
-        mergeMCFragmentContents(DwarfSections.Abbrev->getFragmentList(), true);
+        mergeMCFragmentContents(DwarfSections.Abbrev, true);
     if (!DebugAbbrevData)
       return DebugAbbrevData.takeError();
     auto DbgAbbrevUnoptRef =
@@ -2362,10 +2369,12 @@ Error InMemoryCASDWARFObject::partitionCUData(ArrayRef<char> DebugInfoData,
   uint64_t OffsetPtr = 0;
   DWARFUnitHeader Header;
   DWARFSection Section = {toStringRef(DebugInfoData), 0 /*Address*/};
-  Header.extract(*Ctx,
-                 DWARFDataExtractor(*this, Section, isLittleEndian(),
-                                    Builder.ObjectWriter.getAddressSize()),
-                 &OffsetPtr, DWARFSectionKind::DW_SECT_INFO);
+  if (Error E = Header.extract(
+          *Ctx,
+          DWARFDataExtractor(*this, Section, isLittleEndian(),
+                             Builder.ObjectWriter.getAddressSize()),
+          &OffsetPtr, DWARFSectionKind::DW_SECT_INFO))
+    return E;
 
   DWARFUnitVector UV;
   DWARFCompileUnit DCU(*Ctx, Section, Header, &Abbrev, &getRangesSection(),
@@ -2406,8 +2415,7 @@ Error MCCASBuilder::splitDebugInfoAndAbbrevSections() {
   if (!DwarfSections.DebugInfo)
     return Error::success();
 
-  const MCSection::FragmentListType &FragmentList =
-      DwarfSections.DebugInfo->getFragmentList();
+  const MCSection *FragmentList = DwarfSections.DebugInfo;
   Expected<SmallVector<char, 0>> DebugInfoData =
       mergeMCFragmentContents(FragmentList);
   if (!DebugInfoData)
@@ -2417,8 +2425,7 @@ Error MCCASBuilder::splitDebugInfoAndAbbrevSections() {
   if (!SplitInfo)
     return SplitInfo.takeError();
 
-  const MCSection::FragmentListType &AbbrevFragmentList =
-      DwarfSections.Abbrev->getFragmentList();
+  const MCSection *AbbrevFragmentList = DwarfSections.Abbrev;
 
   Expected<SmallVector<char, 0>> FullAbbrevData =
       mergeMCFragmentContents(AbbrevFragmentList);
@@ -2426,8 +2433,7 @@ Error MCCASBuilder::splitDebugInfoAndAbbrevSections() {
   if (!FullAbbrevData)
     return FullAbbrevData.takeError();
 
-  const MCSection::FragmentListType &StringOffsetsFragmentList =
-      DwarfSections.StrOffsets->getFragmentList();
+  const MCSection *StringOffsetsFragmentList = DwarfSections.StrOffsets;
 
   Expected<SmallVector<char, 0>> FullStringOffsetsData =
       mergeMCFragmentContents(StringOffsetsFragmentList);
@@ -2436,8 +2442,7 @@ Error MCCASBuilder::splitDebugInfoAndAbbrevSections() {
     return FullStringOffsetsData.takeError();
 
   InMemoryCASDWARFObject CASObj(*FullAbbrevData, *FullStringOffsetsData,
-                                Asm.getBackend().Endian ==
-                                    support::endianness::little,
+                                Asm.getBackend().Endian == endianness::little,
                                 ObjectWriter.getAddressSize());
   auto DWARFObj = std::make_unique<InMemoryCASDWARFObject>(CASObj);
   auto DWARFContextHolder = std::make_unique<DWARFContext>(std::move(DWARFObj));
@@ -2463,8 +2468,12 @@ inline void copyData(SmallVector<char, 0> &Data, StringRef DebugLineStrRef,
 
 Expected<uint64_t>
 MCCASBuilder::createOptimizedLineSection(StringRef DebugLineStrRef) {
-  DWARFDataExtractor LineTableDataReader(
-      DebugLineStrRef, Asm.getBackend().Endian, ObjectWriter.getAddressSize());
+  auto Endian = Asm.getBackend().Endian;
+  assert((Endian == endianness::big || Endian == endianness::little) &&
+         "Endian must be either big or little");
+  DWARFDataExtractor LineTableDataReader(DebugLineStrRef,
+                                         Endian == endianness::little,
+                                         ObjectWriter.getAddressSize());
   auto Prologue = parseLineTableHeaderAndSkip(LineTableDataReader);
   if (!Prologue)
     return Prologue.takeError();
@@ -2568,7 +2577,7 @@ Error MCCASBuilder::createLineSection() {
     return Error::success();
 
   Expected<SmallVector<char, 0>> DebugLineData =
-      mergeMCFragmentContents(DwarfSections.Line->getFragmentList(), true);
+      mergeMCFragmentContents(DwarfSections.Line, true);
   if (!DebugLineData)
     return DebugLineData.takeError();
 
@@ -2610,10 +2619,10 @@ Error MCCASBuilder::createDebugStrSection() {
 }
 
 Expected<SmallVector<DebugStrRef, 0>> MCCASBuilder::createDebugStringRefs() {
-  if (!DwarfSections.Str || !DwarfSections.Str->getFragmentList().size())
+  if (!DwarfSections.Str || DwarfSections.Str->empty())
     return SmallVector<DebugStrRef, 0>();
 
-  assert(DwarfSections.Str->getFragmentList().size() == 1 &&
+  assert(DwarfSections.Str->curFragList()->Head->getNext() == nullptr &&
          "One fragment in debug str section");
 
   SmallVector<DebugStrRef, 0> DebugStringRefs;
@@ -2634,11 +2643,10 @@ Expected<SmallVector<DebugStrRef, 0>> MCCASBuilder::createDebugStringRefs() {
 template <typename SectionTy>
 std::optional<Expected<SectionTy>>
 MCCASBuilder::createGenericDebugRef(MCSection *Section) {
-  if (!Section || !Section->getFragmentList().size())
+  if (!Section || Section->empty())
     return std::nullopt;
 
-  auto DebugCASData =
-      mergeMCFragmentContents(Section->getFragmentList(), false);
+  auto DebugCASData = mergeMCFragmentContents(Section, false);
 
   if (!DebugCASData)
     return DebugCASData.takeError();
@@ -2655,12 +2663,11 @@ MCCASBuilder::createGenericDebugRef(MCSection *Section) {
 std::optional<Expected<DebugStrOffsetsRef>>
 MCCASBuilder::createDebugStrOffsetsRef() {
 
-  if (!DwarfSections.StrOffsets ||
-      !DwarfSections.StrOffsets->getFragmentList().size())
+  if (!DwarfSections.StrOffsets || DwarfSections.StrOffsets->empty())
     return std::nullopt;
 
-  auto DebugStrOffsetsData = mergeMCFragmentContents(
-      DwarfSections.StrOffsets->getFragmentList(), false);
+  auto DebugStrOffsetsData =
+      mergeMCFragmentContents(DwarfSections.StrOffsets, false);
 
   if (!DebugStrOffsetsData)
     return DebugStrOffsetsData.takeError();
@@ -2918,7 +2925,7 @@ static uint32_t getRelocationOffset(const MachO::any_relocation_info &RE) {
 /// parameter and is the index into the \p RelocationBuffer, which is used to
 /// access the current relocation that has to be partitioned.
 static void
-partitionFragment(const MCAsmLayout &Layout, SmallVector<char, 0> &Addends,
+partitionFragment(MCAssembler &Asm, SmallVector<char, 0> &Addends,
                   SmallVector<char, 0> &FinalFragmentContents,
                   ArrayRef<MachO::any_relocation_info> RelocationBuffer,
                   const MCFragment &Fragment, uint64_t &RelocationBufferIndex,
@@ -2939,7 +2946,7 @@ partitionFragment(const MCAsmLayout &Layout, SmallVector<char, 0> &Addends,
     uint32_t RelocOffset = getRelocationOffset(Reloc);
     if (PrevOffset == RelocOffset)
       continue;
-    uint64_t FragmentOffset = Layout.getFragmentOffset(&Fragment);
+    uint64_t FragmentOffset = Asm.getFragmentOffset(Fragment);
     if (RelocOffset < FragmentOffset + FragmentContents.size()) {
       /// RelocOffsetInFragment: This is used to denote the offset of the
       /// relocation in the current Fragment. Relocation offsets are always from
@@ -2972,7 +2979,7 @@ Error MCCASBuilder::buildFragments() {
   startGroup();
 
   for (const MCSection &Sec : Asm) {
-    if (Sec.isVirtualSection() || Sec.getFragmentList().empty())
+    if (Sec.isVirtualSection() || Sec.empty())
       continue;
 
     // Handle Debug Info sections separately.
@@ -3084,7 +3091,7 @@ Error MCCASBuilder::buildFragments() {
     startSection(&Sec);
 
     // Start subsection for first Atom.
-    startAtom(Sec.getFragmentList().front().getAtom());
+    startAtom(Sec.curFragList()->Head->getAtom());
 
     SmallVector<char, 0> Addends;
     ArrayRef<MachO::any_relocation_info> RelocationBuffer;
@@ -3115,7 +3122,7 @@ Error MCCASBuilder::buildFragments() {
       else
         RelocationBuffer = SectionRelocs;
 
-      auto Size = Asm.computeFragmentSize(Layout, F);
+      auto Size = Asm.computeFragmentSize(F);
       // Don't need to encode the fragment if it doesn't contribute anything.
       if (!Size)
         continue;
@@ -3130,8 +3137,8 @@ Error MCCASBuilder::buildFragments() {
         RelocationBuffer = ArrayRef<MachO::any_relocation_info>();
         RelocationBufferIndex = 0;
       }
-      partitionFragment(Layout, Addends, FinalFragmentContents,
-                        RelocationBuffer, F, RelocationBufferIndex,
+      partitionFragment(Asm, Addends, FinalFragmentContents, RelocationBuffer,
+                        F, RelocationBufferIndex,
                         ObjectWriter.Target.isLittleEndian());
 
       if (auto E = Merger.tryMerge(F, Size, FinalFragmentContents))
@@ -3165,7 +3172,7 @@ Error MCCASBuilder::buildRelocations() {
   ObjectWriter.resetBuffer();
   if (ObjectWriter.Mode == CASBackendMode::Verify ||
       RelocLocation == CompileUnit)
-    ObjectWriter.writeRelocations(Asm, Layout);
+    ObjectWriter.writeRelocations(Asm);
 
   if (RelocLocation == CompileUnit) {
     auto Relocs = RelocationsRef::create(*this, ObjectWriter.getContent());
@@ -3180,7 +3187,7 @@ Error MCCASBuilder::buildRelocations() {
 
 Error MCCASBuilder::buildDataInCodeRegion() {
   ObjectWriter.resetBuffer();
-  ObjectWriter.writeDataInCodeRegion(Asm, Layout);
+  ObjectWriter.writeDataInCodeRegion(Asm);
   auto Data = DataInCodeRef::create(*this, ObjectWriter.getContent());
   if (!Data)
     return Data.takeError();
@@ -3191,7 +3198,7 @@ Error MCCASBuilder::buildDataInCodeRegion() {
 
 Error MCCASBuilder::buildSymbolTable() {
   ObjectWriter.resetBuffer();
-  ObjectWriter.writeSymbolTable(Asm, Layout);
+  ObjectWriter.writeSymbolTable(Asm);
   StringRef S = ObjectWriter.getContent();
   std::vector<cas::ObjectRef> CStrings;
   if (auto E = createStringSection(S, [&](StringRef S) -> Error {
@@ -3305,9 +3312,8 @@ void MCCASBuilder::addNode(cas::ObjectProxy Node) {
 Expected<MCAssemblerRef> MCAssemblerRef::create(const MCSchema &Schema,
                                                 MachOCASWriter &ObjectWriter,
                                                 MCAssembler &Asm,
-                                                const MCAsmLayout &Layout,
                                                 raw_ostream *DebugOS) {
-  MCCASBuilder Builder(Schema, ObjectWriter, Asm, Layout, DebugOS);
+  MCCASBuilder Builder(Schema, ObjectWriter, Asm, DebugOS);
 
   if (auto E = Builder.prepare())
     return std::move(E);
@@ -3321,7 +3327,7 @@ Expected<MCAssemblerRef> MCAssemblerRef::create(const MCSchema &Schema,
   // Only need to do this for verify mode so we compare the output byte by
   // byte.
   if (ObjectWriter.Mode == CASBackendMode::Verify) {
-    ObjectWriter.writeSectionData(Asm, Layout);
+    ObjectWriter.writeSectionData(Asm);
   }
 
   if (auto E = Builder.buildRelocations())
@@ -3590,7 +3596,7 @@ MCCASReader::reconstructSection(SmallVectorImpl<char> &SectionBuffer,
       if (PrevOffset == RelocationOffsetInSection)
         continue;
       auto RelocationSize =
-          getRelocationSize(Reloc, getEndian() == support::little);
+          getRelocationSize(Reloc, getEndian() == endianness::little);
       /// NumOfBytesToReloc: This denotes the number of bytes needed to be
       /// copied into the \p SectionBuffer before we copy the next addend.
       auto NumOfBytesToReloc = RelocationOffsetInSection - SectionBuffer.size();

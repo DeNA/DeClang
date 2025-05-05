@@ -1,4 +1,4 @@
-// REQUIRES: case_insensitive_src_dir,ondisk_cas
+// REQUIRES: case_insensitive_build_dir,ondisk_cas
 
 // RUN: rm -rf %t
 // RUN: split-file %s %t
@@ -52,10 +52,6 @@ void bar1(void) {
 void bar2(void) {
   foo();
 }
-
-//--- header.h
-#pragma once
-void foo(void);
 
 //--- Header.h
 #pragma once

@@ -276,12 +276,25 @@ DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForType(
 
   DeclarationFragments Fragments;
 
+  if (const MacroQualifiedType *MQT = dyn_cast<MacroQualifiedType>(T)) {
+    Fragments.append(
+        getFragmentsForType(MQT->getUnderlyingType(), Context, After));
+    return Fragments;
+  }
+
+  if (const AttributedType *AT = dyn_cast<AttributedType>(T)) {
+    // FIXME: Serialize Attributes correctly
+    Fragments.append(
+        getFragmentsForType(AT->getModifiedType(), Context, After));
+    return Fragments;
+  }
+
   // An ElaboratedType is a sugar for types that are referred to using an
   // elaborated keyword, e.g., `struct S`, `enum E`, or (in C++) via a
   // qualified name, e.g., `N::M::type`, or both.
   if (const ElaboratedType *ET = dyn_cast<ElaboratedType>(T)) {
     ElaboratedTypeKeyword Keyword = ET->getKeyword();
-    if (Keyword != ElaboratedTypeKeyword::ETK_None) {
+    if (Keyword != ElaboratedTypeKeyword::None) {
       Fragments
           .append(ElaboratedType::getKeywordName(Keyword),
                   DeclarationFragments::FragmentKind::Keyword)
@@ -366,12 +379,12 @@ DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForType(
     After.append("[", DeclarationFragments::FragmentKind::Text);
 
     switch (AT->getSizeModifier()) {
-    case ArrayType::Normal:
+    case ArraySizeModifier::Normal:
       break;
-    case ArrayType::Static:
+    case ArraySizeModifier::Static:
       Fragments.append("static", DeclarationFragments::FragmentKind::Keyword);
       break;
-    case ArrayType::Star:
+    case ArraySizeModifier::Star:
       Fragments.append("*", DeclarationFragments::FragmentKind::Text);
       break;
     }
@@ -410,6 +423,7 @@ DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForType(
             TemplSpecTy->template_arguments(), Context, std::nullopt))
         .append(">", DeclarationFragments::FragmentKind::Text);
   }
+
   // Everything we care about has been handled now, reduce to the canonical
   // unqualified base type.
   QualType Base = T->getCanonicalTypeUnqualified();
@@ -420,7 +434,8 @@ DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForType(
     const TagDecl *Decl = TagTy->getDecl();
     // Anonymous decl, skip this fragment.
     if (Decl->getName().empty())
-      return Fragments;
+      return Fragments.append("{ ... }",
+                              DeclarationFragments::FragmentKind::Text);
     SmallString<128> TagUSR;
     clang::index::generateUSRForDecl(Decl, TagUSR);
     return Fragments.append(Decl->getName(),
@@ -767,10 +782,15 @@ DeclarationFragmentsBuilder::getFragmentsForEnum(const EnumDecl *EnumDecl) {
 
   QualType IntegerType = EnumDecl->getIntegerType();
   if (!IntegerType.isNull())
-    Fragments.append(": ", DeclarationFragments::FragmentKind::Text)
+    Fragments.appendSpace()
+        .append(": ", DeclarationFragments::FragmentKind::Text)
         .append(
             getFragmentsForType(IntegerType, EnumDecl->getASTContext(), After))
         .append(std::move(After));
+
+  if (EnumDecl->getName().empty())
+    Fragments.appendSpace().append("{ ... }",
+                                   DeclarationFragments::FragmentKind::Text);
 
   return Fragments.appendSemicolon();
 }
@@ -802,9 +822,12 @@ DeclarationFragments DeclarationFragmentsBuilder::getFragmentsForRecordDecl(
   else
     Fragments.append("struct", DeclarationFragments::FragmentKind::Keyword);
 
+  Fragments.appendSpace();
   if (!Record->getName().empty())
-    Fragments.appendSpace().append(
-        Record->getName(), DeclarationFragments::FragmentKind::Identifier);
+    Fragments.append(Record->getName(),
+                     DeclarationFragments::FragmentKind::Identifier);
+  else
+    Fragments.append("{ ... }", DeclarationFragments::FragmentKind::Text);
 
   return Fragments.appendSemicolon();
 }
@@ -829,9 +852,9 @@ DeclarationFragmentsBuilder::getFragmentsForSpecialCXXMethod(
     const CXXMethodDecl *Method) {
   DeclarationFragments Fragments;
   std::string Name;
-  if (isa<CXXConstructorDecl>(Method)) {
+  if (const auto *Constructor = dyn_cast<CXXConstructorDecl>(Method)) {
     Name = Method->getNameAsString();
-    if (dyn_cast<CXXConstructorDecl>(Method)->isExplicit())
+    if (Constructor->isExplicit())
       Fragments.append("explicit", DeclarationFragments::FragmentKind::Keyword)
           .appendSpace();
   } else if (isa<CXXDestructorDecl>(Method))
@@ -990,16 +1013,16 @@ DeclarationFragmentsBuilder::getFragmentsForTemplateParameters(
             DeclarationFragments::FragmentKind::GenericParameter);
 
       if (TemplateParam->hasDefaultArgument()) {
-        DeclarationFragments After;
+        const auto Default = TemplateParam->getDefaultArgument();
         Fragments.append(" = ", DeclarationFragments::FragmentKind::Text)
-            .append(getFragmentsForType(TemplateParam->getDefaultArgument(),
-                                        TemplateParam->getASTContext(), After));
-        Fragments.append(std::move(After));
+            .append(getFragmentsForTemplateArguments(
+                {Default.getArgument()}, TemplateParam->getASTContext(),
+                {Default}));
       }
     } else if (const auto *NTP =
                    dyn_cast<NonTypeTemplateParmDecl>(ParameterArray[i])) {
       DeclarationFragments After;
-      auto TyFragments =
+      const auto TyFragments =
           getFragmentsForType(NTP->getType(), NTP->getASTContext(), After);
       Fragments.append(std::move(TyFragments)).append(std::move(After));
 
@@ -1014,8 +1037,9 @@ DeclarationFragmentsBuilder::getFragmentsForTemplateParameters(
       if (NTP->hasDefaultArgument()) {
         SmallString<8> ExprStr;
         raw_svector_ostream Output(ExprStr);
-        NTP->getDefaultArgument()->printPretty(
-            Output, nullptr, NTP->getASTContext().getPrintingPolicy());
+        NTP->getDefaultArgument().getArgument().print(
+            NTP->getASTContext().getPrintingPolicy(), Output,
+            /*IncludeType=*/false);
         Fragments.append(" = ", DeclarationFragments::FragmentKind::Text)
             .append(ExprStr, DeclarationFragments::FragmentKind::Text);
       }
@@ -1028,7 +1052,7 @@ DeclarationFragmentsBuilder::getFragmentsForTemplateParameters(
               TTP->getTemplateParameters()->asArray()))
           .append(">", DeclarationFragments::FragmentKind::Text)
           .appendSpace()
-          .append("typename",
+          .append(TTP->wasDeclaredWithTypename() ? "typename" : "class",
                   DeclarationFragments::FragmentKind::Keyword);
 
       if (TTP->isParameterPack())
@@ -1109,6 +1133,13 @@ DeclarationFragmentsBuilder::getFragmentsForTemplateArguments(
       SmallString<4> Str;
       CTA.getAsIntegral().toString(Str);
       Fragments.append(Str, DeclarationFragments::FragmentKind::Text);
+      break;
+    }
+
+    case TemplateArgument::StructuralValue: {
+      const auto SVTy = CTA.getStructuralValueType();
+      Fragments.append(CTA.getAsStructuralValue().getAsString(Context, SVTy),
+                       DeclarationFragments::FragmentKind::Text);
       break;
     }
 
@@ -1207,7 +1238,7 @@ DeclarationFragmentsBuilder::getFragmentsForClassTemplateSpecialization(
       .append("<", DeclarationFragments::FragmentKind::Text)
       .append(getFragmentsForTemplateArguments(
           Decl->getTemplateArgs().asArray(), Decl->getASTContext(),
-          std::nullopt))
+          Decl->getTemplateArgsAsWritten()->arguments()))
       .append(">", DeclarationFragments::FragmentKind::Text)
       .appendSemicolon();
 }
@@ -1250,7 +1281,7 @@ DeclarationFragmentsBuilder::getFragmentsForVarTemplateSpecialization(
       .append("<", DeclarationFragments::FragmentKind::Text)
       .append(getFragmentsForTemplateArguments(
           Decl->getTemplateArgs().asArray(), Decl->getASTContext(),
-          std::nullopt))
+          Decl->getTemplateArgsAsWritten()->arguments()))
       .append(">", DeclarationFragments::FragmentKind::Text)
       .appendSemicolon();
 }
@@ -1309,13 +1340,11 @@ DeclarationFragmentsBuilder::getFragmentsForFunctionTemplateSpecialization(
 
 DeclarationFragments
 DeclarationFragmentsBuilder::getFragmentsForMacro(StringRef Name,
-                                                  const MacroDirective *MD) {
+                                                  const MacroInfo *MI) {
   DeclarationFragments Fragments;
   Fragments.append("#define", DeclarationFragments::FragmentKind::Keyword)
       .appendSpace();
   Fragments.append(Name, DeclarationFragments::FragmentKind::Identifier);
-
-  auto *MI = MD->getMacroInfo();
 
   if (MI->isFunctionLike()) {
     Fragments.append("(", DeclarationFragments::FragmentKind::Text);
@@ -1593,6 +1622,9 @@ DeclarationFragmentsBuilder::getSubHeading(const NamedDecl *Decl) {
              cast<CXXMethodDecl>(Decl)->isOverloadedOperator()) {
     Fragments.append(Decl->getNameAsString(),
                      DeclarationFragments::FragmentKind::Identifier);
+  } else if (isa<TagDecl>(Decl) &&
+             cast<TagDecl>(Decl)->getTypedefNameForAnonDecl()) {
+    return getSubHeading(cast<TagDecl>(Decl)->getTypedefNameForAnonDecl());
   } else if (Decl->getIdentifier()) {
     Fragments.append(Decl->getName(),
                      DeclarationFragments::FragmentKind::Identifier);

@@ -1,10 +1,10 @@
 // RUN: rm -fR %t
 // RUN: %clang_cc1 -fsyntax-only -verify=c99 -std=c99 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=c11 -std=c11 %s
-// RUN: %clang_cc1 -fsyntax-only -verify=c23 -std=c2x %s
+// RUN: %clang_cc1 -fsyntax-only -verify=c23 -std=c23 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=c99-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c99 %s
 // RUN: %clang_cc1 -fsyntax-only -verify=c11-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c11 %s
-// RUN: %clang_cc1 -fsyntax-only -verify=c23-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c2x %s
+// RUN: %clang_cc1 -fsyntax-only -verify=c23-modules -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -std=c23 %s
 
 struct astruct { char member; };
 

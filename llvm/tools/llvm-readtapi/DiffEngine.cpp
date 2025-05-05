@@ -224,7 +224,7 @@ std::vector<DiffOutput> getSingleIF(InterfaceFile *Interface,
                 Order);
   diffAttribute("Parent Umbrellas", Output, Interface->umbrellas(), Order);
   diffAttribute("Symbols", Output, Interface->symbols(), Order);
-  for (auto Doc : Interface->documents()) {
+  for (const auto &Doc : Interface->documents()) {
     DiffOutput Documents("Inlined Reexported Frameworks/Libraries");
     Documents.Kind = AD_Inline_Doc;
     Documents.Values.push_back(std::make_unique<InlineDoc>(
@@ -459,10 +459,10 @@ T *castValues(const std::unique_ptr<AttributeDiff> &RawAttr) {
 
 template <typename T> void sortTargetValues(std::vector<T> &TargValues) {
   llvm::stable_sort(TargValues, [](const auto &ValA, const auto &ValB) {
+    if (ValA.getOrder() == ValB.getOrder()) {
+      return ValA.getVal() < ValB.getVal();
+    }
     return ValA.getOrder() < ValB.getOrder();
-  });
-  llvm::stable_sort(TargValues, [](const auto &ValA, const auto &ValB) {
-    return ValA.getOrder() == ValB.getOrder() && ValA.getVal() < ValB.getVal();
   });
 }
 

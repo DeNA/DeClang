@@ -30,7 +30,7 @@ SUPPRESS1 void foo() {
   int SUPPRESS2("r") z; // no-warning
   SUPPRESS2(foo) // no-warning
   float f;
-  // expected-error@-2 {{'suppress' attribute requires a string}}
+  // expected-error@-2 {{expected string literal as argument of 'suppress' attribute}}
 }
 
 union SUPPRESS2("type.1") U { // no-warning

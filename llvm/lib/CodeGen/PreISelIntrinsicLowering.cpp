@@ -72,8 +72,6 @@ static bool lowerLoadRelative(Function &F) {
 
   bool Changed = false;
   Type *Int32Ty = Type::getInt32Ty(F.getContext());
-  Type *Int32PtrTy = Int32Ty->getPointerTo();
-  Type *Int8Ty = Type::getInt8Ty(F.getContext());
 
   for (Use &U : llvm::make_early_inc_range(F.uses())) {
     auto CI = dyn_cast<CallInst>(U.getUser());
@@ -82,11 +80,10 @@ static bool lowerLoadRelative(Function &F) {
 
     IRBuilder<> B(CI);
     Value *OffsetPtr =
-        B.CreateGEP(Int8Ty, CI->getArgOperand(0), CI->getArgOperand(1));
-    Value *OffsetPtrI32 = B.CreateBitCast(OffsetPtr, Int32PtrTy);
-    Value *OffsetI32 = B.CreateAlignedLoad(Int32Ty, OffsetPtrI32, Align(4));
+        B.CreatePtrAdd(CI->getArgOperand(0), CI->getArgOperand(1));
+    Value *OffsetI32 = B.CreateAlignedLoad(Int32Ty, OffsetPtr, Align(4));
 
-    Value *ResultPtr = B.CreateGEP(Int8Ty, CI->getArgOperand(0), OffsetI32);
+    Value *ResultPtr = B.CreatePtrAdd(CI->getArgOperand(0), OffsetI32);
 
     CI->replaceAllUsesWith(ResultPtr);
     CI->eraseFromParent();
@@ -164,6 +161,16 @@ static bool lowerObjCCall(Function &F, const char *NewFn,
     CallInst::TailCallKind TCK = CI->getTailCallKind();
     NewCI->setTailCallKind(std::max(TCK, OverridingTCK));
 
+    // Transfer the 'returned' attribute from the intrinsic to the call site.
+    // By applying this only to intrinsic call sites, we avoid applying it to
+    // non-ARC explicit calls to things like objc_retain which have not been
+    // auto-upgraded to use the intrinsics.
+    unsigned Index;
+    if (F.getAttributes().hasAttrSomewhere(Attribute::Returned, &Index) &&
+        Index)
+      NewCI->addParamAttr(Index - AttributeList::FirstArgIndex,
+                          Attribute::Returned);
+
     if (!CI->use_empty())
       CI->replaceAllUsesWith(NewCI);
     CI->eraseFromParent();
@@ -223,6 +230,21 @@ bool PreISelIntrinsicLowering::expandMemIntrinsicUses(Function &F) const {
 
       break;
     }
+    case Intrinsic::memcpy_inline: {
+      // Only expand llvm.memcpy.inline with non-constant length in this
+      // codepath, leaving the current SelectionDAG expansion for constant
+      // length memcpy intrinsics undisturbed.
+      auto *Memcpy = cast<MemCpyInlineInst>(Inst);
+      if (isa<ConstantInt>(Memcpy->getLength()))
+        break;
+
+      Function *ParentFunc = Memcpy->getFunction();
+      const TargetTransformInfo &TTI = LookupTTI(*ParentFunc);
+      expandMemCpyAsLoop(Memcpy, TTI);
+      Changed = true;
+      Memcpy->eraseFromParent();
+      break;
+    }
     case Intrinsic::memmove: {
       auto *Memmove = cast<MemMoveInst>(Inst);
       Function *ParentFunc = Memmove->getFunction();
@@ -256,6 +278,19 @@ bool PreISelIntrinsicLowering::expandMemIntrinsicUses(Function &F) const {
 
       break;
     }
+    case Intrinsic::memset_inline: {
+      // Only expand llvm.memset.inline with non-constant length in this
+      // codepath, leaving the current SelectionDAG expansion for constant
+      // length memset intrinsics undisturbed.
+      auto *Memset = cast<MemSetInlineInst>(Inst);
+      if (isa<ConstantInt>(Memset->getLength()))
+        break;
+
+      expandMemSetAsLoop(Memset);
+      Changed = true;
+      Memset->eraseFromParent();
+      break;
+    }
     default:
       llvm_unreachable("unhandled intrinsic");
     }
@@ -271,8 +306,10 @@ bool PreISelIntrinsicLowering::lowerIntrinsics(Module &M) const {
     default:
       break;
     case Intrinsic::memcpy:
+    case Intrinsic::memcpy_inline:
     case Intrinsic::memmove:
     case Intrinsic::memset:
+    case Intrinsic::memset_inline:
       Changed |= expandMemIntrinsicUses(F);
       break;
     case Intrinsic::load_relative:

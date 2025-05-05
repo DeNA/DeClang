@@ -31,7 +31,6 @@
 using namespace clang;
 using namespace clang::extractapi;
 using namespace llvm;
-using namespace llvm::json;
 
 namespace {
 
@@ -105,6 +104,10 @@ Object serializePlatform(const Triple &T) {
   Object Platform;
   Platform["architecture"] = T.getArchName();
   Platform["vendor"] = T.getVendorName();
+
+  if (!T.getEnvironmentName().empty())
+    Platform["environment"] = T.getEnvironmentName();
+
   Platform["operatingSystem"] = serializeOperatingSystem(T);
   return Platform;
 }
@@ -172,22 +175,25 @@ std::optional<Array> serializeAvailability(const AvailabilityInfo &Avail) {
     UnconditionallyDeprecated["isUnconditionallyDeprecated"] = true;
     AvailabilityArray.emplace_back(std::move(UnconditionallyDeprecated));
   }
-  Object Availability;
 
-  Availability["domain"] = Avail.Domain;
+  if (Avail.Domain.str() != "") {
+    Object Availability;
+    Availability["domain"] = Avail.Domain;
 
-  if (Avail.isUnavailable()) {
-    Availability["isUnconditionallyUnavailable"] = true;
-  } else {
-    serializeObject(Availability, "introduced",
-                    serializeSemanticVersion(Avail.Introduced));
-    serializeObject(Availability, "deprecated",
-                    serializeSemanticVersion(Avail.Deprecated));
-    serializeObject(Availability, "obsoleted",
-                    serializeSemanticVersion(Avail.Obsoleted));
+    if (Avail.isUnavailable()) {
+      Availability["isUnconditionallyUnavailable"] = true;
+    } else {
+      serializeObject(Availability, "introduced",
+                      serializeSemanticVersion(Avail.Introduced));
+      serializeObject(Availability, "deprecated",
+                      serializeSemanticVersion(Avail.Deprecated));
+      serializeObject(Availability, "obsoleted",
+                      serializeSemanticVersion(Avail.Obsoleted));
+    }
+
+    AvailabilityArray.emplace_back(std::move(Availability));
   }
 
-  AvailabilityArray.emplace_back(std::move(Availability));
   return AvailabilityArray;
 }
 
@@ -215,6 +221,7 @@ StringRef getLanguageName(Language Lang) {
   case Language::Unknown:
   case Language::Asm:
   case Language::LLVM_IR:
+  case Language::CIR:
     llvm_unreachable("Unsupported language kind");
   }
 
@@ -556,7 +563,7 @@ void serializeTemplateMixin(Object &Paren, const RecordTy &Record) {
 
   Object Generics;
   Array GenericParameters;
-  for (const auto Param : Template.getParameters()) {
+  for (const auto &Param : Template.getParameters()) {
     Object Parameter;
     Parameter["name"] = Param.Name;
     Parameter["index"] = Param.Index;
@@ -567,7 +574,7 @@ void serializeTemplateMixin(Object &Paren, const RecordTy &Record) {
     Generics["parameters"] = std::move(GenericParameters);
 
   Array GenericConstraints;
-  for (const auto Constr : Template.getConstraints()) {
+  for (const auto &Constr : Template.getConstraints()) {
     Object Constraint;
     Constraint["kind"] = Constr.Kind;
     Constraint["lhs"] = Constr.LHS;
@@ -698,6 +705,8 @@ StringRef SymbolGraphSerializer::getRelationshipString(RelationshipKind Kind) {
     return "inheritsFrom";
   case RelationshipKind::ConformsTo:
     return "conformsTo";
+  case RelationshipKind::ExtensionTo:
+    return "extensionTo";
   }
   llvm_unreachable("Unhandled relationship kind");
 }
@@ -919,8 +928,8 @@ bool SymbolGraphSerializer::traverseObjCCategoryRecord(
     return true;
 
   auto *CurrentModule = ModuleForCurrentSymbol;
-  if (Record->isExtendingExternalModule())
-    ModuleForCurrentSymbol = &ExtendedModules[Record->Interface.Source];
+  if (auto ModuleExtendedByRecord = Record->getExtendedExternalModule())
+    ModuleForCurrentSymbol = &ExtendedModules[*ModuleExtendedByRecord];
 
   if (!walkUpFromObjCCategoryRecord(Record))
     return false;
@@ -1025,9 +1034,9 @@ void SymbolGraphSerializer::serializeGraphToStream(
     ExtendedModule &&EM) {
   Object Root = serializeGraph(ModuleName, std::move(EM));
   if (Options.Compact)
-    OS << formatv("{0}", Value(std::move(Root))) << "\n";
+    OS << formatv("{0}", json::Value(std::move(Root))) << "\n";
   else
-    OS << formatv("{0:2}", Value(std::move(Root))) << "\n";
+    OS << formatv("{0:2}", json::Value(std::move(Root))) << "\n";
 }
 
 void SymbolGraphSerializer::serializeMainSymbolGraph(
@@ -1071,9 +1080,6 @@ SymbolGraphSerializer::serializeSingleSymbolSGF(StringRef USR,
                                                 const APISet &API) {
   APIRecord *Record = API.findRecordForUSR(USR);
   if (!Record)
-    return {};
-
-  if (isa<ObjCCategoryRecord>(Record))
     return {};
 
   Object Root;

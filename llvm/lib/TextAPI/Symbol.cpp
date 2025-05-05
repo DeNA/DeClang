@@ -85,7 +85,7 @@ SimpleSymbol parseSymbol(StringRef SymName) {
   if (SymName.starts_with(ObjC2EHTypePrefix))
     return {SymName.drop_front(ObjC2EHTypePrefix.size()),
             EncodeKind::ObjectiveCClassEHType, ObjCIFSymbolKind::EHType};
-  if (SymName.startswith(ObjC2IVarPrefix))
+  if (SymName.starts_with(ObjC2IVarPrefix))
     return {SymName.drop_front(ObjC2IVarPrefix.size()),
             EncodeKind::ObjectiveCInstanceVariable, ObjCIFSymbolKind::None};
   return {SymName, EncodeKind::GlobalSymbol, ObjCIFSymbolKind::None};

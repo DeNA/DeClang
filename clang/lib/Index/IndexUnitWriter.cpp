@@ -12,7 +12,6 @@
 #include "clang/Basic/PathRemapper.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Bitstream/BitstreamWriter.h"
 #include "llvm/Support/Allocator.h"
@@ -20,6 +19,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/xxhash.h"
 
 using namespace clang;
 using namespace clang::index;
@@ -49,10 +49,10 @@ public:
 
   ArrayRef<FileBitPath> getBitPaths() const { return FileBitPaths; }
 
-  int getPathIndex(const FileEntry *FE) {
+  int getPathIndex(OptionalFileEntryRef FE) {
     if (!FE)
       return -1;
-    auto Pair = FileToIndex.insert(std::make_pair(FE, FileBitPaths.size()));
+    auto Pair = FileToIndex.insert(std::make_pair(*FE, FileBitPaths.size()));
     bool IsNew = Pair.second;
     size_t Index = Pair.first->getSecond();
 
@@ -109,7 +109,7 @@ private:
   }
 
   static bool isPathInDir(StringRef dir, StringRef path) {
-    if (dir.empty() || !path.startswith(dir))
+    if (dir.empty() || !path.starts_with(dir))
       return false;
     StringRef rest = path.drop_front(dir.size());
     return !rest.empty() && sys::path::is_separator(rest.front());
@@ -122,7 +122,7 @@ IndexUnitWriter::IndexUnitWriter(FileManager &FileMgr,
                                  StringRef ProviderVersion,
                                  StringRef OutputFile,
                                  StringRef ModuleName,
-                                 const FileEntry *MainFile,
+                                 OptionalFileEntryRef MainFile,
                                  bool IsSystem,
                                  bool IsModuleUnit,
                                  bool IsDebugCompilation,
@@ -136,8 +136,12 @@ IndexUnitWriter::IndexUnitWriter(FileManager &FileMgr,
   this->ProviderIdentifier = std::string(ProviderIdentifier);
   this->ProviderVersion = std::string(ProviderVersion);
   SmallString<256> AbsOutputFile(OutputFile);
-  if (OutputFile != "-")  // Can't make stdout absolute, should stay as "-".
+  if (OutputFile != "-")  {
+    // Can't make stdout absolute, should stay as "-".
     FileMgr.makeAbsolutePath(AbsOutputFile);
+    llvm::sys::path::native(AbsOutputFile);
+  }
+
   this->OutputFile = std::string(AbsOutputFile.str());
   this->ModuleName = std::string(ModuleName);
   this->MainFile = MainFile;
@@ -165,28 +169,30 @@ int IndexUnitWriter::addModule(writer::OpaqueModule Mod) {
   return Pair.first->second;
 }
 
-int IndexUnitWriter::addFileDependency(const FileEntry *File, bool IsSystem,
+int IndexUnitWriter::addFileDependency(OptionalFileEntryRef File, bool IsSystem,
                                        writer::OpaqueModule Mod) {
   assert(File);
-  auto Pair = IndexByFile.insert(std::make_pair(File, Files.size()));
+  auto Pair = IndexByFile.insert(std::make_pair(*File, Files.size()));
   bool WasInserted = Pair.second;
   if (WasInserted) {
-    Files.push_back(FileEntryData{File, IsSystem, addModule(Mod), {}});
+    Files.push_back(FileEntryData{*File, IsSystem, addModule(Mod), {}});
   }
   return Pair.first->second;
 }
 
-void IndexUnitWriter::addRecordFile(StringRef RecordFile, const FileEntry *File,
-                                    bool IsSystem, writer::OpaqueModule Mod) {
+void IndexUnitWriter::addRecordFile(StringRef RecordFile,
+                                    OptionalFileEntryRef File, bool IsSystem,
+                                    writer::OpaqueModule Mod) {
   int Dep = File ? addFileDependency(File, IsSystem, /*module=*/nullptr) : -1;
   Records.push_back(RecordOrUnitData{std::string(RecordFile), Dep, addModule(Mod), IsSystem});
 }
 
-void IndexUnitWriter::addASTFileDependency(const FileEntry *File, bool IsSystem,
+void IndexUnitWriter::addASTFileDependency(OptionalFileEntryRef File,
+                                           bool IsSystem,
                                            writer::OpaqueModule Mod,
                                            bool withoutUnitName) {
   assert(File);
-  if (!SeenASTFiles.insert(File).second)
+  if (!SeenASTFiles.insert(*File).second)
     return;
 
   SmallString<64> UnitName;
@@ -196,7 +202,8 @@ void IndexUnitWriter::addASTFileDependency(const FileEntry *File, bool IsSystem,
 }
 
 void IndexUnitWriter::addUnitDependency(StringRef UnitFile,
-                                        const FileEntry *File, bool IsSystem,
+                                        OptionalFileEntryRef File,
+                                        bool IsSystem,
                                         writer::OpaqueModule Mod) {
   int Dep = File ? addFileDependency(File, IsSystem, /*module=*/nullptr) : -1;
   ASTFileUnits.emplace_back(RecordOrUnitData{std::string(UnitFile), Dep, addModule(Mod), IsSystem});
@@ -224,13 +231,14 @@ void IndexUnitWriter::getUnitNameForOutputFile(StringRef FilePath,
                                                SmallVectorImpl<char> &Str) {
   SmallString<256> AbsPath(FilePath);
   FileMgr.makeAbsolutePath(AbsPath);
+  llvm::sys::path::native(AbsPath);
   return getUnitNameForAbsoluteOutputFile(AbsPath, Str, Remapper);
 }
 
 void IndexUnitWriter::getUnitPathForOutputFile(StringRef FilePath,
                                                SmallVectorImpl<char> &Str) {
   Str.append(UnitsPath.begin(), UnitsPath.end());
-  Str.push_back('/');
+  Str.push_back(llvm::sys::path::get_separator().front());
   return getUnitNameForOutputFile(FilePath, Str);
 }
 
@@ -242,7 +250,7 @@ std::optional<bool> IndexUnitWriter::isUnitUpToDateForOutputFile(
 
   llvm::sys::fs::file_status UnitStat;
   if (std::error_code EC = llvm::sys::fs::status(UnitPath.c_str(), UnitStat)) {
-    if (EC != llvm::errc::no_such_file_or_directory) {
+    if (EC != llvm::errc::no_such_file_or_directory && EC != llvm::errc::delete_pending) {
       llvm::raw_string_ostream Err(Error);
       Err << "could not access path '" << UnitPath
           << "': " << EC.message();
@@ -256,7 +264,7 @@ std::optional<bool> IndexUnitWriter::isUnitUpToDateForOutputFile(
 
   llvm::sys::fs::file_status CompareStat;
   if (std::error_code EC = llvm::sys::fs::status(*TimeCompareFilePath, CompareStat)) {
-    if (EC != llvm::errc::no_such_file_or_directory) {
+    if (EC != llvm::errc::no_such_file_or_directory && EC != llvm::errc::delete_pending) {
       llvm::raw_string_ostream Err(Error);
       Err << "could not access path '" << *TimeCompareFilePath
           << "': " << EC.message();
@@ -278,8 +286,8 @@ void IndexUnitWriter::getUnitNameForAbsoluteOutputFile(StringRef FilePath,
   Str.push_back('-');
   // Need to be sure we use the remapped path to keep things hermetic.
   std::string RemappedPath = Remapper.remapPath(FilePath);
-  llvm::hash_code PathHashVal = llvm::hash_value(RemappedPath);
-  llvm::APInt(64, PathHashVal).toString(Str, 36, /*Signed=*/false);
+  auto PathHashVal = llvm::xxh3_64bits(RemappedPath);
+  llvm::APInt(64, PathHashVal).toStringUnsigned(Str, /*Radix*/ 36);
 }
 
 static void writeBlockInfo(BitstreamWriter &Stream) {

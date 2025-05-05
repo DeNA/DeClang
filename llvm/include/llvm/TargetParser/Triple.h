@@ -96,6 +96,7 @@ public:
     hsail64,        // AMD HSAIL with 64-bit pointers
     spir,           // SPIR: standard portable IR for OpenCL 32-bit version
     spir64,         // SPIR: standard portable IR for OpenCL 64-bit version
+    spirv,          // SPIR-V with logical memory layout.
     spirv32,        // SPIR-V with 32-bit pointers
     spirv64,        // SPIR-V with 64-bit pointers
     kalimba,        // Kalimba: generic kalimba
@@ -111,6 +112,7 @@ public:
   enum SubArchType {
     NoSubArch,
 
+    ARMSubArch_v9_5a,
     ARMSubArch_v9_4a,
     ARMSubArch_v9_3a,
     ARMSubArch_v9_2a,
@@ -162,6 +164,19 @@ public:
     SPIRVSubArch_v13,
     SPIRVSubArch_v14,
     SPIRVSubArch_v15,
+    SPIRVSubArch_v16,
+
+    // DXIL sub-arch corresponds to its version.
+    DXILSubArch_v1_0,
+    DXILSubArch_v1_1,
+    DXILSubArch_v1_2,
+    DXILSubArch_v1_3,
+    DXILSubArch_v1_4,
+    DXILSubArch_v1_5,
+    DXILSubArch_v1_6,
+    DXILSubArch_v1_7,
+    DXILSubArch_v1_8,
+    LatestDXILSubArch = DXILSubArch_v1_8,
   };
   enum VendorType {
     UnknownVendor,
@@ -175,7 +190,6 @@ public:
     MipsTechnologies,
     NVIDIA,
     CSR,
-    Myriad,
     AMD,
     Mesa,
     SUSE,
@@ -186,8 +200,6 @@ public:
   enum OSType {
     UnknownOS,
 
-    Ananas,
-    CloudABI,
     Darwin,
     DragonFly,
     FreeBSD,
@@ -195,7 +207,7 @@ public:
     IOS,
     KFreeBSD,
     Linux,
-    Lv2,        // PS3
+    Lv2, // PS3
     MacOSX,
     NetBSD,
     OpenBSD,
@@ -204,22 +216,21 @@ public:
     Win32,
     ZOS,
     Haiku,
-    Minix,
     RTEMS,
-    NaCl,       // Native Client
+    NaCl, // Native Client
     AIX,
-    CUDA,       // NVIDIA CUDA
-    NVCL,       // NVIDIA OpenCL
-    AMDHSA,     // AMD HSA Runtime
+    CUDA,   // NVIDIA CUDA
+    NVCL,   // NVIDIA OpenCL
+    AMDHSA, // AMD HSA Runtime
     PS4,
     PS5,
     ELFIAMCU,
-    TvOS,       // Apple tvOS
-    WatchOS,    // Apple watchOS
-    DriverKit,  // Apple DriverKit
-    XROS,       // Apple XROS
+    TvOS,      // Apple tvOS
+    WatchOS,   // Apple watchOS
+    BridgeOS,  // Apple bridgeOS
+    DriverKit, // Apple DriverKit
+    XROS,      // Apple XROS
     Mesa3D,
-    Contiki,
     AMDPAL,     // AMD PAL Runtime
     HermitCore, // HermitCore Unikernel/Multikernel
     Hurd,       // GNU/Hurd
@@ -227,7 +238,9 @@ public:
     Emscripten,
     ShaderModel, // DirectX ShaderModel
     LiteOS,
-    LastOSType = LiteOS
+    Serenity,
+    Vulkan, // Vulkan SPIR-V
+    LastOSType = Vulkan
   };
   enum EnvironmentType {
     UnknownEnvironment,
@@ -256,7 +269,7 @@ public:
     Cygnus,
     CoreCLR,
     Simulator, // Simulator variants of other systems, e.g., Apple's iOS
-    MacABI, // Mac Catalyst variant of Apple's iOS deployment target.
+    MacABI,    // Mac Catalyst variant of Apple's iOS deployment target.
 
     // Shader Stages
     // The order of these values matters, and must be kept in sync with the
@@ -277,8 +290,16 @@ public:
     Callable,
     Mesh,
     Amplification,
+    OpenCL,
     OpenHOS,
-    LastEnvironmentType = OpenHOS
+
+    PAuthTest,
+
+    GNUT64,
+    GNUEABIT64,
+    GNUEABIHFT64,
+
+    LastEnvironmentType = GNUEABIHFT64
   };
   enum ObjectFormatType {
     UnknownObjectFormat,
@@ -411,6 +432,14 @@ public:
   /// Parse the version number as with getOSVersion.
   VersionTuple getDriverKitVersion() const;
 
+  /// Parse the Vulkan version number from the OSVersion and SPIR-V version
+  /// (SubArch).  This should only be called with Vulkan SPIR-V triples.
+  VersionTuple getVulkanVersion() const;
+
+  /// Parse the DXIL version number from the OSVersion and DXIL version
+  /// (SubArch).  This should only be called with DXIL triples.
+  VersionTuple getDXILVersion() const;
+
   /// @}
   /// @name Direct Component Access
   /// @{
@@ -436,9 +465,23 @@ public:
   /// string (separated by a '-' if the environment component is present).
   StringRef getOSAndEnvironmentName() const;
 
+  /// Get the version component of the environment component as a single
+  /// string (the version after the environment).
+  ///
+  /// For example, "fooos1.2.3" would return "1.2.3".
+  StringRef getEnvironmentVersionString() const;
+
   /// @}
   /// @name Convenience Predicates
   /// @{
+
+  /// Returns the pointer width of this architecture.
+  static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch);
+
+  /// Returns the pointer width of this architecture.
+  unsigned getArchPointerBitWidth() const {
+    return getArchPointerBitWidth(getArch());
+  }
 
   /// Test whether the architecture is 64-bit
   ///
@@ -567,15 +610,12 @@ public:
 
   bool isGNUEnvironment() const {
     EnvironmentType Env = getEnvironment();
-    return Env == Triple::GNU || Env == Triple::GNUABIN32 ||
-           Env == Triple::GNUABI64 || Env == Triple::GNUEABI ||
-           Env == Triple::GNUEABIHF || Env == Triple::GNUF32 ||
-           Env == Triple::GNUF64 || Env == Triple::GNUSF ||
-           Env == Triple::GNUX32;
-  }
-
-  bool isOSContiki() const {
-    return getOS() == Triple::Contiki;
+    return Env == Triple::GNU || Env == Triple::GNUT64 ||
+           Env == Triple::GNUABIN32 || Env == Triple::GNUABI64 ||
+           Env == Triple::GNUEABI || Env == Triple::GNUEABIT64 ||
+           Env == Triple::GNUEABIHF || Env == Triple::GNUEABIHFT64 ||
+           Env == Triple::GNUF32 || Env == Triple::GNUF64 ||
+           Env == Triple::GNUSF || Env == Triple::GNUX32;
   }
 
   /// Tests whether the OS is Haiku.
@@ -679,6 +719,10 @@ public:
     return getOS() == Triple::AIX;
   }
 
+  bool isOSSerenity() const {
+    return getOS() == Triple::Serenity;
+  }
+
   /// Tests whether the OS uses the ELF binary format.
   bool isOSBinFormatELF() const {
     return getObjectFormat() == Triple::ELF;
@@ -766,14 +810,38 @@ public:
     return getArch() == Triple::dxil;
   }
 
+  bool isShaderModelOS() const {
+    return getOS() == Triple::ShaderModel;
+  }
+
+  bool isVulkanOS() const { return getOS() == Triple::Vulkan; }
+
+  bool isShaderStageEnvironment() const {
+    EnvironmentType Env = getEnvironment();
+    return Env == Triple::Pixel || Env == Triple::Vertex ||
+           Env == Triple::Geometry || Env == Triple::Hull ||
+           Env == Triple::Domain || Env == Triple::Compute ||
+           Env == Triple::Library || Env == Triple::RayGeneration ||
+           Env == Triple::Intersection || Env == Triple::AnyHit ||
+           Env == Triple::ClosestHit || Env == Triple::Miss ||
+           Env == Triple::Callable || Env == Triple::Mesh ||
+           Env == Triple::Amplification;
+  }
+
   /// Tests whether the target is SPIR (32- or 64-bit).
   bool isSPIR() const {
     return getArch() == Triple::spir || getArch() == Triple::spir64;
   }
 
-  /// Tests whether the target is SPIR-V (32/64-bit).
+  /// Tests whether the target is SPIR-V (32/64-bit/Logical).
   bool isSPIRV() const {
-    return getArch() == Triple::spirv32 || getArch() == Triple::spirv64;
+    return getArch() == Triple::spirv32 || getArch() == Triple::spirv64 ||
+           getArch() == Triple::spirv;
+  }
+
+  /// Tests whether the target is SPIR-V Logical
+  bool isSPIRVLogical() const {
+    return getArch() == Triple::spirv;
   }
 
   /// Tests whether the target is NVPTX (32- or 64-bit).
@@ -804,9 +872,11 @@ public:
     return (isARM() || isThumb()) &&
            (getEnvironment() == Triple::EABI ||
             getEnvironment() == Triple::GNUEABI ||
+            getEnvironment() == Triple::GNUEABIT64 ||
             getEnvironment() == Triple::MuslEABI ||
             getEnvironment() == Triple::EABIHF ||
             getEnvironment() == Triple::GNUEABIHF ||
+            getEnvironment() == Triple::GNUEABIHFT64 ||
             getEnvironment() == Triple::OpenHOS ||
             getEnvironment() == Triple::MuslEABIHF || isAndroid()) &&
            isOSBinFormatELF();
@@ -984,6 +1054,22 @@ public:
     return getArch() == Triple::bpfel || getArch() == Triple::bpfeb;
   }
 
+  /// Tests if the target forces 64-bit time_t on a 32-bit architecture.
+  bool isTime64ABI() const {
+    EnvironmentType Env = getEnvironment();
+    return Env == Triple::GNUT64 || Env == Triple::GNUEABIT64 ||
+           Env == Triple::GNUEABIHFT64;
+  }
+
+  /// Tests if the target forces hardfloat.
+  bool isHardFloatABI() const {
+    EnvironmentType Env = getEnvironment();
+    return Env == llvm::Triple::GNUEABIHF ||
+           Env == llvm::Triple::GNUEABIHFT64 ||
+           Env == llvm::Triple::MuslEABIHF ||
+           Env == llvm::Triple::EABIHF;
+  }
+
   /// Tests whether the target supports comdat
   bool supportsCOMDAT() const {
     return !(isOSBinFormatMachO() || isOSBinFormatXCOFF() ||
@@ -997,6 +1083,10 @@ public:
     return (isAndroid() && isAndroidVersionLT(29)) || isOSOpenBSD() ||
            isWindowsCygwinEnvironment() || isOHOSFamily();
   }
+
+  /// True if the target supports both general-dynamic and TLSDESC, and TLSDESC
+  /// is enabled by default.
+  bool hasDefaultTLSDESC() const { return isAndroid() && isRISCV64(); }
 
   /// Tests whether the target uses -data-sections as default.
   bool hasDefaultDataSections() const {

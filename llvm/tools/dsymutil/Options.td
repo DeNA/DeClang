@@ -65,6 +65,10 @@ def no_swiftmodule_timestamp: F<"no-swiftmodule-timestamp">,
   HelpText<"Don't check timestamp for swiftmodule files.">,
   Group<grp_general>;
 
+def no_object_timestamp: F<"no-object-timestamp">,
+  HelpText<"Don't check timestamp for object files.">,
+  Group<grp_general>;
+
 def no_odr: F<"no-odr">,
   HelpText<"Do not use ODR (One Definition Rule) for type uniquing.">,
   Group<grp_general>;
@@ -135,12 +139,6 @@ def object_prefix_map: Separate<["--", "-"], "object-prefix-map">,
              "find the Clang module cache.">,
     Group<grp_general>;
 def: Joined<["--", "-"], "object-prefix-map=">, Alias<object_prefix_map>;
-
-def symbolmap: Separate<["--", "-"], "symbol-map">,
-  MetaVarName<"<bcsymbolmap>">,
-  HelpText<"Updates the existing dSYMs inplace using symbol map specified.">,
-  Group<grp_general>;
-def: Joined<["--", "-"], "symbol-map=">, Alias<symbolmap>;
 
 def arch: Separate<["--", "-"], "arch">,
   MetaVarName<"<arch>">,

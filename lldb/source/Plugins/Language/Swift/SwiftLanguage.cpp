@@ -15,9 +15,9 @@
 #include "SwiftUnsafeTypes.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/PluginManager.h"
-#include "lldb/Core/ValueObject.h"
-#include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/ValueObject/ValueObject.h"
+#include "lldb/ValueObject/ValueObjectVariable.h"
 
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
@@ -408,7 +408,14 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
   SetConfig::Get().RegisterSyntheticChildrenCreators(swift_category_sp,
                                                      synth_flags);
 
-  synth_flags.SetSkipPointers(true);
+  AddCXXSynthetic(swift_category_sp,
+                  lldb_private::formatters::swift::TaskSyntheticFrontEndCreator,
+                  "Swift.Task synthetic children",
+                  ConstString("^Swift\\.Task<.+,.+>"), synth_flags, true);
+  AddCXXSynthetic(swift_category_sp,
+                  lldb_private::formatters::swift::TaskSyntheticFrontEndCreator,
+                  "Swift.UnsafeCurrentTask synthetic children",
+                  ConstString("Swift.UnsafeCurrentTask"), synth_flags);
 
   AddCXXSummary(
       swift_category_sp, lldb_private::formatters::swift::Bool_SummaryProvider,
@@ -720,7 +727,7 @@ SwiftLanguage::GetHardcodedSummaries() {
       }
       llvm::StringRef tau_ = u8"$\u03C4_";
       if (valobj.GetName().GetLength() > 12 &&
-          valobj.GetName().GetStringRef().startswith(tau_) &&
+          valobj.GetName().GetStringRef().starts_with(tau_) &&
           type.GetTypeName() == g_RawPointerType) {
         if (!swift_metatype_summary_sp.get()) {
           TypeSummaryImpl::Flags flags;
@@ -1048,16 +1055,15 @@ SwiftLanguage::GetHardcodedSynthetics() {
         LLDB_LOGV(log, "[Matching CxxBridgedSyntheticChildProvider] - "
                        "Could not get the swift runtime.");
 
-      std::optional<SwiftScratchContextReader> scratch_ctx_reader =
-          valobj.GetSwiftScratchContext();
-      if (!scratch_ctx_reader || !scratch_ctx_reader->get()) {
+      auto ts = TypeSystemSwiftTypeRefForExpressions::GetForTarget(
+          valobj.GetTargetSP());
+      if (!ts) {
         LLDB_LOGV(log, "[Matching CxxBridgedSyntheticChildProvider] - "
                        "Could not get the Swift scratch context.");
         return nullptr;
       }
-      auto &ts = *scratch_ctx_reader->get();
       CompilerType swift_type = ExtractSwiftTypeFromCxxInteropTypeName(
-          type, swift_type_name, ts, *swift_runtime);
+          type, swift_type_name, *ts, *swift_runtime);
       if (!swift_type) {
         LLDB_LOGV(log,
                   "[Matching CxxBridgedSyntheticChildProvider] - "
@@ -1224,7 +1230,7 @@ SwiftLanguage::GetHardcodedSynthetics() {
 }
 
 bool SwiftLanguage::IsSourceFile(llvm::StringRef file_path) const {
-  return file_path.endswith(".swift");
+  return file_path.ends_with(".swift");
 }
 
 std::vector<FormattersMatchCandidate>
@@ -1244,7 +1250,6 @@ SwiftLanguage::GetPossibleFormattersMatches(
   if (valobj.GetObjectRuntimeLanguage() == eLanguageTypeObjC)
     return result;
 
-  SwiftScratchContextLock scratch_ctx_lock(&valobj.GetExecutionContextRef());
   CompilerType compiler_type(valobj.GetCompilerType());
 
   const bool check_cpp = false;
@@ -1363,29 +1368,24 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
           size_t before = results.size();
 
           if (exe_scope) {
-            Target *target = exe_scope->CalculateTarget().get();
-            if (target) {
-              const bool create_on_demand = false;
-              Status error;
-              std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
-                  target->GetSwiftScratchContext(error, *exe_scope,
-                                                 create_on_demand);
-              const SymbolContext *sc = nullptr;
-              if (auto frame_sp = exe_scope->CalculateStackFrame())
-                sc = &frame_sp->GetSymbolContext(lldb::eSymbolContextFunction);
-              if (maybe_scratch_ctx)
-                if (auto scratch_ctx = maybe_scratch_ctx->get())
-                  if (SwiftASTContext *ast_ctx =
-                          scratch_ctx->GetSwiftASTContext(sc)) {
-                    ConstString cs_input{input};
-                    Mangled mangled(cs_input);
-                    if (mangled.GuessLanguage() == eLanguageTypeSwift) {
-                      auto candidate =
-                          ast_ctx->GetTypeFromMangledTypename(cs_input);
-                      if (candidate.IsValid())
-                        results.insert(candidate);
-                    }
+            TargetSP target = exe_scope->CalculateTarget();
+            auto scratch_ctx =
+                TypeSystemSwiftTypeRefForExpressions::GetForTarget(target);
+            if (auto frame_sp = exe_scope->CalculateStackFrame()) {
+              auto &sc =
+                  frame_sp->GetSymbolContext(lldb::eSymbolContextFunction);
+              if (scratch_ctx)
+                if (SwiftASTContextSP ast_ctx =
+                        scratch_ctx->GetSwiftASTContext(sc)) {
+                  ConstString cs_input{input};
+                  Mangled mangled(cs_input);
+                  if (mangled.GuessLanguage() == eLanguageTypeSwift) {
+                    auto candidate =
+                        ast_ctx->GetTypeFromMangledTypename(cs_input);
+                    if (candidate.IsValid())
+                      results.insert(candidate);
                   }
+                }
             }
           }
 
@@ -1419,9 +1419,9 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
                     if (auto swift_ast_ctx =
                             result_type.GetTypeSystem()
                                 .dyn_cast_or_null<SwiftASTContext>())
-                      result_type = swift_ast_ctx->GetTypeSystemSwiftTypeRef()
-                                        .GetTypeFromMangledTypename(
-                                            result_type.GetMangledTypeName());
+                      if (auto ts = swift_ast_ctx->GetTypeSystemSwiftTypeRef())
+                        result_type = ts->GetTypeFromMangledTypename(
+                            result_type.GetMangledTypeName());
                   }
                   results.insert(TypeOrDecl(result_type));
                 }
@@ -1437,19 +1437,14 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
           size_t before = results.size();
 
           if (exe_scope) {
-            Target *target = exe_scope->CalculateTarget().get();
-            const bool create_on_demand = false;
-            Status error;
-            std::optional<SwiftScratchContextReader> maybe_scratch_ctx =
-                target->GetSwiftScratchContext(error, *exe_scope,
-                                               create_on_demand);
-            const SymbolContext *sc = nullptr;
-            if (auto frame_sp = exe_scope->CalculateStackFrame())
-              sc = &frame_sp->GetSymbolContext(lldb::eSymbolContextFunction);
-
-            if (maybe_scratch_ctx)
-              if (auto scratch_ctx = maybe_scratch_ctx->get())
-                if (SwiftASTContext *ast_ctx =
+            TargetSP target = exe_scope->CalculateTarget();
+            auto scratch_ctx =
+                TypeSystemSwiftTypeRefForExpressions::GetForTarget(target);
+            if (auto frame_sp = exe_scope->CalculateStackFrame()) {
+              const SymbolContext &sc =
+                  frame_sp->GetSymbolContext(lldb::eSymbolContextFunction);
+              if (scratch_ctx)
+                if (SwiftASTContextSP ast_ctx =
                         scratch_ctx->GetSwiftASTContext(sc)) {
                   auto iter = ast_ctx->GetModuleCache().begin(),
                        end = ast_ctx->GetModuleCache().end();
@@ -1457,9 +1452,9 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
                   std::vector<llvm::StringRef> name_parts;
                   SplitDottedName(input, name_parts);
 
-                  std::function<void(swift::ModuleDecl *)> lookup_func =
+                  std::function<void(const swift::ModuleDecl *)> lookup_func =
                       [&ast_ctx, input, name_parts,
-                       &results](swift::ModuleDecl *module) -> void {
+                       &results](const swift::ModuleDecl *module) -> void {
                     for (auto imported_module :
                          swift::namelookup::getAllImports(module)) {
                       auto module = imported_module.importedModule;
@@ -1511,8 +1506,9 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
                   };
 
                   for (; iter != end; iter++)
-                    lookup_func(iter->second);
+                    lookup_func(&iter->second);
                 }
+            }
           }
 
           return (results.size() - before);
@@ -1619,11 +1615,11 @@ LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
         valobj_type.GetTypeName() == g_SwiftBool) {
       ValueObjectSP your_value_sp(valobj.GetChildMemberWithName(g_value, true));
       if (!your_value_sp) {
-        error.SetErrorString("unexpected data layout");
+        error = Status::FromErrorString("unexpected data layout");
         return eLazyBoolNo;
       } else {
         if (!your_value_sp->ResolveValue(scalar_value)) {
-          error.SetErrorString("unexpected data layout");
+          error = Status::FromErrorString("unexpected data layout");
           return eLazyBoolNo;
         } else {
           error.Clear();
@@ -1636,7 +1632,7 @@ LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
     }
   }
 
-  error.SetErrorString("not a Swift boolean type");
+  error = Status::FromErrorString("not a Swift boolean type");
   return eLazyBoolNo;
 }
 
@@ -1654,7 +1650,6 @@ bool SwiftLanguage::IsUninitializedReference(ValueObject &valobj) {
 bool SwiftLanguage::GetFunctionDisplayName(
     const SymbolContext *sc, const ExecutionContext *exe_ctx,
     FunctionNameRepresentation representation, Stream &s) {
-  SwiftScratchContextLock scratch_ctx_lock(exe_ctx);
   switch (representation) {
   case Language::FunctionNameRepresentation::eName:
     // No need to customize this.
@@ -1832,6 +1827,34 @@ SwiftLanguage::GetDemangledFunctionNameWithoutArguments(Mangled mangled) const {
   if (demangled_name)
     return demangled_name;
   return mangled_name;
+}
+
+bool SwiftLanguage::IgnoreForLineBreakpoints(const SymbolContext &sc) const {
+  // If we don't have a function, conservatively return false.
+  if (!sc.function)
+    return false;
+  StringRef name = sc.function->GetMangled().GetMangledName().GetStringRef();
+  // In async functions, ignore await resume ("Q") funclets, these only
+  // deallocate the async context and task_switch back to user code.
+  return SwiftLanguageRuntime::IsSwiftAsyncAwaitResumePartialFunctionSymbol(
+      name);
+}
+
+std::optional<bool>
+SwiftLanguage::AreEqualForFrameComparison(const SymbolContext &sc1,
+                                          const SymbolContext &sc2) const {
+  auto result = SwiftLanguageRuntime::AreFuncletsOfSameAsyncFunction(
+      sc1.GetFunctionName(Mangled::ePreferMangled),
+      sc2.GetFunctionName(Mangled::ePreferMangled));
+  switch (result) {
+  case SwiftLanguageRuntime::FuncletComparisonResult::NotBothFunclets:
+    return {};
+  case SwiftLanguageRuntime::FuncletComparisonResult::SameAsyncFunction:
+    return true;
+  case SwiftLanguageRuntime::FuncletComparisonResult::DifferentAsyncFunctions:
+    return false;
+  }
+  llvm_unreachable("unhandled enumeration in AreEquivalentFunctions");
 }
 
 //------------------------------------------------------------------

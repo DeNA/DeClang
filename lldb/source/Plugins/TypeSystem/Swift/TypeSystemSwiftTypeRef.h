@@ -68,23 +68,25 @@ public:
   ~TypeSystemSwiftTypeRef();
   TypeSystemSwiftTypeRef(Module &module);
   /// Get the corresponding SwiftASTContext, and create one if necessary.
-  SwiftASTContext *GetSwiftASTContext(const SymbolContext *sc) const override;
+  SwiftASTContextSP GetSwiftASTContext(const SymbolContext &sc) const override;
   /// Convenience helpers.
-  SwiftASTContext *
-  GetSwiftASTContextFromExecutionScope(ExecutionContextScope *exe_scope) const;
-  SwiftASTContext *
-  GetSwiftASTContextFromExecutionContext(const ExecutionContext *exe_ctx) const;
+  SymbolContext GetSymbolContext(ExecutionContextScope *exe_scope) const;
+  SymbolContext GetSymbolContext(const ExecutionContext *exe_ctx) const;
   /// Return SwiftASTContext, iff one has already been created.
-  virtual SwiftASTContext *
-  GetSwiftASTContextOrNull(const SymbolContext *sc) const;
-  TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() override { return *this; }
-  const TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() const override {
-    return *this;
+  virtual SwiftASTContextSP
+  GetSwiftASTContextOrNull(const SymbolContext &sc) const;
+  TypeSystemSwiftTypeRefSP GetTypeSystemSwiftTypeRef() override {
+    return std::static_pointer_cast<TypeSystemSwiftTypeRef>(shared_from_this());
+  }
+  std::shared_ptr<const TypeSystemSwiftTypeRef>
+  GetTypeSystemSwiftTypeRef() const override {
+    return std::static_pointer_cast<const TypeSystemSwiftTypeRef>(
+        shared_from_this());
   }
   SwiftDWARFImporterForClangTypes &GetSwiftDWARFImporterForClangTypes();
   ClangNameImporter *GetNameImporter() const;
   llvm::Triple GetTriple() const;
-  void SetTriple(const llvm::Triple triple) override;
+  void SetTriple(const SymbolContext &sc, const llvm::Triple triple) override;
   void ClearModuleDependentCaches() override;
   lldb::TargetWP GetTargetWP() const override { return {}; }
 
@@ -108,7 +110,8 @@ public:
   bool SupportsLanguage(lldb::LanguageType language) override;
   Status IsCompatible() override;
 
-  void DiagnoseWarnings(Process &process, Module &module) const override;
+  void DiagnoseWarnings(Process &process,
+                        const SymbolContext &sc) const override;
   plugin::dwarf::DWARFASTParser *GetDWARFParser() override;
   // CompilerDecl functions
   ConstString DeclGetName(void *opaque_decl) override {
@@ -131,8 +134,11 @@ public:
 
   Module *GetModule() const { return m_module; }
 
-  /// Return the owning Swift module for a function.
-  static ConstString GetSwiftModuleFor(const SymbolContext *sc);
+  /// Return a key for the SwiftASTContext map. If there is debug info it's the
+  /// name of the owning Swift module for a function.
+  static const char *DeriveKeyFor(const SymbolContext &sc);
+  /// Return the name of the owning Swift module for a function.
+  static ConstString GetSwiftModuleFor(const SymbolContext &sc);
 
   // Tests
 #ifndef NDEBUG
@@ -364,11 +370,19 @@ public:
   CanonicalizeSugar(swift::Demangle::Demangler &dem,
                     swift::Demangle::NodePointer node);
 
-  /// Transforms the module name in the mangled type name using module_name_map
-  /// as the mapping source.
-  static swift::Demangle::ManglingErrorOr<std::string>
-  TransformModuleName(llvm::StringRef mangled_name,
-                      const llvm::StringMap<llvm::StringRef> &module_name_map);
+  /// Finds the nominal type node (struct, class, enum) that contains the
+  /// module and identifier nodes for that type. If \p node is not a valid
+  /// type node, returns a nullptr.
+  static swift::Demangle::NodePointer
+  FindTypeWithModuleAndIdentifierNode(swift::Demangle::NodePointer node);
+
+  /// Types with the @_originallyDefinedIn attribute are serialized with with
+  /// the original module name in reflection metadata. At the same time the type
+  /// is serialized with the swiftmodule name in debug info, but with a parent
+  /// module with the original module name. This function adjusts \type to look
+  /// up the type in reflection metadata if necessary.
+  std::string
+  AdjustTypeForOriginallyDefinedInModule(llvm::StringRef mangled_typename);
 
   /// Return the canonicalized Demangle tree for a Swift mangled type name.
   swift::Demangle::NodePointer
@@ -413,6 +427,10 @@ public:
 
 protected:
   /// Helper that creates an AST type from \p type.
+  ///
+  /// FIXME: This API is dangerous, it would be better to return a
+  /// CompilerType so the caller isn't responsible for matching the
+  /// exact same SwiftASTContext.
   void *ReconstructType(lldb::opaque_compiler_type_t type,
                         const ExecutionContext *exe_ctx = nullptr);
   void *ReconstructType(lldb::opaque_compiler_type_t type,
@@ -420,6 +438,10 @@ protected:
   /// Cast \p opaque_type as a mangled name.
   static const char *AsMangledName(lldb::opaque_compiler_type_t type);
 
+  /// Helper function that canonicalizes node, but doesn't look at its
+  /// children.
+  swift::Demangle::NodePointer Canonicalize(swift::Demangle::Demangler &dem,
+                                            swift::Demangle::NodePointer node);
 
   /// Demangle the mangled name of the canonical type of \p type and
   /// drill into the Global(TypeMangling(Type())).
@@ -428,6 +450,15 @@ protected:
   swift::Demangle::NodePointer
   DemangleCanonicalType(swift::Demangle::Demangler &dem,
                         lldb::opaque_compiler_type_t type);
+
+  /// Demangle the mangled name of \p type after canonicalizing its
+  /// outermost type node and drill into the
+  /// Global(TypeMangling(Type())).
+  ///
+  /// \return the child of Type or a nullptr.
+  swift::Demangle::NodePointer
+  DemangleCanonicalOutermostType(swift::Demangle::Demangler &dem,
+                                 lldb::opaque_compiler_type_t type);
 
   /// If \p node is a Struct/Class/Typedef in the __C module, return a
   /// Swiftified node by looking up the name in the corresponding APINotes and
@@ -459,6 +490,18 @@ protected:
   CompilerType LookupClangForwardType(llvm::StringRef name, 
                   llvm::ArrayRef<CompilerContext> decl_context);
 
+  /// Recursively resolves all type aliases.
+  swift::Demangle::NodePointer
+  ResolveAllTypeAliases(swift::Demangle::Demangler &dem,
+                        swift::Demangle::NodePointer node);
+
+  /// Resolve a type alias node and return a demangle tree for the
+  /// resolved type. If the type alias resolves to a Clang type, return
+  /// a Clang CompilerType.
+  ///
+  /// \param prefer_clang_types if this is true, type aliases in the
+  ///                           __C module are resolved as Clang types.
+  ///
   std::pair<swift::Demangle::NodePointer, CompilerType>
   ResolveTypeAlias(swift::Demangle::Demangler &dem,
                    swift::Demangle::NodePointer node,
@@ -486,12 +529,24 @@ protected:
 
   /// Perform an action on all subling SwiftASTContexts.
   void NotifyAllTypeSystems(std::function<void(lldb::TypeSystemSP)> fn);
-  
+
+  struct TypeSystemAndCount {
+    lldb::TypeSystemSP typesystem;
+    /// Count how often this typesystem was initialized.
+    unsigned char retry_count = 0;
+  };
+
   mutable std::mutex m_swift_ast_context_lock;
   /// The "precise" SwiftASTContexts managed by this scratch context. There
   /// exists one per Swift module. The keys in this map are module names.
-  mutable llvm::DenseMap<const char *, lldb::TypeSystemSP>
+  mutable llvm::DenseMap<const char *, TypeSystemAndCount>
       m_swift_ast_context_map;
+  /// A list of types that turn SwiftASTContext into a fatal error
+  /// state after type reconstruction (presumably due to additional
+  /// module imports). The key is a pair of SymbolContext string and
+  /// mangled type name.
+  mutable llvm::DenseSet<std::pair<const char *, const char *>>
+      m_dangerous_types;
 
   mutable std::unique_ptr<SwiftDWARFImporterForClangTypes>
       m_dwarf_importer_for_clang_types_up;
@@ -525,13 +580,18 @@ public:
                                        Target &target,
                                        const char *extra_options);
 
-  /// For per-module fallback contexts.
-  TypeSystemSwiftTypeRefForExpressions(lldb::LanguageType language,
-                                       Target &target, Module &module);
+  static TypeSystemSwiftTypeRefForExpressionsSP GetForTarget(Target &target);
+  static TypeSystemSwiftTypeRefForExpressionsSP
+  GetForTarget(lldb::TargetSP target);
 
-  SwiftASTContext *GetSwiftASTContext(const SymbolContext *sc) const override;
-  SwiftASTContext *
-  GetSwiftASTContextOrNull(const SymbolContext *sc) const override;
+  SwiftASTContextSP GetSwiftASTContext(const SymbolContext &sc) const override;
+  SwiftASTContextSP
+  GetSwiftASTContextOrNull(const SymbolContext &sc) const override;
+  /// This API needs to be called for a REPL or Playground before the first call
+  /// to GetSwiftASTContext is being made.
+  void SetCompilerOptions(const char *compiler_options) {
+    m_compiler_options = compiler_options;
+  }
   lldb::TargetWP GetTargetWP() const override { return m_target_wp; }
 
   void ModulesDidLoad(ModuleList &module_list);
@@ -561,6 +621,7 @@ public:
 protected:
   lldb::TargetWP m_target_wp;
   unsigned m_generation = 0;
+  const char *m_compiler_options = nullptr;
 
   /// This exists to implement the PerformCompileUnitImports
   /// mechanism.

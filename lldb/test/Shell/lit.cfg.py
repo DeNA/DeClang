@@ -58,12 +58,18 @@ if "Address" in config.llvm_use_sanitizer:
     config.environment[
         "ASAN_OPTIONS"
     ] = "detect_container_overflow=0:detect_stack_use_after_return=1"
+    # FIXME: This is the wrong place to disable this. This is working
+    # around the fact that the ci.swift.org scripts build only LLDB with
+    # asan and this creates an ODR violation in Allocator.h that breaks
+    # poisoning.
+    config.environment['ASAN_OPTIONS'] += ':' + 'allow_user_poisoning=0'
     # End Swift mod.
     if platform.system() == "Darwin":
         config.environment["MallocNanoZone"] = "0"
 
 if "Thread" in config.llvm_use_sanitizer:
     config.environment["TSAN_OPTIONS"] = "halt_on_error=1"
+
 
 # Support running the test suite under the lldb-repro wrapper. This makes it
 # possible to capture a test suite run and then rerun all the test from the
@@ -154,7 +160,7 @@ if config.lldb_enable_swift:
 if config.lldb_enable_lzma:
     config.available_features.add("lzma")
 
-if shutil.which("xz") != None:
+if shutil.which("xz") is not None:
     config.available_features.add("xz")
 
 if config.lldb_system_debugserver:

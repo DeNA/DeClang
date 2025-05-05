@@ -15,8 +15,10 @@ add_llvm_unittest(UtilsTests
   CallPromotionUtilsTest.cpp
   CloningTest.cpp
   CodeExtractorTest.cpp
+  CodeLayoutTest.cpp
   CodeMoverUtilsTest.cpp
   DebugifyTest.cpp
+  DXILResourceTest.cpp
   FunctionComparatorTest.cpp
   IntegerDivisionTest.cpp
   LocalTest.cpp
@@ -29,8 +31,5 @@ add_llvm_unittest(UtilsTests
   SSAUpdaterBulkTest.cpp
   UnrollLoopTest.cpp
   ValueMapperTest.cpp
-  VFABIUtils.cpp
   ProfDataUtilTest.cpp
   )
-
-set_property(TARGET UtilsTests PROPERTY FOLDER "Tests/UnitTests/TransformsTests")

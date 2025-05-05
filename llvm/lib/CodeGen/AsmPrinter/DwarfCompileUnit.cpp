@@ -32,6 +32,7 @@
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/MC/MachineLocation.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Target/TargetLoweringObjectFile.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
@@ -41,6 +42,20 @@
 #include <utility>
 
 using namespace llvm;
+
+/// Query value using AddLinkageNamesToDeclCallOriginsForTuning.
+cl::opt<cl::boolOrDefault> AddLinkageNamesToDeclCallOrigins(
+    "add-linkage-names-to-declaration-call-origins", cl::Hidden,
+    cl::desc("Add DW_AT_linkage_name to function declaration DIEs "
+             "referenced by DW_AT_call_origin attributes. Enabled by default "
+             "for -gsce debugger tuning."));
+
+static bool AddLinkageNamesToDeclCallOriginsForTuning(const DwarfDebug *DD) {
+  bool EnabledByDefault = DD->tuneForSCE();
+  if (EnabledByDefault)
+    return AddLinkageNamesToDeclCallOrigins != cl::boolOrDefault::BOU_FALSE;
+  return AddLinkageNamesToDeclCallOrigins == cl::boolOrDefault::BOU_TRUE;
+}
 
 static dwarf::Tag GetCompileUnitType(UnitKind Kind, DwarfDebug *DW) {
 
@@ -460,15 +475,6 @@ void DwarfCompileUnit::attachLowHighPC(DIE &D, const MCSymbol *Begin,
     addLabelDelta(D, dwarf::DW_AT_high_pc, End, Begin);
 }
 
-// Find DIE for the given subprogram and attach appropriate DW_AT_low_pc
-// and DW_AT_high_pc attributes. If there are global variables in this
-// scope then create and insert DIEs for these variables.
-DIE &DwarfCompileUnit::updateSubprogramScopeDIE(const DISubprogram *SP) {
-  DIE *SPDie = getOrCreateSubprogramDIE(SP, includeMinimalInlineScopes());
-  auto *ContextCU = static_cast<DwarfCompileUnit *>(SPDie->getUnit());
-  return ContextCU->updateSubprogramScopeDIEImpl(SP, SPDie);
-}
-
 // Add info for Wasm-global-based relocation.
 // 'GlobalIndex' is used for split dwarf, which currently relies on a few
 // assumptions that are not guaranteed in a formal way but work in practice.
@@ -502,8 +508,11 @@ void DwarfCompileUnit::addWasmRelocBaseGlobal(DIELoc *Loc, StringRef GlobalName,
   }
 }
 
-DIE &DwarfCompileUnit::updateSubprogramScopeDIEImpl(const DISubprogram *SP,
-                                                    DIE *SPDie) {
+// Find DIE for the given subprogram and attach appropriate DW_AT_low_pc
+// and DW_AT_high_pc attributes. If there are global variables in this
+// scope then create and insert DIEs for these variables.
+DIE &DwarfCompileUnit::updateSubprogramScopeDIE(const DISubprogram *SP) {
+  DIE *SPDie = getOrCreateSubprogramDIE(SP, includeMinimalInlineScopes());
   SmallVector<RangeSpan, 2> BB_List;
   // If basic block sections are on, ranges for each basic block section has
   // to be emitted separately.
@@ -675,7 +684,7 @@ void DwarfCompileUnit::attachRangesOrLowHighPC(
     // the order of blocks will be frozen beyond this point.
     do {
       if (MBB->sameSection(EndMBB) || MBB->isEndSection()) {
-        auto MBBSectionRange = Asm->MBBSectionRanges[MBB->getSectionIDNum()];
+        auto MBBSectionRange = Asm->MBBSectionRanges[MBB->getSectionID()];
         List.push_back(
             {MBB->sameSection(BeginMBB) ? BeginLabel
                                         : MBBSectionRange.BeginLabel,
@@ -749,11 +758,219 @@ DIE *DwarfCompileUnit::constructLexicalScopeDIE(LexicalScope *Scope) {
   return ScopeDIE;
 }
 
-/// constructVariableDIE - Construct a DIE for the given DbgVariable.
 DIE *DwarfCompileUnit::constructVariableDIE(DbgVariable &DV, bool Abstract) {
-  auto D = constructVariableDIEImpl(DV, Abstract);
-  DV.setDIE(*D);
-  return D;
+  auto *VariableDie = DIE::get(DIEValueAllocator, DV.getTag());
+  insertDIE(DV.getVariable(), VariableDie);
+  DV.setDIE(*VariableDie);
+  // Abstract variables don't get common attributes later, so apply them now.
+  if (Abstract) {
+    applyCommonDbgVariableAttributes(DV, *VariableDie);
+  } else {
+    std::visit(
+        [&](const auto &V) {
+          applyConcreteDbgVariableAttributes(V, DV, *VariableDie);
+        },
+        DV.asVariant());
+  }
+  return VariableDie;
+}
+
+void DwarfCompileUnit::applyConcreteDbgVariableAttributes(
+    const Loc::Single &Single, const DbgVariable &DV, DIE &VariableDie) {
+  const DbgValueLoc *DVal = &Single.getValueLoc();
+  if (!DVal->isVariadic()) {
+    const DbgValueLocEntry *Entry = DVal->getLocEntries().begin();
+    if (Entry->isLocation()) {
+      addVariableAddress(DV, VariableDie, Entry->getLoc());
+    } else if (Entry->isInt()) {
+      auto *Expr = Single.getExpr();
+      if (Expr && Expr->getNumElements()) {
+        DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+        DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+        // If there is an expression, emit raw unsigned bytes.
+        DwarfExpr.addFragmentOffset(Expr);
+        DwarfExpr.addUnsignedConstant(Entry->getInt());
+        DwarfExpr.addExpression(Expr);
+        addBlock(VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+        if (DwarfExpr.TagOffset)
+          addUInt(VariableDie, dwarf::DW_AT_LLVM_tag_offset,
+                  dwarf::DW_FORM_data1, *DwarfExpr.TagOffset);
+      } else
+        addConstantValue(VariableDie, Entry->getInt(), DV.getType());
+    } else if (Entry->isConstantFP()) {
+      addConstantFPValue(VariableDie, Entry->getConstantFP());
+    } else if (Entry->isConstantInt()) {
+      addConstantValue(VariableDie, Entry->getConstantInt(), DV.getType());
+    } else if (Entry->isTargetIndexLocation()) {
+      DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+      DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+      const DIBasicType *BT = dyn_cast<DIBasicType>(
+          static_cast<const Metadata *>(DV.getVariable()->getType()));
+      DwarfDebug::emitDebugLocValue(*Asm, BT, *DVal, DwarfExpr);
+      addBlock(VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+    }
+    return;
+  }
+  // If any of the location entries are registers with the value 0,
+  // then the location is undefined.
+  if (any_of(DVal->getLocEntries(), [](const DbgValueLocEntry &Entry) {
+        return Entry.isLocation() && !Entry.getLoc().getReg();
+      }))
+    return;
+  const DIExpression *Expr = Single.getExpr();
+  assert(Expr && "Variadic Debug Value must have an Expression.");
+  DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+  DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+  DwarfExpr.addFragmentOffset(Expr);
+  DIExpressionCursor Cursor(Expr);
+  const TargetRegisterInfo &TRI = *Asm->MF->getSubtarget().getRegisterInfo();
+
+  auto AddEntry = [&](const DbgValueLocEntry &Entry,
+                      DIExpressionCursor &Cursor) {
+    if (Entry.isLocation()) {
+      if (!DwarfExpr.addMachineRegExpression(TRI, Cursor,
+                                             Entry.getLoc().getReg()))
+        return false;
+    } else if (Entry.isInt()) {
+      // If there is an expression, emit raw unsigned bytes.
+      DwarfExpr.addUnsignedConstant(Entry.getInt());
+    } else if (Entry.isConstantFP()) {
+      // DwarfExpression does not support arguments wider than 64 bits
+      // (see PR52584).
+      // TODO: Consider chunking expressions containing overly wide
+      // arguments into separate pointer-sized fragment expressions.
+      APInt RawBytes = Entry.getConstantFP()->getValueAPF().bitcastToAPInt();
+      if (RawBytes.getBitWidth() > 64)
+        return false;
+      DwarfExpr.addUnsignedConstant(RawBytes.getZExtValue());
+    } else if (Entry.isConstantInt()) {
+      APInt RawBytes = Entry.getConstantInt()->getValue();
+      if (RawBytes.getBitWidth() > 64)
+        return false;
+      DwarfExpr.addUnsignedConstant(RawBytes.getZExtValue());
+    } else if (Entry.isTargetIndexLocation()) {
+      TargetIndexLocation Loc = Entry.getTargetIndexLocation();
+      // TODO TargetIndexLocation is a target-independent. Currently
+      // only the WebAssembly-specific encoding is supported.
+      assert(Asm->TM.getTargetTriple().isWasm());
+      DwarfExpr.addWasmLocation(Loc.Index, static_cast<uint64_t>(Loc.Offset));
+    } else {
+      llvm_unreachable("Unsupported Entry type.");
+    }
+    return true;
+  };
+
+  if (!DwarfExpr.addExpression(
+          std::move(Cursor),
+          [&](unsigned Idx, DIExpressionCursor &Cursor) -> bool {
+            return AddEntry(DVal->getLocEntries()[Idx], Cursor);
+          }))
+    return;
+
+  // Now attach the location information to the DIE.
+  addBlock(VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+  if (DwarfExpr.TagOffset)
+    addUInt(VariableDie, dwarf::DW_AT_LLVM_tag_offset, dwarf::DW_FORM_data1,
+            *DwarfExpr.TagOffset);
+}
+
+void DwarfCompileUnit::applyConcreteDbgVariableAttributes(
+    const Loc::Multi &Multi, const DbgVariable &DV, DIE &VariableDie) {
+  addLocationList(VariableDie, dwarf::DW_AT_location,
+                  Multi.getDebugLocListIndex());
+  auto TagOffset = Multi.getDebugLocListTagOffset();
+  if (TagOffset)
+    addUInt(VariableDie, dwarf::DW_AT_LLVM_tag_offset, dwarf::DW_FORM_data1,
+            *TagOffset);
+}
+
+void DwarfCompileUnit::applyConcreteDbgVariableAttributes(const Loc::MMI &MMI,
+                                                          const DbgVariable &DV,
+                                                          DIE &VariableDie) {
+  std::optional<unsigned> NVPTXAddressSpace;
+  DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+  DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+  for (const auto &Fragment : MMI.getFrameIndexExprs()) {
+    Register FrameReg;
+    const DIExpression *Expr = Fragment.Expr;
+    const TargetFrameLowering *TFI = Asm->MF->getSubtarget().getFrameLowering();
+    StackOffset Offset =
+        TFI->getFrameIndexReference(*Asm->MF, Fragment.FI, FrameReg);
+    DwarfExpr.addFragmentOffset(Expr);
+
+    auto *TRI = Asm->MF->getSubtarget().getRegisterInfo();
+    SmallVector<uint64_t, 8> Ops;
+    TRI->getOffsetOpcodes(Offset, Ops);
+
+    // According to
+    // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
+    // cuda-gdb requires DW_AT_address_class for all variables to be
+    // able to correctly interpret address space of the variable
+    // address. Decode DW_OP_constu <DWARF Address Space> DW_OP_swap
+    // DW_OP_xderef sequence for the NVPTX + gdb target.
+    unsigned LocalNVPTXAddressSpace;
+    if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
+      const DIExpression *NewExpr =
+          DIExpression::extractAddressClass(Expr, LocalNVPTXAddressSpace);
+      if (NewExpr != Expr) {
+        Expr = NewExpr;
+        NVPTXAddressSpace = LocalNVPTXAddressSpace;
+      }
+    }
+    if (Expr)
+      Ops.append(Expr->elements_begin(), Expr->elements_end());
+    DIExpressionCursor Cursor(Ops);
+    DwarfExpr.setMemoryLocationKind();
+    if (const MCSymbol *FrameSymbol = Asm->getFunctionFrameSymbol())
+      addOpAddress(*Loc, FrameSymbol);
+    else
+      DwarfExpr.addMachineRegExpression(
+          *Asm->MF->getSubtarget().getRegisterInfo(), Cursor, FrameReg);
+    DwarfExpr.addExpression(std::move(Cursor));
+  }
+  if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
+    // According to
+    // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
+    // cuda-gdb requires DW_AT_address_class for all variables to be
+    // able to correctly interpret address space of the variable
+    // address.
+    const unsigned NVPTX_ADDR_local_space = 6;
+    addUInt(VariableDie, dwarf::DW_AT_address_class, dwarf::DW_FORM_data1,
+            NVPTXAddressSpace.value_or(NVPTX_ADDR_local_space));
+  }
+  addBlock(VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+  if (DwarfExpr.TagOffset)
+    addUInt(VariableDie, dwarf::DW_AT_LLVM_tag_offset, dwarf::DW_FORM_data1,
+            *DwarfExpr.TagOffset);
+}
+
+void DwarfCompileUnit::applyConcreteDbgVariableAttributes(
+    const Loc::EntryValue &EntryValue, const DbgVariable &DV,
+    DIE &VariableDie) {
+  DIELoc *Loc = new (DIEValueAllocator) DIELoc;
+  DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
+  // Emit each expression as: EntryValue(Register) <other ops> <Fragment>.
+  for (auto [Register, Expr] : EntryValue.EntryValues) {
+    DwarfExpr.addFragmentOffset(&Expr);
+    DIExpressionCursor Cursor(Expr.getElements());
+    DwarfExpr.beginEntryValueExpression(Cursor);
+    DwarfExpr.addMachineRegExpression(
+        *Asm->MF->getSubtarget().getRegisterInfo(), Cursor, Register);
+    DwarfExpr.addExpression(std::move(Cursor));
+  }
+  addBlock(VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
+}
+
+void DwarfCompileUnit::applyConcreteDbgVariableAttributes(
+    const std::monostate &, const DbgVariable &DV, DIE &VariableDie) {}
+
+DIE *DwarfCompileUnit::constructVariableDIE(DbgVariable &DV,
+                                            const LexicalScope &Scope,
+                                            DIE *&ObjectPointer) {
+  auto Var = constructVariableDIE(DV, Scope.isAbstractScope());
+  if (DV.isObjectPointer())
+    ObjectPointer = Var;
+  return Var;
 }
 
 DIE *DwarfCompileUnit::constructLabelDIE(DbgLabel &DL,
@@ -766,222 +983,6 @@ DIE *DwarfCompileUnit::constructLabelDIE(DbgLabel &DL,
     applyLabelAttributes(DL, *LabelDie);
 
   return LabelDie;
-}
-
-DIE *DwarfCompileUnit::constructVariableDIEImpl(const DbgVariable &DV,
-                                                bool Abstract) {
-  // Define variable debug information entry.
-  auto VariableDie = DIE::get(DIEValueAllocator, DV.getTag());
-  insertDIE(DV.getVariable(), VariableDie);
-
-  if (Abstract) {
-    applyVariableAttributes(DV, *VariableDie);
-    return VariableDie;
-  }
-
-  // Add variable address.
-  std::visit(
-      makeVisitor(
-          [=, &DV](const Loc::Single &Single) {
-            const DbgValueLoc *DVal = &Single.getValueLoc();
-            if (!DVal->isVariadic()) {
-              const DbgValueLocEntry *Entry = DVal->getLocEntries().begin();
-              if (Entry->isLocation()) {
-                addVariableAddress(DV, *VariableDie, Entry->getLoc());
-              } else if (Entry->isInt()) {
-                auto *Expr = Single.getExpr();
-                if (Expr && Expr->getNumElements()) {
-                  DIELoc *Loc = new (DIEValueAllocator) DIELoc;
-                  DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-                  // If there is an expression, emit raw unsigned bytes.
-                  DwarfExpr.addFragmentOffset(Expr);
-                  DwarfExpr.addUnsignedConstant(Entry->getInt());
-                  DwarfExpr.addExpression(Expr);
-                  addBlock(*VariableDie, dwarf::DW_AT_location,
-                           DwarfExpr.finalize());
-                  if (DwarfExpr.TagOffset)
-                    addUInt(*VariableDie, dwarf::DW_AT_LLVM_tag_offset,
-                            dwarf::DW_FORM_data1, *DwarfExpr.TagOffset);
-                } else
-                  addConstantValue(*VariableDie, Entry->getInt(), DV.getType());
-              } else if (Entry->isConstantFP()) {
-                addConstantFPValue(*VariableDie, Entry->getConstantFP());
-              } else if (Entry->isConstantInt()) {
-                addConstantValue(*VariableDie, Entry->getConstantInt(),
-                                 DV.getType());
-              } else if (Entry->isTargetIndexLocation()) {
-                DIELoc *Loc = new (DIEValueAllocator) DIELoc;
-                DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-                const DIBasicType *BT = dyn_cast<DIBasicType>(
-                    static_cast<const Metadata *>(DV.getVariable()->getType()));
-                DwarfDebug::emitDebugLocValue(*Asm, BT, *DVal, DwarfExpr);
-                addBlock(*VariableDie, dwarf::DW_AT_location,
-                         DwarfExpr.finalize());
-              }
-              return;
-            }
-            // If any of the location entries are registers with the value 0,
-            // then the location is undefined.
-            if (any_of(DVal->getLocEntries(),
-                       [](const DbgValueLocEntry &Entry) {
-                         return Entry.isLocation() && !Entry.getLoc().getReg();
-                       }))
-              return;
-            const DIExpression *Expr = Single.getExpr();
-            assert(Expr && "Variadic Debug Value must have an Expression.");
-            DIELoc *Loc = new (DIEValueAllocator) DIELoc;
-            DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-            DwarfExpr.addFragmentOffset(Expr);
-            DIExpressionCursor Cursor(Expr);
-            const TargetRegisterInfo &TRI =
-                *Asm->MF->getSubtarget().getRegisterInfo();
-
-            auto AddEntry = [&](const DbgValueLocEntry &Entry,
-                                DIExpressionCursor &Cursor) {
-              if (Entry.isLocation()) {
-                if (!DwarfExpr.addMachineRegExpression(TRI, Cursor,
-                                                       Entry.getLoc().getReg()))
-                  return false;
-              } else if (Entry.isInt()) {
-                // If there is an expression, emit raw unsigned bytes.
-                DwarfExpr.addUnsignedConstant(Entry.getInt());
-              } else if (Entry.isConstantFP()) {
-                // DwarfExpression does not support arguments wider than 64 bits
-                // (see PR52584).
-                // TODO: Consider chunking expressions containing overly wide
-                // arguments into separate pointer-sized fragment expressions.
-                APInt RawBytes =
-                    Entry.getConstantFP()->getValueAPF().bitcastToAPInt();
-                if (RawBytes.getBitWidth() > 64)
-                  return false;
-                DwarfExpr.addUnsignedConstant(RawBytes.getZExtValue());
-              } else if (Entry.isConstantInt()) {
-                APInt RawBytes = Entry.getConstantInt()->getValue();
-                if (RawBytes.getBitWidth() > 64)
-                  return false;
-                DwarfExpr.addUnsignedConstant(RawBytes.getZExtValue());
-              } else if (Entry.isTargetIndexLocation()) {
-                TargetIndexLocation Loc = Entry.getTargetIndexLocation();
-                // TODO TargetIndexLocation is a target-independent. Currently
-                // only the WebAssembly-specific encoding is supported.
-                assert(Asm->TM.getTargetTriple().isWasm());
-                DwarfExpr.addWasmLocation(Loc.Index,
-                                          static_cast<uint64_t>(Loc.Offset));
-              } else {
-                llvm_unreachable("Unsupported Entry type.");
-              }
-              return true;
-            };
-
-            if (!DwarfExpr.addExpression(
-                    std::move(Cursor),
-                    [&](unsigned Idx, DIExpressionCursor &Cursor) -> bool {
-                      return AddEntry(DVal->getLocEntries()[Idx], Cursor);
-                    }))
-              return;
-
-            // Now attach the location information to the DIE.
-            addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
-            if (DwarfExpr.TagOffset)
-              addUInt(*VariableDie, dwarf::DW_AT_LLVM_tag_offset,
-                      dwarf::DW_FORM_data1, *DwarfExpr.TagOffset);
-          },
-          [=](const Loc::Multi &Multi) {
-            addLocationList(*VariableDie, dwarf::DW_AT_location,
-                            Multi.getDebugLocListIndex());
-            auto TagOffset = Multi.getDebugLocListTagOffset();
-            if (TagOffset)
-              addUInt(*VariableDie, dwarf::DW_AT_LLVM_tag_offset,
-                      dwarf::DW_FORM_data1, *TagOffset);
-          },
-          [=](const Loc::MMI &MMI) {
-            std::optional<unsigned> NVPTXAddressSpace;
-            DIELoc *Loc = new (DIEValueAllocator) DIELoc;
-            DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-            for (const auto &Fragment : MMI.getFrameIndexExprs()) {
-              Register FrameReg;
-              const DIExpression *Expr = Fragment.Expr;
-              const TargetFrameLowering *TFI =
-                  Asm->MF->getSubtarget().getFrameLowering();
-              StackOffset Offset =
-                  TFI->getFrameIndexReference(*Asm->MF, Fragment.FI, FrameReg);
-              DwarfExpr.addFragmentOffset(Expr);
-
-              auto *TRI = Asm->MF->getSubtarget().getRegisterInfo();
-              SmallVector<uint64_t, 8> Ops;
-              TRI->getOffsetOpcodes(Offset, Ops);
-
-              // According to
-              // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
-              // cuda-gdb requires DW_AT_address_class for all variables to be
-              // able to correctly interpret address space of the variable
-              // address. Decode DW_OP_constu <DWARF Address Space> DW_OP_swap
-              // DW_OP_xderef sequence for the NVPTX + gdb target.
-              unsigned LocalNVPTXAddressSpace;
-              if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
-                const DIExpression *NewExpr = DIExpression::extractAddressClass(
-                    Expr, LocalNVPTXAddressSpace);
-                if (NewExpr != Expr) {
-                  Expr = NewExpr;
-                  NVPTXAddressSpace = LocalNVPTXAddressSpace;
-                }
-              }
-              if (Expr)
-                Ops.append(Expr->elements_begin(), Expr->elements_end());
-              DIExpressionCursor Cursor(Ops);
-              DwarfExpr.setMemoryLocationKind();
-              if (const MCSymbol *FrameSymbol = Asm->getFunctionFrameSymbol())
-                addOpAddress(*Loc, FrameSymbol);
-              else
-                DwarfExpr.addMachineRegExpression(
-                    *Asm->MF->getSubtarget().getRegisterInfo(), Cursor,
-                    FrameReg);
-              DwarfExpr.addExpression(std::move(Cursor));
-            }
-            if (Asm->TM.getTargetTriple().isNVPTX() && DD->tuneForGDB()) {
-              // According to
-              // https://docs.nvidia.com/cuda/archive/10.0/ptx-writers-guide-to-interoperability/index.html#cuda-specific-dwarf
-              // cuda-gdb requires DW_AT_address_class for all variables to be
-              // able to correctly interpret address space of the variable
-              // address.
-              const unsigned NVPTX_ADDR_local_space = 6;
-              addUInt(*VariableDie, dwarf::DW_AT_address_class,
-                      dwarf::DW_FORM_data1,
-                      NVPTXAddressSpace.value_or(NVPTX_ADDR_local_space));
-            }
-            addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
-            if (DwarfExpr.TagOffset)
-              addUInt(*VariableDie, dwarf::DW_AT_LLVM_tag_offset,
-                      dwarf::DW_FORM_data1, *DwarfExpr.TagOffset);
-          },
-          [=](const Loc::EntryValue &EntryValue) {
-            DIELoc *Loc = new (DIEValueAllocator) DIELoc;
-            DIEDwarfExpression DwarfExpr(*Asm, *this, *Loc);
-            // Emit each expression as: EntryValue(Register) <other ops>
-            // <Fragment>.
-            for (auto [Register, Expr] : EntryValue.EntryValues) {
-              DwarfExpr.addFragmentOffset(&Expr);
-              DIExpressionCursor Cursor(Expr.getElements());
-              DwarfExpr.beginEntryValueExpression(Cursor);
-              DwarfExpr.addMachineRegExpression(
-                  *Asm->MF->getSubtarget().getRegisterInfo(), Cursor, Register);
-              DwarfExpr.addExpression(std::move(Cursor));
-            }
-            addBlock(*VariableDie, dwarf::DW_AT_location, DwarfExpr.finalize());
-          },
-          [](const std::monostate &) {}),
-      DV.asVariant());
-
-  return VariableDie;
-}
-
-DIE *DwarfCompileUnit::constructVariableDIE(DbgVariable &DV,
-                                            const LexicalScope &Scope,
-                                            DIE *&ObjectPointer) {
-  auto Var = constructVariableDIE(DV, Scope.isAbstractScope());
-  if (DV.isObjectPointer())
-    ObjectPointer = Var;
-  return Var;
 }
 
 /// Return all DIVariables that appear in count: expressions.
@@ -1090,7 +1091,6 @@ sortLocalVars(SmallVectorImpl<DbgVariable *> &Input) {
 DIE &DwarfCompileUnit::constructSubprogramScopeDIE(const DISubprogram *Sub,
                                                    LexicalScope *Scope) {
   DIE &ScopeDIE = updateSubprogramScopeDIE(Sub);
-  auto *ContextCU = static_cast<DwarfCompileUnit *>(ScopeDIE.getUnit());
 
   if (Scope) {
     assert(!Scope->getInlinedAt());
@@ -1098,10 +1098,8 @@ DIE &DwarfCompileUnit::constructSubprogramScopeDIE(const DISubprogram *Sub,
     // Collect lexical scope children first.
     // ObjectPointer might be a local (non-argument) local variable if it's a
     // block's synthetic this pointer.
-    if (DIE *ObjectPointer =
-            ContextCU->createAndAddScopeChildren(Scope, ScopeDIE))
-      ContextCU->addDIEEntry(ScopeDIE, dwarf::DW_AT_object_pointer,
-                             *ObjectPointer);
+    if (DIE *ObjectPointer = createAndAddScopeChildren(Scope, ScopeDIE))
+      addDIEEntry(ScopeDIE, dwarf::DW_AT_object_pointer, *ObjectPointer);
   }
 
   // If this is a variadic function, add an unspecified parameter.
@@ -1277,6 +1275,12 @@ DIE &DwarfCompileUnit::constructCallSiteEntryDIE(DIE &ScopeDIE,
   } else {
     DIE *CalleeDIE = getOrCreateSubprogramDIE(CalleeSP);
     assert(CalleeDIE && "Could not create DIE for call site entry origin");
+    if (AddLinkageNamesToDeclCallOriginsForTuning(DD) &&
+        !CalleeSP->isDefinition() &&
+        !CalleeDIE->findAttribute(dwarf::DW_AT_linkage_name)) {
+      addLinkageName(*CalleeDIE, CalleeSP->getLinkageName());
+    }
+
     addDIEEntry(CallSiteDIE, getDwarf5OrGNUAttr(dwarf::DW_AT_call_origin),
                 *CalleeDIE);
   }
@@ -1435,7 +1439,7 @@ void DwarfCompileUnit::finishEntityDefinition(const DbgEntity *Entity) {
     Label = dyn_cast<const DbgLabel>(Entity);
   } else {
     if (const DbgVariable *Var = dyn_cast<const DbgVariable>(Entity))
-      applyVariableAttributes(*Var, *Die);
+      applyCommonDbgVariableAttributes(*Var, *Die);
     else if ((Label = dyn_cast<const DbgLabel>(Entity)))
       applyLabelAttributes(*Label, *Die);
     else
@@ -1535,8 +1539,8 @@ void DwarfCompileUnit::addGlobalNameForTypeUnit(StringRef Name,
 }
 
 /// Add a new global type to the unit.
-void DwarfCompileUnit::addGlobalType(const DIType *Ty, const DIE &Die,
-                                     const DIScope *Context) {
+void DwarfCompileUnit::addGlobalTypeImpl(const DIType *Ty, const DIE &Die,
+                                         const DIScope *Context) {
   if (!hasDwarfPubSections())
     return;
   std::string FullName = getParentContextString(Context) + Ty->getName().str();
@@ -1625,8 +1629,8 @@ void DwarfCompileUnit::addLocationList(DIE &Die, dwarf::Attribute Attribute,
   addAttribute(Die, Attribute, Form, DIELocList(Index));
 }
 
-void DwarfCompileUnit::applyVariableAttributes(const DbgVariable &Var,
-                                               DIE &VariableDie) {
+void DwarfCompileUnit::applyCommonDbgVariableAttributes(const DbgVariable &Var,
+                                                        DIE &VariableDie) {
   StringRef Name = Var.getName();
   if (!Name.empty())
     addString(VariableDie, dwarf::DW_AT_name, Name);

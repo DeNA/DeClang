@@ -19,11 +19,46 @@
 #include "lldb/Interpreter/CommandObject.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/DiagnosticsRendering.h"
 #include "lldb/Utility/StreamString.h"
 #include "llvm/ADT/STLExtras.h"
 
 using namespace lldb;
 using namespace lldb_private;
+
+namespace lldb_private {
+
+/// An llvm::Error that represents an option parsing diagnostic.
+class OptionParseError
+    : public llvm::ErrorInfo<OptionParseError, DiagnosticError> {
+  std::vector<DiagnosticDetail> m_details;
+
+public:
+  using llvm::ErrorInfo<OptionParseError, DiagnosticError>::ErrorInfo;
+  OptionParseError(DiagnosticDetail detail)
+      : ErrorInfo(std::error_code(EINVAL, std::generic_category())),
+        m_details({detail}) {}
+  OptionParseError(const Args::ArgEntry &arg, std::string msg)
+      : ErrorInfo(std::error_code(EINVAL, std::generic_category())) {
+    DiagnosticDetail::SourceLocation sloc;
+    if (auto pos = arg.GetPos()) {
+      uint16_t len = arg.GetLength();
+      sloc = {FileSpec{}, 1, *pos, len, false, true};
+    }
+    m_details.push_back(DiagnosticDetail{sloc, lldb::eSeverityError, msg, msg});
+  }
+  std::unique_ptr<CloneableError> Clone() const override {
+    return std::make_unique<OptionParseError>(m_details[0]);
+  }
+  llvm::ArrayRef<DiagnosticDetail> GetDetails() const override {
+    return m_details;
+  }
+  static char ID;
+};
+
+char OptionParseError::ID;
+
+} // namespace lldb_private
 
 // Options
 Options::Options() { BuildValidOptionSets(); }
@@ -636,7 +671,7 @@ bool Options::HandleOptionCompletion(CompletionRequest &request,
         // upper level code will know this is a full match and add the " ".
         const OptionDefinition &opt = opt_defs[opt_defs_index];
         llvm::StringRef long_option = opt.long_option;
-        if (cur_opt_str.startswith("--") && cur_opt_str != long_option) {
+        if (cur_opt_str.starts_with("--") && cur_opt_str != long_option) {
           request.AddCompletion("--" + long_option.str(), opt.usage_text);
           return true;
         } else
@@ -652,7 +687,7 @@ bool Options::HandleOptionCompletion(CompletionRequest &request,
         if (cur_opt_str.consume_front("--")) {
           for (auto &def : opt_defs) {
             llvm::StringRef long_option(def.long_option);
-            if (long_option.startswith(cur_opt_str))
+            if (long_option.starts_with(cur_opt_str))
               request.AddCompletion("--" + long_option.str(), def.usage_text);
           }
         }
@@ -811,7 +846,8 @@ Status OptionGroupOptions::SetOptionValue(uint32_t option_idx,
         execution_context);
 
   } else {
-    error.SetErrorString("invalid option index"); // Shouldn't happen...
+    error =
+        Status::FromErrorString("invalid option index"); // Shouldn't happen...
   }
   return error;
 }
@@ -890,8 +926,8 @@ static size_t FindArgumentIndexForOption(const Args &args,
   std::string long_opt =
       std::string(llvm::formatv("--{0}", long_option.definition->long_option));
   for (const auto &entry : llvm::enumerate(args)) {
-    if (entry.value().ref().startswith(short_opt) ||
-        entry.value().ref().startswith(long_opt))
+    if (entry.value().ref().starts_with(short_opt) ||
+        entry.value().ref().starts_with(long_opt))
       return entry.index();
   }
 
@@ -1197,21 +1233,12 @@ OptionElementVector Options::ParseForCompletion(const Args &args,
         }
         break;
       case OptionParser::eOptionalArgument:
-        if (OptionParser::GetOptionArgument() != nullptr) {
-          option_element_vector.push_back(OptionArgElement(
-              opt_defs_index,
-              FindOriginalIndex(dummy_vec[OptionParser::GetOptionIndex() - 2],
-                                args),
-              FindOriginalIndex(dummy_vec[OptionParser::GetOptionIndex() - 1],
-                                args)));
-        } else {
-          option_element_vector.push_back(OptionArgElement(
-              opt_defs_index,
-              FindOriginalIndex(dummy_vec[OptionParser::GetOptionIndex() - 2],
-                                args),
-              FindOriginalIndex(dummy_vec[OptionParser::GetOptionIndex() - 1],
-                                args)));
-        }
+        option_element_vector.push_back(OptionArgElement(
+            opt_defs_index,
+            FindOriginalIndex(dummy_vec[OptionParser::GetOptionIndex() - 2],
+                              args),
+            FindOriginalIndex(dummy_vec[OptionParser::GetOptionIndex() - 1],
+                              args)));
         break;
       default:
         // The options table is messed up.  Here we'll just continue
@@ -1261,16 +1288,16 @@ llvm::Expected<Args> Options::Parse(const Args &args,
 
   std::string short_options = BuildShortOptions(long_options);
   std::vector<char *> argv = GetArgvForParsing(args);
+
   std::unique_lock<std::mutex> lock;
   OptionParser::Prepare(lock);
-  int val;
   while (true) {
     int long_options_index = -1;
-    val = OptionParser::Parse(argv, short_options, long_options,
-                              &long_options_index);
+    int val = OptionParser::Parse(argv, short_options, long_options,
+                                  &long_options_index);
 
     if (val == ':') {
-      error.SetErrorString("last option requires an argument");
+      error = Status::FromErrorString("last option requires an argument");
       break;
     }
 
@@ -1279,7 +1306,14 @@ llvm::Expected<Args> Options::Parse(const Args &args,
 
     // Did we get an error?
     if (val == '?') {
-      error.SetErrorString("unknown or ambiguous option");
+      // Account for "argv[0]" and that it points to the next option.
+      int idx = OptionParser::GetOptionIndex() - 2;
+      if (idx >= 0 && (size_t)idx < args.GetArgumentCount())
+        error = Status::FromError(llvm::make_error<OptionParseError>(
+            args[idx], "unknown or ambiguous option"));
+      else
+        error = Status("unknown or ambiguous option");
+
       break;
     }
     // The option auto-set itself
@@ -1328,9 +1362,9 @@ llvm::Expected<Args> Options::Parse(const Args &args,
             execution_context ? execution_context : &dummy_context;
         if (validator && !validator->IsValid(*platform_sp, *exe_ctx_p)) {
           validation_failed = true;
-          error.SetErrorStringWithFormat("Option \"%s\" invalid.  %s",
-                                         def->long_option,
-                                         def->validator->LongConditionString());
+          error = Status::FromErrorStringWithFormat(
+              "Option \"%s\" invalid.  %s", def->long_option,
+              def->validator->LongConditionString());
         }
       }
 
@@ -1347,7 +1381,8 @@ llvm::Expected<Args> Options::Parse(const Args &args,
       if (error.Fail())
         break;
     } else {
-      error.SetErrorStringWithFormat("invalid option with value '%i'", val);
+      error = Status::FromErrorStringWithFormat(
+          "invalid option with value '%i'", val);
     }
   }
 
@@ -1357,4 +1392,17 @@ llvm::Expected<Args> Options::Parse(const Args &args,
   argv.pop_back();
   argv.erase(argv.begin(), argv.begin() + OptionParser::GetOptionIndex());
   return ReconstituteArgsAfterParsing(argv, args);
+}
+
+llvm::Error lldb_private::CreateOptionParsingError(
+    llvm::StringRef option_arg, const char short_option,
+    llvm::StringRef long_option, llvm::StringRef additional_context) {
+  std::string buffer;
+  llvm::raw_string_ostream stream(buffer);
+  stream << "Invalid value ('" << option_arg << "') for -" << short_option;
+  if (!long_option.empty())
+    stream << " (" << long_option << ")";
+  if (!additional_context.empty())
+    stream << ": " << additional_context;
+  return llvm::createStringError(llvm::inconvertibleErrorCode(), buffer);
 }

@@ -4,6 +4,7 @@ import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
 
 
+@skipIfAsan # rdar://138777205
 class TestCase(lldbtest.TestBase):
     @swiftTest
     @skipIf(oslist=["windows", "linux"])
@@ -15,7 +16,10 @@ class TestCase(lldbtest.TestBase):
         target, _, thread, _ = lldbutil.run_to_source_breakpoint(self, "await f()", src)
         self.assertEqual(thread.frame[0].function.mangled, "$s1a5entryO4mainyyYaFZ")
 
-        function = target.FindFunctions("$s1a5entryO4mainyyYaFZTQ0_")[0].function
+        sym_ctx_list = target.FindFunctions("$s1a5entryO4mainyyYaFZTQ0_")
+        self.assertEqual(sym_ctx_list.GetSize(), 1)
+        function = sym_ctx_list[0].function
+        self.assertIsNotNone(function)
         instructions = list(function.GetInstructions(target))
         self.assertGreater(len(instructions), 0)
         # Expected to be a trampoline that tail calls `swift_task_switch`.
@@ -24,7 +28,7 @@ class TestCase(lldbtest.TestBase):
         # Using the line table, build a set of the non-zero line numbers for
         # this this function - and verify that there is exactly one line.
         lines = {inst.addr.line_entry.line for inst in instructions}
-        lines.remove(0)
+        lines.discard(0)
         self.assertEqual(lines, {3})
 
         # Required for builds that have debug info.

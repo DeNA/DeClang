@@ -36,7 +36,7 @@ FileSystemCache::canonicalizeWorkingDirectory(const Twine &Path,
                                               StringRef WorkingDirectory,
                                               SmallVectorImpl<char> &Storage) {
   // Not portable.
-  assert(WorkingDirectory.startswith("/"));
+  assert(WorkingDirectory.starts_with("/"));
   Path.toVector(Storage);
   if (Storage.empty())
     return WorkingDirectory;
@@ -419,7 +419,7 @@ vfs::directory_iterator FileSystemCache::getCachedVFSDirIter(
   SmallString<128> Storage;
   if (RequestedName.empty()) {
     RequestedName = WorkingDirectory;
-  } else if (!RequestedName.startswith("/")) {
+  } else if (!RequestedName.starts_with("/")) {
     Storage.append(WorkingDirectory);
     sys::path::append(Storage, sys::path::Style::posix, RequestedName);
     RequestedName = Storage;

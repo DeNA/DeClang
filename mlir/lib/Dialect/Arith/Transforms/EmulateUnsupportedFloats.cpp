@@ -56,6 +56,7 @@ static std::optional<FloatType> parseFloatType(MLIRContext *ctx,
   Builder b(ctx);
   return llvm::StringSwitch<std::optional<FloatType>>(name)
       .Case("f8E5M2", b.getFloat8E5M2Type())
+      .Case("f8E4M3", b.getFloat8E4M3Type())
       .Case("f8E4M3FN", b.getFloat8E4M3FNType())
       .Case("f8E5M2FNUZ", b.getFloat8E5M2FNUZType())
       .Case("f8E4M3FNUZ", b.getFloat8E4M3FNUZType())
@@ -80,7 +81,7 @@ LogicalResult EmulateFloatPattern::match(Operation *op) const {
 void EmulateFloatPattern::rewrite(Operation *op, ArrayRef<Value> operands,
                                   ConversionPatternRewriter &rewriter) const {
   Location loc = op->getLoc();
-  TypeConverter *converter = getTypeConverter();
+  const TypeConverter *converter = getTypeConverter();
   SmallVector<Type> resultTypes;
   if (failed(converter->convertTypes(op->getResultTypes(), resultTypes))) {
     // Note to anyone looking for this error message: this is a "can't happen".
@@ -94,8 +95,11 @@ void EmulateFloatPattern::rewrite(Operation *op, ArrayRef<Value> operands,
   SmallVector<Value> newResults(expandedOp->getResults());
   for (auto [res, oldType, newType] : llvm::zip_equal(
            MutableArrayRef{newResults}, op->getResultTypes(), resultTypes)) {
-    if (oldType != newType)
-      res = rewriter.create<arith::TruncFOp>(loc, oldType, res);
+    if (oldType != newType) {
+      auto truncFOp = rewriter.create<arith::TruncFOp>(loc, oldType, res);
+      truncFOp.setFastmath(arith::FastMathFlags::contract);
+      res = truncFOp.getResult();
+    }
   }
   rewriter.replaceOp(op, newResults);
 }
@@ -106,7 +110,7 @@ void mlir::arith::populateEmulateUnsupportedFloatsConversions(
                            targetType](Type type) -> std::optional<Type> {
     if (llvm::is_contained(sourceTypes, type))
       return targetType;
-    if (auto shaped = type.dyn_cast<ShapedType>())
+    if (auto shaped = dyn_cast<ShapedType>(type))
       if (llvm::is_contained(sourceTypes, shaped.getElementType()))
         return shaped.clone(targetType);
     // All other types legal
@@ -114,7 +118,9 @@ void mlir::arith::populateEmulateUnsupportedFloatsConversions(
   });
   converter.addTargetMaterialization(
       [](OpBuilder &b, Type target, ValueRange input, Location loc) {
-        return b.create<arith::ExtFOp>(loc, target, input);
+        auto extFOp = b.create<arith::ExtFOp>(loc, target, input);
+        extFOp.setFastmath(arith::FastMathFlags::contract);
+        return extFOp;
       });
 }
 
@@ -136,8 +142,8 @@ void mlir::arith::populateEmulateUnsupportedFloatsLegality(
       vector::ContractionOp, vector::ReductionOp, vector::MultiDimReductionOp,
       vector::FMAOp, vector::OuterProductOp, vector::MatmulOp, vector::ScanOp>(
       [&](Operation *op) { return converter.isLegal(op); });
-  target.addLegalOp<arith::ExtFOp, arith::TruncFOp, arith::ConstantOp,
-                    vector::SplatOp>();
+  target.addLegalOp<arith::BitcastOp, arith::ExtFOp, arith::TruncFOp,
+                    arith::ConstantOp, vector::SplatOp>();
 }
 
 void EmulateUnsupportedFloatsPass::runOnOperation() {

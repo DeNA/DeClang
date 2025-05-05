@@ -19,8 +19,21 @@
  * so that it doesn't add duplicate declarations to all of its includers'
  * modules.
  */
+#if defined(__MVS__) && __has_include_next(<stddef.h>)
+#undef __need_ptrdiff_t
+#undef __need_size_t
+#undef __need_rsize_t
+#undef __need_wchar_t
+#undef __need_NULL
+#undef __need_nullptr_t
+#undef __need_unreachable
+#undef __need_max_align_t
+#undef __need_offsetof
+#undef __need_wint_t
+#include <__stddef_header_macro.h>
+#include_next <stddef.h>
 
-#if defined(__musl__)
+#elif defined(__musl__)
 
 // On musl systems, use the system header
 #include_next <stddef.h>
@@ -58,13 +71,11 @@
  */
 #define __need_NULL
 #endif
-/* FIXME: This is using the placeholder dates Clang produces for these macros
-   in C2x mode; switch to the correct values once they've been published. */
-#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202000L) ||              \
+#if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L) ||              \
     defined(__cplusplus)
 #define __need_nullptr_t
 #endif
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202000L
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
 #define __need_unreachable
 #endif
 #if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) ||              \
@@ -130,4 +141,4 @@ __WINT_TYPE__ directly; accommodate both by requiring __need_wint_t */
 #undef __need_wint_t
 #endif /* __need_wint_t */
 
-#endif /* !defined(__musl__) */
+#endif /* !defined(__MVS__) && !defined(__musl__) */

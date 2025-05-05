@@ -42,10 +42,7 @@ public:
   ///
   /// \see lldb_private::TypeSystemClang::GetType(clang::QualType)
   CompilerType(lldb::TypeSystemWP type_system,
-               lldb::opaque_compiler_type_t type)
-    : m_type_system(type_system), m_type(type) {
-    assert(Verify() && "verification failed");
-  }
+               lldb::opaque_compiler_type_t type);
 
   /// This is a minimal wrapper of a TypeSystem shared pointer as
   /// returned by CompilerType which conventien dyn_cast support.
@@ -88,10 +85,8 @@ public:
     lldb::TypeSystemSP GetSharedPointer() const { return m_typesystem_sp; }
   };
 
-  CompilerType(TypeSystemSPWrapper type_system, lldb::opaque_compiler_type_t type)
-    : m_type_system(type_system.GetSharedPointer()), m_type(type) {
-    assert(Verify() && "verification failed");
-  }
+  CompilerType(TypeSystemSPWrapper type_system,
+               lldb::opaque_compiler_type_t type);
 
   CompilerType(const CompilerType &rhs)
       : m_type_system(rhs.m_type_system), m_type(rhs.m_type) {}
@@ -145,8 +140,6 @@ public:
   bool IsCompleteType() const;
 
   bool IsConst() const;
-
-  bool IsCStringType(uint32_t &length) const;
 
   bool IsDefined() const;
 
@@ -202,6 +195,60 @@ public:
   bool IsTypedefType() const;
 
   bool IsVoidType() const;
+
+  /// This is used when you don't care about the signedness of the integer.
+  bool IsInteger() const;
+
+  bool IsFloat() const;
+
+  /// This is used when you don't care about the signedness of the enum.
+  bool IsEnumerationType() const;
+
+  bool IsUnscopedEnumerationType() const;
+
+  bool IsIntegerOrUnscopedEnumerationType() const;
+
+  bool IsSigned() const;
+
+  bool IsNullPtrType() const;
+
+  bool IsBoolean() const;
+
+  bool IsEnumerationIntegerTypeSigned() const;
+
+  bool IsScalarOrUnscopedEnumerationType() const;
+
+  bool IsPromotableIntegerType() const;
+
+  bool IsPointerToVoid() const;
+
+  bool IsRecordType() const;
+
+  //// Checks whether `target_base` is a virtual base of `type` (direct or
+  /// indirect). If it is, stores the first virtual base type on the path from
+  /// `type` to `target_type`. Parameter "virtual_base" is where the first
+  /// virtual base type gets stored. Parameter "carry_virtual" is used to
+  /// denote that we're in a recursive check of virtual base classes and we
+  /// have already seen a virtual base class (so should only check direct
+  /// base classes).
+  /// Note: This may only be defined in TypeSystemClang.
+  bool IsVirtualBase(CompilerType target_base, CompilerType *virtual_base,
+                     bool carry_virtual = false) const;
+
+  /// This may only be defined in TypeSystemClang.
+  bool IsContextuallyConvertibleToBool() const;
+
+  bool IsBasicType() const;
+
+  std::string TypeDescription();
+
+  bool CompareTypes(CompilerType rhs) const;
+
+  const char *GetTypeTag();
+
+  /// Go through the base classes and count non-empty ones.
+  uint32_t GetNumberOfNonEmptyBaseClasses();
+
   /// \}
 
   /// Type Completion.
@@ -215,6 +262,12 @@ public:
   /// \{
   size_t GetPointerByteSize() const;
   /// \}
+
+  unsigned GetPtrAuthKey() const;
+
+  unsigned GetPtrAuthDiscriminator() const;
+
+  bool GetPtrAuthAddressDiversity() const;
 
   /// Accessors.
   /// \{
@@ -325,6 +378,12 @@ public:
 
   /// Create related types using the current type's AST
   CompilerType GetBasicTypeFromAST(lldb::BasicType basic_type) const;
+
+  /// Return a new CompilerType adds a ptrauth modifier from the given 32-bit
+  /// opaque payload to this type if this type is valid and the type system
+  /// supports ptrauth modifiers, else return an invalid type. Note that this
+  /// does not check if this type is a pointer.
+  CompilerType AddPtrAuthModifier(uint32_t payload) const;
   /// \}
 
   /// Exploring the type.
@@ -375,6 +434,8 @@ public:
   CompilerType GetVirtualBaseClassAtIndex(size_t idx,
                                           uint32_t *bit_offset_ptr) const;
 
+  CompilerDecl GetStaticFieldWithName(llvm::StringRef name) const;
+
   uint32_t GetIndexOfFieldWithName(const char *name,
                                    CompilerType *field_compiler_type = nullptr,
                                    uint64_t *bit_offset_ptr = nullptr,
@@ -406,6 +467,8 @@ public:
   GetIndexOfChildMemberWithName(llvm::StringRef name, ExecutionContext *exe_ctx,
                                 bool omit_empty_base_classes,
                                 std::vector<uint32_t> &child_indexes) const;
+
+  CompilerType GetDirectNestedTypeWithName(llvm::StringRef name) const;
 
   /// Return the number of template arguments the type has.
   /// If expand_pack is true, then variadic argument packs are automatically
@@ -445,25 +508,15 @@ public:
   LLVM_DUMP_METHOD void dump() const;
 #endif
 
-  void DumpValue(ExecutionContext *exe_ctx, Stream *s, lldb::Format format,
-                 const DataExtractor &data, lldb::offset_t data_offset,
-                 size_t data_byte_size, uint32_t bitfield_bit_size,
-                 uint32_t bitfield_bit_offset, bool show_types,
-                 bool show_summary, bool verbose, uint32_t depth);
-
   bool DumpTypeValue(Stream *s, lldb::Format format, const DataExtractor &data,
                      lldb::offset_t data_offset, size_t data_byte_size,
                      uint32_t bitfield_bit_size, uint32_t bitfield_bit_offset,
                      ExecutionContextScope *exe_scope, bool is_base_class);
 
-  void DumpSummary(ExecutionContext *exe_ctx, Stream *s,
-                   const DataExtractor &data, lldb::offset_t data_offset,
-                   size_t data_byte_size);
-
   /// Dump to stdout.
   void DumpTypeDescription(
       lldb::DescriptionLevel level = lldb::eDescriptionLevelFull,
-            ExecutionContextScope *exe_scope = nullptr) const;
+      ExecutionContextScope *exe_scope = nullptr) const;
 
   /// Print a description of the type to a stream. The exact implementation
   /// varies, but the expectation is that eDescriptionLevelFull returns a

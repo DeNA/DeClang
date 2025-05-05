@@ -56,7 +56,8 @@ using namespace lldb;
 using namespace lldb_private;
 
 DisassemblerSP Disassembler::FindPlugin(const ArchSpec &arch,
-                                        const char *flavor,
+                                        const char *flavor, const char *cpu,
+                                        const char *features,
                                         const char *plugin_name) {
   LLDB_SCOPED_TIMERF("Disassembler::FindPlugin (arch = %s, plugin_name = %s)",
                      arch.GetArchitectureName(), plugin_name);
@@ -67,7 +68,7 @@ DisassemblerSP Disassembler::FindPlugin(const ArchSpec &arch,
     create_callback =
         PluginManager::GetDisassemblerCreateCallbackForPluginName(plugin_name);
     if (create_callback) {
-      if (auto disasm_sp = create_callback(arch, flavor))
+      if (auto disasm_sp = create_callback(arch, flavor, cpu, features))
         return disasm_sp;
     }
   } else {
@@ -75,18 +76,17 @@ DisassemblerSP Disassembler::FindPlugin(const ArchSpec &arch,
          (create_callback = PluginManager::GetDisassemblerCreateCallbackAtIndex(
               idx)) != nullptr;
          ++idx) {
-      if (auto disasm_sp = create_callback(arch, flavor))
+      if (auto disasm_sp = create_callback(arch, flavor, cpu, features))
         return disasm_sp;
     }
   }
   return DisassemblerSP();
 }
 
-DisassemblerSP Disassembler::FindPluginForTarget(const Target &target,
-                                                 const ArchSpec &arch,
-                                                 const char *flavor,
-                                                 const char *plugin_name) {
-  if (flavor == nullptr) {
+DisassemblerSP Disassembler::FindPluginForTarget(
+    const Target &target, const ArchSpec &arch, const char *flavor,
+    const char *cpu, const char *features, const char *plugin_name) {
+  if (!flavor) {
     // FIXME - we don't have the mechanism in place to do per-architecture
     // settings.  But since we know that for now we only support flavors on x86
     // & x86_64,
@@ -94,7 +94,12 @@ DisassemblerSP Disassembler::FindPluginForTarget(const Target &target,
         arch.GetTriple().getArch() == llvm::Triple::x86_64)
       flavor = target.GetDisassemblyFlavor();
   }
-  return FindPlugin(arch, flavor, plugin_name);
+  if (!cpu)
+    cpu = target.GetDisassemblyCPU();
+  if (!features)
+    features = target.GetDisassemblyFeatures();
+
+  return FindPlugin(arch, flavor, cpu, features, plugin_name);
 }
 
 static Address ResolveAddress(Target &target, const Address &addr) {
@@ -117,15 +122,16 @@ static Address ResolveAddress(Target &target, const Address &addr) {
 
 lldb::DisassemblerSP Disassembler::DisassembleRange(
     const ArchSpec &arch, const char *plugin_name, const char *flavor,
-    Target &target, const AddressRange &range, bool force_live_memory) {
+    const char *cpu, const char *features, Target &target,
+    const AddressRange &range, bool force_live_memory) {
   if (range.GetByteSize() <= 0)
     return {};
 
   if (!range.GetBaseAddress().IsValid())
     return {};
 
-  lldb::DisassemblerSP disasm_sp =
-      Disassembler::FindPluginForTarget(target, arch, flavor, plugin_name);
+  lldb::DisassemblerSP disasm_sp = Disassembler::FindPluginForTarget(
+      target, arch, flavor, cpu, features, plugin_name);
 
   if (!disasm_sp)
     return {};
@@ -141,14 +147,15 @@ lldb::DisassemblerSP Disassembler::DisassembleRange(
 
 lldb::DisassemblerSP
 Disassembler::DisassembleBytes(const ArchSpec &arch, const char *plugin_name,
-                               const char *flavor, const Address &start,
+                               const char *flavor, const char *cpu,
+                               const char *features, const Address &start,
                                const void *src, size_t src_len,
                                uint32_t num_instructions, bool data_from_file) {
   if (!src)
     return {};
 
   lldb::DisassemblerSP disasm_sp =
-      Disassembler::FindPlugin(arch, flavor, plugin_name);
+      Disassembler::FindPlugin(arch, flavor, cpu, features, plugin_name);
 
   if (!disasm_sp)
     return {};
@@ -163,6 +170,7 @@ Disassembler::DisassembleBytes(const ArchSpec &arch, const char *plugin_name,
 
 bool Disassembler::Disassemble(Debugger &debugger, const ArchSpec &arch,
                                const char *plugin_name, const char *flavor,
+                               const char *cpu, const char *features,
                                const ExecutionContext &exe_ctx,
                                const Address &address, Limit limit,
                                bool mixed_source_and_assembly,
@@ -172,7 +180,7 @@ bool Disassembler::Disassemble(Debugger &debugger, const ArchSpec &arch,
     return false;
 
   lldb::DisassemblerSP disasm_sp(Disassembler::FindPluginForTarget(
-      exe_ctx.GetTargetRef(), arch, flavor, plugin_name));
+      exe_ctx.GetTargetRef(), arch, flavor, cpu, features, plugin_name));
   if (!disasm_sp)
     return false;
 
@@ -201,8 +209,8 @@ Disassembler::GetFunctionDeclLineEntry(const SymbolContext &sc) {
   uint32_t func_decl_line;
   sc.function->GetStartLineSourceInfo(func_decl_file, func_decl_line);
 
-  if (func_decl_file != prologue_end_line.file &&
-      func_decl_file != prologue_end_line.original_file)
+  if (func_decl_file != prologue_end_line.GetFile() &&
+      func_decl_file != prologue_end_line.original_file_sp->GetSpecOnly())
     return {};
 
   SourceLine decl_line;
@@ -354,7 +362,7 @@ void Disassembler::PrintInstructions(Debugger &debugger, const ArchSpec &arch,
             }
             if (sc.line_entry.IsValid()) {
               SourceLine this_line;
-              this_line.file = sc.line_entry.file;
+              this_line.file = sc.line_entry.GetFile();
               this_line.line = sc.line_entry.line;
               this_line.column = sc.line_entry.column;
               if (!ElideMixedSourceAndDisassemblyLine(exe_ctx, sc, this_line))
@@ -406,8 +414,9 @@ void Disassembler::PrintInstructions(Debugger &debugger, const ArchSpec &arch,
                   uint32_t func_decl_line;
                   sc.function->GetStartLineSourceInfo(func_decl_file,
                                                       func_decl_line);
-                  if (func_decl_file == prologue_end_line.file ||
-                      func_decl_file == prologue_end_line.original_file) {
+                  if (func_decl_file == prologue_end_line.GetFile() ||
+                      func_decl_file ==
+                          prologue_end_line.original_file_sp->GetSpecOnly()) {
                     // Add all the lines between the function declaration and
                     // the first non-prologue source line to the list of lines
                     // to print.
@@ -438,7 +447,7 @@ void Disassembler::PrintInstructions(Debugger &debugger, const ArchSpec &arch,
 
               if (sc != prev_sc && sc.comp_unit && sc.line_entry.IsValid()) {
                 SourceLine this_line;
-                this_line.file = sc.line_entry.file;
+                this_line.file = sc.line_entry.GetFile();
                 this_line.line = sc.line_entry.line;
 
                 if (!ElideMixedSourceAndDisassemblyLine(exe_ctx, sc,
@@ -557,8 +566,8 @@ bool Disassembler::Disassemble(Debugger &debugger, const ArchSpec &arch,
     if (limit.value == 0)
       limit.value = DEFAULT_DISASM_BYTE_SIZE;
 
-    return Disassemble(debugger, arch, nullptr, nullptr, frame,
-                       range.GetBaseAddress(), limit, false, 0, 0, strm);
+    return Disassemble(debugger, arch, nullptr, nullptr, nullptr, nullptr,
+                       frame, range.GetBaseAddress(), limit, false, 0, 0, strm);
 }
 
 Instruction::Instruction(const Address &address, AddressClass addr_class)
@@ -1116,8 +1125,7 @@ size_t Disassembler::ParseInstructions(Target &target, Address start,
 
 // Disassembler copy constructor
 Disassembler::Disassembler(const ArchSpec &arch, const char *flavor)
-    : m_arch(arch), m_instruction_list(), m_base_addr(LLDB_INVALID_ADDRESS),
-      m_flavor() {
+    : m_arch(arch), m_instruction_list(), m_flavor() {
   if (flavor == nullptr)
     m_flavor.assign("default");
   else

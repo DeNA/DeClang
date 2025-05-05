@@ -20,6 +20,7 @@
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/StreamString.h"
+#include "lldb/Utility/StructuredData.h"
 #include "lldb/lldb-private.h"
 
 #include <future>
@@ -212,7 +213,7 @@ void SymbolFileCommon::SetCompileUnitAtIndex(uint32_t idx,
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
   const size_t num_compile_units = GetNumCompileUnits();
   assert(idx < num_compile_units);
-  (void)num_compile_units;
+  UNUSED_IF_ASSERT_DISABLED(num_compile_units);
 
   // Fire off an assertion if this compile unit already exists for now. The
   // partial parsing should take care of only setting the compile unit
@@ -234,7 +235,7 @@ SymbolFileCommon::GetTypeSystemForLanguage(lldb::LanguageType language) {
   return type_system_or_err;
 }
 
-uint64_t SymbolFileCommon::GetDebugInfoSize() {
+uint64_t SymbolFileCommon::GetDebugInfoSize(bool load_all_debug_info) {
   if (!m_objfile_sp)
     return 0;
   ModuleSP module_sp(m_objfile_sp->GetModule());

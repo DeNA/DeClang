@@ -19,7 +19,7 @@ void ExceptionAnalyzer::ExceptionInfo::registerException(
 
 void ExceptionAnalyzer::ExceptionInfo::registerExceptions(
     const Throwables &Exceptions) {
-  if (Exceptions.size() == 0)
+  if (Exceptions.empty())
     return;
   Behaviour = State::Throwing;
   ThrownExceptions.insert(Exceptions.begin(), Exceptions.end());
@@ -141,7 +141,10 @@ bool isStandardPointerConvertible(QualType From, QualType To) {
     if (RD->isCompleteDefinition() &&
         isBaseOf(From->getPointeeType().getTypePtr(),
                  To->getPointeeType().getTypePtr())) {
-      return true;
+      // If B is an inaccessible or ambiguous base class of D, a program
+      // that necessitates this conversion is ill-formed
+      return isUnambiguousPublicBaseClass(From->getPointeeType().getTypePtr(),
+                                          To->getPointeeType().getTypePtr());
     }
   }
 
@@ -375,10 +378,7 @@ bool ExceptionAnalyzer::ExceptionInfo::filterByCatch(
         isPointerOrPointerToMember(ExceptionCanTy->getTypePtr())) {
       // A standard pointer conversion not involving conversions to pointers to
       // private or protected or ambiguous classes ...
-      if (isStandardPointerConvertible(ExceptionCanTy, HandlerCanTy) &&
-          isUnambiguousPublicBaseClass(
-              ExceptionCanTy->getTypePtr()->getPointeeType().getTypePtr(),
-              HandlerCanTy->getTypePtr()->getPointeeType().getTypePtr())) {
+      if (isStandardPointerConvertible(ExceptionCanTy, HandlerCanTy)) {
         TypesToDelete.push_back(ExceptionTy);
       }
       // A function pointer conversion ...
@@ -404,7 +404,7 @@ bool ExceptionAnalyzer::ExceptionInfo::filterByCatch(
     ThrownExceptions.erase(T);
 
   reevaluateBehaviour();
-  return TypesToDelete.size() > 0;
+  return !TypesToDelete.empty();
 }
 
 ExceptionAnalyzer::ExceptionInfo &
@@ -437,7 +437,7 @@ void ExceptionAnalyzer::ExceptionInfo::clear() {
 }
 
 void ExceptionAnalyzer::ExceptionInfo::reevaluateBehaviour() {
-  if (ThrownExceptions.size() == 0)
+  if (ThrownExceptions.empty())
     if (ContainsUnknown)
       Behaviour = State::Unknown;
     else

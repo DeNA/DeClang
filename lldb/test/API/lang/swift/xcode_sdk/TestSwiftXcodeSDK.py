@@ -3,7 +3,6 @@ from lldbsuite.test.decorators import *
 import lldbsuite.test.lldbtest as lldbtest
 import lldbsuite.test.lldbutil as lldbutil
 import os
-import unittest2
 
 
 class TestSwiftXcodeSDK(lldbtest.TestBase):
@@ -11,18 +10,26 @@ class TestSwiftXcodeSDK(lldbtest.TestBase):
     mydir = lldbtest.TestBase.compute_mydir(__file__)
     NO_DEBUG_INFO_TESTCASE = True
 
-    def check_log(self, log, expected_path):
+    def check_log(self, log, expected_path, expect_precise):
         import io
         logfile = io.open(log, "r", encoding='utf-8')
-        in_expr_log = 0
         found = 0
+        precise = False
         for line in logfile:
-            if line.startswith(" SwiftASTContextForExpressions::LogConfiguration(SwiftASTContext"):
-                in_expr_log += 1
-            if in_expr_log and "SDK path" in line and expected_path in line:
+            if not line.startswith(' SwiftASTContextForExpressions(module: "a", cu: "main.swift")'):
+                continue
+            if "Using precise SDK" in line:
+                precise = True
+                continue
+            if "Override target.sdk-path" in line:
+                precise = False
+                continue
+            if not '::LogConfiguration()' in line:
+                continue
+            if "SDK path" in line and expected_path in line:
                 found += 1
-        self.assertEqual(in_expr_log, 1)
         self.assertEqual(found, 1)
+        self.assertEqual(precise, expect_precise)
 
     @swiftTest
     @skipUnlessDarwin
@@ -36,7 +43,7 @@ class TestSwiftXcodeSDK(lldbtest.TestBase):
         lldbutil.run_to_name_breakpoint(self, 'main')
 
         self.expect("expression 1")
-        self.check_log(log, "MacOSX")
+        self.check_log(log, "MacOSX", True)
 
     @swiftTest
     @skipUnlessDarwin
@@ -55,7 +62,7 @@ class TestSwiftXcodeSDK(lldbtest.TestBase):
         lldbutil.run_to_name_breakpoint(self, 'main')
 
         self.expect("expression 1")
-        self.check_log(log, "iPhoneSimulator")
+        self.check_log(log, "iPhoneSimulator", True)
 
     @swiftTest
     @skipUnlessDarwin
@@ -75,4 +82,4 @@ class TestSwiftXcodeSDK(lldbtest.TestBase):
         lldbutil.run_to_name_breakpoint(self, 'main')
 
         self.expect("expression 1")
-        self.check_log(log, ios_sdk)
+        self.check_log(log, ios_sdk, False)

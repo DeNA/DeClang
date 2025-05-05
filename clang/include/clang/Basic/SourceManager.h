@@ -43,6 +43,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
+#include "llvm/ADT/PagedVector.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -142,13 +143,13 @@ public:
   ///
   /// FIXME: Make non-optional using a virtual file as needed, remove \c
   /// Filename and use \c OrigEntry.getNameAsRequested() instead.
-  OptionalFileEntryRefDegradesToFileEntryPtr OrigEntry;
+  OptionalFileEntryRef OrigEntry;
 
   /// References the file which the contents were actually loaded from.
   ///
   /// Can be different from 'Entry' if we overridden the contents of one file
   /// with the contents of another file.
-  const FileEntry *ContentsEntry;
+  OptionalFileEntryRef ContentsEntry;
 
   /// The filename that is used to access OrigEntry.
   ///
@@ -166,27 +167,31 @@ public:
   ///
   /// When true, the original entry may be a virtual file that does not
   /// exist.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned BufferOverridden : 1;
 
   /// True if this content cache was initially created for a source file
   /// considered to be volatile (likely to change between stat and open).
+  LLVM_PREFERRED_TYPE(bool)
   unsigned IsFileVolatile : 1;
 
   /// True if this file may be transient, that is, if it might not
   /// exist at some later point in time when this content entry is used,
   /// after serialization and deserialization.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned IsTransient : 1;
 
+  LLVM_PREFERRED_TYPE(bool)
   mutable unsigned IsBufferInvalid : 1;
 
   ContentCache()
-      : OrigEntry(std::nullopt), ContentsEntry(nullptr),
+      : OrigEntry(std::nullopt), ContentsEntry(std::nullopt),
         BufferOverridden(false), IsFileVolatile(false), IsTransient(false),
         IsBufferInvalid(false) {}
 
   ContentCache(FileEntryRef Ent) : ContentCache(Ent, Ent) {}
 
-  ContentCache(FileEntryRef Ent, const FileEntry *contentEnt)
+  ContentCache(FileEntryRef Ent, FileEntryRef contentEnt)
       : OrigEntry(Ent), ContentsEntry(contentEnt), BufferOverridden(false),
         IsFileVolatile(false), IsTransient(false), IsBufferInvalid(false) {}
 
@@ -304,6 +309,7 @@ class FileInfo {
   unsigned NumCreatedFIDs : 31;
 
   /// Whether this FileInfo has any \#line directives.
+  LLVM_PREFERRED_TYPE(bool)
   unsigned HasLineDirectives : 1;
 
   /// The content cache and the characteristic of the file.
@@ -480,6 +486,7 @@ static_assert(sizeof(FileInfo) <= sizeof(ExpansionInfo),
 class SLocEntry {
   static constexpr int OffsetBits = 8 * sizeof(SourceLocation::UIntTy) - 1;
   SourceLocation::UIntTy Offset : OffsetBits;
+  LLVM_PREFERRED_TYPE(bool)
   SourceLocation::UIntTy IsExpansion : 1;
   union {
     FileInfo File;
@@ -495,6 +502,10 @@ public:
   bool isFile() const { return !isExpansion(); }
 
   const FileInfo &getFile() const {
+    return const_cast<SLocEntry *>(this)->getFile();
+  }
+
+  FileInfo &getFile() {
     assert(isFile() && "Not a file SLocEntry!");
     return File;
   }
@@ -668,7 +679,7 @@ class SourceManager : public RefCountedBase<SourceManager> {
   /// This map allows us to merge ContentCache entries based
   /// on their FileEntry*.  All ContentCache objects will thus have unique,
   /// non-null, FileEntry pointers.
-  llvm::DenseMap<const FileEntry*, SrcMgr::ContentCache*> FileInfos;
+  llvm::DenseMap<FileEntryRef, SrcMgr::ContentCache*> FileInfos;
 
   /// True if the ContentCache for files that are overridden by other
   /// files, should report the original file name. Defaults to true.
@@ -718,7 +729,7 @@ class SourceManager : public RefCountedBase<SourceManager> {
   ///
   /// Negative FileIDs are indexes into this table. To get from ID to an index,
   /// use (-ID - 2).
-  SmallVector<SrcMgr::SLocEntry, 0> LoadedSLocEntryTable;
+  llvm::PagedVector<SrcMgr::SLocEntry> LoadedSLocEntryTable;
 
   /// For each allocation in LoadedSLocEntryTable, we keep the first FileID.
   /// We assume exactly one allocation per AST file, and use that to determine
@@ -906,13 +917,6 @@ public:
 
   /// Create a new FileID that represents the specified file
   /// being \#included from the specified IncludePosition.
-  ///
-  /// This translates NULL into standard input.
-  FileID createFileID(const FileEntry *SourceFile, SourceLocation IncludePos,
-                      SrcMgr::CharacteristicKind FileCharacter,
-                      int LoadedID = 0,
-                      SourceLocation::UIntTy LoadedOffset = 0);
-
   FileID createFileID(FileEntryRef SourceFile, SourceLocation IncludePos,
                       SrcMgr::CharacteristicKind FileCharacter,
                       int LoadedID = 0,
@@ -938,7 +942,7 @@ public:
 
   /// Get the FileID for \p SourceFile if it exists. Otherwise, create a
   /// new FileID for the \p SourceFile.
-  FileID getOrCreateFileID(const FileEntry *SourceFile,
+  FileID getOrCreateFileID(FileEntryRef SourceFile,
                            SrcMgr::CharacteristicKind FileCharacter);
 
   /// Creates an expansion SLocEntry for the substitution of an argument into a
@@ -972,12 +976,12 @@ public:
   ///
   /// Returns std::nullopt if the buffer is not valid.
   std::optional<llvm::MemoryBufferRef>
-  getMemoryBufferForFileOrNone(const FileEntry *File);
+  getMemoryBufferForFileOrNone(FileEntryRef File);
 
   /// Retrieve the memory buffer associated with the given file.
   ///
   /// Returns a fake buffer if there isn't a real one.
-  llvm::MemoryBufferRef getMemoryBufferForFileOrFake(const FileEntry *File) {
+  llvm::MemoryBufferRef getMemoryBufferForFileOrFake(FileEntryRef File) {
     if (auto B = getMemoryBufferForFileOrNone(File))
       return *B;
     return getFakeBufferForRecovery();
@@ -990,7 +994,7 @@ public:
   ///
   /// \param Buffer the memory buffer whose contents will be used as the
   /// data in the given source file.
-  void overrideFileContents(const FileEntry *SourceFile,
+  void overrideFileContents(FileEntryRef SourceFile,
                             const llvm::MemoryBufferRef &Buffer) {
     overrideFileContents(SourceFile, llvm::MemoryBuffer::getMemBuffer(Buffer));
   }
@@ -1002,12 +1006,8 @@ public:
   ///
   /// \param Buffer the memory buffer whose contents will be used as the
   /// data in the given source file.
-  void overrideFileContents(const FileEntry *SourceFile,
-                            std::unique_ptr<llvm::MemoryBuffer> Buffer);
   void overrideFileContents(FileEntryRef SourceFile,
-                            std::unique_ptr<llvm::MemoryBuffer> Buffer) {
-    overrideFileContents(&SourceFile.getFileEntry(), std::move(Buffer));
-  }
+                            std::unique_ptr<llvm::MemoryBuffer> Buffer);
 
   /// Override the given source file with another one.
   ///
@@ -1036,7 +1036,7 @@ public:
   OptionalFileEntryRef bypassFileContentsOverride(FileEntryRef File);
 
   /// Specify that a file is transient.
-  void setFileIsTransient(const FileEntry *SourceFile);
+  void setFileIsTransient(FileEntryRef SourceFile);
 
   /// Specify that all files that are read during this compilation are
   /// transient.
@@ -1073,8 +1073,8 @@ public:
 
   /// Returns the FileEntry record for the provided FileID.
   const FileEntry *getFileEntryForID(FileID FID) const {
-    if (auto *Entry = getSLocEntryForFile(FID))
-      return Entry->getFile().getContentCache().OrigEntry;
+    if (auto FE = getFileEntryRefForID(FID))
+      return *FE;
     return nullptr;
   }
 
@@ -1092,9 +1092,11 @@ public:
   std::optional<StringRef> getNonBuiltinFilenameForID(FileID FID) const;
 
   /// Returns the FileEntry record for the provided SLocEntry.
-  const FileEntry *getFileEntryForSLocEntry(const SrcMgr::SLocEntry &sloc) const
-  {
-    return sloc.getFile().getContentCache().OrigEntry;
+  const FileEntry *
+  getFileEntryForSLocEntry(const SrcMgr::SLocEntry &SLocEntry) const {
+    if (auto FE = SLocEntry.getFile().getContentCache().OrigEntry)
+      return *FE;
+    return nullptr;
   }
 
   /// Return a StringRef to the source buffer data for the
@@ -1127,12 +1129,12 @@ public:
   /// Set the number of FileIDs (files and macros) that were created
   /// during preprocessing of \p FID, including it.
   void setNumCreatedFIDsForFileID(FileID FID, unsigned NumFIDs,
-                                  bool Force = false) const {
+                                  bool Force = false) {
     auto *Entry = getSLocEntryForFile(FID);
     if (!Entry)
       return;
     assert((Force || Entry->getFile().NumCreatedFIDs == 0) && "Already set!");
-    const_cast<SrcMgr::FileInfo &>(Entry->getFile()).NumCreatedFIDs = NumFIDs;
+    Entry->getFile().NumCreatedFIDs = NumFIDs;
   }
 
   //===--------------------------------------------------------------------===//
@@ -1511,7 +1513,7 @@ public:
     if (Presumed.isInvalid())
       return false;
     StringRef Filename(Presumed.getFilename());
-    return Filename.equals("<built-in>");
+    return Filename == "<built-in>";
   }
 
   /// Returns whether \p Loc is located in a <command line> file.
@@ -1520,7 +1522,7 @@ public:
     if (Presumed.isInvalid())
       return false;
     StringRef Filename(Presumed.getFilename());
-    return Filename.equals("<command line>");
+    return Filename == "<command line>";
   }
 
   /// Returns whether \p Loc is located in a <scratch space> file.
@@ -1529,7 +1531,7 @@ public:
     if (Presumed.isInvalid())
       return false;
     StringRef Filename(Presumed.getFilename());
-    return Filename.equals("<scratch space>");
+    return Filename == "<scratch space>";
   }
 
   /// Returns if a SourceLocation is in a system header.
@@ -1720,12 +1722,12 @@ public:
 
   // Iterators over FileInfos.
   using fileinfo_iterator =
-      llvm::DenseMap<const FileEntry*, SrcMgr::ContentCache*>::const_iterator;
+      llvm::DenseMap<FileEntryRef, SrcMgr::ContentCache *>::const_iterator;
 
   fileinfo_iterator fileinfo_begin() const { return FileInfos.begin(); }
   fileinfo_iterator fileinfo_end() const { return FileInfos.end(); }
   bool hasFileInfo(const FileEntry *File) const {
-    return FileInfos.contains(File);
+    return FileInfos.find_as(File) != FileInfos.end();
   }
 
   /// Print statistics to stderr.
@@ -1742,6 +1744,11 @@ public:
 
   /// Get a local SLocEntry. This is exposed for indexing.
   const SrcMgr::SLocEntry &getLocalSLocEntry(unsigned Index) const {
+    return const_cast<SourceManager *>(this)->getLocalSLocEntry(Index);
+  }
+
+  /// Get a local SLocEntry. This is exposed for indexing.
+  SrcMgr::SLocEntry &getLocalSLocEntry(unsigned Index) {
     assert(Index < LocalSLocEntryTable.size() && "Invalid index");
     return LocalSLocEntryTable[Index];
   }
@@ -1752,6 +1759,13 @@ public:
   /// Get a loaded SLocEntry. This is exposed for indexing.
   const SrcMgr::SLocEntry &getLoadedSLocEntry(unsigned Index,
                                               bool *Invalid = nullptr) const {
+    return const_cast<SourceManager *>(this)->getLoadedSLocEntry(Index,
+                                                                 Invalid);
+  }
+
+  /// Get a loaded SLocEntry. This is exposed for indexing.
+  SrcMgr::SLocEntry &getLoadedSLocEntry(unsigned Index,
+                                        bool *Invalid = nullptr) {
     assert(Index < LoadedSLocEntryTable.size() && "Invalid index");
     if (SLocEntryLoaded[Index])
       return LoadedSLocEntryTable[Index];
@@ -1760,6 +1774,10 @@ public:
 
   const SrcMgr::SLocEntry &getSLocEntry(FileID FID,
                                         bool *Invalid = nullptr) const {
+    return const_cast<SourceManager *>(this)->getSLocEntry(FID, Invalid);
+  }
+
+  SrcMgr::SLocEntry &getSLocEntry(FileID FID, bool *Invalid = nullptr) {
     if (FID.ID == 0 || FID.ID == -1) {
       if (Invalid) *Invalid = true;
       return LocalSLocEntryTable[0];
@@ -1833,14 +1851,23 @@ private:
   SrcMgr::ContentCache &getFakeContentCacheForRecovery() const;
 
   const SrcMgr::SLocEntry &loadSLocEntry(unsigned Index, bool *Invalid) const;
+  SrcMgr::SLocEntry &loadSLocEntry(unsigned Index, bool *Invalid);
 
   const SrcMgr::SLocEntry *getSLocEntryOrNull(FileID FID) const {
+    return const_cast<SourceManager *>(this)->getSLocEntryOrNull(FID);
+  }
+
+  SrcMgr::SLocEntry *getSLocEntryOrNull(FileID FID) {
     bool Invalid = false;
-    const SrcMgr::SLocEntry &Entry = getSLocEntry(FID, &Invalid);
+    SrcMgr::SLocEntry &Entry = getSLocEntry(FID, &Invalid);
     return Invalid ? nullptr : &Entry;
   }
 
   const SrcMgr::SLocEntry *getSLocEntryForFile(FileID FID) const {
+    return const_cast<SourceManager *>(this)->getSLocEntryForFile(FID);
+  }
+
+  SrcMgr::SLocEntry *getSLocEntryForFile(FileID FID) {
     if (auto *Entry = getSLocEntryOrNull(FID))
       if (Entry->isFile())
         return Entry;
@@ -1851,6 +1878,10 @@ private:
   /// Invalid will not be modified for Local IDs.
   const SrcMgr::SLocEntry &getSLocEntryByID(int ID,
                                             bool *Invalid = nullptr) const {
+    return const_cast<SourceManager *>(this)->getSLocEntryByID(ID, Invalid);
+  }
+
+  SrcMgr::SLocEntry &getSLocEntryByID(int ID, bool *Invalid = nullptr) {
     assert(ID != -1 && "Using FileID sentinel value");
     if (ID < 0)
       return getLoadedSLocEntryByID(ID, Invalid);
@@ -1859,6 +1890,11 @@ private:
 
   const SrcMgr::SLocEntry &
   getLoadedSLocEntryByID(int ID, bool *Invalid = nullptr) const {
+    return const_cast<SourceManager *>(this)->getLoadedSLocEntryByID(ID,
+                                                                     Invalid);
+  }
+
+  SrcMgr::SLocEntry &getLoadedSLocEntryByID(int ID, bool *Invalid = nullptr) {
     return getLoadedSLocEntry(static_cast<unsigned>(-ID - 2), Invalid);
   }
 
@@ -1950,6 +1986,7 @@ private:
                                          SourceLocation SpellLoc,
                                          SourceLocation ExpansionLoc,
                                          unsigned ExpansionLength) const;
+  void updateSlocUsageStats() const;
 };
 
 /// Comparison function object.

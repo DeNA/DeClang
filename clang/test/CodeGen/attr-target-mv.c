@@ -23,10 +23,23 @@ int __attribute__((target("arch=grandridge"))) foo(void) {return 17;}
 int __attribute__((target("arch=graniterapids"))) foo(void) {return 18;}
 int __attribute__((target("arch=emeraldrapids"))) foo(void) {return 19;}
 int __attribute__((target("arch=graniterapids-d"))) foo(void) {return 20;}
+int __attribute__((target("arch=arrowlake"))) foo(void) {return 21;}
+int __attribute__((target("arch=arrowlake-s"))) foo(void) {return 22;}
+int __attribute__((target("arch=lunarlake"))) foo(void) {return 23;}
+int __attribute__((target("arch=gracemont"))) foo(void) {return 24;}
+int __attribute__((target("arch=pantherlake"))) foo(void) {return 25;}
+int __attribute__((target("arch=clearwaterforest"))) foo(void) {return 26;}
 int __attribute__((target("default"))) foo(void) { return 2; }
 
 int bar(void) {
   return foo();
+}
+
+static int __attribute__((target("arch=meteorlake"))) foo_internal(void) {return 15;}
+static int __attribute__((target("default"))) foo_internal(void) { return 2; }
+
+int bar1(void) {
+  return foo_internal();
 }
 
 inline int __attribute__((target("sse4.2"))) foo_inline(void) { return 0; }
@@ -128,6 +141,7 @@ void calls_pr50025c(void) { pr50025c(); }
 
 
 // ITANIUM: @foo.ifunc = weak_odr ifunc i32 (), ptr @foo.resolver
+// ITANIUM: @foo_internal.ifunc = internal ifunc i32 (), ptr @foo_internal.resolver
 // ITANIUM: @foo_inline.ifunc = weak_odr ifunc i32 (), ptr @foo_inline.resolver
 // ITANIUM: @foo_decls.ifunc = weak_odr ifunc void (), ptr @foo_decls.resolver
 // ITANIUM: @foo_multi.ifunc = weak_odr ifunc void (i32, double), ptr @foo_multi.resolver
@@ -174,6 +188,18 @@ void calls_pr50025c(void) { pr50025c(); }
 // ITANIUM: ret i32 19
 // ITANIUM: define{{.*}} i32 @foo.arch_graniterapids-d()
 // ITANIUM: ret i32 20
+// ITANIUM: define{{.*}} i32 @foo.arch_arrowlake()
+// ITANIUM: ret i32 21
+// ITANIUM: define{{.*}} i32 @foo.arch_arrowlake-s()
+// ITANIUM: ret i32 22
+// ITANIUM: define{{.*}} i32 @foo.arch_lunarlake()
+// ITANIUM: ret i32 23
+// ITANIUM: define{{.*}} i32 @foo.arch_gracemont()
+// ITANIUM: ret i32 24
+// ITANIUM: define{{.*}} i32 @foo.arch_pantherlake()
+// ITANIUM: ret i32 25
+// ITANIUM: define{{.*}} i32 @foo.arch_clearwaterforest()
+// ITANIUM: ret i32 26
 // ITANIUM: define{{.*}} i32 @foo()
 // ITANIUM: ret i32 2
 // ITANIUM: define{{.*}} i32 @bar()
@@ -219,6 +245,18 @@ void calls_pr50025c(void) { pr50025c(); }
 // WINDOWS: ret i32 19
 // WINDOWS: define dso_local i32 @foo.arch_graniterapids-d()
 // WINDOWS: ret i32 20
+// WINDOWS: define dso_local i32 @foo.arch_arrowlake()
+// WINDOWS: ret i32 21
+// WINDOWS: define dso_local i32 @foo.arch_arrowlake-s()
+// WINDOWS: ret i32 22
+// WINDOWS: define dso_local i32 @foo.arch_lunarlake()
+// WINDOWS: ret i32 23
+// WINDOWS: define dso_local i32 @foo.arch_gracemont()
+// WINDOWS: ret i32 24
+// WINDOWS: define dso_local i32 @foo.arch_pantherlake()
+// WINDOWS: ret i32 25
+// WINDOWS: define dso_local i32 @foo.arch_clearwaterforest()
+// WINDOWS: ret i32 26
 // WINDOWS: define dso_local i32 @foo()
 // WINDOWS: ret i32 2
 // WINDOWS: define dso_local i32 @bar()
@@ -238,6 +276,11 @@ void calls_pr50025c(void) { pr50025c(); }
 // WINDOWS: call i32 @foo.arch_ivybridge
 // WINDOWS: call i32 @foo.sse4.2
 // WINDOWS: call i32 @foo
+
+/// Internal linkage resolvers do not use comdat.
+// ITANIUM: define internal ptr @foo_internal.resolver() {
+
+// WINDOWS: define internal i32 @foo_internal.resolver() {
 
 // ITANIUM: define{{.*}} i32 @bar2()
 // ITANIUM: call i32 @foo_inline.ifunc()

@@ -26,7 +26,7 @@
 ; Also, the first eviction problem is significantly less than 300 instructions. Check
 ; that there is a zero value.
 ; Note: we're regex-ing some of the opcodes to avoid test flakyness.
-; CHECK: instructions: 19,{{([0-9]{4})}},12{{([0-9]{2})}},12{{([0-9]{2})}},{{.*}},0,
+; CHECK: instructions: 19,{{([0-9]{4})}},1{{([0-9]{3})}},1{{([0-9]{3})}},{{.*}},0,
 ; Only the candidate virtreg and the 10th LR are included in this problem. Make
 ; sure the other LRs have values of zero. There are 2700 0s followed by some 1s.
 ; There's a limit to how many repetitions can be matched.
@@ -45,4 +45,4 @@
 ; CHECK: mbb_frequencies:
 ; Make sure that we have the mbb_mapping feature, and that the first couple
 ; of values are correct.
-; CHECK: mbb_mapping: 0,0,0,0,0,1,1
+; CHECK: mbb_mapping: 0,0,0,0,1,1,1

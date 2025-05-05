@@ -56,6 +56,7 @@
 #include "clang/Sema/CodeCompleteConsumer.h"
 #include "clang/Sema/CodeCompleteOptions.h"
 #include "clang/Sema/Sema.h"
+#include "clang/Sema/SemaCodeCompletion.h"
 #include "clang/Serialization/ASTBitCodes.h"
 #include "clang/Serialization/ASTReader.h"
 #include "clang/Serialization/ASTWriter.h"
@@ -375,8 +376,8 @@ void ASTUnit::CacheCodeCompletionResults() {
   SmallVector<Result, 8> Results;
   CachedCompletionAllocator = std::make_shared<GlobalCodeCompletionAllocator>();
   CodeCompletionTUInfo CCTUInfo(CachedCompletionAllocator);
-  TheSema->GatherGlobalCodeCompletions(*CachedCompletionAllocator,
-                                       CCTUInfo, Results);
+  TheSema->CodeCompletion().GatherGlobalCodeCompletions(
+      *CachedCompletionAllocator, CCTUInfo, Results);
 
   // Translate global code completions into cached completions.
   llvm::DenseMap<CanQualType, unsigned> CompletionTypes;
@@ -540,7 +541,17 @@ public:
     if (InitializedLanguage)
       return false;
 
+    // FIXME: We did similar things in ReadHeaderSearchOptions too. But such
+    // style is not scaling. Probably we need to invite some mechanism to
+    // handle such patterns generally.
+    auto PICLevel = LangOpt.PICLevel;
+    auto PIE = LangOpt.PIE;
+
     LangOpt = LangOpts;
+
+    LangOpt.PICLevel = PICLevel;
+    LangOpt.PIE = PIE;
+
     InitializedLanguage = true;
 
     updated();
@@ -550,12 +561,16 @@ public:
   bool ReadHeaderSearchOptions(const HeaderSearchOptions &HSOpts,
                                StringRef SpecificModuleCachePath,
                                bool Complain) override {
-    // Preserve previously set header search paths.
+    // llvm::SaveAndRestore doesn't support bit field.
+    auto ForceCheckCXX20ModulesInputFiles =
+        this->HSOpts.ForceCheckCXX20ModulesInputFiles;
     llvm::SaveAndRestore X(this->HSOpts.UserEntries);
     llvm::SaveAndRestore Y(this->HSOpts.SystemHeaderPrefixes);
     llvm::SaveAndRestore Z(this->HSOpts.VFSOverlayFiles);
 
     this->HSOpts = HSOpts;
+    this->HSOpts.ForceCheckCXX20ModulesInputFiles =
+        ForceCheckCXX20ModulesInputFiles;
 
     return false;
   }
@@ -786,7 +801,8 @@ std::unique_ptr<ASTUnit> ASTUnit::LoadFromASTFile(
     const std::string &Filename, const PCHContainerReader &PCHContainerRdr,
     WhatToLoad ToLoad, IntrusiveRefCntPtr<DiagnosticsEngine> Diags,
     const FileSystemOptions &FileSystemOpts,
-    std::shared_ptr<HeaderSearchOptions> HSOpts, bool OnlyLocalDecls,
+    std::shared_ptr<HeaderSearchOptions> HSOpts,
+    std::shared_ptr<LangOptions> LangOpts, bool OnlyLocalDecls,
     CaptureDiagsKind CaptureDiagnostics, bool AllowASTWithCompilerErrors,
     bool UserFilesAreVolatile, IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS) {
   std::unique_ptr<ASTUnit> AST(new ASTUnit(true));
@@ -800,7 +816,7 @@ std::unique_ptr<ASTUnit> ASTUnit::LoadFromASTFile(
 
   ConfigureDiags(Diags, *AST, CaptureDiagnostics);
 
-  AST->LangOpts = std::make_shared<LangOptions>();
+  AST->LangOpts = LangOpts ? LangOpts : std::make_shared<LangOptions>();
   AST->OnlyLocalDecls = OnlyLocalDecls;
   AST->CaptureDiagnostics = CaptureDiagnostics;
   AST->Diagnostics = Diags;
@@ -878,7 +894,7 @@ std::unique_ptr<ASTUnit> ASTUnit::LoadFromASTFile(
   PP.setCounterValue(Counter);
 
   Module *M = HeaderInfo.lookupModule(AST->getLangOpts().CurrentModule);
-  if (M && AST->getLangOpts().isCompilingModule() && M->isModulePurview())
+  if (M && AST->getLangOpts().isCompilingModule() && M->isNamedModule())
     AST->Ctx->setCurrentNamedModule(M);
 
   // Create an AST consumer, even though it isn't used.
@@ -1052,7 +1068,7 @@ public:
 
   std::vector<Decl *> takeTopLevelDecls() { return std::move(TopLevelDecls); }
 
-  std::vector<serialization::DeclID> takeTopLevelDeclIDs() {
+  std::vector<LocalDeclID> takeTopLevelDeclIDs() {
     return std::move(TopLevelDeclIDs);
   }
 
@@ -1086,7 +1102,7 @@ public:
 private:
   unsigned Hash = 0;
   std::vector<Decl *> TopLevelDecls;
-  std::vector<serialization::DeclID> TopLevelDeclIDs;
+  std::vector<LocalDeclID> TopLevelDeclIDs;
   llvm::SmallVector<ASTUnit::StandaloneDiagnostic, 4> PreambleDiags;
 };
 
@@ -1452,11 +1468,12 @@ void ASTUnit::RealizeTopLevelDeclsFromPreamble() {
 
   std::vector<Decl *> Resolved;
   Resolved.reserve(TopLevelDeclsInPreamble.size());
-  ExternalASTSource &Source = *getASTContext().getExternalSource();
+  // The module file of the preamble.
+  serialization::ModuleFile &MF = Reader->getModuleManager().getPrimaryModule();
   for (const auto TopLevelDecl : TopLevelDeclsInPreamble) {
     // Resolve the declaration ID to an actual declaration, possibly
     // deserializing the declaration in the process.
-    if (Decl *D = Source.GetExternalDecl(TopLevelDecl))
+    if (Decl *D = Reader->GetLocalDecl(MF, TopLevelDecl))
       Resolved.push_back(D);
   }
   TopLevelDeclsInPreamble.clear();
@@ -1492,8 +1509,8 @@ StringRef ASTUnit::getMainFileName() const {
   }
 
   if (SourceMgr) {
-    if (const FileEntry *
-          FE = SourceMgr->getFileEntryForID(SourceMgr->getMainFileID()))
+    if (OptionalFileEntryRef FE =
+            SourceMgr->getFileEntryRefForID(SourceMgr->getMainFileID()))
       return FE->getName();
   }
 
@@ -2010,7 +2027,8 @@ static void CalculateHiddenNames(const CodeCompletionContext &Context,
   case CodeCompletionContext::CCC_SymbolOrNewName:
   case CodeCompletionContext::CCC_ParenthesizedExpression:
   case CodeCompletionContext::CCC_ObjCInterfaceName:
-    break;
+  case CodeCompletionContext::CCC_TopLevelOrExpression:
+      break;
 
   case CodeCompletionContext::CCC_EnumTag:
   case CodeCompletionContext::CCC_UnionTag:
@@ -2169,7 +2187,8 @@ void ASTUnit::CodeComplete(
     std::shared_ptr<PCHContainerOperations> PCHContainerOps,
     DiagnosticsEngine &Diag, LangOptions &LangOpts, SourceManager &SourceMgr,
     FileManager &FileMgr, SmallVectorImpl<StoredDiagnostic> &StoredDiagnostics,
-    SmallVectorImpl<const llvm::MemoryBuffer *> &OwnedBuffers) {
+    SmallVectorImpl<const llvm::MemoryBuffer *> &OwnedBuffers,
+    std::unique_ptr<SyntaxOnlyAction> Act) {
   if (!Invocation)
     return;
 
@@ -2306,8 +2325,9 @@ void ASTUnit::CodeComplete(
   if (!Clang->getLangOpts().Modules)
     PreprocessorOpts.DetailedRecord = false;
 
-  std::unique_ptr<SyntaxOnlyAction> Act;
-  Act.reset(new SyntaxOnlyAction);
+  if (!Act)
+    Act.reset(new SyntaxOnlyAction);
+
   if (Act->BeginSourceFile(*Clang.get(), Clang->getFrontendOpts().Inputs[0])) {
     if (llvm::Error Err = Act->Execute()) {
       consumeError(std::move(Err)); // FIXME this drops errors on the floor.
@@ -2336,12 +2356,9 @@ bool ASTUnit::Save(StringRef File) {
   return false;
 }
 
-static bool serializeUnit(ASTWriter &Writer,
-                          SmallVectorImpl<char> &Buffer,
-                          Sema &S,
-                          bool hasErrors,
-                          raw_ostream &OS) {
-  Writer.WriteAST(S, std::string(), nullptr, "", hasErrors);
+static bool serializeUnit(ASTWriter &Writer, SmallVectorImpl<char> &Buffer,
+                          Sema &S, raw_ostream &OS) {
+  Writer.WriteAST(&S, std::string(), nullptr, "");
 
   // Write the generated bitstream to "Out".
   if (!Buffer.empty())
@@ -2351,21 +2368,15 @@ static bool serializeUnit(ASTWriter &Writer,
 }
 
 bool ASTUnit::serialize(raw_ostream &OS) {
-  // For serialization we are lenient if the errors were only warn-as-error kind.
-  bool hasErrors = getDiagnostics().hasUncompilableErrorOccurred();
-
   if (WriterData)
-    return serializeUnit(WriterData->Writer, WriterData->Buffer,
-                         getSema(), hasErrors, OS);
+    return serializeUnit(WriterData->Writer, WriterData->Buffer, getSema(), OS);
 
   SmallString<128> Buffer;
   llvm::BitstreamWriter Stream(Buffer);
   InMemoryModuleCache ModuleCache;
   ASTWriter Writer(Stream, Buffer, ModuleCache, {});
-  return serializeUnit(Writer, Buffer, getSema(), hasErrors, OS);
+  return serializeUnit(Writer, Buffer, getSema(), OS);
 }
-
-using SLocRemap = ContinuousRangeMap<unsigned, int, 2>;
 
 void ASTUnit::TranslateStoredDiagnostics(
                           FileManager &FileMgr,

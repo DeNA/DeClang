@@ -232,13 +232,7 @@ protected:
 
     // Lex source text.
     PP.EnterMainSourceFile();
-
-    while (true) {
-      Token Tok;
-      PP.Lex(Tok);
-      if (Tok.is(tok::eof))
-        break;
-    }
+    PP.LexTokensUntilEOF();
 
     // Callbacks have been executed at this point -- return filename range.
     return Callbacks;
@@ -262,13 +256,7 @@ protected:
 
     // Lex source text.
     PP.EnterMainSourceFile();
-
-    while (true) {
-      Token Tok;
-      PP.Lex(Tok);
-      if (Tok.is(tok::eof))
-        break;
-    }
+    PP.LexTokensUntilEOF();
 
     return Callbacks->Results;
   }
@@ -293,12 +281,7 @@ protected:
 
     // Lex source text.
     PP.EnterMainSourceFile();
-    while (true) {
-      Token Tok;
-      PP.Lex(Tok);
-      if (Tok.is(tok::eof))
-        break;
-    }
+    PP.LexTokensUntilEOF();
 
     return Callbacks->Marks;
   }
@@ -337,12 +320,7 @@ protected:
 
     // Lex source text.
     PP.EnterMainSourceFile();
-    while (true) {
-      Token Tok;
-      PP.Lex(Tok);
-      if (Tok.is(tok::eof))
-        break;
-    }
+    PP.LexTokensUntilEOF();
 
     PragmaOpenCLExtensionCallbacks::CallbackParameters RetVal = {
       Callbacks->Name,
@@ -480,12 +458,7 @@ TEST_F(PPCallbacksTest, FileNotFoundSkipped) {
 
   // Lex source text.
   PP.EnterMainSourceFile();
-  while (true) {
-    Token Tok;
-    PP.Lex(Tok);
-    if (Tok.is(tok::eof))
-      break;
-  }
+  PP.LexTokensUntilEOF();
 
   ASSERT_EQ(1u, Callbacks->NumCalls);
   ASSERT_EQ(0u, DiagConsumer->getNumErrors());

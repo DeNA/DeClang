@@ -276,7 +276,7 @@ namespace yaml {
 template <> struct MappingTraits<ExportSection> {
   static void mapping(IO &IO, ExportSection &Section) {
     const auto *Ctx = reinterpret_cast<TextAPIContext *>(IO.getContext());
-    assert((!Ctx || (Ctx && Ctx->FileKind != FileType::Invalid)) &&
+    assert((!Ctx || Ctx->FileKind != FileType::Invalid) &&
            "File type is not set in YAML context");
 
     IO.mapRequired("archs", Section.Architectures);
@@ -298,7 +298,7 @@ template <> struct MappingTraits<ExportSection> {
 template <> struct MappingTraits<UndefinedSection> {
   static void mapping(IO &IO, UndefinedSection &Section) {
     const auto *Ctx = reinterpret_cast<TextAPIContext *>(IO.getContext());
-    assert((!Ctx || (Ctx && Ctx->FileKind != FileType::Invalid)) &&
+    assert((!Ctx || Ctx->FileKind != FileType::Invalid) &&
            "File type is not set in YAML context");
 
     IO.mapRequired("archs", Section.Architectures);
@@ -1073,23 +1073,23 @@ static void DiagHandler(const SMDiagnostic &Diag, void *Context) {
 
 Expected<FileType> TextAPIReader::canRead(MemoryBufferRef InputBuffer) {
   auto TAPIFile = InputBuffer.getBuffer().trim();
-  if (TAPIFile.startswith("{") && TAPIFile.endswith("}"))
+  if (TAPIFile.starts_with("{") && TAPIFile.ends_with("}"))
     return FileType::TBD_V5;
 
-  if (!TAPIFile.endswith("..."))
+  if (!TAPIFile.ends_with("..."))
     return createStringError(std::errc::not_supported, "unsupported file type");
 
-  if (TAPIFile.startswith("--- !tapi-tbd\n"))
+  if (TAPIFile.starts_with("--- !tapi-tbd"))
     return FileType::TBD_V4;
 
-  if (TAPIFile.startswith("--- !tapi-tbd-v3\n"))
+  if (TAPIFile.starts_with("--- !tapi-tbd-v3"))
     return FileType::TBD_V3;
 
-  if (TAPIFile.startswith("--- !tapi-tbd-v2\n"))
+  if (TAPIFile.starts_with("--- !tapi-tbd-v2"))
     return FileType::TBD_V2;
 
-  if (TAPIFile.startswith("--- !tapi-tbd-v1\n") ||
-      TAPIFile.startswith("---\narchs:"))
+  if (TAPIFile.starts_with("--- !tapi-tbd-v1") ||
+      TAPIFile.starts_with("---\narchs:"))
     return FileType::TBD_V1;
 
   return createStringError(std::errc::not_supported, "unsupported file type");
@@ -1154,7 +1154,7 @@ Error TextAPIWriter::writeToStream(raw_ostream &OS, const InterfaceFile &File,
   std::vector<const InterfaceFile *> Files;
   Files.emplace_back(&File);
 
-  for (auto Document : File.documents())
+  for (const auto &Document : File.documents())
     Files.emplace_back(Document.get());
 
   // Stream out yaml.

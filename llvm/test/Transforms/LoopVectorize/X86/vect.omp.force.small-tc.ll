@@ -35,24 +35,24 @@ define void @vectorized(ptr noalias nocapture %A, ptr noalias nocapture readonly
 ; CHECK-NEXT:    [[TMP6:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP2]]
 ; CHECK-NEXT:    [[TMP7:%.*]] = getelementptr inbounds float, ptr [[B]], i64 [[TMP3]]
 ; CHECK-NEXT:    [[TMP8:%.*]] = getelementptr inbounds float, ptr [[TMP4]], i32 0
-; CHECK-NEXT:    [[WIDE_LOAD:%.*]] = load <4 x float>, ptr [[TMP8]], align 4, !llvm.access.group [[ACC_GRP0:![0-9]+]]
 ; CHECK-NEXT:    [[TMP9:%.*]] = getelementptr inbounds float, ptr [[TMP4]], i32 4
-; CHECK-NEXT:    [[WIDE_LOAD1:%.*]] = load <4 x float>, ptr [[TMP9]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[TMP10:%.*]] = getelementptr inbounds float, ptr [[TMP4]], i32 8
-; CHECK-NEXT:    [[WIDE_LOAD2:%.*]] = load <4 x float>, ptr [[TMP10]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[TMP11:%.*]] = getelementptr inbounds float, ptr [[TMP4]], i32 12
+; CHECK-NEXT:    [[WIDE_LOAD:%.*]] = load <4 x float>, ptr [[TMP8]], align 4, !llvm.access.group [[ACC_GRP0:![0-9]+]]
+; CHECK-NEXT:    [[WIDE_LOAD1:%.*]] = load <4 x float>, ptr [[TMP9]], align 4, !llvm.access.group [[ACC_GRP0]]
+; CHECK-NEXT:    [[WIDE_LOAD2:%.*]] = load <4 x float>, ptr [[TMP10]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[WIDE_LOAD3:%.*]] = load <4 x float>, ptr [[TMP11]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[TMP12:%.*]] = getelementptr inbounds float, ptr [[A:%.*]], i64 [[TMP0]]
 ; CHECK-NEXT:    [[TMP13:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[TMP1]]
 ; CHECK-NEXT:    [[TMP14:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[TMP2]]
 ; CHECK-NEXT:    [[TMP15:%.*]] = getelementptr inbounds float, ptr [[A]], i64 [[TMP3]]
 ; CHECK-NEXT:    [[TMP16:%.*]] = getelementptr inbounds float, ptr [[TMP12]], i32 0
-; CHECK-NEXT:    [[WIDE_LOAD4:%.*]] = load <4 x float>, ptr [[TMP16]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[TMP17:%.*]] = getelementptr inbounds float, ptr [[TMP12]], i32 4
-; CHECK-NEXT:    [[WIDE_LOAD5:%.*]] = load <4 x float>, ptr [[TMP17]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[TMP18:%.*]] = getelementptr inbounds float, ptr [[TMP12]], i32 8
-; CHECK-NEXT:    [[WIDE_LOAD6:%.*]] = load <4 x float>, ptr [[TMP18]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[TMP19:%.*]] = getelementptr inbounds float, ptr [[TMP12]], i32 12
+; CHECK-NEXT:    [[WIDE_LOAD4:%.*]] = load <4 x float>, ptr [[TMP16]], align 4, !llvm.access.group [[ACC_GRP0]]
+; CHECK-NEXT:    [[WIDE_LOAD5:%.*]] = load <4 x float>, ptr [[TMP17]], align 4, !llvm.access.group [[ACC_GRP0]]
+; CHECK-NEXT:    [[WIDE_LOAD6:%.*]] = load <4 x float>, ptr [[TMP18]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[WIDE_LOAD7:%.*]] = load <4 x float>, ptr [[TMP19]], align 4, !llvm.access.group [[ACC_GRP0]]
 ; CHECK-NEXT:    [[TMP20:%.*]] = fadd fast <4 x float> [[WIDE_LOAD]], [[WIDE_LOAD4]]
 ; CHECK-NEXT:    [[TMP21:%.*]] = fadd fast <4 x float> [[WIDE_LOAD1]], [[WIDE_LOAD5]]
@@ -66,8 +66,7 @@ define void @vectorized(ptr noalias nocapture %A, ptr noalias nocapture readonly
 ; CHECK-NEXT:    [[TMP24:%.*]] = icmp eq i64 [[INDEX_NEXT]], 16
 ; CHECK-NEXT:    br i1 [[TMP24]], label [[MIDDLE_BLOCK:%.*]], label [[VECTOR_BODY]], !llvm.loop [[LOOP1:![0-9]+]]
 ; CHECK:       middle.block:
-; CHECK-NEXT:    [[CMP_N:%.*]] = icmp eq i64 20, 16
-; CHECK-NEXT:    br i1 [[CMP_N]], label [[FOR_END:%.*]], label [[SCALAR_PH]]
+; CHECK-NEXT:    br i1 false, label [[FOR_END:%.*]], label [[SCALAR_PH]]
 ; CHECK:       scalar.ph:
 ; CHECK-NEXT:    [[BC_RESUME_VAL:%.*]] = phi i64 [ 16, [[MIDDLE_BLOCK]] ], [ 0, [[ENTRY:%.*]] ]
 ; CHECK-NEXT:    br label [[FOR_BODY:%.*]]
@@ -202,8 +201,7 @@ define void @vectorized2(ptr noalias nocapture %A, ptr noalias nocapture readonl
 ; CHECK-NEXT:    [[TMP6:%.*]] = icmp eq i64 [[INDEX_NEXT]], 16
 ; CHECK-NEXT:    br i1 [[TMP6]], label [[MIDDLE_BLOCK:%.*]], label [[VECTOR_BODY]], !llvm.loop [[LOOP10:![0-9]+]]
 ; CHECK:       middle.block:
-; CHECK-NEXT:    [[CMP_N:%.*]] = icmp eq i64 16, 16
-; CHECK-NEXT:    br i1 [[CMP_N]], label [[FOR_END:%.*]], label [[SCALAR_PH]]
+; CHECK-NEXT:    br i1 true, label [[FOR_END:%.*]], label [[SCALAR_PH]]
 ; CHECK:       scalar.ph:
 ; CHECK-NEXT:    [[BC_RESUME_VAL:%.*]] = phi i64 [ 16, [[MIDDLE_BLOCK]] ], [ 0, [[ENTRY:%.*]] ]
 ; CHECK-NEXT:    br label [[FOR_BODY:%.*]]

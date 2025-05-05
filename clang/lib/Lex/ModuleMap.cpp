@@ -235,7 +235,7 @@ OptionalFileEntryRef ModuleMap::findHeader(
   llvm::sys::path::append(FullPathName, RelativePathName);
   auto NormalHdrFile = GetFile(FullPathName);
 
-  if (!NormalHdrFile && Directory->getName().endswith(".framework")) {
+  if (!NormalHdrFile && Directory->getName().ends_with(".framework")) {
     // The lack of 'framework' keyword in a module declaration it's a simple
     // mistake we can diagnose when the header exists within the proper
     // framework style path.
@@ -308,7 +308,7 @@ void ModuleMap::resolveHeader(Module *Mod,
         setUmbrellaHeaderAsWritten(Mod, *File, Header.FileName,
                                    RelativePathName.str());
     } else {
-      Module::Header H = {Header.FileName, std::string(RelativePathName.str()),
+      Module::Header H = {Header.FileName, std::string(RelativePathName),
                           *File};
       addHeader(Mod, H, headerKindToRole(Header.Kind));
     }
@@ -362,12 +362,7 @@ ModuleMap::ModuleMap(SourceManager &SourceMgr, DiagnosticsEngine &Diags,
   MMapLangOpts.LineComment = true;
 }
 
-ModuleMap::~ModuleMap() {
-  for (auto &M : Modules)
-    delete M.getValue();
-  for (auto *M : ShadowModules)
-    delete M;
-}
+ModuleMap::~ModuleMap() = default;
 
 void ModuleMap::setTarget(const TargetInfo &Target) {
   assert((!this->Target || this->Target == &Target) &&
@@ -412,9 +407,9 @@ static StringRef sanitizeFilenameAsIdentifier(StringRef Name,
   return Name;
 }
 
-bool ModuleMap::isBuiltinHeader(const FileEntry *File) {
-  return File->getDir() == BuiltinIncludeDir && LangOpts.BuiltinHeadersInSystemModules &&
-         isBuiltinHeaderName(llvm::sys::path::filename(File->getName()));
+bool ModuleMap::isBuiltinHeader(FileEntryRef File) {
+  return File.getDir() == BuiltinIncludeDir && LangOpts.BuiltinHeadersInSystemModules &&
+         isBuiltinHeaderName(llvm::sys::path::filename(File.getName()));
 }
 
 bool ModuleMap::shouldImportRelativeToBuiltinIncludeDir(StringRef FileName,
@@ -424,8 +419,7 @@ bool ModuleMap::shouldImportRelativeToBuiltinIncludeDir(StringRef FileName,
          isBuiltinHeaderName(FileName);
 }
 
-ModuleMap::HeadersMap::iterator
-ModuleMap::findKnownHeader(const FileEntry *File) {
+ModuleMap::HeadersMap::iterator ModuleMap::findKnownHeader(FileEntryRef File) {
   resolveHeaderDirectives(File);
   HeadersMap::iterator Known = Headers.find(File);
   if (HeaderInfo.getHeaderSearchOpts().ImplicitModuleMaps &&
@@ -478,12 +472,12 @@ static bool violatesPrivateInclude(Module *RequestingModule,
     // as obtained from the lookup and as obtained from the module.
     // This check is not cheap, so enable it only for debugging.
     bool IsPrivate = false;
-    SmallVectorImpl<Module::Header> *HeaderList[] = {
-        &Header.getModule()->Headers[Module::HK_Private],
-        &Header.getModule()->Headers[Module::HK_PrivateTextual]};
-    for (auto *Hs : HeaderList)
+    ArrayRef<Module::Header> HeaderList[] = {
+        Header.getModule()->getHeaders(Module::HK_Private),
+        Header.getModule()->getHeaders(Module::HK_PrivateTextual)};
+    for (auto Hs : HeaderList)
       IsPrivate |= llvm::any_of(
-          *Hs, [&](const Module::Header &H) { return H.Entry == IncFileEnt; });
+          Hs, [&](const Module::Header &H) { return H.Entry == IncFileEnt; });
     assert(IsPrivate && "inconsistent headers and roles");
   }
 #endif
@@ -661,10 +655,9 @@ ModuleMap::findOrCreateModuleForHeaderInUmbrellaDir(FileEntryRef File) {
         SmallString<32> NameBuf;
         StringRef Name = sanitizeFilenameAsIdentifier(
             llvm::sys::path::stem(SkippedDir.getName()), NameBuf);
-        Result = findOrCreateModule(Name, Result, /*IsFramework=*/false,
-                                    Explicit).first;
-        InferredModuleAllowedBy[Result] = UmbrellaModuleMap;
-        Result->IsInferred = true;
+        Result = findOrCreateModuleFirst(Name, Result, /*IsFramework=*/false,
+                                         Explicit);
+        setInferredModuleAllowedBy(Result, UmbrellaModuleMap);
 
         // Associate the module and the directory.
         UmbrellaDirs[SkippedDir] = Result;
@@ -679,10 +672,9 @@ ModuleMap::findOrCreateModuleForHeaderInUmbrellaDir(FileEntryRef File) {
       SmallString<32> NameBuf;
       StringRef Name = sanitizeFilenameAsIdentifier(
                          llvm::sys::path::stem(File.getName()), NameBuf);
-      Result = findOrCreateModule(Name, Result, /*IsFramework=*/false,
-                                  Explicit).first;
-      InferredModuleAllowedBy[Result] = UmbrellaModuleMap;
-      Result->IsInferred = true;
+      Result = findOrCreateModuleFirst(Name, Result, /*IsFramework=*/false,
+                                       Explicit);
+      setInferredModuleAllowedBy(Result, UmbrellaModuleMap);
       Result->addTopHeader(File);
 
       // If inferred submodules export everything they import, add a
@@ -717,7 +709,7 @@ ModuleMap::findAllModulesForHeader(FileEntryRef File) {
 }
 
 ArrayRef<ModuleMap::KnownHeader>
-ModuleMap::findResolvedModulesForHeader(const FileEntry *File) const {
+ModuleMap::findResolvedModulesForHeader(FileEntryRef File) const {
   // FIXME: Is this necessary?
   resolveHeaderDirectives(File);
   auto It = Headers.find(File);
@@ -832,13 +824,29 @@ Module *ModuleMap::findModule(StringRef Name) const {
     if (M->DefinitionLoc.isValid() && !M->IsFromModuleFile)
       for (const auto &Cb : Callbacks)
         Cb->moduleMapFoundForModule(
-            **getContainingModuleMapFile(M), M,
+            *getContainingModuleMapFile(M), M,
             SourceMgr.getFileCharacteristic(M->DefinitionLoc) ==
                 SrcMgr::C_System_ModuleMap);
     return M;
   }
 
   return nullptr;
+}
+
+Module *ModuleMap::findOrInferSubmodule(Module *Parent, StringRef Name) {
+  if (Module *SubM = Parent->findSubmodule(Name))
+    return SubM;
+  if (!Parent->InferSubmodules)
+    return nullptr;
+  Module *Result = new (ModulesAlloc.Allocate())
+      Module(ModuleConstructorTag{}, Name, SourceLocation(), Parent, false,
+             Parent->InferExplicitSubmodules, 0);
+  Result->InferExplicitSubmodules = Parent->InferExplicitSubmodules;
+  Result->InferSubmodules = Parent->InferSubmodules;
+  Result->InferExportWildcard = Parent->InferExportWildcard;
+  if (Result->InferExportWildcard)
+    Result->Exports.push_back(Module::ExportDecl(nullptr, true));
+  return Result;
 }
 
 Module *ModuleMap::lookupModuleUnqualified(StringRef Name,
@@ -867,21 +875,32 @@ std::pair<Module *, bool> ModuleMap::findOrCreateModule(StringRef Name,
     return std::make_pair(Sub, false);
 
   // Create a new module with this name.
-  Module *Result = new Module(Name, SourceLocation(), Parent, IsFramework,
-                              IsExplicit, NumCreatedModules++);
+  Module *M = createModule(Name, Parent, IsFramework, IsExplicit);
+  return std::make_pair(M, true);
+}
+
+Module *ModuleMap::createModule(StringRef Name, Module *Parent,
+                                bool IsFramework, bool IsExplicit) {
+  assert(lookupModuleQualified(Name, Parent) == nullptr &&
+         "Creating duplicate submodule");
+
+  Module *Result = new (ModulesAlloc.Allocate())
+      Module(ModuleConstructorTag{}, Name, SourceLocation(), Parent,
+             IsFramework, IsExplicit, NumCreatedModules++);
   if (!Parent) {
     if (LangOpts.CurrentModule == Name)
       SourceModule = Result;
     Modules[Name] = Result;
     ModuleScopeIDs[Result] = CurrentModuleScopeID;
   }
-  return std::make_pair(Result, true);
+  return Result;
 }
 
 Module *ModuleMap::createGlobalModuleFragmentForModuleUnit(SourceLocation Loc,
                                                            Module *Parent) {
-  auto *Result = new Module("<global>", Loc, Parent, /*IsFramework*/ false,
-                            /*IsExplicit*/ true, NumCreatedModules++);
+  auto *Result = new (ModulesAlloc.Allocate()) Module(
+      ModuleConstructorTag{}, "<global>", Loc, Parent, /*IsFramework=*/false,
+      /*IsExplicit=*/true, NumCreatedModules++);
   Result->Kind = Module::ExplicitGlobalModuleFragment;
   // If the created module isn't owned by a parent, send it to PendingSubmodules
   // to wait for its parent.
@@ -890,17 +909,17 @@ Module *ModuleMap::createGlobalModuleFragmentForModuleUnit(SourceLocation Loc,
   return Result;
 }
 
-Module *ModuleMap::createImplicitGlobalModuleFragmentForModuleUnit(
-    SourceLocation Loc, bool IsExported, Module *Parent) {
+Module *
+ModuleMap::createImplicitGlobalModuleFragmentForModuleUnit(SourceLocation Loc,
+                                                           Module *Parent) {
   assert(Parent && "We should only create an implicit global module fragment "
                    "in a module purview");
   // Note: Here the `IsExplicit` parameter refers to the semantics in clang
   // modules. All the non-explicit submodules in clang modules will be exported
   // too. Here we simplify the implementation by using the concept.
-  auto *Result = new Module(IsExported ? "<exported implicit global>"
-                                       : "<implicit global>",
-                            Loc, Parent, /*IsFramework*/ false,
-                            /*IsExplicit*/ !IsExported, NumCreatedModules++);
+  auto *Result = new (ModulesAlloc.Allocate())
+      Module(ModuleConstructorTag{}, "<implicit global>", Loc, Parent,
+             /*IsFramework=*/false, /*IsExplicit=*/false, NumCreatedModules++);
   Result->Kind = Module::ImplicitGlobalModuleFragment;
   return Result;
 }
@@ -908,25 +927,23 @@ Module *ModuleMap::createImplicitGlobalModuleFragmentForModuleUnit(
 Module *
 ModuleMap::createPrivateModuleFragmentForInterfaceUnit(Module *Parent,
                                                        SourceLocation Loc) {
-  auto *Result =
-      new Module("<private>", Loc, Parent, /*IsFramework*/ false,
-                 /*IsExplicit*/ true, NumCreatedModules++);
+  auto *Result = new (ModulesAlloc.Allocate()) Module(
+      ModuleConstructorTag{}, "<private>", Loc, Parent, /*IsFramework=*/false,
+      /*IsExplicit=*/true, NumCreatedModules++);
   Result->Kind = Module::PrivateModuleFragment;
   return Result;
 }
 
 Module *ModuleMap::createModuleUnitWithKind(SourceLocation Loc, StringRef Name,
                                             Module::ModuleKind Kind) {
-  auto *Result =
-      new Module(Name, Loc, nullptr, /*IsFramework*/ false,
-                 /*IsExplicit*/ false, NumCreatedModules++);
+  auto *Result = new (ModulesAlloc.Allocate())
+      Module(ModuleConstructorTag{}, Name, Loc, nullptr, /*IsFramework=*/false,
+             /*IsExplicit=*/false, NumCreatedModules++);
   Result->Kind = Kind;
 
   // Reparent any current global module fragment as a submodule of this module.
-  for (auto &Submodule : PendingSubmodules) {
+  for (auto &Submodule : PendingSubmodules)
     Submodule->setParent(Result);
-    Submodule.release(); // now owned by parent
-  }
   PendingSubmodules.clear();
   return Result;
 }
@@ -942,9 +959,9 @@ Module *ModuleMap::createModuleForInterfaceUnit(SourceLocation Loc,
 
   // Mark the main source file as being within the newly-created module so that
   // declarations and macros are properly visibility-restricted to it.
-  auto *MainFile = SourceMgr.getFileEntryForID(SourceMgr.getMainFileID());
+  auto MainFile = SourceMgr.getFileEntryRefForID(SourceMgr.getMainFileID());
   assert(MainFile && "no input file for module interface");
-  Headers[MainFile].push_back(KnownHeader(Result, PrivateHeader));
+  Headers[*MainFile].push_back(KnownHeader(Result, PrivateHeader));
 
   return Result;
 }
@@ -978,8 +995,9 @@ Module *ModuleMap::createHeaderUnit(SourceLocation Loc, StringRef Name,
   assert(LangOpts.CurrentModule == Name && "module name mismatch");
   assert(!Modules[Name] && "redefining existing module");
 
-  auto *Result = new Module(Name, Loc, nullptr, /*IsFramework*/ false,
-                            /*IsExplicit*/ false, NumCreatedModules++);
+  auto *Result = new (ModulesAlloc.Allocate())
+      Module(ModuleConstructorTag{}, Name, Loc, nullptr, /*IsFramework=*/false,
+             /*IsExplicit=*/false, NumCreatedModules++);
   Result->Kind = Module::ModuleHeaderUnit;
   Modules[Name] = SourceModule = Result;
   addHeader(Result, H, NormalHeader);
@@ -1045,7 +1063,7 @@ Module *ModuleMap::inferFrameworkModule(DirectoryEntryRef FrameworkDir,
         if (inferred == InferredDirectories.end()) {
           // We haven't looked here before. Load a module map, if there is
           // one.
-          bool IsFrameworkDir = Parent.endswith(".framework");
+          bool IsFrameworkDir = Parent.ends_with(".framework");
           if (OptionalFileEntryRef ModMapFile =
                   HeaderInfo.lookupModuleMapFile(*ParentDir, IsFrameworkDir)) {
             parseModuleMapFile(*ModMapFile, Attrs.IsSystem, *ParentDir);
@@ -1092,11 +1110,10 @@ Module *ModuleMap::inferFrameworkModule(DirectoryEntryRef FrameworkDir,
   if (!UmbrellaHeader)
     return nullptr;
 
-  Module *Result = new Module(ModuleName, SourceLocation(), Parent,
-                              /*IsFramework=*/true, /*IsExplicit=*/false,
-                              NumCreatedModules++);
-  InferredModuleAllowedBy[Result] = ModuleMapFID;
-  Result->IsInferred = true;
+  Module *Result = new (ModulesAlloc.Allocate())
+      Module(ModuleConstructorTag{}, ModuleName, SourceLocation(), Parent,
+             /*IsFramework=*/true, /*IsExplicit=*/false, NumCreatedModules++);
+  setInferredModuleAllowedBy(Result, ModuleMapFID);
   if (!Parent) {
     if (LangOpts.CurrentModule == ModuleName)
       SourceModule = Result;
@@ -1136,7 +1153,7 @@ Module *ModuleMap::inferFrameworkModule(DirectoryEntryRef FrameworkDir,
            Dir = FS.dir_begin(SubframeworksDirName, EC),
            DirEnd;
        Dir != DirEnd && !EC; Dir.increment(EC)) {
-    if (!StringRef(Dir->path()).endswith(".framework"))
+    if (!StringRef(Dir->path()).ends_with(".framework"))
       continue;
 
     if (auto SubframeworkDir = FileMgr.getOptionalDirectoryRef(Dir->path())) {
@@ -1182,9 +1199,9 @@ Module *ModuleMap::createShadowedModule(StringRef Name, bool IsFramework,
                                         Module *ShadowingModule) {
 
   // Create a new module with this name.
-  Module *Result =
-      new Module(Name, SourceLocation(), /*Parent=*/nullptr, IsFramework,
-                 /*IsExplicit=*/false, NumCreatedModules++);
+  Module *Result = new (ModulesAlloc.Allocate())
+      Module(ModuleConstructorTag{}, Name, SourceLocation(), /*Parent=*/nullptr,
+             IsFramework, /*IsExplicit=*/false, NumCreatedModules++);
   Result->ShadowingModule = ShadowingModule;
   Result->markUnavailable(/*Unimportable*/true);
   ModuleScopeIDs[Result] = CurrentModuleScopeID;
@@ -1293,27 +1310,28 @@ void ModuleMap::addHeader(Module *Mod, Module::Header Header,
                           ModuleHeaderRole Role, bool Imported) {
   KnownHeader KH(Mod, Role);
 
+  FileEntryRef HeaderEntry = Header.Entry;
+
   // Only add each header to the headers list once.
   // FIXME: Should we diagnose if a header is listed twice in the
   // same module definition?
-  auto &HeaderList = Headers[Header.Entry];
+  auto &HeaderList = Headers[HeaderEntry];
   if (llvm::is_contained(HeaderList, KH))
     return;
 
   HeaderList.push_back(KH);
-  Mod->Headers[headerRoleToKind(Role)].push_back(Header);
+  Mod->addHeader(headerRoleToKind(Role), std::move(Header));
 
   bool isCompilingModuleHeader = Mod->isForBuilding(LangOpts);
   if (!Imported || isCompilingModuleHeader) {
     // When we import HeaderFileInfo, the external source is expected to
     // set the isModuleHeader flag itself.
-    HeaderInfo.MarkFileModuleHeader(Header.Entry, Role,
-                                    isCompilingModuleHeader);
+    HeaderInfo.MarkFileModuleHeader(HeaderEntry, Role, isCompilingModuleHeader);
   }
 
   // Notify callbacks that we just added a new header.
   for (const auto &Cb : Callbacks)
-    Cb->moduleMapAddHeader(Header.Entry.getName());
+    Cb->moduleMapAddHeader(HeaderEntry.getName());
 }
 
 FileID ModuleMap::getContainingModuleMapFileID(const Module *Module) const {
@@ -1342,7 +1360,7 @@ ModuleMap::getModuleMapFileForUniquing(const Module *M) const {
 }
 
 void ModuleMap::setInferredModuleAllowedBy(Module *M, FileID ModMapFID) {
-  assert(M->IsInferred && "module not inferred");
+  M->IsInferred = true;
   InferredModuleAllowedBy[M] = ModMapFID;
 }
 
@@ -1354,7 +1372,7 @@ ModuleMap::canonicalizeModuleMapPath(SmallVectorImpl<char> &Path) {
   // Modules/ not Versions/A/Modules.
   if (llvm::sys::path::filename(Dir) == "Modules") {
     StringRef Parent = llvm::sys::path::parent_path(Dir);
-    if (Parent.endswith(".framework"))
+    if (Parent.ends_with(".framework"))
       Dir = Parent;
   }
 
@@ -1380,7 +1398,7 @@ ModuleMap::canonicalizeModuleMapPath(SmallVectorImpl<char> &Path) {
 }
 
 void ModuleMap::addAdditionalModuleMapFile(const Module *M,
-                                           const FileEntry *ModuleMap) {
+                                           FileEntryRef ModuleMap) {
   AdditionalModMaps[M].insert(ModuleMap);
 }
 
@@ -1394,7 +1412,7 @@ LLVM_DUMP_METHOD void ModuleMap::dump() {
   llvm::errs() << "Headers:";
   for (HeadersMap::iterator H = Headers.begin(), HEnd = Headers.end();
        H != HEnd; ++H) {
-    llvm::errs() << "  \"" << H->first->getName() << "\" -> ";
+    llvm::errs() << "  \"" << H->first.getName() << "\" -> ";
     for (SmallVectorImpl<KnownHeader>::const_iterator I = H->second.begin(),
                                                       E = H->second.end();
          I != E; ++I) {
@@ -1573,8 +1591,6 @@ namespace clang {
     /// Skip tokens until we reach the a token with the given kind
     /// (or the end of the file).
     void skipUntil(MMToken::TokenKind K);
-
-    using ModuleId = SmallVector<std::pair<std::string, SourceLocation>, 2>;
 
     bool parseModuleId(ModuleId &Id);
     void parseModuleDecl();
@@ -1885,7 +1901,7 @@ void ModuleMapParser::diagnosePrivateModules(SourceLocation ExplicitLoc,
       continue;
 
     SmallString<128> FullName(ActiveModule->getFullModuleName());
-    if (!FullName.startswith(M->Name) && !FullName.endswith("Private"))
+    if (!FullName.starts_with(M->Name) && !FullName.ends_with("Private"))
       continue;
     SmallString<128> FixedPrivModDecl;
     SmallString<128> Canonical(M->Name);
@@ -2127,9 +2143,8 @@ void ModuleMapParser::parseModuleDecl() {
     ActiveModule =
         Map.createShadowedModule(ModuleName, Framework, ShadowingModule);
   } else {
-    ActiveModule =
-        Map.findOrCreateModule(ModuleName, ActiveModule, Framework, Explicit)
-            .first;
+    ActiveModule = Map.findOrCreateModuleFirst(ModuleName, ActiveModule,
+                                               Framework, Explicit);
   }
 
   ActiveModule->DefinitionLoc = ModuleNameLoc;
@@ -2143,8 +2158,8 @@ void ModuleMapParser::parseModuleDecl() {
 
   StringRef MapFileName(
       SourceMgr.getFileEntryRefForID(ModuleMapFID)->getName());
-  if (MapFileName.endswith("module.private.modulemap") ||
-      MapFileName.endswith("module_private.map")) {
+  if (MapFileName.ends_with("module.private.modulemap") ||
+      MapFileName.ends_with("module_private.map")) {
     ActiveModule->ModuleMapIsPrivate = true;
   }
 
@@ -2456,7 +2471,8 @@ void ModuleMapParser::parseHeaderDecl(MMToken::TokenKind LeadingToken,
   Header.Kind = Map.headerRoleToKind(Role);
 
   // Check whether we already have an umbrella.
-  if (Header.IsUmbrella && ActiveModule->Umbrella) {
+  if (Header.IsUmbrella &&
+      !std::holds_alternative<std::monostate>(ActiveModule->Umbrella)) {
     Diags.Report(Header.FileNameLoc, diag::err_mmap_umbrella_clash)
       << ActiveModule->getFullModuleName();
     HadError = true;
@@ -2556,7 +2572,7 @@ void ModuleMapParser::parseUmbrellaDirDecl(SourceLocation UmbrellaLoc) {
   SourceLocation DirNameLoc = consumeToken();
 
   // Check whether we already have an umbrella.
-  if (ActiveModule->Umbrella) {
+  if (!std::holds_alternative<std::monostate>(ActiveModule->Umbrella)) {
     Diags.Report(DirNameLoc, diag::err_mmap_umbrella_clash)
       << ActiveModule->getFullModuleName();
     HadError = true;
@@ -3177,7 +3193,7 @@ bool ModuleMap::parseModuleMapFile(FileEntryRef File, bool IsSystem,
 
   // Notify callbacks that we parsed it.
   for (const auto &Cb : Callbacks)
-    Cb->moduleMapFileRead(Start, *File, IsSystem);
+    Cb->moduleMapFileRead(Start, File, IsSystem);
 
   return Result;
 }

@@ -64,7 +64,7 @@ private:
 class ObjCSuperCallChecker : public Checker<
                                       check::ASTDecl<ObjCImplementationDecl> > {
 public:
-  ObjCSuperCallChecker() : IsInitialized(false) {}
+  ObjCSuperCallChecker() = default;
 
   void checkASTDecl(const ObjCImplementationDecl *D, AnalysisManager &Mgr,
                     BugReporter &BR) const;
@@ -75,7 +75,7 @@ private:
   void fillSelectors(ASTContext &Ctx, ArrayRef<SelectorDescriptor> Sel,
                      StringRef ClassName) const;
   mutable llvm::StringMap<llvm::SmallPtrSet<Selector, 16>> SelectorsForClass;
-  mutable bool IsInitialized;
+  mutable bool IsInitialized = false;
 };
 
 }
@@ -107,7 +107,7 @@ void ObjCSuperCallChecker::fillSelectors(ASTContext &Ctx,
     assert(Descriptor.ArgumentCount <= 1); // No multi-argument selectors yet.
 
     // Get the selector.
-    IdentifierInfo *II = &Ctx.Idents.get(Descriptor.SelectorName);
+    const IdentifierInfo *II = &Ctx.Idents.get(Descriptor.SelectorName);
 
     Selector Sel = Ctx.Selectors.getSelector(Descriptor.ArgumentCount, &II);
     ClassSelectors.insert(Sel);
