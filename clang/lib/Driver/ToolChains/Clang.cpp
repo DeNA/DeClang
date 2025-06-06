@@ -3749,14 +3749,17 @@ static bool RenderModulesOptions(Compilation &C, const Driver &D,
   // Users can pass -fno-cxx-modules to turn off modules support for
   // C++/Objective-C++ programs.
   bool HaveClangModules = false;
-  if (Args.hasFlag(options::OPT_fmodules, options::OPT_fno_modules, false)) {
-    bool AllowedInCXX = Args.hasFlag(options::OPT_fcxx_modules,
-                                     options::OPT_fno_cxx_modules, true);
-    if (AllowedInCXX || !IsCXX) {
-      CmdArgs.push_back("-fmodules");
-      HaveClangModules = true;
-    }
-  }
+
+  //DECLANG CODES BEGIN
+  //if (Args.hasFlag(options::OPT_fmodules, options::OPT_fno_modules, false)) {
+  //  bool AllowedInCXX = Args.hasFlag(options::OPT_fcxx_modules,
+  //                                   options::OPT_fno_cxx_modules, true);
+  //  if (AllowedInCXX || !IsCXX) {
+  //    CmdArgs.push_back("-fmodules");
+  //    HaveClangModules = true;
+  //  }
+  //}
+  //DECLANG CODES END
 
   HaveModules |= HaveClangModules;
 
