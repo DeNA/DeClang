@@ -61,11 +61,4 @@ if [[ ! -d "${darwin_path}"/lib.orig ]]; then
 fi
 cp -r "${compiler_path}"/lib/clang "${darwin_path}"/lib/
 
-src=`ls -d ${darwin_path}/lib64/clang/*/lib/linux/`
-echo $src
-for f in `ls ${darwin_path}/lib/clang/`; do
-  mkdir -p ${darwin_path}/lib/clang/$f/lib/
-  ln -s $src ${darwin_path}/lib/clang/$f/lib/ || true
-done
-
 popd >/dev/null
