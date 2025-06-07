@@ -61,12 +61,7 @@ else
   rm -rf "${darwin_path}"/lib
   cp -r "${darwin_path}"/lib.orig "${darwin_path}"/lib
 fi
-
-compiler_version=`ls "${darwin_path}"/lib/clang`
-if [[ ! -d "${darwin_path}"/lib/clang/17 ]]; then
-  cp -r "${darwin_path}"/lib/clang/${compiler_version} "${darwin_path}"/lib/clang/17
-fi
-cp -r "${compiler_path}"/lib/clang/17 "${darwin_path}"/lib/clang
+cp -r "${compiler_path}"/lib/clang "${darwin_path}"/lib
 
 popd >/dev/null
 

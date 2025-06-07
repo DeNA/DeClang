@@ -1,0 +1,2 @@
+/* The __atomic_* APIs are now in libclang_rt.builtins-*.a. They might
+   eventually be broken out into a separate library -- see llvm.org/D47606. */
