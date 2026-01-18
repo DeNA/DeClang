@@ -79,7 +79,7 @@ pythonenv*
 /build/
 /Release*/
 /**/config.json
-/AntiHackDeNA*/
+/AntiHackDeNA*
 /clang/lib/Driver/DeClangExtraProcess.cpp
 /llvm/lib/Transforms/AntiHack
 /llvm/include/llvm/Transforms/AntiHack
