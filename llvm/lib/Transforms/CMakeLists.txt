@@ -8,6 +8,7 @@ add_subdirectory(Vectorize)
 add_subdirectory(ObjCARC)
 add_subdirectory(Coroutines)
 add_subdirectory(CFGuard)
+add_subdirectory(HipStdPar)
 # DECLANG CODES BEGIN
 add_subdirectory(AntiHack)
 # DECLANG CODES END

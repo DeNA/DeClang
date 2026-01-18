@@ -74,4 +74,7 @@ add_llvm_component_library(LLVMipo
   TransformUtils
   Vectorize
   Instrumentation
+  # DECLANG CODES BEGIN
+  AntiHack
+  # DECLANG CODES END
   )

@@ -105,7 +105,6 @@ AntiHackOpt("antihack", cl::init(""), cl::Hidden,
     cl::ZeroOrMore, cl::desc("antihack pass"));
 //DECLANG CODES END
 
-
 #define HANDLE_EXTENSION(Ext)                                                  \
   llvm::PassPluginLibraryInfo get##Ext##PluginInfo();
 #include "llvm/Support/Extension.def"
