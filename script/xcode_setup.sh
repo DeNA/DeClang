@@ -64,8 +64,18 @@ else
   HOMEDIR=$DECLANG_HOME
 fi
 
-DECLANG=$HOMEDIR/.DeClang/compiler/bin/clang
-DECLANGXX=$HOMEDIR/.DeClang/compiler/bin/clang++
+xcode_version=$(defaults read $(xcode-select -p)/../Info CFBundleShortVersionString | cut -d. -f 1)
+if [[ -d "$HOMEDIR/.DeClang/compiler/xcode/$xcode_version" ]]; then
+  echo using dedicated xcode $xcode_version compiler
+  COMPILER_DIR=compiler/xcode/$xcode_version
+else
+  echo using default compiler
+  COMPILER_DIR=compiler
+fi
+
+DECLANG=$HOMEDIR/.DeClang/$COMPILER_DIR/bin/clang
+DECLANGXX=$HOMEDIR/.DeClang/$COMPILER_DIR/bin/clang++
+
 sed -i '' $"s~buildSettings = {~buildSettings = {\\
 CC = \"${DECLANG}\";\\
 CPLUSPLUS = \"${DECLANGXX}\";\\
@@ -77,7 +87,7 @@ sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = YES;~COMPILER_INDEX_STORE_ENABLE = N
 sed -i '' $'s~COMPILER_INDEX_STORE_ENABLE = DEFAULT;~COMPILER_INDEX_STORE_ENABLE = NO;~g' "$pbxproj"
 sed -i '' $'s~GCC_PRECOMPILE_PREFIX_HEADER = YES;~GCC_PRECOMPILE_PREFIX_HEADER = NO;~g' "$pbxproj"
 
-TOOLCHAIN_PATH='--tool-chain-path=\\"'$HOMEDIR'/.DeClang/compiler\\"'
+TOOLCHAIN_PATH='--tool-chain-path=\\"'$HOMEDIR'/.DeClang/'$COMPILER_DIR'\\"'
 SYSROOT_PATH='--sysroot-path=\\"'$(xcrun --sdk iphoneos --show-sdk-path)'\\"'
 sed -i '' "s#--compile-cpp#--compile-cpp $TOOLCHAIN_PATH $SYSROOT_PATH#" "$pbxproj"
 
