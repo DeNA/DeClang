@@ -44,12 +44,6 @@ else
   fi
 fi
 
-# restore header file
-if [[ -f "${darwin_path}"/sysroot/usr/include/android/hardware_buffer.h.orig ]]; then
-  cp -v "${darwin_path}"/sysroot/usr/include/android/hardware_buffer.h.orig "${darwin_path}"/sysroot/usr/include/android/hardware_buffer.h
-  rm "${darwin_path}"/sysroot/usr/include/android/hardware_buffer.h.orig
-fi
-
 # restore lib
 if [[ -d "${darwin_path}"/lib.orig ]]; then
   rm -rf "${darwin_path}"/lib/
