@@ -119,13 +119,6 @@ else
     make llvm-headers
     make -j 16
   fi
-
-  # cp prebuilt libraries
-  if [[ "_$OS" = "_Windows_NT" ]]; then
-    cp -r ../script/lib Release
-  else
-    cp -r ../script/lib .
-  fi
 fi
  
 popd > /dev/null
