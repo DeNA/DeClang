@@ -91,4 +91,8 @@ TOOLCHAIN_PATH='--tool-chain-path=\\"'$HOMEDIR'/.DeClang/'$COMPILER_DIR'\\"'
 SYSROOT_PATH='--sysroot-path=\\"'$(xcrun --sdk iphoneos --show-sdk-path)'\\"'
 sed -i '' "s#--compile-cpp#--compile-cpp $TOOLCHAIN_PATH $SYSROOT_PATH#" "$pbxproj"
 
+SHELLSCRIPT_BEGIN='shellScript = "'
+SHELLSCRIPT_NEW_BEGIN='shellScript = "export TOOLCHAIN_DIR=\\"'$HOMEDIR'/.DeClang/'$COMPILER_DIR'\\"\\n'
+sed -i '' "s#$SHELLSCRIPT_BEGIN#$SHELLSCRIPT_NEW_BEGIN#" "$pbxproj"
+
 # popd >/dev/null
