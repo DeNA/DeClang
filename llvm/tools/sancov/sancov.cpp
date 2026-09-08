@@ -518,8 +518,12 @@ private:
   static std::unique_ptr<SpecialCaseList> createUserIgnorelist() {
     if (ClIgnorelist.empty())
       return std::unique_ptr<SpecialCaseList>();
-    return SpecialCaseList::createOrDie({{ClIgnorelist}},
+    // DECLANG CODES BEGIN
+    // return SpecialCaseList::createOrDie({{ClIgnorelist}},
+                                        // *vfs::getRealFileSystem());
+    return SpecialCaseList::createOrDie({std::string(ClIgnorelist)},
                                         *vfs::getRealFileSystem());
+    // DECLANG CODES END
   }
   std::unique_ptr<SpecialCaseList> DefaultIgnorelist;
   std::unique_ptr<SpecialCaseList> UserIgnorelist;
