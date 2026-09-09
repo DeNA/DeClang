@@ -373,7 +373,7 @@ void Flattening::fixStack(Function *f)
   // Demote escaped instructions
   //NumRegsDemoted += WorkList.size();
   for (Instruction *ilb : WorkList) {
-    DemoteRegToStack(*ilb, false, AllocaInsertionPoint);
+    DemoteRegToStack(*ilb, false, AllocaInsertionPoint->getIterator());
   }
 
   WorkList.clear();
@@ -388,7 +388,7 @@ void Flattening::fixStack(Function *f)
   // Demote phi nodes
   //NumPhisDemoted += WorkList.size();
   for (Instruction *ilb : WorkList)
-    DemotePHIToStack(cast<PHINode>(ilb), AllocaInsertionPoint);
+    DemotePHIToStack(cast<PHINode>(ilb), AllocaInsertionPoint->getIterator());
 }
 
 bool Flattening::valueEscapes(Instruction *Inst) {
