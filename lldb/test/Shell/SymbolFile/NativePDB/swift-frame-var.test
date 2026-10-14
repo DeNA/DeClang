@@ -1,0 +1,90 @@
+# Test that frame variable works for Swift types with NativePDB debug info.
+
+# Won't pass until https://github.com/swiftlang/llvm-project/issues/12289 is resolved.
+# REQUIRES: swift, system-windows
+
+# RUN: split-file %s %t
+# RUN: %target-swiftc -v -g -debug-info-format=codeview %t/main.swift -o %t.exe -Xlinker -debug -use-ld=lld
+# RUN: %lldb -x -b -s %t/commands.input %t.exe -o exit 2>&1 | FileCheck %s
+
+#--- main.swift
+struct Point {
+    var x: Int32
+    var y: Int32
+}
+
+enum Direction {
+    case north
+    case south
+}
+
+struct Box<T> {
+    var value: T
+}
+
+enum Pair<A, B> {
+    case first(A)
+    case second(B)
+}
+
+func main() {
+    var myInt32: Int32 = 42
+    var myBool: Bool = true
+    var myUInt64: UInt64 = 123456789
+    var myFloat: Float = 3.14
+    var myDouble: Double = 2.718
+    var myString: String = "hello"
+    var myPoint: Point = Point(x: 10, y: 20)
+    var myDirection: Direction = .north
+    var myOptional: Int32? = 7
+    var myNestedOptional: Int32?? = 8
+    var myArray: [Int32] = [1, 2, 3]
+    var myOptionalArray: [Int32]? = [4, 5]
+    var myResult: Result<Int, Error> = .success(42)
+    var myBox: Box<Int32> = Box(value: 99)
+    var myPair: Pair<Int, String> = .first(7)
+    var myDictionary: [Int: String] = [1: "one", 2: "two"]
+    var mySet: Set<Int32> = [1, 2, 3]
+    let constInt: Int = 100
+    let constInt8: Int8 = -42
+    let constUInt16: UInt16 = 1000
+    let constBool: Bool = false
+    let constString: String = "world"
+    print(myInt32, myBool, myUInt64, myFloat, myDouble,
+          myString, myPoint, myDirection, myOptional, myNestedOptional, myArray,
+          myOptionalArray, myResult, myBox, myPair, myDictionary, mySet,
+          constInt, constInt8, constUInt16, constBool, constString)
+}
+
+main()
+
+#--- commands.input
+b main.swift:43
+run
+frame variable
+
+# Basic scalar types
+# CHECK: (Int32) myInt32 = 42
+# CHECK: (Bool) myBool = true
+# CHECK: (UInt64) myUInt64 = 123456789
+# CHECK: (Float) myFloat = 3.1400001
+# CHECK: (Double) myDouble = 2.718
+# Compound types
+# CHECK: (String) myString = "hello"
+# CHECK: (main.Point) myPoint = (x = 10, y = 20)
+# CHECK: (main.Direction) myDirection = north
+# CHECK: (Int32?) myOptional = 7
+# CHECK: (Int32??) myNestedOptional = 8
+# CHECK: ([Int32]) myArray = 3 values
+# CHECK: ([Int32]?) myOptionalArray = 2 values
+# CHECK: (Result<Int, Error>) myResult = success
+# CHECK: (main.Box<Int32>) myBox = (value = 99)
+# CHECK: (main.Pair<Int, String>) myPair = first
+# CHECK: ([Int : String]) myDictionary = 2 key/value pairs
+# CHECK: (Set<Int32>) mySet = 3 values
+# Local constants
+# CHECK: (Int) constInt = 100
+# CHECK: (Int8) constInt8 = -42
+# CHECK: (UInt16) constUInt16 = 1000
+# CHECK: (Bool) constBool = false
+# CHECK: (String) constString = "world"

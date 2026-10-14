@@ -1,0 +1,86 @@
+# REQUIRES: system-darwin
+# RUN: rm -rf %t
+# RUN: split-file %s %t
+
+# RUN: %python %S/../../../scripts/clang-explicit-module-build.py -cas-path %t/cas -- %clang_host -c -g -o %t/test.o %t/tu.c -fmodules -gmodules -fmodules-cache-path=%t/module-cache
+# RUN: %clang_host %t/test.o -o %t/main
+# The search for a .cas-config walks up the directory tree, so a
+# caching-enabled build directory above %t would otherwise hand this run a
+# CAS. An empty CASPath terminates that search without configuring a CAS.
+# RUN: cp %t/empty-cas-config.template %t/.cas-config
+# RUN: cd %t && %lldb main -s lldb.script 2>&1 | FileCheck %s --check-prefix=FAIL
+# RUN: sed "s|DIR|%/t|g" %t/cas-config.template > %t/.cas-config
+# RUN: cd %t && %lldb main -s lldb.script 2>&1 | FileCheck %s
+
+# When the .pcm path in DWARF is a regular file path (not a CAS id) and
+# the file doesn't exist, GetSharedModuleFromCAS should silently return
+# false rather than logging "is not valid CASID". Build the same source
+# without -cas-path (file-path .pcm refs in DWARF), keep the .cas-config
+# so CAS is initialized, then delete the module cache.
+# RUN: rm -rf %t/nocas-build %t/nocas-cache
+# RUN: mkdir -p %t/nocas-build
+# RUN: cp %t/.cas-config %t/nocas-build/.cas-config
+# RUN: %clang_host -c -g -o %t/nocas-build/test.o %t/tu.c -fmodules -gmodules -fmodules-cache-path=%t/nocas-cache
+# RUN: %clang_host %t/nocas-build/test.o -o %t/nocas-build/main
+# RUN: rm -rf %t/nocas-cache
+# RUN: cd %t/nocas-build && %lldb main -s %t/lldb.script 2>&1 | FileCheck %s --check-prefix=NONCAS
+
+# FAIL: Failed to load module 'Bottom' at '{{.*}}' from CAS: no CAS associated with module
+# FAIL: Unable to locate module needed for external types.
+# CHECK: Loading module 'Bottom' from CAS at
+# CHECK: Initialized CAS at [[CAS:.*]]
+# CHECK: Loading module 'Top' from CAS at
+# CHECK: top = (x = 1)
+# CHECK: CAS at [[CAS]] was garbage-collected
+# CHECK: Initialized CAS at [[CAS]]
+# CHECK: Loading module 'Top' from CAS at
+
+# NONCAS-NOT: is not valid CASID
+# NONCAS: Unable to locate module needed for external types
+
+
+//--- module.modulemap
+module Top { header "Top.h" export *}
+module Bottom { header "Bottom.h" export *}
+
+//--- Top.h
+#pragma once
+struct Top { int x; };
+
+//--- Bottom.h
+#pragma once
+#include "Top.h"
+struct Bottom { struct Top top; };
+
+//--- tu.c
+#include "Bottom.h"
+
+int main(void) {
+  struct Bottom _bottom;
+  _bottom.top.x = 1;
+
+  return 0; // BREAK HERE
+}
+
+//--- empty-cas-config.template
+{
+  "CASPath": ""
+}
+
+//--- cas-config.template
+{
+  "CASPath": "DIR/cas"
+}
+
+//--- lldb.script
+log enable lldb module
+b tu.c:7
+run
+v _bottom
+process kill
+target delete --clean
+target create main
+b tu.c:7
+run
+expr _bottom
+quit

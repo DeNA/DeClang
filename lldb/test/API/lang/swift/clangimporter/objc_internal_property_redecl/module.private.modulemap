@@ -1,0 +1,4 @@
+framework module TestFramework_Private {
+  umbrella header "TestFramework_Private.h"
+  export *
+}

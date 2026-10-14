@@ -1,0 +1,5 @@
+SWIFT_ENABLE_EXPLICIT_MODULES := NO
+SWIFT_SOURCES := main.swift
+SWIFT_EMBEDDED_MODE := 1
+
+include Makefile.rules

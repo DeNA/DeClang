@@ -1,0 +1,8 @@
+#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_DECLANGANDROIDNDK_H
+#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_DECLANGANDROIDNDK_H
+
+
+extern int getNdkVersion(const char *path);
+
+
+#endif

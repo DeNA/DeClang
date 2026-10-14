@@ -1,0 +1,27 @@
+// REQUIRES: system-darwin
+// REQUIRES: swift
+
+// RUN: %lldb --repl < %s | FileCheck %s --check-prefix=DICT
+
+// The dictionary order isn't deterministic, so print the dictionary
+// once per element.
+//
+// This exercises the Dictionary data formatter with a *resilient*
+// (non-@frozen) Foundation value key type. Data is used as a representative
+// resilient Foundation value type.
+
+import Foundation
+
+let x : [Data:Int] = [Data([1, 2, 3]): 40, Data([9]): 230]
+// DICT-LABEL: {{x}}: [Foundation.Data : Int] = 2 key/value pairs {
+// DICT:      [{{[0-1]}}] = {
+// DICT:         key = 3 bytes
+// DICT-NEXT:    value = 40
+// DICT-NEXT:  }
+
+let y : [Data:Int] = [Data([1, 2, 3]): 40, Data([9]): 230]
+// DICT-LABEL: {{y}}: [Foundation.Data : Int] = 2 key/value pairs {
+// DICT:       [{{[0-1]}}] = {
+// DICT:          key = 1 byte
+// DICT-NEXT:     value = 230
+// DICT-NEXT:  }

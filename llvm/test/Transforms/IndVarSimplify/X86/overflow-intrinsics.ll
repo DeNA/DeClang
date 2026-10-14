@@ -1,0 +1,313 @@
+; RUN: opt -S -passes=indvars < %s | FileCheck %s
+
+target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
+target triple = "x86_64-unknown-linux-gnu"
+
+define void @f_sadd(ptr %a) {
+; CHECK-LABEL: @f_sadd(
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ 0, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+; CHECK: for.body:
+; CHECK-NOT: @llvm.sadd.with.overflow
+; CHECK:  br i1 false, label %trap, label %cont, !nosanitize !0
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap() #2, !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp slt i32 %2, 16
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+define void @f_sadd_overflow(ptr %a) {
+; CHECK-LABEL: define void @f_sadd_overflow(
+; CHECK-SAME: ptr [[A:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*]]:
+; CHECK-NEXT:    br label %[[FOR_BODY:.*]]
+; CHECK:       [[FOR_COND_CLEANUP:.*]]:
+; CHECK-NEXT:    ret void
+; CHECK:       [[FOR_BODY]]:
+; CHECK-NEXT:    [[INDVARS_IV:%.*]] = phi i64 [ [[INDVARS_IV_NEXT:%.*]], %[[CONT:.*]] ], [ 2147483645, %[[ENTRY]] ]
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i8, ptr [[A]], i64 [[INDVARS_IV]]
+; CHECK-NEXT:    store i8 0, ptr [[ARRAYIDX]], align 1
+; CHECK-NEXT:    br i1 true, label %[[TRAP:.*]], label %[[CONT]], !nosanitize
+; CHECK:       [[TRAP]]:
+; CHECK-NEXT:    tail call void @llvm.trap(), !nosanitize 
+; CHECK-NEXT:    unreachable, !nosanitize 
+; CHECK:       [[CONT]]:
+; CHECK-NEXT:    [[INDVARS_IV_NEXT]] = add nuw nsw i64 [[INDVARS_IV]], 1
+; CHECK-NEXT:    br i1 true, label %[[FOR_BODY]], label %[[FOR_COND_CLEANUP]]
+;
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ 2147483645, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap() #2, !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp sle i32 %2, 2147483647
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+define void @f_uadd(ptr %a) {
+; CHECK-LABEL: @f_uadd(
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ 0, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.uadd.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+; CHECK: for.body:
+; CHECK-NOT: @llvm.uadd.with.overflow
+; CHECK: br i1 false, label %trap, label %cont, !nosanitize !0
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap(), !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp slt i32 %2, 16
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+define void @f_uadd_overflow(ptr %a) {
+; CHECK-LABEL: define void @f_uadd_overflow(
+; CHECK-SAME: ptr [[A:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*]]:
+; CHECK-NEXT:    br label %[[FOR_BODY:.*]]
+; CHECK:       [[FOR_COND_CLEANUP:.*]]:
+; CHECK-NEXT:    ret void
+; CHECK:       [[FOR_BODY]]:
+; CHECK-NEXT:    [[INDVARS_IV:%.*]] = phi i64 [ [[INDVARS_IV_NEXT:%.*]], %[[CONT:.*]] ], [ -6, %[[ENTRY]] ]
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i8, ptr [[A]], i64 [[INDVARS_IV]]
+; CHECK-NEXT:    store i8 0, ptr [[ARRAYIDX]], align 1
+; CHECK-NEXT:    br i1 true, label %[[TRAP:.*]], label %[[CONT]], !nosanitize 
+; CHECK:       [[TRAP]]:
+; CHECK-NEXT:    tail call void @llvm.trap(), !nosanitize 
+; CHECK-NEXT:    unreachable, !nosanitize 
+; CHECK:       [[CONT]]:
+; CHECK-NEXT:    [[INDVARS_IV_NEXT]] = add nsw i64 [[INDVARS_IV]], 1
+; CHECK-NEXT:    br i1 true, label %[[FOR_BODY]], label %[[FOR_COND_CLEANUP]]
+;
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ 4294967290, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.uadd.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap(), !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp ule i32 %2, 4294967295
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+define void @f_ssub(ptr nocapture %a) {
+; CHECK-LABEL: @f_ssub(
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ 15, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.ssub.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+; CHECK: for.body:
+; CHECK-NOT: @llvm.ssub.with.overflow.i32
+; CHECK: br i1 false, label %trap, label %cont, !nosanitize !0
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap(), !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp sgt i32 %2, -1
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+; It is theoretically possible to replace the `ssub.with.overflow` with a
+; condition on the IV, but SCEV cannot represent non-unsigned-wrapping
+; subtraction operations.
+define void @f_ssub_overflow(ptr nocapture %a) {
+; CHECK-LABEL: define void @f_ssub_overflow(
+; CHECK-SAME: ptr captures(none) [[A:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*]]:
+; CHECK-NEXT:    br label %[[FOR_BODY:.*]]
+; CHECK:       [[FOR_COND_CLEANUP:.*]]:
+; CHECK-NEXT:    ret void
+; CHECK:       [[FOR_BODY]]:
+; CHECK-NEXT:    [[INDVARS_IV:%.*]] = phi i64 [ [[INDVARS_IV_NEXT:%.*]], %[[CONT:.*]] ], [ -2147483642, %[[ENTRY]] ]
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i8, ptr [[A]], i64 [[INDVARS_IV]]
+; CHECK-NEXT:    store i8 0, ptr [[ARRAYIDX]], align 1
+; CHECK-NEXT:    br i1 true, label %[[TRAP:.*]], label %[[CONT]], !nosanitize 
+; CHECK:       [[TRAP]]:
+; CHECK-NEXT:    tail call void @llvm.trap(), !nosanitize 
+; CHECK-NEXT:    unreachable, !nosanitize 
+; CHECK:       [[CONT]]:
+; CHECK-NEXT:    [[INDVARS_IV_NEXT]] = add nsw i64 [[INDVARS_IV]], -1
+; CHECK-NEXT:    br i1 true, label %[[FOR_BODY]], label %[[FOR_COND_CLEANUP]]
+;
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ -2147483642, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.ssub.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap(), !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp sge i32 %2, -2147483648
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+define void @f_usub(ptr nocapture %a) {
+; CHECK-LABEL: @f_usub(
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ 15, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap(), !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp sgt i32 %2, 0
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+; It is theoretically possible to replace the `usub.with.overflow` with a
+; condition on the IV, but SCEV cannot represent non-unsigned-wrapping
+; subtraction operations.
+define void @f_usub_overflow(ptr nocapture %a) {
+; CHECK-LABEL: define void @f_usub_overflow(
+; CHECK-SAME: ptr captures(none) [[A:%.*]]) {
+; CHECK-NEXT:  [[ENTRY:.*]]:
+; CHECK-NEXT:    br label %[[FOR_BODY:.*]]
+; CHECK:       [[FOR_COND_CLEANUP:.*]]:
+; CHECK-NEXT:    ret void
+; CHECK:       [[FOR_BODY]]:
+; CHECK-NEXT:    [[INDVARS_IV:%.*]] = phi i64 [ [[INDVARS_IV_NEXT:%.*]], %[[CONT:.*]] ], [ 15, %[[ENTRY]] ]
+; CHECK-NEXT:    [[ARRAYIDX:%.*]] = getelementptr inbounds i8, ptr [[A]], i64 [[INDVARS_IV]]
+; CHECK-NEXT:    store i8 0, ptr [[ARRAYIDX]], align 1
+; CHECK-NEXT:    br i1 true, label %[[TRAP:.*]], label %[[CONT]], !nosanitize 
+; CHECK:       [[TRAP]]:
+; CHECK-NEXT:    tail call void @llvm.trap(), !nosanitize 
+; CHECK-NEXT:    unreachable, !nosanitize 
+; CHECK:       [[CONT]]:
+; CHECK-NEXT:    [[INDVARS_IV_NEXT]] = add nsw i64 [[INDVARS_IV]], -1
+; CHECK-NEXT:    br i1 true, label %[[FOR_BODY]], label %[[FOR_COND_CLEANUP]]
+;
+entry:
+  br label %for.body
+
+for.cond.cleanup:                                 ; preds = %cont
+  ret void
+
+for.body:                                         ; preds = %entry, %cont
+  %i.04 = phi i32 [ 15, %entry ], [ %2, %cont ]
+  %idxprom = sext i32 %i.04 to i64
+  %arrayidx = getelementptr inbounds i8, ptr %a, i64 %idxprom
+  store i8 0, ptr %arrayidx, align 1
+  %0 = tail call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %i.04, i32 1)
+  %1 = extractvalue { i32, i1 } %0, 1
+  br i1 %1, label %trap, label %cont, !nosanitize !{}
+
+trap:                                             ; preds = %for.body
+  tail call void @llvm.trap(), !nosanitize !{}
+  unreachable, !nosanitize !{}
+
+cont:                                             ; preds = %for.body
+  %2 = extractvalue { i32, i1 } %0, 0
+  %cmp = icmp sgt i32 %2, -1
+  br i1 %cmp, label %for.body, label %for.cond.cleanup
+}
+
+declare { i32, i1 } @llvm.sadd.with.overflow.i32(i32, i32) nounwind readnone
+declare { i32, i1 } @llvm.uadd.with.overflow.i32(i32, i32) nounwind readnone
+declare { i32, i1 } @llvm.ssub.with.overflow.i32(i32, i32) nounwind readnone
+declare { i32, i1 } @llvm.usub.with.overflow.i32(i32, i32) nounwind readnone
+declare { i32, i1 } @llvm.smul.with.overflow.i32(i32, i32) nounwind readnone
+declare { i32, i1 } @llvm.umul.with.overflow.i32(i32, i32) nounwind readnone
+
+declare void @llvm.trap() #2

@@ -1,0 +1,40 @@
+import lldb
+from lldbsuite.test.lldbtest import *
+from lldbsuite.test.decorators import *
+import lldbsuite.test.lldbutil as lldbutil
+
+class TestSwiftClangImporterCaching(TestBase):
+
+    @skipEmbeddedSwift
+    # Don't run ClangImporter tests if Clangimporter is disabled.
+    @skipIf(swift_module_importer="noclang")
+    @skipIf(setting=("symbols.swift-precise-compiler-invocation", "false"))
+    @skipUnlessDarwin
+    @swiftTest
+    def test(self):
+        self.build()
+        target, process, thread, bkpt = lldbutil.run_to_source_breakpoint(
+            self, "break here", lldb.SBFileSpec('main.swift')
+        )
+        log = self.getBuildArtifact("types.log")
+        self.runCmd("settings set target.swift-clang-override-options +-DADDED=1")
+        self.runCmd("settings set target.swift-extra-clang-flags -- -DEXTRA=1")
+        self.expect('log enable lldb types symbols -f "%s"' % log)
+        self.expect("expression obj", DATA_TYPES_DISPLAYED_CORRECTLY,
+                    substrs=["b ="])
+
+        frame = thread.frames[0]
+        data = frame.GetLanguageSpecificData()
+        has_cas = data.GetValueForKey("SwiftHasCAS").GetBooleanValue()
+        self.assertTrue(has_cas)
+                
+        self.filecheck_log(log, __file__)
+#       CHECK Loading module ClangB from CAS at llvmcas://
+### -cc1 should be round-tripped so there is no more `-cc1` in the extra args. Look for `-triple` which is a cc1 flag.
+#       CHECK:  SwiftASTContextForExpressions(module: "a", cu: "main.swift")::LogConfiguration() --     -triple
+#       CHECK:  SwiftASTContextForExpressions(module: "a", cu: "main.swift")::LogConfiguration() --     -DADDED=1
+#       CHECK:  SwiftASTContextForExpressions(module: "a", cu: "main.swift")::LogConfiguration() --     -DEXTRA=1
+#       CHECK:  SwiftASTContextForExpressions(module: "a", cu: "main.swift") Module import remark: loaded module 'ClangA'
+#       CHECK-NOT: -Werror
+#       CHECK-NOT: -cc1
+#       CHECK-NOT: Clang error

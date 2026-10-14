@@ -1,0 +1,14 @@
+static_library("HLSL") {
+  output_name = "LLVMFrontendHLSL"
+  deps = [
+    "//llvm/lib/IR",
+    "//llvm/lib/Support",
+  ]
+  sources = [
+    "CBuffer.cpp",
+    "HLSLResource.cpp",
+    "HLSLRootSignature.cpp",
+    "RootSignatureMetadata.cpp",
+    "RootSignatureValidations.cpp",
+  ]
+}

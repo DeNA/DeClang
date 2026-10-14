@@ -1,0 +1,32 @@
+set(SWIFT_SOURCES HostInfoMacOSXSwift.cpp)
+set(LLVM_OPTIONAL_SOURCES ${SWIFT_SOURCES})
+
+remove_module_flags()
+include_directories(..)
+
+find_library(SECURITY_FRAMEWORK Security)
+
+add_lldb_library(lldbHostMacOSXObjCXX NO_PLUGIN_DEPENDENCIES
+  Host.mm
+  HostInfoMacOSX.mm
+  HostThreadMacOSX.mm
+  MemoryMonitorMacOSX.mm
+
+  ## BEGIN SWIFT
+  ${SWIFT_SOURCES}
+  ## END SWIFT
+
+  ADDITIONAL_HEADER_DIRS
+    ${LLDB_INCLUDE_DIR}/lldb/Host/macosx/objcxx
+  LINK_COMPONENTS
+    Support
+    TargetParser
+  LINK_LIBS
+    lldbUtility
+    ${EXTRA_LIBS}
+    ${SECURITY_FRAMEWORK}
+  )
+
+target_compile_options(lldbHostMacOSXObjCXX PRIVATE
+  -fno-objc-exceptions
+  -Wno-deprecated-declarations)

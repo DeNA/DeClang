@@ -1,0 +1,13 @@
+add_clang_unittest(ClangCASTests
+  CASOptionsTest.cpp
+  IncludeTreeTest.cpp
+  CLANG_LIBS
+  clangBasic
+  clangCAS
+  clangDependencyScanning
+  LINK_LIBS
+  LLVMTestingSupport
+  LLVM_COMPONENTS
+  CAS
+  Support
+  )

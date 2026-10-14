@@ -1,0 +1,14 @@
+set_property(DIRECTORY PROPERTY LLDB_PLUGIN_KIND InstrumentationRuntime)
+
+add_subdirectory(ASan)
+add_subdirectory(ASanLibsanitizers)
+# TO_UPSTREAM(BoundsSafety) ON
+add_subdirectory(BoundsSafety)
+# TO_UPSTREAM(BoundsSafety) OFF
+add_subdirectory(MainThreadChecker)
+add_subdirectory(TSan)
+add_subdirectory(UBSan)
+add_subdirectory(Utility)
+if(LLDB_ENABLE_SWIFT_SUPPORT)
+  add_subdirectory(SwiftRuntimeReporting)
+endif()

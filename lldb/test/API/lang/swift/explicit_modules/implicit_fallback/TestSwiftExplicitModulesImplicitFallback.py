@@ -1,0 +1,80 @@
+import shutil
+import lldb
+from lldbsuite.test.decorators import *
+import lldbsuite.test.lldbtest as lldbtest
+import lldbsuite.test.lldbutil as lldbutil
+
+
+class TestCase(lldbtest.TestBase):
+    NO_DEBUG_INFO_TESTCASE = True
+    @skipEmbeddedSwift
+    @swiftTest
+    def test_missing(self):
+        """Test missing explicit Swift modules and fallback to implicit modules."""
+        self.build()
+
+        # This test verifies the case where explicit modules are missing.
+        # Remove explicit modules from their place in the module cache.
+        mod_cache = self.getBuildArtifact("private-module-cache")
+        shutil.rmtree(mod_cache)
+
+        lldbutil.run_to_source_breakpoint(
+            self, "Set breakpoint here", lldb.SBFileSpec("main.swift")
+        )
+
+        log = self.getBuildArtifact("types.log")
+        self.runCmd(f"log enable lldb types -f '{log}'")
+
+        self.expect("expression c", substrs=["hello implicit fallback"])
+
+        self.filecheck_log(log, __file__)
+        # CHECK: Nonexistent explicit module file
+        # CHECK: Explicit modules : false (downgraded
+
+    @skipEmbeddedSwift
+    @swiftTest
+    def test_sanity(self):
+        """Check the normal behavior."""
+        mod_cache = self.getBuildArtifact("my-clang-modules-cache")
+        if os.path.isdir(mod_cache):
+          shutil.rmtree(mod_cache)
+
+        self.runCmd('settings set symbols.clang-modules-cache-path "%s"'
+                    % mod_cache)
+        self.runCmd("settings set symbols.swift-validate-typesystem false")
+        self.build()
+
+        lldbutil.run_to_source_breakpoint(
+            self, "Set breakpoint here", lldb.SBFileSpec("main.swift")
+        )
+
+        log = self.getBuildArtifact("types.log")
+        self.runCmd(f"log enable lldb types -f '{log}'")
+
+        self.expect("expression c")
+        # FIXME: self.expect("expression -- import Foundation")
+
+        self.filecheck_log(log, __file__, "--check-prefix=CHECK-SANITY")
+        # CHECK-SANITY: Explicit modules : true
+        # CHECK-SANITY: Turning off implicit modules
+        # CHECK-SANITY: Turning on implicit modules
+
+    @skipEmbeddedSwift
+    @swiftTest
+    def test_setting(self):
+        """Check the normal behavior."""
+        self.build()
+
+        lldbutil.run_to_source_breakpoint(
+            self, "Set breakpoint here", lldb.SBFileSpec("main.swift")
+        )
+
+        log = self.getBuildArtifact("types.log")
+        self.runCmd(f"log enable lldb types -f '{log}'")
+        self.expect("settings set target.experimental.swift-allow-implicit-module-loader true")
+
+        self.expect("expression c")
+
+        self.filecheck_log(log, __file__, "--check-prefix=CHECK-SETTING")
+        # CHECK-SETTING: Explicit modules : true
+        # CHECK-SETTING-NOT: Turning {{.*}} implicit modules

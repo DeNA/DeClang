@@ -1,0 +1,162 @@
+add_libc_fuzzer(
+  math_differential_fuzz
+  SRCS
+    math_differential_fuzz.cpp
+  HDRS
+    Compare.h
+    RemQuoDiff.h
+    SingleInputSingleOutputDiff.h
+    TwoInputSingleOutputDiff.h
+  DEPENDS
+    libc.hdr.math_macros
+    libc.src.math.ceil
+    libc.src.math.ceilf
+    libc.src.math.ceill
+    libc.src.math.fdim
+    libc.src.math.fdimf
+    libc.src.math.fdiml
+    libc.src.math.floor
+    libc.src.math.floorf
+    libc.src.math.floorl
+    libc.src.math.frexp
+    libc.src.math.frexpf
+    libc.src.math.frexpl
+    libc.src.math.hypotf
+    libc.src.math.ldexp
+    libc.src.math.ldexpf
+    libc.src.math.ldexpl
+    libc.src.math.logb
+    libc.src.math.logbf
+    libc.src.math.logbl
+    libc.src.math.modf
+    libc.src.math.modff
+    libc.src.math.modfl
+    libc.src.math.sqrt
+    libc.src.math.sqrtf
+    libc.src.math.sqrtl
+    libc.src.math.remainder
+    libc.src.math.remainderf
+    libc.src.math.remainderl
+    libc.src.math.remquo
+    libc.src.math.remquof
+    libc.src.math.remquol
+    libc.src.math.round
+    libc.src.math.roundf
+    libc.src.math.roundl
+    libc.src.math.trunc
+    libc.src.math.truncf
+    libc.src.math.truncl
+    libc.src.__support.FPUtil.fp_bits
+    libc.src.__support.CPP.type_traits
+)
+
+add_libc_fuzzer(
+  nextafter_differential_fuzz
+  SRCS
+    nextafter_differential_fuzz.cpp
+  HDRS
+    TwoInputSingleOutputDiff.h
+  DEPENDS
+    libc.src.math.nextafter
+    libc.src.math.nextafterf
+    libc.src.math.nextafterl
+)
+
+add_libc_fuzzer(
+  exp_fuzz
+  NEED_MPFR
+  SRCS
+    exp_fuzz.cpp
+  DEPENDS
+    libc.src.math.exp
+)
+
+add_libc_fuzzer(
+  exp10_fuzz
+  NEED_MPFR
+  SRCS
+    exp10_fuzz.cpp
+  DEPENDS
+    libc.src.math.exp10
+)
+
+add_libc_fuzzer(
+  exp2_fuzz
+  NEED_MPFR
+  SRCS
+    exp2_fuzz.cpp
+  DEPENDS
+    libc.src.math.exp2
+)
+
+add_libc_fuzzer(
+  expm1_fuzz
+  NEED_MPFR
+  SRCS
+    expm1_fuzz.cpp
+  DEPENDS
+    libc.src.math.expm1
+)
+
+add_libc_fuzzer(
+  asin_fuzz
+  NEED_MPFR
+  SRCS
+    asin_fuzz.cpp
+  DEPENDS
+    libc.src.math.asin
+)
+
+add_libc_fuzzer(
+  sin_fuzz
+  NEED_MPFR
+  SRCS
+    sin_fuzz.cpp
+  DEPENDS
+    libc.src.math.sin
+)
+
+add_libc_fuzzer(
+  acos_fuzz
+  NEED_MPFR
+  SRCS
+    acos_fuzz.cpp
+  DEPENDS
+    libc.src.math.acos
+)
+
+add_libc_fuzzer(
+  cos_fuzz
+  NEED_MPFR
+  SRCS
+    cos_fuzz.cpp
+  DEPENDS
+    libc.src.math.cos
+)
+
+add_libc_fuzzer(
+  atan_fuzz
+  NEED_MPFR
+  SRCS
+    atan_fuzz.cpp
+  DEPENDS
+    libc.src.math.atan
+)
+
+add_libc_fuzzer(
+  tan_fuzz
+  NEED_MPFR
+  SRCS
+    tan_fuzz.cpp
+  DEPENDS
+    libc.src.math.tan
+)
+
+add_libc_fuzzer(
+  sincos_fuzz
+  NEED_MPFR
+  SRCS
+    sincos_fuzz.cpp
+  DEPENDS
+    libc.src.math.sincos
+)
