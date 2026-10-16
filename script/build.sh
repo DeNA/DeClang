@@ -11,8 +11,13 @@ case $key in
     shift # past argument
     shift # past value
     ;;
+    -d|--ll-dir)
+    ll_dir="$2"
+    shift # past argument
+    shift # past value
+    ;;
     -h|--help)
-    echo "Usage: $0 -a {\"arm64;x86_64\"} " >&2
+    echo "Usage: $0 -a {\"arm64;x86_64\"} [-d {\".\"}] " >&2
     exit
     shift # past argument
     ;;
@@ -30,6 +35,10 @@ if [[ $build_arch == "" ]]; then
   else
     build_arch=$(uname -m)
   fi
+fi
+
+if [[ -z $ll_dir ]]; then
+  ll_dir="${DECLANG_LL_DIR:-.}"
 fi
 
 pushd $(dirname $0) > /dev/null
@@ -86,6 +95,7 @@ else
         -DLLVM_CCACHE_BUILD=${use_ccache}\
         -DLLVM_USE_CRT_RELEASE=MT \
         -DLLVM_USE_CRT_RELWITHDEBINFO=MT \
+        -DDECLANG_LL_DIR="${ll_dir}" \
         -A x64\
         -Thost=x64\
           -G "Visual Studio 17 2022" ../llvm
@@ -103,6 +113,7 @@ else
         -DLLVM_ENABLE_RUNTIMES="libcxx;libcxxabi" \
         -DCLANG_DEFAULT_RTLIB="libgcc" \
         -DCMAKE_OSX_ARCHITECTURES="$build_arch" \
+        -DDECLANG_LL_DIR="${ll_dir}" \
         -DLLVM_CCACHE_BUILD=${use_ccache} \
           -G "Unix Makefiles" ../llvm
     fi
