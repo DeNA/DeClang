@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -e
 
 if [[ $# -ne 1 ]]; then
@@ -5,63 +6,75 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-ndk_path=$1
-dir=`dirname "$ndk_path"`
+if [[ ! -d "$1" ]]; then
+  echo "Error: NDK directory not found: $1" >&2
+  exit 1
+fi
 
-pushd "$dir" > /dev/null
+ndk_path="$(cd "$1" && pwd)"
 
-if [[ -z "$DECLANG_HOME" ]]; then
-  HOMEDIR=$HOME
+HOMEDIR="${DECLANG_HOME:-${HOME:-${USERPROFILE:-}}}"
+if [[ -z "$HOMEDIR" ]]; then
+  echo "Error: DECLANG_HOME, HOME, or USERPROFILE is not set." >&2
+  exit 1
+fi
+compiler_path="${HOMEDIR}/.DeClang/compiler"
+
+if [[ "_${OS:-}" = "_Windows_NT" ]] || uname -r | grep -iq microsoft; then # MSYS2 or WSL2
+  exe_ext=".exe"
+  ndk_clang_candidates="$(find "$ndk_path" -type f -name "clang++.exe")"
 else
-  HOMEDIR=$DECLANG_HOME
+  exe_ext=""
+  # Keep -type f omitted so macOS universal binaries / symlinks are matched (PR #24)
+  ndk_clang_candidates="$(find "$ndk_path" -name "clang++")"
 fi
-compiler_path="$HOMEDIR"/.DeClang/compiler
+orig_ext=".orig${exe_ext}"
 
-if [ "_$OS" = "_Windows_NT" ]; then # MSYS2
-  ndk_clang_path=`find "$ndk_path" -type f -name "clang++.exe"`
-elif uname -r | grep -i microsoft > /dev/null; then # WSL2
-  ndk_clang_path=`find "$ndk_path" -type f -name "clang++.exe"`
-else
-  ndk_clang_path=`find "$ndk_path" -name "clang++"`
+ndk_clang_path="$(echo "$ndk_clang_candidates" | grep "/bin/clang++${exe_ext}$" | head -n 1 || true)"
+if [[ -z "$ndk_clang_path" ]]; then
+  ndk_clang_path="$(echo "$ndk_clang_candidates" | head -n 1)"
 fi
 
-darwin_path=`dirname "$ndk_clang_path"`
-darwin_path=`dirname "$darwin_path"`
-
-if uname -r | grep -i microsoft > /dev/null; then # WSL2
-  # backup bin
-  if [[ ! -f "${darwin_path}"/bin/clang.orig.exe ]]; then
-      cp "${darwin_path}"/bin/clang.exe "${darwin_path}"/bin/clang.orig.exe
-  fi
-  if [[ ! -f "${darwin_path}"/bin/clang++.orig.exe ]]; then
-      cp "${darwin_path}"/bin/clang++.exe "${darwin_path}"/bin/clang++.orig.exe
-  fi
-  # copy bin
-  cp -v "${compiler_path}"/bin/clang.exe "${darwin_path}"/bin/clang.exe
-  cp -v "${compiler_path}"/bin/clang++.exe "${darwin_path}"/bin/clang++.exe
-  
-else # MSYS2 and others
-  # backup bin
-  if [[ ! -f "${darwin_path}"/bin/clang.orig ]]; then
-      cp "${darwin_path}"/bin/clang "${darwin_path}"/bin/clang.orig
-  fi
-  if [[ ! -f "${darwin_path}"/bin/clang++.orig ]]; then
-      cp "${darwin_path}"/bin/clang++ "${darwin_path}"/bin/clang++.orig
-  fi
-  # copy bin
-  cp -v "${compiler_path}"/bin/clang "${darwin_path}"/bin/clang
-  cp -v "${compiler_path}"/bin/clang++ "${darwin_path}"/bin/clang++
-  
+if [[ -z "$ndk_clang_path" ]]; then
+  echo "Error: Could not find clang++${exe_ext} under $ndk_path" >&2
+  exit 1
 fi
+
+darwin_path="$(dirname "$(dirname "$ndk_clang_path")")"
+
+src_clang="${compiler_path}/bin/clang${exe_ext}"
+src_clangxx="${compiler_path}/bin/clang++${exe_ext}"
+src_lib="${compiler_path}/lib/clang"
+
+if [[ ! -f "$src_clang" || ! -f "$src_clangxx" || ! -d "$src_lib" ]]; then
+  echo "Error: DeClang compiler files not found under ${compiler_path}" >&2
+  exit 1
+fi
+
+# backup bin
+if [[ ! -f "${darwin_path}/bin/clang${orig_ext}" ]]; then
+  cp "${darwin_path}/bin/clang${exe_ext}" "${darwin_path}/bin/clang${orig_ext}"
+fi
+if [[ ! -f "${darwin_path}/bin/clang++${orig_ext}" ]]; then
+  cp "${darwin_path}/bin/clang++${exe_ext}" "${darwin_path}/bin/clang++${orig_ext}"
+fi
+
+# copy bin (unlink symlink destination first so target clang is not overwritten)
+if [[ -L "${darwin_path}/bin/clang${exe_ext}" ]]; then
+  rm -f "${darwin_path}/bin/clang${exe_ext}"
+fi
+cp -v "$src_clang" "${darwin_path}/bin/clang${exe_ext}"
+
+if [[ -L "${darwin_path}/bin/clang++${exe_ext}" ]]; then
+  rm -f "${darwin_path}/bin/clang++${exe_ext}"
+fi
+cp -v "$src_clangxx" "${darwin_path}/bin/clang++${exe_ext}"
 
 # backup and copy lib
-if [[ ! -d "${darwin_path}"/lib.orig ]]; then
-  cp -r "${darwin_path}"/lib "${darwin_path}"/lib.orig
+if [[ ! -d "${darwin_path}/lib.orig" ]]; then
+  cp -r "${darwin_path}/lib" "${darwin_path}/lib.orig"
 else
-  rm -rf "${darwin_path}"/lib
-  cp -r "${darwin_path}"/lib.orig "${darwin_path}"/lib
+  rm -rf "${darwin_path}/lib"
+  cp -r "${darwin_path}/lib.orig" "${darwin_path}/lib"
 fi
-cp -r "${compiler_path}"/lib/clang "${darwin_path}"/lib
-
-popd >/dev/null
-
+cp -r "$src_lib" "${darwin_path}/lib"

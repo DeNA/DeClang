@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -e
 
 if [[ $# -ne 1 ]]; then
@@ -5,44 +6,56 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-webgl_path=$1
-dir=`dirname "$webgl_path"`
+if [[ ! -d "$1" ]]; then
+  echo "Error: Unity WebGL support directory not found: $1" >&2
+  exit 1
+fi
 
-pushd "$dir" > /dev/null
+webgl_path="$(cd "$1" && pwd)"
 
-if [[ -z "$DECLANG_HOME" ]]; then
-  HOMEDIR=$HOME
+HOMEDIR="${DECLANG_HOME:-${HOME:-${USERPROFILE:-}}}"
+if [[ -z "$HOMEDIR" ]]; then
+  echo "Error: DECLANG_HOME, HOME, or USERPROFILE is not set." >&2
+  exit 1
+fi
+compiler_path="${HOMEDIR}/.DeClang/compiler"
+webgl_clang_path="${webgl_path}/BuildTools/Emscripten/llvm"
+
+if [[ ! -d "$webgl_clang_path" ]]; then
+  echo "Error: Emscripten llvm directory not found: $webgl_clang_path" >&2
+  exit 1
+fi
+
+if [[ "_${OS:-}" = "_Windows_NT" ]] || uname -r | grep -iq microsoft; then # MSYS2 or WSL2
+  exe_ext=".exe"
 else
-  HOMEDIR=$DECLANG_HOME
+  exe_ext=""
 fi
-compiler_path="$HOMEDIR"/.DeClang/compiler
+orig_ext=".orig${exe_ext}"
 
-webgl_clang_path="$webgl_path"/BuildTools/Emscripten/llvm
+src_clang="${compiler_path}/bin/clang${exe_ext}"
+src_clangxx="${compiler_path}/bin/clang++${exe_ext}"
 
-if uname -r | grep -i microsoft > /dev/null; then # WSL2
-  # backup bin
-  if [[ ! -f "${webgl_clang_path}"/clang.orig.exe ]]; then
-    cp "${webgl_clang_path}"/clang.exe "${webgl_clang_path}"/clang.orig.exe
-  fi
-  if [[ ! -f "${webgl_clang_path}"/clang++.orig.exe ]]; then
-    cp "${webgl_clang_path}"/clang++.exe "${webgl_clang_path}"/clang++.orig.exe
-  fi
-  # copy bin
-  cp -v "${compiler_path}"/bin/clang.exe "${webgl_clang_path}"/clang.exe
-  cp -v "${compiler_path}"/bin/clang++.exe "${webgl_clang_path}"/clang++.exe
-
-else # MSYS2 and others
-  # backup bin
-  if [[ ! -f "${webgl_clang_path}"/clang.orig ]]; then
-    cp "${webgl_clang_path}"/clang "${webgl_clang_path}"/clang.orig
-  fi
-  if [[ ! -f "${webgl_clang_path}"/clang++.orig ]]; then
-    cp "${webgl_clang_path}"/clang++ "${webgl_clang_path}"/clang++.orig
-  fi
-  # copy bin
-  cp -v "${compiler_path}"/bin/clang "${webgl_clang_path}"/clang
-  cp -v "${compiler_path}"/bin/clang++ "${webgl_clang_path}"/clang++
-
+if [[ ! -f "$src_clang" || ! -f "$src_clangxx" ]]; then
+  echo "Error: DeClang compiler binaries not found under ${compiler_path}/bin" >&2
+  exit 1
 fi
 
-popd >/dev/null
+# backup bin
+if [[ ! -f "${webgl_clang_path}/clang${orig_ext}" ]]; then
+  cp "${webgl_clang_path}/clang${exe_ext}" "${webgl_clang_path}/clang${orig_ext}"
+fi
+if [[ ! -f "${webgl_clang_path}/clang++${orig_ext}" ]]; then
+  cp "${webgl_clang_path}/clang++${exe_ext}" "${webgl_clang_path}/clang++${orig_ext}"
+fi
+
+# copy bin
+if [[ -L "${webgl_clang_path}/clang${exe_ext}" ]]; then
+  rm -f "${webgl_clang_path}/clang${exe_ext}"
+fi
+cp -v "$src_clang" "${webgl_clang_path}/clang${exe_ext}"
+
+if [[ -L "${webgl_clang_path}/clang++${exe_ext}" ]]; then
+  rm -f "${webgl_clang_path}/clang++${exe_ext}"
+fi
+cp -v "$src_clangxx" "${webgl_clang_path}/clang++${exe_ext}"
