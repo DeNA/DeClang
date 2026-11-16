@@ -1,8 +1,11 @@
-.PHONY: all
+.PHONY: all test clean
 
 NAME := gen_config
 
 ALL: $(NAME)_mac_intel $(NAME)_mac_applesilicon $(NAME)_linux $(NAME)_windows.exe
+
+test:
+	go test -v $(SRCS) GenConfig_test.go
 
 clean:
 	rm -f $(NAME)_mac_intel
