@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 set -e
 
 if [[ $# -ne 1 ]]; then
@@ -5,42 +6,32 @@ if [[ $# -ne 1 ]]; then
   exit 1
 fi
 
-webgl_path=$1
-dir=`dirname "$webgl_path"`
+if [[ ! -d "$1" ]]; then
+  echo "Error: Unity WebGL support directory not found: $1" >&2
+  exit 1
+fi
 
-pushd "$dir" > /dev/null
+webgl_path="$(cd "$1" && pwd)"
+webgl_clang_path="${webgl_path}/BuildTools/Emscripten/llvm"
 
-if [[ -z "$DECLANG_HOME" ]]; then
-  HOMEDIR=$HOME
+if [[ ! -d "$webgl_clang_path" ]]; then
+  echo "Error: Emscripten llvm directory not found: $webgl_clang_path" >&2
+  exit 1
+fi
+
+if [[ "_${OS:-}" = "_Windows_NT" ]] || uname -r | grep -iq microsoft; then # MSYS2 or WSL2
+  exe_ext=".exe"
 else
-  HOMEDIR=$DECLANG_HOME
+  exe_ext=""
 fi
-compiler_path="$HOMEDIR"/.DeClang/compiler
+orig_ext=".orig${exe_ext}"
 
-webgl_clang_path="$webgl_path"/BuildTools/Emscripten/llvm
-
-if uname -r | grep -i microsoft > /dev/null; then # WSL2
-  # restore bin
-  if [[ -f "${webgl_clang_path}"/clang.orig.exe ]]; then
-    cp "${webgl_clang_path}"/clang.orig.exe "${webgl_clang_path}"/clang.exe
-    rm "${webgl_clang_path}"/clang.orig.exe
-  fi
-  if [[ -f "${webgl_clang_path}"/clang++.orig.exe ]]; then
-    cp "${webgl_clang_path}"/clang++.orig.exe "${webgl_clang_path}"/clang++.exe
-    rm "${webgl_clang_path}"/clang++.orig.exe
-  fi
-
-else # MSYS2 and others
-  # restore bin
-  if [[ -f "${webgl_clang_path}"/clang.orig ]]; then
-    cp "${webgl_clang_path}"/clang.orig "${webgl_clang_path}"/clang
-    rm "${webgl_clang_path}"/clang.orig
-  fi
-  if [[ -f "${webgl_clang_path}"/clang++.orig ]]; then
-    cp "${webgl_clang_path}"/clang++.orig "${webgl_clang_path}"/clang++
-    rm "${webgl_clang_path}"/clang++.orig
-  fi
-
+# restore bin
+if [[ -f "${webgl_clang_path}/clang${orig_ext}" ]]; then
+  cp -v "${webgl_clang_path}/clang${orig_ext}" "${webgl_clang_path}/clang${exe_ext}"
+  rm "${webgl_clang_path}/clang${orig_ext}"
 fi
-
-popd >/dev/null
+if [[ -f "${webgl_clang_path}/clang++${orig_ext}" ]]; then
+  cp -v "${webgl_clang_path}/clang++${orig_ext}" "${webgl_clang_path}/clang++${exe_ext}"
+  rm "${webgl_clang_path}/clang++${orig_ext}"
+fi
