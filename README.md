@@ -1,6 +1,6 @@
 # DeClang
 
-<sub>[日本語はこちら](https://github.com/DeNA/DeClang/blob/swift/release/6.0/README_JP.md)</sub>
+<sub>[日本語はこちら](README_JP.md)</sub>
 
 ## Introduction
 
@@ -42,8 +42,7 @@ $ bash release.sh v1.0.0
 ```
 Then you have a Release-v1.0.0 folder in the root directory of DeClang. 
 
-If you are building DeClang on Windows, you have to install MYSYS2 and run
-the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build.
+If you are building DeClang on Windows, install MSYS2 and run the above scripts in an MSYS2 shell. Visual Studio 2022 is also required for the build.
 
 ## Installation & Setup
 
@@ -51,8 +50,9 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
   ```
   export DECLANG_HOME=/path/to/declang_home/
   ```
+  On Windows Command Prompt (`cmd.exe`), you can set `DECLANG_HOME` via system environment variables or `set DECLANG_HOME=C:\path\to\declang_home`. If `DECLANG_HOME` is not set, DeClang defaults to `~/.DeClang/` (`%USERPROFILE%\.DeClang` on Windows).
 
-- Copy Release folder to $DECLAHG_HOME
+- Copy Release folder to $DECLANG_HOME
   - If you built DeClang by yourself
     - Copy Release-v1.0.0 to $DECLANG_HOME/.DeClang. 
     ```
@@ -63,6 +63,7 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
     ```
     mv Release/ $DECLANG_HOME/.DeClang
     ```
+    On Windows (`Release-Win-*.zip`), extract the archive and place the contents of `Release` into `%DECLANG_HOME%\.DeClang` (or `%USERPROFILE%\.DeClang`) so that `compiler\bin\clang.exe` and `gen_config\bin\Windows\gen_config.exe` are located under `.DeClang\`.
 
 - Setup DeClang for android-ndk:
   ```
@@ -107,7 +108,7 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
   - C/C++ compiler for Windows
 - Release-Swift-Toolchain-*.zip
   - Swift compiler for AppleSilicon/Intel Mac
-  - How to Insatll
+  - How to Install
     1. Run `tar -xzf swift-LOCAL-*-a-osx.tar.gz -C ~/` to deploy
     2. Open Xcode and select Xcode->Toolchains->Local Swift Development Snapshot
     3. Edit your ~/.DeClang/config.pre.json and run `~/.DeClang/gen_config.sh`
@@ -131,6 +132,10 @@ the above script in MYSYS2 shell. Also, Visual Studio 2017 is required for build
 - Generate config.json from config.pre.json:
   ```
   $DECLANG_HOME/.DeClang/gen_config.sh -path $DECLANG_HOME/.DeClang/ -seed {your seed}
+  ```
+  On Windows Command Prompt (`cmd.exe`), you can run `gen_config.exe` directly (replace `%DECLANG_HOME%` with `%USERPROFILE%` if `DECLANG_HOME` is not set):
+  ```cmd
+  %DECLANG_HOME%\.DeClang\gen_config\bin\Windows\gen_config.exe -path "%DECLANG_HOME%\.DeClang" -seed {your seed}
   ```
   "seed" can be any string. You should change "seed" for each build.
 
