@@ -25,6 +25,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 )
 
 var DEFAULT_SPLIT_LEVEL int = 1
@@ -156,27 +157,34 @@ func makeRandomString(length int) string {
 	return string(buf)
 }
 
-func main() {
-	homeDir := os.Getenv("DECLANG_HOME")
-	if len(homeDir) == 0 {
-		homeDir = os.Getenv("HOME")
+func resolveHomeDir() string {
+	for _, envKey := range []string{"DECLANG_HOME", "HOME", "USERPROFILE"} {
+		if val := os.Getenv(envKey); len(val) > 0 {
+			return val
+		}
 	}
+	return ""
+}
 
-	pathPtr := flag.String("path", homeDir+"/.DeClang/", "config file path")
-	seedPtr := flag.String("seed", "", "a seed")
-	flag.Parse()
+func resolveDefaultConfigDir() (string, error) {
+	homeDir := resolveHomeDir()
+	if homeDir == "" {
+		return "", fmt.Errorf("DECLANG_HOME, HOME, or USERPROFILE environment variable is not set")
+	}
+	return filepath.Join(homeDir, ".DeClang"), nil
+}
 
-	var config Config
-	var jsonOutPath string
-	jsonOutPath = *pathPtr + "/config.json"
-	config = getConfig(*pathPtr + "/config.pre.json")
+func generateConfigFile(configDir string, seedOverride string) error {
+	jsonPrePath := filepath.Join(configDir, "config.pre.json")
+	jsonOutPath := filepath.Join(configDir, "config.json")
+	config := getConfig(jsonPrePath)
 
 	if config.Build_seed == "hello, i am seed" {
 		config.Build_seed = makeRandomString(16)
 	}
 
-	if len(*seedPtr) > 0 {
-		config.Build_seed = *seedPtr
+	if len(seedOverride) > 0 {
+		config.Build_seed = seedOverride
 	}
 
 	buildSeed := config.Build_seed
@@ -195,12 +203,30 @@ func main() {
 	}
 
 	configStr, err := json.MarshalIndent(config, "", "    ")
-	check("JSON形式への変換に失敗しました。", err)
+	if err != nil {
+		return fmt.Errorf("JSON形式への変換に失敗しました: %w", err)
+	}
 
-	jsonOutFile, err := os.Create(jsonOutPath)
-	check(fmt.Sprintf("%v のファイルが開けませんでした。", jsonOutPath), err)
-	defer jsonOutFile.Close()
-
-	jsonOutFile.Write(configStr)
+	if err := os.WriteFile(jsonOutPath, configStr, 0644); err != nil {
+		return fmt.Errorf("%v のファイルに書き込めませんでした: %w", jsonOutPath, err)
+	}
 	fmt.Printf("[GenConfig]: Generate config.json\n")
+	return nil
+}
+
+func main() {
+	pathPtr := flag.String("path", "", "config file path (defaults to $DECLANG_HOME/.DeClang, $HOME/.DeClang, or %USERPROFILE%/.DeClang)")
+	seedPtr := flag.String("seed", "", "a seed")
+	flag.Parse()
+
+	configDir := *pathPtr
+	if configDir == "" {
+		defaultDir, err := resolveDefaultConfigDir()
+		check("設定ディレクトリの解決に失敗しました。", err)
+		configDir = defaultDir
+	}
+
+	if err := generateConfigFile(configDir, *seedPtr); err != nil {
+		check("config.jsonの生成に失敗しました。", err)
+	}
 }
