@@ -71,20 +71,28 @@ bool SplitBasicBlock::runOnFunction(Function &F) {
   }
 
   llvm::json::Object *jsonObj = configJson->getAsObject();
-  if (jsonObj->getArray("flatten")) {
+  if (jsonObj && jsonObj->getArray("flatten")) {
     llvm::json::Array *flattenArray = jsonObj->getArray("flatten");
 
     for (auto &obj : *flattenArray) {
-      if (!obj.getAsObject()->getString("name")) {
+      llvm::json::Object *itemObj = obj.getAsObject();
+      if (!itemObj) {
+        continue;
+      }
+
+      if (!itemObj->getString("name")) {
         (*logFile) << "[Frontend]: Config Error: missing 'name' string object in flatten array\n";
         std::exit(EXIT_FAILURE);
       }
 
-      std::string funcName = obj.getAsObject()->getString("name")->str();
+      std::string funcName = itemObj->getString("name")->str();
       llvm::Regex reFuncName(funcName);
 
-      std::string seed = obj.getAsObject()->getString("seed")->str();
-      int SplitNum = obj.getAsObject()->getInteger("split_level").value_or(0);
+      std::string seed;
+      if (auto seedOpt = itemObj->getString("seed")) {
+        seed = seedOpt->str();
+      }
+      int SplitNum = itemObj->getInteger("split_level").value_or(0);
       if (!((SplitNum >= 0) && (SplitNum <= 10))) {
         (*logFile) << "[Frontend]: Config Error: split_level should be 0 to 10.\n";
         return false;
@@ -112,7 +120,6 @@ void SplitBasicBlock::split(Function *f, int SplitNum, std::string seed) {
 
 
   std::vector<BasicBlock *> origBB;
-  int splitN = SplitNum;
 
   // Save all basic blocks
   for (Function::iterator I = f->begin(), IE = f->end(); I != IE; ++I) {
@@ -129,6 +136,8 @@ void SplitBasicBlock::split(Function *f, int SplitNum, std::string seed) {
     if (curr->size() < 2 || containsPHI(curr)) {
       continue;
     }
+
+    int splitN = SplitNum;
 
     // Check splitN and current BB size
     if ((size_t)splitN >= curr->size()) {

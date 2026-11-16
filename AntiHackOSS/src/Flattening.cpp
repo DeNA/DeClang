@@ -84,22 +84,30 @@ bool Flattening::runOnFunction(Function &F) {
 
   llvm::json::Object *jsonObj = configJson->getAsObject();
 
-  if (jsonObj->getArray("flatten")) {
+  if (jsonObj && jsonObj->getArray("flatten")) {
     llvm::json::Array *flattenArray = jsonObj->getArray("flatten");
 
     for (auto &obj : *flattenArray) {
-      if (!obj.getAsObject()->getString("name")) {
+      llvm::json::Object *itemObj = obj.getAsObject();
+      if (!itemObj) {
+        continue;
+      }
+
+      if (!itemObj->getString("name")) {
         (*logFile) << "[Frontend]: Config Error: missing 'name' string object in flatten array\n";
         std::exit(EXIT_FAILURE);
       }
 
-      std::string funcName = obj.getAsObject()->getString("name")->str();
+      std::string funcName = itemObj->getString("name")->str();
       //(*logFile) << "[Frontend]: flattening, try match " << F.getName() << " with " << funcName << "\n";
       logFile->flush();
 
       llvm::Regex reFuncName(funcName);
 
-      std::string seed = obj.getAsObject()->getString("seed")->str();
+      std::string seed;
+      if (auto seedOpt = itemObj->getString("seed")) {
+        seed = seedOpt->str();
+      }
       if (reFuncName.match(F.getName()) && flattenedFuncs.find(F.getName().str()) == flattenedFuncs.end() ) {
         flattenedFuncs.insert(F.getName().str());
         (*logFile) << "[Frontend]: Flattening func " << F.getName() << "\n";
