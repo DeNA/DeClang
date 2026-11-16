@@ -1,5 +1,7 @@
 # DeClang
 
+<sub>[English](README.md)</sub>
+
 ## 概要
 
 DeClang は LLVM フレームワークを利用したコンパイル型アンチチートツールです。
@@ -42,12 +44,15 @@ $ bash release.sh v1.0.0
 ```
 上記コマンドが正常に完了すると、プロジェクトのTopディレクトリにRelease-v1.0.0というディレクトリが生成されます。
 
+Windows で DeClang をビルドする場合は、MSYS2 を導入して MSYS2 シェル上で上記スクリプトを実行してください。ビルドには Visual Studio 2022 も必要です。
+
 ## インストール方法
 
 - DECLANG_HOMEを定義します
   ```
   export DECLANG_HOME=/path/to/declang_home/
   ```
+  Windows（コマンドプロンプト）では、環境変数として `DECLANG_HOME` を設定します（例: `set DECLANG_HOME=C:\path\to\declang_home`）。未設定時のデフォルト配置先は `~/.DeClang/`（Windows では `%USERPROFILE%\.DeClang`）です。
 
 - DECLANG_HOMEにReleaseをコピーします。
   - 手動でビルドした場合
@@ -60,6 +65,7 @@ $ bash release.sh v1.0.0
     ```
     mv Release/ $DECLANG_HOME/.DeClang
     ```
+    Windows 版（`Release-Win-*.zip`）を使う場合は、展開した `Release` フォルダの中身を `%DECLANG_HOME%\.DeClang`（未設定時は `%USERPROFILE%\.DeClang`）へ配置し、`.DeClang\compiler\bin\clang.exe` や `.DeClang\gen_config\bin\Windows\gen_config.exe` が参照できる状態にします。
 
 - android-ndkの標準コンパイラとしてDeClangを利用したい場合には、次のコマンドを実行します。
   ```
@@ -93,7 +99,7 @@ $ bash release.sh v1.0.0
   - Swift compiler for AppleSilicon/Intel Mac
   - インストール方法
     1. `tar -xzf swift-LOCAL-*-a-osx.tar.gz -C ~/` を実行します
-    2. Xcode を開いて select Xcode->Toolchains->Local Swift Development Snapshot を選択します
+    2. Xcode を開いて Xcode->Toolchains->Local Swift Development Snapshot を選択します
     3. ~/.DeClang/config.pre.json を編集して `~/.DeClang/gen_config.sh` を実行します
     4. Xcodeであなたのアプリケーションをビルドします
 
@@ -115,6 +121,10 @@ $ bash release.sh v1.0.0
 - config.pre.jsonからconfig.jsonを生成します。
   ```
   $DECLANG_HOME/.DeClang/gen_config.sh -path $DECLANG_HOME/.DeClang/ -seed {your seed}
+  ```
+  Windows のコマンドプロンプトからは `gen_config.exe` を直接実行できます（`DECLANG_HOME` 未設定時は `%DECLANG_HOME%` を `%USERPROFILE%` に置き換えてください）。
+  ```cmd
+  %DECLANG_HOME%\.DeClang\gen_config\bin\Windows\gen_config.exe -path "%DECLANG_HOME%\.DeClang" -seed {your seed}
   ```
   seedは任意の文字列で、ビルドごとに変えるのが好ましいです。
 - 以上で準備が整ったので、ndk-build等を通して、任意プログラムをコンパイルすればconfig.pre.jsonの設定にしたがって難読化が適用されます。
